@@ -1,4 +1,22 @@
+# Normalize EOL for all files that Git considers text files.
+* text=auto eol=lf
 *.md filter=lfs diff=lfs merge=lfs -text
+*.editorconfig filter=lfs diff=lfs merge=lfs -text
+*.gitignore filter=lfs diff=lfs merge=lfs -text
+*.json filter=lfs diff=lfs merge=lfs -text
+*.cs filter=lfs diff=lfs merge=lfs -text
+*.uid filter=lfs diff=lfs merge=lfs -text
+*.csproj filter=lfs diff=lfs merge=lfs -text
+*.sln filter=lfs diff=lfs merge=lfs -text
+*.xlsx filter=lfs diff=lfs merge=lfs -text
+*.Unnamed filter=lfs diff=lfs merge=lfs -text
+*.csv filter=lfs diff=lfs merge=lfs -text
+*.import filter=lfs diff=lfs merge=lfs -text
+*.d2 filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
+*.tscn filter=lfs diff=lfs merge=lfs -text
+*.rs filter=lfs diff=lfs merge=lfs -text
+*.godot filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.rs !text !filter !merge !diff
 *.cs !text !filter !merge !diff
