@@ -1,0 +1,80 @@
+direction: right
+
+title: System Architecture
+
+GameState: {
+  shape: rectangle
+  label: "Game State"
+}
+
+Simulation: {
+  shape: rectangle
+  label: "Simulation
+  Engine"
+}
+
+World: {
+  shape: rectangle
+  label: "World Systems
+  - Universe
+  - Maps
+  - Celestial Bodies"
+}
+
+Gameplay: {
+  shape: rectangle
+  label: "Gameplay Systems
+  - Factions
+  - Population
+  - Resources
+  - Buildings
+  - Units"
+}
+
+Technical: {
+  shape: rectangle
+  label: "Technical Systems
+  - Events
+  - Production
+  - Procedural Generation"
+}
+
+GameState -> Simulation: manages
+Simulation -> World: updates
+Simulation -> Gameplay: processes
+Simulation -> Technical: coordinates
+
+World -> Gameplay: provides context
+Gameplay -> Technical: uses
+Technical -> World: generates
+
+# Component Details
+GameState: {
+  style: {
+    stroke: "#4a90e2"
+  }
+}
+
+Simulation: {
+  style: {
+    stroke: "#50e3c2"
+  }
+}
+
+World: {
+  style: {
+    stroke: "#f5a623"
+  }
+}
+
+Gameplay: {
+  style: {
+    stroke: "#d0021b"
+  }
+}
+
+Technical: {
+  style: {
+    stroke: "#9013fe"
+  }
+} 

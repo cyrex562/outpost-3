@@ -1,0 +1,41 @@
+direction: right
+
+title: Faction System Relationships
+
+Faction: {
+  shape: rectangle
+  label: "Faction"
+}
+
+Resources: {
+  shape: rectangle
+  label: "Resources"
+}
+
+Population: {
+  shape: rectangle
+  label: "Population"
+}
+
+Territory: {
+  shape: rectangle
+  label: "Territory"
+}
+
+Diplomacy: {
+  shape: rectangle
+  label: "Diplomacy"
+}
+
+Faction -> Resources: controls
+Faction -> Population: manages
+Faction -> Territory: owns
+Faction -> Diplomacy: engages in
+
+Faction1: Faction
+Faction2: Faction
+Faction3: Faction
+
+Faction1 -> Faction2: diplomatic relations
+Faction2 -> Faction3: diplomatic relations
+Faction3 -> Faction1: diplomatic relations 

@@ -1,0 +1,34 @@
+direction: right
+
+title: Simulation Flow
+
+GameState -> Simulation: process_turn()
+Simulation -> EventQueue: queue_events()
+EventQueue -> Systems: process_events()
+Systems -> GameState: update_state()
+
+Systems: {
+  shape: rectangle
+  label: "Game Systems
+  - Resources
+  - Population
+  - Buildings
+  - Factions"
+}
+
+GameState: {
+  shape: rectangle
+  label: "Game State"
+}
+
+Simulation: {
+  shape: rectangle
+  label: "Simulation
+  Engine"
+}
+
+EventQueue: {
+  shape: rectangle
+  label: "Event
+  Queue"
+} 
