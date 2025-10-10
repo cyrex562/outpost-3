@@ -1,7 +1,6 @@
 {
-    "godotTools.editorPath.godot4": "c:\\Users\\cyrex\\files\\bin\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe",
+    "godotTools.editorPath.godot4": "C:\\Users\\cyrex\\bin\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe",
     "rust-analyzer.cargo.features": "all",
-    "rust-analyzer.checkOnSave.command": "clippy",
     "rust-analyzer.linkedProjects": ["./Cargo.toml"],
     "files.watcherExclude": {
         "**/target/**": true

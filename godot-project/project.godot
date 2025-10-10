@@ -10,14 +10,14 @@ config_version=5
 
 [application]
 
-config/name="Outpost 3"
-run/main_scene="uid://fj23fdi4ck07"
+config/name="Outpost3"
+run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.5", "C#", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [dotnet]
 
-project/assembly_name="Outpost 3"
+project/assembly_name="Outpost3"
 
 [internationalization]
 

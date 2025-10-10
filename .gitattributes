@@ -21,6 +21,8 @@
 *.toml filter=lfs diff=lfs merge=lfs -text
 *.gitkeep filter=lfs diff=lfs merge=lfs -text
 *.py filter=lfs diff=lfs merge=lfs -text
+*.dll filter=lfs diff=lfs merge=lfs -text
+*.h filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.rs !text !filter !merge !diff
 *.cs !text !filter !merge !diff
