@@ -1,0 +1,63 @@
+[gd_scene load_steps=2 format=3 uid="uid://cga1qdr4aahxg"]
+
+[ext_resource type="Script" uid="uid://cmqe4w0725l0y" path="res://scripts/UI/GameHUD.cs" id="1_bg7v8"]
+
+[node name="GameHUD" type="CanvasLayer"]
+script = ExtResource("1_bg7v8")
+
+[node name="PanelContainer" type="PanelContainer" parent="."]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -73.5
+offset_right = 73.5
+offset_bottom = 58.0
+grow_horizontal = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelContainer"]
+layout_mode = 2
+
+[node name="TimeLabel" type="Label" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Game Time: 0.0h"
+
+[node name="HSeparator1" type="HSeparator" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ButtonBar1" type="HBoxContainer" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="AdvanceButton" type="Button" parent="PanelContainer/VBoxContainer/ButtonBar1"]
+layout_mode = 2
+text = "Advance 10 Hours"
+
+[node name="LaunchProbeButton" type="Button" parent="PanelContainer/VBoxContainer/ButtonBar1"]
+layout_mode = 2
+text = "Launch Probe"
+
+[node name="AutoCheckBox" type="CheckBox" parent="PanelContainer/VBoxContainer/ButtonBar1"]
+layout_mode = 2
+text = "Auto	Advance"
+
+[node name="HSeparator2" type="HSeparator" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Probes In Flight"
+
+[node name="ProbeList" type="ItemList" parent="PanelContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+
+[node name="HSeparator3" type="HSeparator" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="Label2" type="Label" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Discovered Systems"
+
+[node name="SystemList" type="ItemList" parent="PanelContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2

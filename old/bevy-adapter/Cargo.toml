@@ -1,0 +1,11 @@
+[package]
+name = "outpost-3-bevy-adapter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.17.2", features = [] }
+bevy_egui = "0.37.1"
+outpost-3-core = { path = "../core" }
+
+
