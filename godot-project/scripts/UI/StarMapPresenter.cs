@@ -41,7 +41,7 @@ public partial class StarMapPresenter : Control
     // Camera control
     private const float MIN_ZOOM = 0.1f; // Allow zooming out to see all stars
     private const float MAX_ZOOM = 20.0f; // Allow zooming in close to individual stars
-    private const float ZOOM_STEP = 0.15f; // Smoother zoom increments
+    private const float ZOOM_STEP = 0.1f; // Smoother zoom increments
 
     // Scale system: pixels per light-year at zoom level 1.0
     public const float BASE_PIXELS_PER_LY = 2.0f; // Base scale: 2 pixels = 1 LY at zoom 1.0
@@ -78,10 +78,16 @@ public partial class StarMapPresenter : Control
         _screenCoordLabel = GetNode<Label>("CoordinatesPanel/VBoxContainer/ScreenCoordLabel");
         _mapCoordLabel = GetNode<Label>("CoordinatesPanel/VBoxContainer/MapCoordLabel");
 
-        // Initialize camera at Sol (origin)
-        _camera.Position = Vector2.Zero;
-        _camera.Zoom = new Vector2(1.0f, 1.0f);
-        GD.Print($"StarMapPresenter: Camera initialized at ({_camera.Position.X}, {_camera.Position.Y}), zoom {_camera.Zoom.X}");
+        // Configure Camera2D for proper centering
+        // CRITICAL: anchor_mode must be DRAG_CENTER (1) so camera.Position defines the CENTER of view
+        // not the top-left corner
+        _camera.AnchorMode = Camera2D.AnchorModeEnum.DragCenter;
+        
+        // Initialize camera at Sol (origin) with a reasonable starting zoom
+        _camera.Position = Vector2.Zero; // Sol is at world origin (0,0), so this centers view on Sol
+        _camera.Zoom = new Vector2(1.0f, 1.0f); // Start at 1x zoom (2 pixels per LY)
+        GD.Print($"StarMapPresenter: Camera configured with AnchorMode.DragCenter");
+        GD.Print($"StarMapPresenter: Camera initialized at Sol (0, 0), zoom {_camera.Zoom.X}x");
 
         // Connect signals
         _launchProbeButton.Pressed += OnLaunchProbePressed;
@@ -148,16 +154,17 @@ public partial class StarMapPresenter : Control
             return;
         }
 
-        // Update screen coordinates
-        _screenCoordLabel.Text = $"Screen: ({mousePos.X:F1}, {mousePos.Y:F1})";
+        // Update screen coordinates (viewport pixels)
+        _screenCoordLabel.Text = $"Screen: ({mousePos.X:F0}, {mousePos.Y:F0})";
 
         // Convert to world coordinates using proper Camera2D transformation
         var worldPos = ScreenToWorldPos(mousePos);
 
-        // Convert to light-years (world coordinates are in pixels at BASE_PIXELS_PER_LY scale)
+        // Convert to light-years relative to Sol (which is at world origin 0,0)
+        // Since Sol is at (0,0) in world space, these coordinates are already Sol-relative
         var lightYears = WorldPosToLightYears(worldPos);
 
-        // Update map coordinates
+        // Update map coordinates (Sol-relative light-years)
         _mapCoordLabel.Text = $"Map: ({lightYears.X:F2} LY, {lightYears.Y:F2} LY)";
     }
 
@@ -406,19 +413,22 @@ public partial class StarMapPresenter : Control
 
     private void ResetView()
     {
-        GD.Print("ResetView: Fitting all stars to view");
+        GD.Print("ResetView: Centering on Sol with all stars visible");
 
         if (_starNodes.Count == 0)
         {
-            // No stars - just center on origin
+            // No stars - just center on origin (Sol position)
             _camera.Position = Vector2.Zero;
             _camera.Zoom = new Vector2(1.0f, 1.0f);
-            _zoomLabel.Text = "Zoom: 1.0x (1.0 px/LY)";
+            _zoomLabel.Text = "Zoom: 1.0x (2.0 px/LY)";
             UpdateStarZoomLevels(_camera.Zoom.X);
             return;
         }
 
-        // Calculate bounding box of all stars in world coordinates
+        // Camera should always center on Sol (which is at origin 0,0 in our coordinate system)
+        _camera.Position = Vector2.Zero;
+
+        // Calculate bounding box of all stars to determine zoom level
         var minPos = new Vector2(float.MaxValue, float.MaxValue);
         var maxPos = new Vector2(float.MinValue, float.MinValue);
 
@@ -431,19 +441,15 @@ public partial class StarMapPresenter : Control
             maxPos.Y = Mathf.Max(maxPos.Y, pos.Y);
         }
 
-        // Calculate center and size of star field
-        var center = (minPos + maxPos) / 2;
         var size = maxPos - minPos;
 
-        // Position camera at center
-        _camera.Position = center;
-
-        // Calculate zoom to fit all stars with some padding
+        // Calculate zoom to fit all stars with padding (20% on each side)
         var viewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
         var viewportSize = viewport.Size;
 
-        var zoomX = viewportSize.X / (size.X + 100); // +100 for padding
-        var zoomY = viewportSize.Y / (size.Y + 100);
+        // Add 40% padding to ensure stars aren't at screen edges
+        var zoomX = viewportSize.X / (size.X * 1.4f);
+        var zoomY = viewportSize.Y / (size.Y * 1.4f);
         var zoom = Mathf.Min(zoomX, zoomY);
         zoom = Mathf.Clamp(zoom, MIN_ZOOM, MAX_ZOOM);
 
@@ -451,7 +457,7 @@ public partial class StarMapPresenter : Control
         _zoomLabel.Text = $"Zoom: {zoom:F1}x ({GetCurrentPixelsPerLY():F1} px/LY)";
         UpdateStarZoomLevels(_camera.Zoom.X);
 
-        GD.Print($"ResetView: Camera at ({_camera.Position.X:F1}, {_camera.Position.Y:F1}), zoom {zoom:F2}");
+        GD.Print($"ResetView: Camera centered on Sol at (0, 0), zoom {zoom:F2}");
         GD.Print($"ResetView: Star field bounds: ({minPos.X:F1}, {minPos.Y:F1}) to ({maxPos.X:F1}, {maxPos.Y:F1})");
         GD.Print($"ResetView: Field size: {size.X:F1} x {size.Y:F1} world pixels ({size.X / BASE_PIXELS_PER_LY:F1} x {size.Y / BASE_PIXELS_PER_LY:F1} LY)");
     }
@@ -493,6 +499,10 @@ public partial class StarMapPresenter : Control
             node.QueueFree();
         }
         _starNodes.Clear();
+
+        // Add an origin marker to visualize Sol's position (world 0,0)
+        var originMarker = new OriginMarker();
+        _starsContainer.AddChild(originMarker);
 
         // Create new star nodes with debug output
         int index = 0;
@@ -542,42 +552,38 @@ public partial class StarMapPresenter : Control
         var starNode = new StarNode();
         starNode.Initialize(system);
 
-        // Find Sol's position to use as origin
-        Vector2 solPosition = Vector2.Zero;
-        if (_stateStore != null)
-        {
-            var sol = _stateStore.State.Systems.Find(s => s.Name == "Sol" || Mathf.Abs(s.DistanceFromSol) < 0.01f);
-            if (sol != null)
-            {
-                solPosition = new Vector2(sol.Position.X, sol.Position.Y);
-                if (system.Name == "Sol")
-                {
-                    GD.Print($"CreateStarNode: Sol found at raw position ({sol.Position.X:F2}, {sol.Position.Y:F2}, {sol.Position.Z:F2})");
-                    GD.Print($"CreateStarNode: Sol distance from sol = {sol.DistanceFromSol:F3} LY");
-                }
-            }
-            else
-            {
-                GD.PrintErr("CreateStarNode: WARNING - Sol not found in system list! Using (0,0) as origin.");
-            }
-        }
-
-        // Convert 3D position to 2D, RELATIVE to Sol
-        // This means Sol will be at (0,0) and all other stars will be offset from that
+        // Sol should ALWAYS be at Vector3.Zero from galaxy generation
+        // Therefore, Sol's world position in 2D should always be (0, 0)
+        // All other stars are positioned relative to Sol
+        
+        // Convert 3D position to 2D (just take X,Y, ignore Z)
         var systemPos = new Vector2(system.Position.X, system.Position.Y);
-        var relativePos = (systemPos - solPosition) * BASE_PIXELS_PER_LY;
-        starNode.Position = relativePos;
+        
+        // Scale by BASE_PIXELS_PER_LY to convert light-years to pixels
+        var worldPos = systemPos * BASE_PIXELS_PER_LY;
+        
+        starNode.Position = worldPos;
 
-        // Enhanced debug output for coordinate verification
-        if (system.Name == "Sol" || system.Name.Contains("Gliese-72ZJYF") || system.Name.Contains("2MASS-0KADX87J"))
+        // Debug output for coordinate verification
+        if (system.Name == "Sol" || system.Name.Contains("Gliese") || system.Name.Contains("2MASS"))
         {
             GD.Print($"CreateStarNode: {system.Name}:");
-            GD.Print($"  Raw pos: ({system.Position.X:F4}, {system.Position.Y:F4}, {system.Position.Z:F4})");
-            GD.Print($"  Sol pos: ({solPosition.X:F4}, {solPosition.Y:F4})");
-            GD.Print($"  System 2D: ({systemPos.X:F4}, {systemPos.Y:F4})");
-            GD.Print($"  Relative 2D: ({(systemPos - solPosition).X:F4}, {(systemPos - solPosition).Y:F4})");
-            GD.Print($"  Final world pos: ({relativePos.X:F1}, {relativePos.Y:F1}) px");
+            GD.Print($"  3D Position (LY): ({system.Position.X:F4}, {system.Position.Y:F4}, {system.Position.Z:F4})");
+            GD.Print($"  2D Position (LY): ({systemPos.X:F4}, {systemPos.Y:F4})");
+            GD.Print($"  World pos (px): ({worldPos.X:F1}, {worldPos.Y:F1})");
             GD.Print($"  Distance from Sol: {system.DistanceFromSol:F2} LY");
+            
+            if (system.Name == "Sol")
+            {
+                if (Mathf.Abs(worldPos.X) > 0.01f || Mathf.Abs(worldPos.Y) > 0.01f)
+                {
+                    GD.PrintErr($"ERROR: Sol is not at world origin! Position: ({worldPos.X}, {worldPos.Y})");
+                }
+                else
+                {
+                    GD.Print($"✓ Sol correctly positioned at world origin (0, 0)");
+                }
+            }
         }
 
         return starNode;
@@ -745,6 +751,14 @@ public partial class StarNode : Node2D
         // Calculate inverse zoom to keep visual elements constant screen size
         float inverseZoom = 1.0f / Mathf.Max(_currentZoom, 0.1f);
 
+        // Special rendering for Sol (home system) - add a distinctive ring
+        bool isSol = System.Name == "Sol" || Mathf.Abs(System.DistanceFromSol) < 0.01f;
+        if (isSol)
+        {
+            // Draw a golden ring around Sol to make it distinctive
+            DrawArc(Vector2.Zero, (SELECTION_RING_SIZE + 4f) * inverseZoom, 0, Mathf.Tau, 32, new Color(1.0f, 0.84f, 0.0f, 0.9f), 2.0f * inverseZoom);
+        }
+
         // Draw selection ring if selected (constant screen size)
         if (_isSelected)
         {
@@ -752,32 +766,45 @@ public partial class StarNode : Node2D
         }
 
         // Calculate star size based on luminosity
-        var baseLuminositySize = Mathf.Log(System.Luminosity + 1.0f) * 2.0f; // Increased multiplier
-        baseLuminositySize = Mathf.Clamp(baseLuminositySize, 3f, 15f); // Better size range
+        var baseLuminositySize = Mathf.Log(System.Luminosity + 1.0f) * 2.0f;
+        baseLuminositySize = Mathf.Clamp(baseLuminositySize, 3f, 15f);
         var screenStarSize = BASE_STAR_SIZE + baseLuminositySize;
         var worldStarSize = screenStarSize * inverseZoom;
 
         var color = GetStarColor();
         DrawCircle(Vector2.Zero, worldStarSize, color);
 
-        // Only show labels at reasonable zoom levels or for selected stars
-        bool shouldShowLabel = _currentZoom >= LABEL_VISIBILITY_THRESHOLD || _isSelected;
+        // Only show labels at reasonable zoom levels or for selected stars (or always for Sol)
+        bool shouldShowLabel = _currentZoom >= LABEL_VISIBILITY_THRESHOLD || _isSelected || isSol;
 
         if (shouldShowLabel)
         {
+            // For crisp text rendering, we need to:
+            // 1. Use a fixed screen-space font size
+            // 2. Counter-scale the canvas transform to render at screen resolution
+            
             var font = ThemeDB.FallbackFont;
-            // Calculate font size to stay readable (between 10-14 on screen)
-            var screenFontSize = 12; // Target screen size
-            var fontSize = (int)(screenFontSize * inverseZoom);
-            fontSize = Mathf.Clamp(fontSize, 10, 20); // Reasonable world-space bounds
-
+            var fontSize = 14; // Fixed screen-space font size for crisp rendering
+            
             var labelOffset = GetSmartLabelPosition(screenStarSize);
             var worldLabelOffset = labelOffset * inverseZoom;
 
             // Debug mode: show coordinates
             var ly = Position / StarMapPresenter.BASE_PIXELS_PER_LY;
             var labelText = $"{System.Name} ({ly.X:F1}, {ly.Y:F1})";
-            DrawString(font, worldLabelOffset, labelText, HorizontalAlignment.Left, -1, fontSize, new Color(1, 1, 1, 0.9f));
+            
+            // Save current transform
+            var originalTransform = GetCanvasTransform();
+            
+            // Counter-scale to render text at screen resolution
+            // This prevents blurry text when zoomed
+            DrawSetTransform(worldLabelOffset, 0.0f, new Vector2(inverseZoom, inverseZoom));
+            
+            var fontColor = isSol ? new Color(1.0f, 0.84f, 0.0f, 1.0f) : new Color(1, 1, 1, 0.95f);
+            DrawString(font, Vector2.Zero, labelText, HorizontalAlignment.Left, -1, fontSize, fontColor);
+            
+            // Restore transform
+            DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
         }
     }
 
@@ -831,5 +858,40 @@ public partial class StarNode : Node2D
     {
         _isSelected = selected;
         QueueRedraw();
+    }
+}
+
+/// <summary>
+/// Visual marker for the origin (Sol's position at 0,0).
+/// Helps visualize the coordinate system center.
+/// </summary>
+public partial class OriginMarker : Node2D
+{
+    public override void _Process(double delta)
+    {
+        // Always redraw to stay visible at all zoom levels
+        QueueRedraw();
+    }
+
+    public override void _Draw()
+    {
+        // Get the camera to determine proper scaling
+        var camera = GetViewport()?.GetCamera2D();
+        if (camera == null) return;
+
+        float inverseZoom = 1.0f / Mathf.Max(camera.Zoom.X, 0.1f);
+        
+        // Draw subtle crosshairs at origin
+        float crosshairSize = 30f * inverseZoom;
+        float crosshairThickness = 1.5f * inverseZoom;
+        var crosshairColor = new Color(0.5f, 0.5f, 0.5f, 0.4f);
+
+        // Horizontal line
+        DrawLine(new Vector2(-crosshairSize, 0), new Vector2(crosshairSize, 0), crosshairColor, crosshairThickness);
+        // Vertical line
+        DrawLine(new Vector2(0, -crosshairSize), new Vector2(0, crosshairSize), crosshairColor, crosshairThickness);
+        
+        // Draw circle at center
+        DrawCircle(Vector2.Zero, 3f * inverseZoom, crosshairColor);
     }
 }
