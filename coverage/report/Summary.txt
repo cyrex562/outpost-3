@@ -1,0 +1,47 @@
+Summary
+  Generated on: 2025-10-11 - 10:56:33
+  Coverage date: 2025-10-11 - 10:56:14
+  Parser: Cobertura
+  Assemblies: 1
+  Classes: 25
+  Files: 49
+  Line coverage: 5.6%
+  Covered lines: 147
+  Uncovered lines: 2433
+  Coverable lines: 2580
+  Total lines: 4898
+  Branch coverage: 3.6% (39 of 1082)
+  Covered branches: 39
+  Total branches: 1082
+  Method coverage: 8.6% (19 of 220)
+  Full method coverage: 5.9% (13 of 220)
+  Covered methods: 19
+  Fully covered methods: 13
+  Total methods: 220
+
+Outpost3                                              5.6%
+  GodotPlugins.Game.Main                                0%
+  Outpost3.App                                          0%
+  Outpost3.Core.Domain.GameState                        0%
+  Outpost3.Core.Domain.ProbeInFlight                    0%
+  Outpost3.Core.Events.AnomalyDetectedEvent          37.5%
+  Outpost3.Core.Events.EventStoreException           28.5%
+  Outpost3.Core.Events.GameEvent                      100%
+  Outpost3.Core.Events.MechanicalFailureEvent         100%
+  Outpost3.Core.Events.ProbeArrived                  37.5%
+  Outpost3.Core.Events.ProbeLaunched                    0%
+  Outpost3.Core.Events.ShipArrivedEvent               100%
+  Outpost3.Core.Events.ShipDepartedEvent              100%
+  Outpost3.Core.Events.SocialConflictEvent            100%
+  Outpost3.Core.Events.SystemDiscovered                 0%
+  Outpost3.Core.Events.TimeAdvanced                     0%
+  Outpost3.Core.Persistence.FileEventStore           61.6%
+  Outpost3.Core.Persistence.GameEventJsonConverter   65.1%
+  Outpost3.Core.StateStore                              0%
+  Outpost3.Core.Systems.TimeSystem                      0%
+  Outpost3.Services.EventExporter                       0%
+  Outpost3.UI.DebugEventPanel                           0%
+  Outpost3.UI.EventLogScreenPresenter                   0%
+  Outpost3.UI.GameHUD                                   0%
+  Outpost3.UI.JourneyEventEntry                         0%
+  Outpost3.UI.ShipJourneyLogPresenter                   0%

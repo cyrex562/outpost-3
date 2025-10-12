@@ -1,0 +1,2 @@
+﻿11578
+c:/Users/cyrex/files/projects/outpost-3/bin/Godot_v4.5-stable_mono_win64.exe

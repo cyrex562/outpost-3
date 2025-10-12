@@ -25,7 +25,7 @@ public static class TimeSystem
         var newTime = state.GameTime + command.Dt;
         var events = new List<IGameEvent>
         {
-            new TimeAdvanced(newTime, command.Dt)
+            new TimeAdvanced(command.Dt) { GameTime = (float)newTime }
         };
 
         var newState = state.WithAdvanceTime(command.Dt);
@@ -36,12 +36,12 @@ public static class TimeSystem
             if (probe.ArrivalTime <= newTime)
             {
                 arrivedProbeIds.Add(probe.Id);
-                events.Add(new ProbeArrived(newTime, probe.Id, probe.TargetSystemId));
+                events.Add(new ProbeArrived(probe.Id, probe.TargetSystemId) { GameTime = (float)newTime });
 
                 // generate discovered system
                 var system = GenerateSystem(probe.TargetSystemId);
                 newState = newState.WithSystemDiscovered(system);
-                events.Add(new SystemDiscovered(newTime, system.Id, system.Name));
+                events.Add(new SystemDiscovered(system.Id, system.Name) { GameTime = (float)newTime });
             }
         }
 
@@ -70,12 +70,10 @@ public static class TimeSystem
 
         var events = new List<IGameEvent>
         {
-            new ProbeLaunched(
-                state.GameTime,
-                probeId,
-                command.TargetSystemId,
-                arrivalTime
-            )
+            new ProbeLaunched(probeId, command.TargetSystemId, arrivalTime) 
+            { 
+                GameTime = (float)state.GameTime 
+            }
         };
 
         return (newState, events);

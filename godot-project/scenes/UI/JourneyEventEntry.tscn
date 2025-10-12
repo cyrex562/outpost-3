@@ -1,0 +1,70 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8yf3napk2d5n"]
+
+[ext_resource type="Script" path="res://scripts/UI/JourneyEventEntry.cs" id="1_x7j9k"]
+
+[node name="JourneyEventEntry" type="PanelContainer"]
+custom_minimum_size = Vector2(0, 80)
+script = ExtResource("1_x7j9k")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="TimestampSection" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 0
+theme_override_constants/separation = 2
+
+[node name="TimeLabel" type="Label" parent="MarginContainer/HBoxContainer/TimestampSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Day 42"
+
+[node name="GameTimeLabel" type="Label" parent="MarginContainer/HBoxContainer/TimestampSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = "15:30"
+
+[node name="EventIcon" type="TextureRect" parent="MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ContentSection" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/HBoxContainer/ContentSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Event Title"
+
+[node name="DescriptionLabel" type="Label" parent="MarginContainer/HBoxContainer/ContentSection"]
+layout_mode = 2
+text = "Event description goes here. This label will wrap text automatically when it becomes too long for the available space."
+autowrap_mode = 3
+
+[node name="ChoicesContainer" type="VBoxContainer" parent="MarginContainer/HBoxContainer/ContentSection"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="MetadataSection" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 8
+
+[node name="SeverityLabel" type="Label" parent="MarginContainer/HBoxContainer/MetadataSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "⚠️ Minor"
+horizontal_alignment = 2

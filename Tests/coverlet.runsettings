@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <!-- Coverage output formats -->
+          <Format>cobertura,opencover,json</Format>
+          
+          <!-- Exclude test projects and generated code -->
+          <Exclude>[*.Tests]*,[*]*.g.cs,[*]*Godot.SourceGenerators*</Exclude>
+          
+          <!-- Exclude items by attribute -->
+          <ExcludeByAttribute>Obsolete,GeneratedCode,CompilerGenerated,ExcludeFromCodeCoverage</ExcludeByAttribute>
+          
+          <!-- Include only our source code directories -->
+          <IncludeDirectory>../godot-project/scripts/Core/**</IncludeDirectory>
+          <IncludeDirectory>../godot-project/scripts/Services/**</IncludeDirectory>
+          
+          <!-- Use source link to map coverage to source files -->
+          <UseSourceLink>true</UseSourceLink>
+          
+          <!-- Single hit mode for faster collection -->
+          <SingleHit>false</SingleHit>
+          
+          <!-- Include test assembly for better reporting -->
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          
+          <!-- Skip auto-props for cleaner coverage -->
+          <SkipAutoProps>true</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+  
+  <!-- Test execution settings -->
+  <RunConfiguration>
+    <MaxCpuCount>0</MaxCpuCount>
+    <ResultsDirectory>./coverage</ResultsDirectory>
+    <TargetPlatform>x64</TargetPlatform>
+  </RunConfiguration>
+</RunSettings>

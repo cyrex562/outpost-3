@@ -1,0 +1,3 @@
+[gd_scene format=3 uid="uid://4het2ss0gnv5"]
+
+[node name="SaveEntry" type="PanelContainer"]

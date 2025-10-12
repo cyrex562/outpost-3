@@ -1,4 +1,0 @@
-# Gameplay
-
-* New game
-  * 
