@@ -1,7 +1,7 @@
 # Godot 4+ specific ignores
 .godot/**
 .nomedia
-godot-project/.mono/temp/**
+godot-project/.mono/**
 godot-project/.godot/**
 
 # Godot-specific ignores
@@ -14,7 +14,7 @@ export_credentials.cfg
 *.translation
 
 # Mono-specific ignores
-.mono/
+.mono/**
 data_*/
 mono_crash.*.json
 
