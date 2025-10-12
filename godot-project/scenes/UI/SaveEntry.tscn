@@ -1,3 +1,84 @@
-[gd_scene format=3 uid="uid://4het2ss0gnv5"]
+[gd_scene load_steps=2 format=3 uid="uid://4het2ss0gnv5"]
+
+[ext_resource type="Script" path="res://scripts/UI/SaveEntryComponent.cs" id="1_saveentry"]
 
 [node name="SaveEntry" type="PanelContainer"]
+custom_minimum_size = Vector2(0, 80)
+script = ExtResource("1_saveentry")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="LeftSection" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="SaveNameLabel" type="Label" parent="MarginContainer/HBoxContainer/LeftSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Save Name"
+
+[node name="GameTimeContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/LeftSection"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="GameTimePrefix" type="Label" parent="MarginContainer/HBoxContainer/LeftSection/GameTimeContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Game Time:"
+
+[node name="GameTimeLabel" type="Label" parent="MarginContainer/HBoxContainer/LeftSection/GameTimeContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = "Day 0, 0.0h"
+
+[node name="SaveTimeContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/LeftSection"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="SaveTimePrefix" type="Label" parent="MarginContainer/HBoxContainer/LeftSection/SaveTimeContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Saved:"
+
+[node name="SaveTimeLabel" type="Label" parent="MarginContainer/HBoxContainer/LeftSection/SaveTimeContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = "2025-10-11 14:30"
+
+[node name="VersionContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/LeftSection"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="VersionPrefix" type="Label" parent="MarginContainer/HBoxContainer/LeftSection/VersionContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Version:"
+
+[node name="VersionLabel" type="Label" parent="MarginContainer/HBoxContainer/LeftSection/VersionContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = "0.1.4"
+
+[node name="RightSection" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_constants/separation = 5
+
+[node name="EventCountLabel" type="Label" parent="MarginContainer/HBoxContainer/RightSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "0 events"
+horizontal_alignment = 2

@@ -1,0 +1,94 @@
+[gd_scene load_steps=3 format=3 uid="uid://bx3k5h8m9n2vp"]
+
+[ext_resource type="Script" path="res://scripts/UI/SaveLoadMenuPresenter.cs" id="1_presenter"]
+[ext_resource type="PackedScene" uid="uid://4het2ss0gnv5" path="res://scenes/UI/SaveEntry.tscn" id="2_saveentry"]
+
+[node name="SaveLoadMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_presenter")
+_saveEntryScene = ExtResource("2_saveentry")
+
+[node name="PanelContainer" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 50.0
+offset_top = 50.0
+offset_right = -50.0
+offset_bottom = -50.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="PanelContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelContainer/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Save Game Files"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ControlsBar" type="HBoxContainer" parent="PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="NewSaveButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer/ControlsBar"]
+layout_mode = 2
+text = "New Save"
+
+[node name="RefreshButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer/ControlsBar"]
+layout_mode = 2
+text = "Refresh"
+
+[node name="BackButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer/ControlsBar"]
+layout_mode = 2
+text = "Back to Menu"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="PanelContainer/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 400)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SaveListContainer" type="VBoxContainer" parent="PanelContainer/MarginContainer/VBoxContainer/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="HSeparator2" type="HSeparator" parent="PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ActionsBar" type="HBoxContainer" parent="PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer/ActionsBar"]
+layout_mode = 2
+disabled = true
+text = "Load Selected"
+
+[node name="DeleteButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer/ActionsBar"]
+layout_mode = 2
+disabled = true
+text = "Delete Selected"
+
+[node name="DetailsLabel" type="Label" parent="PanelContainer/MarginContainer/VBoxContainer/ActionsBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "No saves found"

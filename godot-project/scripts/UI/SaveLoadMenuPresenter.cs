@@ -11,20 +11,29 @@ namespace Outpost3.UI;
 /// </summary>
 public partial class SaveLoadMenuPresenter : Control
 {
-    [Export] private VBoxContainer _saveListContainer;
-    [Export] private Button _newSaveButton;
-    [Export] private Button _refreshButton;
-    [Export] private Button _loadButton;
-    [Export] private Button _deleteButton;
-    [Export] private Button _backButton;
-    [Export] private Label _detailsLabel;
-    [Export] private PackedScene _saveEntryScene;
+    [Export] private VBoxContainer? _saveListContainer;
+    [Export] private Button? _newSaveButton;
+    [Export] private Button? _refreshButton;
+    [Export] private Button? _loadButton;
+    [Export] private Button? _deleteButton;
+    [Export] private Button? _backButton;
+    [Export] private Label? _detailsLabel;
+    [Export] private PackedScene? _saveEntryScene;
     
-    private SaveLoadService _saveLoadService;
-    private string _selectedSaveSlot;
+    private SaveLoadService? _saveLoadService;
+    private string? _selectedSaveSlot;
     
     public override void _Ready()
     {
+        // Get node references if not set via exports
+        _saveListContainer ??= GetNode<VBoxContainer>("PanelContainer/MarginContainer/VBoxContainer/ScrollContainer/SaveListContainer");
+        _newSaveButton ??= GetNode<Button>("PanelContainer/MarginContainer/VBoxContainer/ControlsBar/NewSaveButton");
+        _refreshButton ??= GetNode<Button>("PanelContainer/MarginContainer/VBoxContainer/ControlsBar/RefreshButton");
+        _backButton ??= GetNode<Button>("PanelContainer/MarginContainer/VBoxContainer/ControlsBar/BackButton");
+        _loadButton ??= GetNode<Button>("PanelContainer/MarginContainer/VBoxContainer/ActionsBar/LoadButton");
+        _deleteButton ??= GetNode<Button>("PanelContainer/MarginContainer/VBoxContainer/ActionsBar/DeleteButton");
+        _detailsLabel ??= GetNode<Label>("PanelContainer/MarginContainer/VBoxContainer/ActionsBar/DetailsLabel");
+        
         // Get service from App singleton
         var app = GetNode<App>("/root/App");
         if (app == null)
@@ -41,11 +50,11 @@ public partial class SaveLoadMenuPresenter : Control
         }
         
         // Connect signals
-        _newSaveButton.Pressed += OnNewSavePressed;
-        _refreshButton.Pressed += RefreshSaveList;
-        _loadButton.Pressed += OnLoadPressed;
-        _deleteButton.Pressed += OnDeletePressed;
-        _backButton.Pressed += OnBackPressed;
+        if (_newSaveButton != null) _newSaveButton.Pressed += OnNewSavePressed;
+        if (_refreshButton != null) _refreshButton.Pressed += RefreshSaveList;
+        if (_loadButton != null) _loadButton.Pressed += OnLoadPressed;
+        if (_deleteButton != null) _deleteButton.Pressed += OnDeletePressed;
+        if (_backButton != null) _backButton.Pressed += OnBackPressed;
         
         // Load save list
         RefreshSaveList();
@@ -53,6 +62,9 @@ public partial class SaveLoadMenuPresenter : Control
     
     private void RefreshSaveList()
     {
+        if (_saveListContainer == null || _saveLoadService == null || _detailsLabel == null || _saveEntryScene == null)
+            return;
+            
         // Clear existing entries
         foreach (var child in _saveListContainer.GetChildren())
         {
@@ -80,6 +92,9 @@ public partial class SaveLoadMenuPresenter : Control
     
     private void OnSaveSelected(string saveSlot)
     {
+        if (_loadButton == null || _deleteButton == null || _saveListContainer == null || _detailsLabel == null)
+            return;
+            
         _selectedSaveSlot = saveSlot;
         _loadButton.Disabled = false;
         _deleteButton.Disabled = false;
@@ -95,12 +110,11 @@ public partial class SaveLoadMenuPresenter : Control
     
     private void OnLoadPressed()
     {
-        if (string.IsNullOrEmpty(_selectedSaveSlot))
+        if (_saveLoadService == null || string.IsNullOrEmpty(_selectedSaveSlot))
             return;
         
         if (_saveLoadService.LoadGame(_selectedSaveSlot))
         {
-            // Return to main game scene
             GetTree().ChangeSceneToFile("res://scenes/Main.tscn");
         }
         else
@@ -116,22 +130,24 @@ public partial class SaveLoadMenuPresenter : Control
     
     private void OnDeletePressed()
     {
-        if (string.IsNullOrEmpty(_selectedSaveSlot))
+        if (_saveLoadService == null || _loadButton == null || _deleteButton == null || string.IsNullOrEmpty(_selectedSaveSlot))
             return;
-        
+            
         ShowConfirmDialog($"Delete save '{_selectedSaveSlot}'?", () =>
         {
+            if (_saveLoadService == null || string.IsNullOrEmpty(_selectedSaveSlot))
+                return;
+                
             _saveLoadService.DeleteSave(_selectedSaveSlot);
             _selectedSaveSlot = null;
-            _loadButton.Disabled = true;
-            _deleteButton.Disabled = true;
+            if (_loadButton != null) _loadButton.Disabled = true;
+            if (_deleteButton != null) _deleteButton.Disabled = true;
             RefreshSaveList();
         });
     }
     
     private void OnBackPressed()
     {
-        // Check if StartMenu exists, otherwise go to Main
         if (ResourceLoader.Exists("res://scenes/game_start/StartMenu.tscn"))
         {
             GetTree().ChangeSceneToFile("res://scenes/game_start/StartMenu.tscn");
@@ -144,6 +160,9 @@ public partial class SaveLoadMenuPresenter : Control
     
     private void ShowSaveNameDialog()
     {
+        if (_saveLoadService == null)
+            return;
+            
         var dialog = new AcceptDialog();
         dialog.Title = "New Save";
         dialog.DialogText = "Enter save name:";
@@ -155,6 +174,9 @@ public partial class SaveLoadMenuPresenter : Control
         
         dialog.Confirmed += () =>
         {
+            if (_saveLoadService == null)
+                return;
+                
             var saveName = lineEdit.Text;
             if (!string.IsNullOrWhiteSpace(saveName))
             {

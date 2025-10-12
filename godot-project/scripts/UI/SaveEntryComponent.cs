@@ -8,27 +8,29 @@ namespace Outpost3.UI;
 /// </summary>
 public partial class SaveEntryComponent : PanelContainer
 {
-    [Export] private Label _saveNameLabel;
-    [Export] private Label _gameTimeLabel;
-    [Export] private Label _saveTimeLabel;
-    [Export] private Label _versionLabel;
-    [Export] private Label _eventCountLabel;
+    [Export] private Label? _saveNameLabel;
+    [Export] private Label? _gameTimeLabel;
+    [Export] private Label? _saveTimeLabel;
+    [Export] private Label? _versionLabel;
+    [Export] private Label? _eventCountLabel;
     
     [Signal]
     public delegate void SelectedEventHandler();
     
-    private SaveMetadata _saveData;
+    private SaveMetadata? _saveData;
     private bool _isSelected;
     
-    public string SaveSlot => _saveData?.SaveSlot;
+    public string? SaveSlot => _saveData?.SaveSlot;
     
     public override void _Ready()
     {
-        _saveNameLabel = GetNode<Label>("MarginContainer/HBoxContainer/VBoxContainer/SaveNameLabel");
-        _gameTimeLabel = GetNode<Label>("MarginContainer/HBoxContainer/VBoxContainer/HBoxContainer/GameTimeLabel");
-        _saveTimeLabel = GetNode<Label>("MarginContainer/HBoxContainer/VBoxContainer/HBoxContainer2/SaveTimeLabel");
-        _versionLabel = GetNode<Label>("MarginContainer/HBoxContainer/VBoxContainer/HBoxContainer3/VersionLabel");
-        _eventCountLabel = GetNode<Label>("MarginContainer/HBoxContainer/VBoxContainer2/EventCountLabel");
+        // Get node references if not set via exports
+        _saveNameLabel ??= GetNode<Label>("MarginContainer/HBoxContainer/LeftSection/SaveNameLabel");
+        _gameTimeLabel ??= GetNode<Label>("MarginContainer/HBoxContainer/LeftSection/GameTimeContainer/GameTimeLabel");
+        _saveTimeLabel ??= GetNode<Label>("MarginContainer/HBoxContainer/LeftSection/SaveTimeContainer/SaveTimeLabel");
+        _versionLabel ??= GetNode<Label>("MarginContainer/HBoxContainer/LeftSection/VersionContainer/VersionLabel");
+        _eventCountLabel ??= GetNode<Label>("MarginContainer/HBoxContainer/RightSection/EventCountLabel");
+        
         GuiInput += OnGuiInput;
     }
     
@@ -39,15 +41,20 @@ public partial class SaveEntryComponent : PanelContainer
     {
         _saveData = saveData;
         
-        _saveNameLabel.Text = saveData.DisplayName;
+        if (_saveNameLabel != null)
+            _saveNameLabel.Text = saveData.DisplayName;
         
         var day = (int)(saveData.GameTime / 24.0);
         var hour = saveData.GameTime % 24.0;
-        _gameTimeLabel.Text = $"Day {day}, {hour:F1}h";
+        if (_gameTimeLabel != null)
+            _gameTimeLabel.Text = $"Day {day}, {hour:F1}h";
         
-        _saveTimeLabel.Text = saveData.SaveTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
-        _versionLabel.Text = saveData.GameVersion;
-        _eventCountLabel.Text = $"{saveData.TotalEvents} events";
+        if (_saveTimeLabel != null)
+            _saveTimeLabel.Text = saveData.SaveTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        if (_versionLabel != null)
+            _versionLabel.Text = saveData.GameVersion;
+        if (_eventCountLabel != null)
+            _eventCountLabel.Text = $"{saveData.TotalEvents} events";
     }
     
     /// <summary>
@@ -61,7 +68,14 @@ public partial class SaveEntryComponent : PanelContainer
         var styleBox = new StyleBoxFlat();
         styleBox.BgColor = selected ? new Color(0.3f, 0.5f, 0.7f, 0.3f) : new Color(0.2f, 0.2f, 0.2f, 0.3f);
         styleBox.BorderColor = selected ? new Color(0.5f, 0.7f, 1.0f) : new Color(0.4f, 0.4f, 0.4f);
-        styleBox.BorderWidthAll = selected ? 2 : 1;
+        
+        // Set border width on all sides
+        int borderWidth = selected ? 2 : 1;
+        styleBox.BorderWidthLeft = borderWidth;
+        styleBox.BorderWidthRight = borderWidth;
+        styleBox.BorderWidthTop = borderWidth;
+        styleBox.BorderWidthBottom = borderWidth;
+        
         AddThemeStyleboxOverride("panel", styleBox);
     }
     

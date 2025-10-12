@@ -1,3 +1,22 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:c36c3b967ce616082dda46ff6f8de6f24d157da0b68926f846d370c560c1f3ac
-size 74
+# Godot 4+ specific ignores
+.godot/**
+.nomedia
+godot-project/.mono/temp/**
+godot-project/.godot/**
+
+# Godot-specific ignores
+.import/
+export.cfg
+export_credentials.cfg
+*.tmp
+
+# Imported translations (automatically generated from CSV files)
+*.translation
+
+# Mono-specific ignores
+.mono/
+data_*/
+mono_crash.*.json
+
+Tests/bin/**
+Tests/obj/**

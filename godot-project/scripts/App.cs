@@ -3,6 +3,7 @@ using Outpost3.Core;
 using Outpost3.Core.Domain;
 using Outpost3.Core.Events;
 using Outpost3.Core.Persistence;
+using Outpost3.Core.Services;
 
 namespace Outpost3;
 
@@ -12,8 +13,11 @@ namespace Outpost3;
 /// </summary>
 public partial class App : Node
 {
-    private IEventStore _eventStore;
-    private StateStore _stateStore;
+    private IEventStore _eventStore = null!;
+    private StateStore _stateStore = null!;
+    private ISnapshotStore _snapshotStore = null!;
+    private SaveLoadService _saveLoadService = null!;
+    private Timer? _autoSaveTimer;
 
     public override void _Ready()
     {
@@ -59,6 +63,30 @@ public partial class App : Node
         AddChild(_stateStore);
         _stateStore.Name = "StateStore";
 
+        // Create snapshot store
+        var savesPath = ProjectSettings.GlobalizePath("user://saves");
+        _snapshotStore = new JsonSnapshotStore(savesPath);
+        GD.Print($"App: Snapshot store initialized: {savesPath}");
+        
+        // Create save/load service
+        _saveLoadService = new SaveLoadService(_stateStore, _eventStore, _snapshotStore);
+        GD.Print("App: SaveLoadService initialized");
+        
+        // Add global input handler for quick save/load
+        var inputHandler = new GlobalInputHandler();
+        AddChild(inputHandler);
+        inputHandler.Name = "GlobalInputHandler";
+        GD.Print("App: GlobalInputHandler initialized");
+        
+        // Setup auto-save timer (every 5 minutes)
+        _autoSaveTimer = new Timer();
+        _autoSaveTimer.WaitTime = 300.0; // 5 minutes
+        _autoSaveTimer.Autostart = true;
+        _autoSaveTimer.Timeout += OnAutoSave;
+        AddChild(_autoSaveTimer);
+        _autoSaveTimer.Name = "AutoSaveTimer";
+        GD.Print("App: Auto-save timer initialized (5 minute interval)");
+
         GD.Print("App: Services initialized successfully");
     }
 
@@ -98,6 +126,23 @@ public partial class App : Node
     public StateStore GetStateStore()
     {
         return _stateStore;
+    }
+
+    /// <summary>
+    /// Gets the SaveLoadService instance for dependency injection.
+    /// </summary>
+    public SaveLoadService GetSaveLoadService()
+    {
+        return _saveLoadService;
+    }
+
+    /// <summary>
+    /// Auto-save timer callback.
+    /// </summary>
+    private void OnAutoSave()
+    {
+        _saveLoadService.AutoSave();
+        GD.Print("⏰ Auto-save triggered");
     }
 
     public override void _Process(double delta)
