@@ -48,12 +48,36 @@ public class GameEventJsonConverter : JsonConverter<GameEvent>
     }
 
     /// <summary>
-    /// Writes a GameEvent to JSON using its runtime type.
+    /// Writes a GameEvent to JSON, adding the eventType discriminator property.
     /// </summary>
     public override void Write(Utf8JsonWriter writer, GameEvent value, JsonSerializerOptions options)
     {
-        // Serialize using the runtime type of the event
-        JsonSerializer.Serialize(writer, value, value.GetType(), options);
+        writer.WriteStartObject();
+
+        // Write the eventType discriminator first
+        writer.WriteString("eventType", value.GetType().Name);
+
+        // Create options without this converter to avoid recursion
+        var serializeOptions = new JsonSerializerOptions(options);
+        serializeOptions.Converters.Clear();
+        foreach (var converter in options.Converters)
+        {
+            if (converter is not GameEventJsonConverter)
+            {
+                serializeOptions.Converters.Add(converter);
+            }
+        }
+
+        // Serialize the object and copy its properties
+        var json = JsonSerializer.Serialize(value, value.GetType(), serializeOptions);
+        using var doc = JsonDocument.Parse(json);
+
+        foreach (var property in doc.RootElement.EnumerateObject())
+        {
+            property.WriteTo(writer);
+        }
+
+        writer.WriteEndObject();
     }
 
     /// <summary>
@@ -78,6 +102,9 @@ public class GameEventJsonConverter : JsonConverter<GameEvent>
             "ProbeLaunched" => typeof(ProbeLaunched),
             "ProbeArrived" => typeof(ProbeArrived),
             "SystemDiscovered" => typeof(SystemDiscovered),
+            "SystemSelected" => typeof(SystemSelected),
+            "GalaxyInitialized" => typeof(GalaxyInitialized),
+            "SystemScanned" => typeof(SystemScanned),
 
             // Unknown event type
             _ => throw new NotSupportedException(

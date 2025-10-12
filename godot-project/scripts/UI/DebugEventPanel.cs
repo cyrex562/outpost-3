@@ -13,19 +13,19 @@ namespace Outpost3.UI;
 public partial class DebugEventPanel : CanvasLayer
 {
     // Exported node references
-    private VBoxContainer _eventList;
-    private Button _pinButton;
-    private Button _clearButton;
-    private Button _closeButton;
-    private ScrollContainer _scrollContainer;
+    private VBoxContainer _eventList = null!;
+    private Button _pinButton = null!;
+    private Button _clearButton = null!;
+    private Button _closeButton = null!;
+    private ScrollContainer _scrollContainer = null!;
 
     // Constants
     private const int MAX_EVENTS = 50;
 
     // Private fields
     private bool _isPinned = false;
-    private IEventStore _eventStore;
-    private StateStore _stateStore;
+    private IEventStore? _eventStore;
+    private StateStore? _stateStore;
     private long _lastDisplayedOffset = -1;
 
     public override void _Ready()
@@ -213,44 +213,32 @@ public partial class DebugEventPanel : CanvasLayer
     }
 
     /// <summary>
-    /// Gets the EventStore instance from service locator.
-    /// TODO: Replace with actual service locator pattern.
+    /// Gets the EventStore instance from GameServices autoload.
     /// </summary>
-    private IEventStore GetEventStore()
+    private IEventStore? GetEventStore()
     {
-        // Try to find it in the scene tree
-        var app = GetNodeOrNull("/root/App");
-        if (app != null)
+        var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
+        if (gameServices != null)
         {
-            var result = app.Call("GetEventStore");
-            if (result.VariantType != Variant.Type.Nil)
-            {
-                return result.AsGodotObject() as IEventStore;
-            }
+            return gameServices.EventStore;
         }
 
-        GD.PrintErr("DebugEventPanel: Could not find EventStore. Implement service locator pattern.");
+        GD.PrintErr("DebugEventPanel: Could not find GameServices autoload!");
         return null;
     }
 
     /// <summary>
-    /// Gets the StateStore instance from service locator.
-    /// TODO: Replace with actual service locator pattern.
+    /// Gets the StateStore instance from GameServices autoload.
     /// </summary>
-    private StateStore GetStateStore()
+    private StateStore? GetStateStore()
     {
-        // Try to find it in the scene tree
-        var app = GetNodeOrNull("/root/App");
-        if (app != null)
+        var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
+        if (gameServices != null)
         {
-            var result = app.Call("GetStateStore");
-            if (result.VariantType != Variant.Type.Nil)
-            {
-                return result.AsGodotObject() as StateStore;
-            }
+            return gameServices.StateStore;
         }
 
-        GD.PrintErr("DebugEventPanel: Could not find StateStore. Implement service locator pattern.");
+        GD.PrintErr("DebugEventPanel: Could not find GameServices autoload!");
         return null;
     }
 }

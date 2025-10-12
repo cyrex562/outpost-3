@@ -70,7 +70,7 @@ public partial class EventLogScreenPresenter : Control
         _eventTree.ItemSelected += OnEventSelected;
         _exportJsonButton.Pressed += () => ExportEvents("json");
         _exportYamlButton.Pressed += () => ExportEvents("yaml");
-        _backButton.Pressed += () => GetTree().ChangeSceneToFile("res://scenes/Main.tscn");
+        _backButton.Pressed += () => GetTree().ChangeSceneToFile("res://Scenes/MainMenuScreen.tscn");
 
         // Load and display events
         LoadAllEvents();
@@ -209,21 +209,21 @@ public partial class EventLogScreenPresenter : Control
         foreach (var evt in _filteredEvents)
         {
             var item = _eventTree.CreateItem(root);
-            
+
             // Column 0: Time
             item.SetText(0, $"{evt.GameTime:F1}h");
-            
+
             // Column 1: Type
             var typeName = evt.EventType.Replace("Event", "");
             item.SetText(1, typeName);
             item.SetCustomColor(1, GetEventTypeColor(evt));
-            
+
             // Column 2: Summary
             item.SetText(2, GetEventSummary(evt));
-            
+
             // Column 3: Location
             item.SetText(3, GetEventLocation(evt));
-            
+
             // Store event offset in metadata (use offset to look up event later)
             item.SetMetadata(0, evt.Offset);
         }
@@ -285,7 +285,7 @@ public partial class EventLogScreenPresenter : Control
         // Get the offset from metadata and find the event
         var offset = selected.GetMetadata(0).AsInt64();
         var evt = _filteredEvents.FirstOrDefault(e => e.Offset == offset);
-        
+
         if (evt != null)
         {
             ShowEventDetails(evt);
@@ -319,8 +319,8 @@ public partial class EventLogScreenPresenter : Control
         rawLabel.AddThemeColorOverride("font_color", Colors.Gray);
         _detailsContainer.AddChild(rawLabel);
 
-        var jsonOptions = new JsonSerializerOptions 
-        { 
+        var jsonOptions = new JsonSerializerOptions
+        {
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };

@@ -14,6 +14,12 @@ public record GameState
     public List<ProbeInFlight> ProbesInFlight { get; init; } = new();
 
     /// <summary>
+    /// The currently selected star system (for UI display).
+    /// Null if no system is selected.
+    /// </summary>
+    public Ulid? SelectedSystemId { get; init; }
+
+    /// <summary>
     /// Create new initial game state
     /// </summary>
     /// <returns></returns>
@@ -71,5 +77,58 @@ public record GameState
         }
         var newSystems = new List<StarSystem>(this.Systems) { system };
         return this with { Systems = newSystems };
+    }
+
+    /// <summary>
+    /// Updates an existing system in the state (e.g., after probe scan).
+    /// </summary>
+    /// <param name="updatedSystem">The updated system.</param>
+    /// <returns>A new GameState with the system updated.</returns>
+    public GameState WithSystemUpdated(StarSystem updatedSystem)
+    {
+        var newSystems = new List<StarSystem>();
+        bool found = false;
+
+        foreach (var system in Systems)
+        {
+            if (system.Id == updatedSystem.Id)
+            {
+                newSystems.Add(updatedSystem);
+                found = true;
+            }
+            else
+            {
+                newSystems.Add(system);
+            }
+        }
+
+        // If not found, add it (shouldn't happen, but defensive)
+        if (!found)
+        {
+            newSystems.Add(updatedSystem);
+        }
+
+        return this with { Systems = newSystems };
+    }
+
+    /// <summary>
+    /// Initializes the galaxy with a list of star systems.
+    /// Replaces all existing systems.
+    /// </summary>
+    /// <param name="systems">The list of systems in the galaxy.</param>
+    /// <returns>A new GameState with the galaxy initialized.</returns>
+    public GameState WithGalaxyInitialized(List<StarSystem> systems)
+    {
+        return this with { Systems = systems };
+    }
+
+    /// <summary>
+    /// Creates a new state with the selected system updated.
+    /// </summary>
+    /// <param name="systemId">The ID of the system to select, or null to deselect.</param>
+    /// <returns>A new GameState with the updated selection.</returns>
+    public GameState WithSelectedSystem(Ulid? systemId)
+    {
+        return this with { SelectedSystemId = systemId };
     }
 }

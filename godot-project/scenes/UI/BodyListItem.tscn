@@ -1,0 +1,33 @@
+[gd_scene format=3 uid="uid://d9i0j1k2l3m4n"]
+
+[node name="BodyListItem" type="PanelContainer"]
+offset_right = 400.0
+offset_bottom = 40.0
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 4
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="BodyNameLabel" type="Label" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Body Name"
+theme_override_font_sizes/font_size = 13
+
+[node name="BodyTypeLabel" type="Label" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+text = "Type"
+theme_override_font_sizes/font_size = 12
+
+[node name="MassValue" type="Label" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+text = "1.0 M⊕"
+theme_override_font_sizes/font_size = 12

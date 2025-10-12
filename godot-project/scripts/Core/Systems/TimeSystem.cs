@@ -14,6 +14,8 @@ public static class TimeSystem
         {
             AdvanceTime cmd => ReduceAdvanceTime(state, cmd),
             LaunchProbe cmd => ReduceLaunchProbe(state, cmd),
+            SelectSystemCommand cmd => SystemSelectionSystem.HandleSelectSystem(state, cmd),
+            InitializeGalaxy cmd => ReduceInitializeGalaxy(state, cmd),
             _ => (state, new List<IGameEvent>())
         };
     }
@@ -38,10 +40,10 @@ public static class TimeSystem
                 arrivedProbeIds.Add(probe.Id);
                 events.Add(new ProbeArrived(probe.Id, probe.TargetSystemId) { GameTime = (float)newTime });
 
-                // generate discovered system
-                var system = GenerateSystem(probe.TargetSystemId);
-                newState = newState.WithSystemDiscovered(system);
-                events.Add(new SystemDiscovered(system.Id, system.Name) { GameTime = (float)newTime });
+                // Handle probe arrival: scan the system
+                var (scannedState, scanEvents) = HandleProbeArrival(newState, probe);
+                newState = scannedState;
+                events.AddRange(scanEvents);
             }
         }
 
@@ -70,51 +72,154 @@ public static class TimeSystem
 
         var events = new List<IGameEvent>
         {
-            new ProbeLaunched(probeId, command.TargetSystemId, arrivalTime) 
-            { 
-                GameTime = (float)state.GameTime 
+            new ProbeLaunched(probeId, command.TargetSystemId, arrivalTime)
+            {
+                GameTime = (float)state.GameTime
             }
         };
 
         return (newState, events);
     }
 
-    private static StarSystem GenerateSystem(Ulid id)
+    private static (GameState, List<IGameEvent>) ReduceInitializeGalaxy(
+        GameState state,
+        InitializeGalaxy command)
     {
-        Random rand = new Random();
+        var systems = GalaxyGenerationSystem.GenerateGalaxy(command.Seed, command.StarCount);
+        var newState = state.WithGalaxyInitialized(systems);
 
-        var spectralClasses = new[] { "O", "B", "A", "F", "G", "K", "M" };
-        var spectralClass = spectralClasses[rand.Next(spectralClasses.Length)];
-        var bodyTypes = new[] { "Planet", "Asteroid Belt" };
+        var events = new List<IGameEvent>
+        {
+            new GalaxyInitialized(systems.Count, command.Seed) { GameTime = (float)state.GameTime }
+        };
 
-        var numBodies = rand.Next(1, 9);
+        return (newState, events);
+    }
 
+    private static (GameState, List<IGameEvent>) HandleProbeArrival(GameState state, ProbeInFlight probe)
+    {
+        var events = new List<IGameEvent>();
+
+        // Find existing system (should be Detected level from galaxy initialization)
+        var existingSystem = state.Systems.Find(s => s.Id == probe.TargetSystemId);
+
+        if (existingSystem == null)
+        {
+            // System not found - shouldn't happen, but defensive
+            // Generate new system as fallback (old behavior)
+            var newSystem = GenerateSystemForUnknownTarget(probe.TargetSystemId);
+            var newState = state.WithSystemDiscovered(newSystem);
+            events.Add(new SystemDiscovered(newSystem.Id, newSystem.Name) { GameTime = (float)state.GameTime });
+            return (newState, events);
+        }
+
+        // Re-scan the system: potentially re-roll characteristics
+        var scannedSystem = RescanStarSystem(existingSystem, state.GameTime);
+
+        // Generate bodies with partial discovery
+        var bodiesWithPartialInfo = GenerateBodiesWithPartialDiscovery(scannedSystem.Id, (int)state.GameTime);
+
+        // Update system to Scanned with bodies
+        var updatedSystem = scannedSystem with
+        {
+            DiscoveryLevel = DiscoveryLevel.Scanned,
+            Bodies = bodiesWithPartialInfo
+        };
+
+        // Update in state
+        var resultState = state.WithSystemUpdated(updatedSystem);
+
+        events.Add(new SystemScanned(updatedSystem.Id, updatedSystem.Name) { GameTime = (float)state.GameTime });
+
+        return (resultState, events);
+    }
+
+    private static StarSystem RescanStarSystem(StarSystem existingSystem, double gameTime)
+    {
+        // Small chance to re-roll characteristics (5% chance)
+        var rng = new Random((int)gameTime + existingSystem.Id.GetHashCode());
+
+        if (rng.NextDouble() < 0.05)
+        {
+            // Re-roll spectral class (star changed or initial detection was wrong)
+            var spectralClasses = new[] { "O", "B", "A", "F", "G", "K", "M" };
+            var newSpectralClass = spectralClasses[rng.Next(spectralClasses.Length)];
+
+            // Recalculate luminosity
+            var newLuminosity = GalaxyGenerationSystem.CalculateLuminosity(newSpectralClass, rng);
+
+            return existingSystem with
+            {
+                SpectralClass = newSpectralClass,
+                Luminosity = newLuminosity
+            };
+        }
+
+        return existingSystem;
+    }
+
+    private static List<CelestialBody> GenerateBodiesWithPartialDiscovery(Ulid systemId, int seed)
+    {
+        var rng = new Random(seed + systemId.GetHashCode());
         var bodies = new List<CelestialBody>();
 
-        bodies.Add(new CelestialBody
+        var bodyTypes = new[] { "Planet", "Moon", "Asteroid Belt", "Cometary Belt" };
+        var compositions = new[] { "Rocky", "Gas Giant", "Ice Giant", "Asteroid", "Comet", "Unknown" };
+        var atmosphereTypes = new[] { "None", "Thin CO2", "Thick CO2", "Nitrogen-Oxygen", "Hydrogen-Helium", "Toxic", "Unknown" };
+        var surfaceTypes = new[] { "Barren", "Cratered", "Terrestrial", "Ice", "Lava", "Desert", "Ocean", "Unknown" };
+
+        int bodyCount = rng.Next(0, 12); // 0-11 bodies (not including star)
+
+        for (int i = 0; i < bodyCount; i++)
         {
-            Id = Ulid.NewUlid(),
-            Name = "Star",
-            BodyType = "Star",
-            Explored = true
-        });
-        for (int i = 1; i < numBodies; i++)
-        {
+            var bodyType = bodyTypes[rng.Next(bodyTypes.Length)];
+            var composition = compositions[rng.Next(compositions.Length)];
+
+            // 30% chance to discover atmosphere type
+            string? atmosphereType = null;
+            if (rng.NextDouble() < 0.3)
+            {
+                atmosphereType = atmosphereTypes[rng.Next(atmosphereTypes.Length)];
+            }
+
+            // 30% chance to discover surface type
+            string? surfaceType = null;
+            if (rng.NextDouble() < 0.3)
+            {
+                surfaceType = surfaceTypes[rng.Next(surfaceTypes.Length)];
+            }
+
             bodies.Add(new CelestialBody
             {
                 Id = Ulid.NewUlid(),
                 Name = $"Body {i + 1}",
-                BodyType = bodyTypes[rand.Next(bodyTypes.Length)],
-                Explored = false
+                BodyType = bodyType,
+                Composition = composition,
+                Explored = false,
+                AtmosphereType = atmosphereType,
+                SurfaceType = surfaceType
             });
         }
+
+        return bodies;
+    }
+
+    private static StarSystem GenerateSystemForUnknownTarget(Ulid id)
+    {
+        // Fallback for when probe targets unknown system (shouldn't happen in normal flow)
+        Random rand = new Random(id.GetHashCode());
+
+        var spectralClasses = new[] { "O", "B", "A", "F", "G", "K", "M" };
+        var spectralClass = spectralClasses[rand.Next(spectralClasses.Length)];
 
         return new StarSystem
         {
             Id = id,
-            Name = $"System {id.ToString().Substring(0, 6)}",
+            Name = $"Unknown-{id.ToString().Substring(0, 6)}",
             SpectralClass = spectralClass,
-            Bodies = bodies
+            Luminosity = 1.0f,
+            DiscoveryLevel = DiscoveryLevel.Scanned,
+            Bodies = new List<CelestialBody>()
         };
     }
 }

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+    <RunConfiguration>
+        <!-- Use single CPU for GdUnit4 tests to avoid conflicts -->
+        <MaxCpuCount>1</MaxCpuCount>
+        <ResultsDirectory>./TestResults</ResultsDirectory>
+        <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+        <!-- Increase timeout for Godot startup and compilation -->
+        <TestSessionTimeout>180000</TestSessionTimeout>
+        <TreatNoTestsAsError>true</TreatNoTestsAsError>
+        <EnvironmentVariables>
+            <!-- Path to Godot executable - CRITICAL for GdUnit4 -->
+            <GODOT_BIN>c:\Users\cyrex\bin\Godot_v4.5-stable_mono_win64\Godot_v4.5-stable_mono_win64.exe</GODOT_BIN>
+        </EnvironmentVariables>
+    </RunConfiguration>
+
+    <LoggerRunSettings>
+        <Loggers>
+            <!-- Console logger for command-line visibility -->
+            <Logger friendlyName="console" enabled="True">
+                <Configuration>
+                    <Verbosity>detailed</Verbosity>
+                </Configuration>
+            </Logger>
+            <!-- HTML report for nice test results viewing -->
+            <Logger friendlyName="html" enabled="True">
+                <Configuration>
+                    <LogFileName>test-result.html</LogFileName>
+                </Configuration>
+            </Logger>
+            <!-- TRX format for CI/CD integration -->
+            <Logger friendlyName="trx" enabled="True">
+                <Configuration>
+                    <LogFileName>test-result.trx</LogFileName>
+                </Configuration>
+            </Logger>
+        </Loggers>
+    </LoggerRunSettings>
+
+    <!-- GdUnit4-specific configuration -->
+    <GdUnit4>
+        <!-- Additional Godot runtime parameters -->
+        <Parameters>"--verbose"</Parameters>
+  
+        <!-- Use fully qualified names for better test identification -->
+        <DisplayName>FullyQualifiedName</DisplayName>
+  
+        <!-- Capture stdout for debugging -->
+        <CaptureStdOut>true</CaptureStdOut>
+  
+        <!-- Increase timeout for large projects (20 seconds default) -->
+        <CompileProcessTimeout>30000</CompileProcessTimeout>
+    </GdUnit4>
+
+    <!-- Code coverage configuration (Coverlet) -->
+    <DataCollectionRunSettings>
+        <DataCollectors>
+            <DataCollector friendlyName="XPlat code coverage">
+                <Configuration>
+                    <!-- Coverage output formats -->
+                    <Format>cobertura,opencover,json</Format>
+                    
+                    <!-- Exclude test projects and generated code -->
+                    <Exclude>[*.Tests]*,[*]*.g.cs,[*]*Godot.SourceGenerators*</Exclude>
+                    
+                    <!-- Exclude items by attribute -->
+                    <ExcludeByAttribute>Obsolete,GeneratedCode,CompilerGenerated,ExcludeFromCodeCoverage</ExcludeByAttribute>
+                    
+                    <!-- Include only our source code directories -->
+                    <IncludeDirectory>../godot-project/scripts/Core/**</IncludeDirectory>
+                    <IncludeDirectory>../godot-project/scripts/Services/**</IncludeDirectory>
+                    
+                    <!-- Use source link to map coverage to source files -->
+                    <UseSourceLink>true</UseSourceLink>
+                    
+                    <!-- Single hit mode for faster collection -->
+                    <SingleHit>false</SingleHit>
+                    
+                    <!-- Include test assembly for better reporting -->
+                    <IncludeTestAssembly>false</IncludeTestAssembly>
+                    
+                    <!-- Skip auto-props for cleaner coverage -->
+                    <SkipAutoProps>true</SkipAutoProps>
+                </Configuration>
+            </DataCollector>
+        </DataCollectors>
+    </DataCollectionRunSettings>
+</RunSettings>

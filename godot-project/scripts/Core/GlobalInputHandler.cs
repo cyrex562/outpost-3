@@ -9,26 +9,26 @@ namespace Outpost3.Core;
 public partial class GlobalInputHandler : Node
 {
     private SaveLoadService? _saveLoadService;
-    
+
     public override void _Ready()
     {
-        var app = GetNode<App>("/root/App");
-        if (app != null)
+        var gameServices = GetNode<GameServices>("/root/GameServices");
+        if (gameServices != null)
         {
-            _saveLoadService = app.GetSaveLoadService();
+            _saveLoadService = gameServices.SaveLoadService;
             GD.Print("GlobalInputHandler ready - F5: Quick Save, F9: Quick Load");
         }
         else
         {
-            GD.PrintErr("GlobalInputHandler: Failed to get App singleton");
+            GD.PrintErr("GlobalInputHandler: Failed to get GameServices autoload");
         }
     }
-    
+
     public override void _Input(InputEvent @event)
     {
         if (_saveLoadService == null)
             return;
-            
+
         if (@event.IsActionPressed("quick_save"))
         {
             _saveLoadService.QuickSave();
@@ -48,7 +48,7 @@ public partial class GlobalInputHandler : Node
             GetViewport().SetInputAsHandled();
         }
     }
-    
+
     private void ShowNotification(string message, bool isError = false)
     {
         // Simple console notification for now

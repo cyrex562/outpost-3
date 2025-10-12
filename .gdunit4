@@ -1,0 +1,3 @@
+# GdUnit4 Configuration
+# Specifies the Godot executable path for test execution
+Godot4Executable: bin/Godot_v4.5-stable_mono_win64_console.exe

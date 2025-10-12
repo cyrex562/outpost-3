@@ -1,0 +1,105 @@
+[gd_scene load_steps=2 format=3 uid="uid://b4k2m6n8p9q0r"]
+
+[ext_resource type="Script" path="res://scripts/UI/MainMenuPresenter.cs" id="1_mainmenu"]
+
+[node name="MainMenuScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_mainmenu")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.05, 0.05, 0.15, 1)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="TitleLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 48
+text = "OUTPOST 3"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Colony Simulation & Exploration"
+horizontal_alignment = 1
+
+[node name="Spacer1" type="Control" parent="CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+
+[node name="ButtonsContainer" type="VBoxContainer" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="NewGameButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "New Game"
+
+[node name="LoadGameButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Load Game"
+
+[node name="SettingsButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Settings"
+
+[node name="ModsButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Mod Management"
+
+[node name="CreditsButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Credits"
+
+[node name="ExitButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Exit"
+
+[node name="VersionLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -30.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "Version 0.1.0-alpha"
+horizontal_alignment = 2

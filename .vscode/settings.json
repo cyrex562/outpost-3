@@ -1,5 +1,5 @@
 {
-    "godotTools.editorPath.godot4": "c:\\Users\\cyrex\\files\\bin\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe",
+    "godotTools.editorPath.godot4": "c:\\Users\\cyrex\\bin\\Godot_v4.5-stable_mono_win64\\Godot_v4.5-stable_mono_win64.exe",
     "rust-analyzer.cargo.features": "all",
     "rust-analyzer.linkedProjects": ["./Cargo.toml"],
     "files.watcherExclude": {
@@ -8,5 +8,10 @@
     "cSpell.words": [
         "nerdfont",
         "toggleable"
-    ]
+    ],
+    // GdUnit4 Test Configuration
+    "dotnet.testWindow.useTestExplorer": true,
+    "gdUnit4.godotExecutable": "${workspaceFolder}\\bin\\Godot_v4.5-stable_mono_win64_console.exe",
+    // VSTest adapter configuration for GdUnit4 test discovery and execution
+    "dotnet.unitTests.runSettingsPath": "${workspaceFolder}/Tests/gdunit4.runsettings"
 }

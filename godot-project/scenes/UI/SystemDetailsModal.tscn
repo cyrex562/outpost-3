@@ -1,0 +1,110 @@
+[gd_scene format=3 uid="uid://e0f1g2h3i4j5k"]
+
+[node name="SystemDetailsModal" type="PanelContainer"]
+offset_right = 500.0
+offset_bottom = 600.0
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderHBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "System Details"
+theme_override_font_sizes/font_size = 18
+
+[node name="CloseButton" type="Button" parent="MarginContainer/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+text = "✕"
+theme_override_font_sizes/font_size = 16
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="SystemNameLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "System Name"
+theme_override_font_sizes/font_size = 16
+
+[node name="PropertiesGrid" type="GridContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+columns = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 8
+
+[node name="StarTypeKeyLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "Star Type:"
+theme_override_font_sizes/font_size = 13
+
+[node name="StarTypeValueLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "G2V"
+theme_override_font_sizes/font_size = 13
+
+[node name="LuminosityKeyLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "Luminosity:"
+theme_override_font_sizes/font_size = 13
+
+[node name="LuminosityValueLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "1.0 L☉"
+theme_override_font_sizes/font_size = 13
+
+[node name="AgeKeyLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "Age:"
+theme_override_font_sizes/font_size = 13
+
+[node name="AgeValueLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "4.6 Gyr"
+theme_override_font_sizes/font_size = 13
+
+[node name="MassKeyLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "Mass:"
+theme_override_font_sizes/font_size = 13
+
+[node name="MassValueLabel" type="Label" parent="MarginContainer/VBoxContainer/PropertiesGrid"]
+layout_mode = 2
+text = "1.0 M☉"
+theme_override_font_sizes/font_size = 13
+
+[node name="HSeparator2" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="BodiesLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Celestial Bodies"
+theme_override_font_sizes/font_size = 14
+
+[node name="BodiesScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BodiesListContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/BodiesScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="HSeparator3" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ViewSystemMapButton" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+disabled = true
+text = "View System Map (Coming in Session 2.2)"

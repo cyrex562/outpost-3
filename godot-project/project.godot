@@ -11,9 +11,18 @@ config_version=5
 [application]
 
 config/name="Outpost3"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://Scenes/MainMenuScreen.tscn"
 config/features=PackedStringArray("4.5", "C#", "GL Compatibility")
 config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=2560
+window/size/viewport_height=1600
+
+[autoload]
+
+GameServices="*res://Autoload/GameServices.cs"
 
 [dotnet]
 

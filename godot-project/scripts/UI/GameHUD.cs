@@ -10,6 +10,7 @@ public partial class GameHUD : CanvasLayer
 	private Godot.Label _timeLabel;
 	private Godot.Button _advanceButton;
 	private Godot.Button _launchProbeButton;
+	private Godot.Button _openStarMapButton;
 
 	private CheckBox _autoCheckBox;
 	private ItemList _probeList;
@@ -25,6 +26,7 @@ public partial class GameHUD : CanvasLayer
 		_timeLabel = GetNode<Godot.Label>("PanelContainer/VBoxContainer/TimeLabel");
 		_advanceButton = GetNode<Godot.Button>("PanelContainer/VBoxContainer/ButtonBar1/AdvanceButton");
 		_launchProbeButton = GetNode<Godot.Button>("PanelContainer/VBoxContainer/ButtonBar1/LaunchProbeButton");
+		_openStarMapButton = GetNode<Godot.Button>("PanelContainer/VBoxContainer/ButtonBar2/OpenStarMapButton");
 		_probeList = GetNode<ItemList>("PanelContainer/VBoxContainer/ProbeList");
 		_systemList = GetNode<ItemList>("PanelContainer/VBoxContainer/SystemList");
 		_autoCheckBox = GetNode<CheckBox>("PanelContainer/VBoxContainer/ButtonBar1/AutoCheckBox");
@@ -34,6 +36,7 @@ public partial class GameHUD : CanvasLayer
 		// connect signals
 		_advanceButton.Pressed += OnAdvancePressed;
 		_launchProbeButton.Pressed += OnLaunchProbePressed;
+		_openStarMapButton.Pressed += OnOpenStarMapPressed;
 		_stateStore.StateChanged += OnStateChanged;
 		_autoCheckBox.Toggled += OnAutoToggled;
 
@@ -72,6 +75,16 @@ public partial class GameHUD : CanvasLayer
 		var newId = Ulid.NewUlid();
 		var command = new LaunchProbe(newId);
 		_stateStore.ApplyCommand(command);
+	}
+
+	private void OnOpenStarMapPressed()
+	{
+		GD.Print("Open Star Map button pressed");
+		var starMap = GetNode<Control>("/root/Main/StarMapScreen");
+		if (starMap != null)
+		{
+			starMap.Show();
+		}
 	}
 
 	private void OnStateChanged()
