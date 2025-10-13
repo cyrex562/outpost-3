@@ -48,8 +48,8 @@ public partial class StarMapPresenter : Control
 
     // State
     private StateStore _stateStore = null!;  // Initialized in _Ready() from GameServices autoload
-    private List<StarNode> _starNodes = new();
-    private List<ProbeNode> _probeNodes = new();
+    private List<StarNode> _starNodes = [];
+    private List<ProbeNode> _probeNodes = [];
     private StarNode? _selectedStar;
     private bool _hasAutoFitView;
     private int _lastRenderedStarCount;
@@ -87,8 +87,25 @@ public partial class StarMapPresenter : Control
 
     public override void _Ready()
     {
-
         GD.Print("=== StarMapPresenter _Ready() START ===");
+
+        // Get state store from GameServices autoload (it's an autoload so it's always available)
+        GD.Print("StarMapPresenter: Attempting to get GameServices...");
+        var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
+        if (gameServices == null)
+        {
+            GD.PrintErr("StarMapPresenter: GameServices autoload not found at /root/GameServices!");
+            GD.PrintErr($"StarMapPresenter: Available root children:");
+            foreach (var child in GetTree().Root.GetChildren())
+            {
+                GD.PrintErr($"  - {child.Name} ({child.GetType().Name})");
+            }
+            throw new InvalidOperationException("StarMapPresenter: GameServices autoload is required but not found at /root/GameServices");
+        }
+
+        GD.Print("StarMapPresenter: Found GameServices");
+        _stateStore = gameServices.StateStore ?? throw new InvalidOperationException("StarMapPresenter: GameServices.StateStore is required but was null");
+        GD.Print($"StarMapPresenter: StateStore found, current systems count: {_stateStore.State.Systems.Count}");
 
         // Get UI nodes
         _viewportContainer = GetNode<SubViewportContainer>("ViewportContainer");
@@ -101,9 +118,11 @@ public partial class StarMapPresenter : Control
         _probesContainer = _subViewport.GetNodeOrNull<Node2D>("ProbesContainer");
         if (_probesContainer == null)
         {
-            _probesContainer = new Node2D();
-            _probesContainer.Name = "ProbesContainer";
-            _probesContainer.ZIndex = 10; // Render above stars
+            _probesContainer = new Node2D
+            {
+                Name = "ProbesContainer",
+                ZIndex = 10 // Render above stars
+            };
             _subViewport.AddChild(_probesContainer);
             GD.Print("StarMapPresenter: Created ProbesContainer");
         }
@@ -113,39 +132,112 @@ public partial class StarMapPresenter : Control
         }
 
         _titleLabel = GetNode<Label>("TopBar/HBoxContainer/TitleLabel");
-        _zoomLabel = GetNode<Label>("ZoomLabel");
-        _systemInfoLabel = GetNode<Label>("SystemInfoLabel");
-        _distanceLabel = GetNode<Label>("DistanceLabel");
-        _spectralClassLabel = GetNode<Label>("SpectralClassLabel");
-        _launchProbeButton = GetNode<Button>("LaunchProbeButton");
-        _viewSystemButton = GetNode<Button>("ViewSystemButton");
-        _launchColonyButton = GetNode<Button>("LaunchColonyButton");
-        _backButton = GetNode<Button>("BackButton");
-        _closeButton = GetNode<Button>("CloseButton");
-        _screenCoordLabel = GetNode<Label>("ScreenCoordLabel");
-        _mapCoordLabel = GetNode<Label>("MapCoordLabel");
+        if (_titleLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: TitleLabel not found in UI!");
+        }
+        _zoomLabel = GetNode<Label>("TopBar/HBoxContainer/ZoomLabel");
+        if (_zoomLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: ZoomLabel not found in UI!");
+        }
+        _systemInfoLabel = GetNode<Label>("TopBar/HBoxContainer/SystemInfoLabel");
+        if (_systemInfoLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: SystemInfoLabel not found in UI!");
+        }
+        _distanceLabel = GetNode<Label>("TopBar/HBoxContainer/DistanceLabel");
+        if (_distanceLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: DistanceLabel not found in UI!");
+        }
+        _spectralClassLabel = GetNode<Label>("TopBar/HBoxContainer/SpectralClassLabel");
+        if (_spectralClassLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: SpectralClassLabel not found in UI!");
+        }
+        _launchProbeButton = GetNode<Button>("BottomBar/ButtonBar/LaunchProbeButton");
+        if (_launchProbeButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: LaunchProbeButton not found in UI!");
+        }
+        _viewSystemButton = GetNode<Button>("BottomBar/ButtonBar/ViewSystemButton");
+        if (_viewSystemButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: ViewSystemButton not found in UI!");
+        }
+        _launchColonyButton = GetNode<Button>("BottomBar/ButtonBar/LaunchColonyButton");
+        if (_launchColonyButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: LaunchColonyButton not found in UI!");
+        }
+        _backButton = GetNode<Button>("BottomBar/ButtonBar/BackButton");
+        if (_backButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: BackButton not found in UI!");
+        }
+        _closeButton = GetNode<Button>("BottomBar/ButtonBar/CloseButton");
+        if (_closeButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: CloseButton not found in UI!");
+        }
+        _screenCoordLabel = GetNode<Label>("TopBar/HBoxContainer/ScreenCoordLabel");
+        if (_screenCoordLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: ScreenCoordLabel not found in UI!");
+        }
+        _mapCoordLabel = GetNode<Label>("TopBar/HBoxContainer/MapCoordLabel");
+        if (_mapCoordLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: MapCoordLabel not found in UI!");
+        }
         GD.Print("StarMapPresenter: Got all UI labels and buttons");
 
         // Get time control nodes (create simple inline UI if they don't exist)
-        _pauseButton = GetNode<Button>("PauseButton");
-        _slowDownButton = GetNode<Button>("SlowDownButton");
-        _speedUpButton = GetNode<Button>("SpeedUpButton");
-        _timeSpeedLabel = GetNode<Label>("TimeSpeedLabel");
-        _gameTimeLabel = GetNode<Label>("GameTimeLabel");
+        _pauseButton = GetNode<Button>("BottomBar/ButtonBar/ButtonBox/PauseButton");
+        if (_pauseButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: PauseButton not found in UI!");
+        }
+        _slowDownButton = GetNode<Button>("BottomBar/ButtonBar/ButtonBox/SlowDownButton");
+        if (_slowDownButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: SlowDownButton not found in UI!");
+        }
+        _speedUpButton = GetNode<Button>("BottomBar/ButtonBar/ButtonBox/SpeedUpButton");
+        if (_speedUpButton == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: SpeedUpButton not found in UI!");
+        }
+        _timeSpeedLabel = GetNode<Label>("TopBar/HBoxContainer/TimeSpeedLabel");
+        if (_timeSpeedLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: TimeSpeedLabel not found in UI!");
+        }
+        _gameTimeLabel = GetNode<Label>("TopBar/HBoxContainer/GameTimeLabel");
+        if (_gameTimeLabel == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: GameTimeLabel not found in UI!");
+        }
+        // Get display options checkbox
+        _showLabelsCheckbox = GetNode<CheckBox>("BottomBar/ButtonBar/ShowLabelsCheckbox");
+        if (_showLabelsCheckbox == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: ShowLabelsCheckbox not found in UI!");
+        }
 
-        // If time controls don't exist in scene, create them inline
-        // if (_pauseButton == null)
-        // {
-        //     CreateTimeControlsUI();
-        // }
+        // Create system details modal
+        GD.Print("StarMapPresenter: Loading SystemDetailsModal...");
+        var modalScene = GD.Load<PackedScene>("res://Scenes/UI/SystemDetailsModal.tscn");
+        if (modalScene == null)
+        {
+            throw new InvalidOperationException("StarMapPresenter: Could not load SystemDetailsModal.tscn");
+        }
 
         // Initialize game time display
         UpdateGameTimeDisplay();
 
-        // Get display options checkbox
-        _showLabelsCheckbox = GetNode<CheckBox>("ShowLabelsCheckbox");
-        _showLabelsCheckbox.Toggled += OnShowLabelsToggled;
-        _showLabels = _showLabelsCheckbox.ButtonPressed;
+
 
 
         // Configure Camera2D for proper centering
@@ -165,22 +257,13 @@ public partial class StarMapPresenter : Control
         _launchColonyButton.Pressed += OnLaunchColonyPressed;
         _backButton.Pressed += OnBackPressed;
         _closeButton.Pressed += OnClosePressed;
+        _showLabelsCheckbox.Toggled += OnShowLabelsToggled;
+        _showLabels = _showLabelsCheckbox.ButtonPressed;
+        _pauseButton.Pressed += OnPausePressed;
+        _slowDownButton.Pressed += OnSlowDownPressed;
+        _speedUpButton.Pressed += OnSpeedUpPressed;
 
-        // Connect time control signals
-        if (_pauseButton != null && _slowDownButton != null && _speedUpButton != null)
-        {
-            _pauseButton.Pressed += OnPausePressed;
-            _slowDownButton.Pressed += OnSlowDownPressed;
-            _speedUpButton.Pressed += OnSpeedUpPressed;
-        }
-
-        // Create system details modal
-        GD.Print("StarMapPresenter: Loading SystemDetailsModal...");
-        var modalScene = GD.Load<PackedScene>("res://Scenes/UI/SystemDetailsModal.tscn");
-        if (modalScene == null)
-        {
-            throw new InvalidOperationException("StarMapPresenter: Could not load SystemDetailsModal.tscn");
-        }
+        _stateStore.StateChanged += OnStateChanged;
 
         var modalInstance = modalScene.Instantiate();
         AddChild(modalInstance);
@@ -190,26 +273,7 @@ public partial class StarMapPresenter : Control
             ?? throw new InvalidOperationException($"StarMapPresenter: Modal instance is not SystemDetailsModalPresenter! Type: {modalInstance.GetType().Name}");
 
         GD.Print("StarMapPresenter: SystemDetailsModal loaded successfully");
-
-        // Get state store from GameServices autoload (it's an autoload so it's always available)
-        GD.Print("StarMapPresenter: Attempting to get GameServices...");
-        var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
-        if (gameServices == null)
-        {
-            GD.PrintErr("StarMapPresenter: GameServices autoload not found at /root/GameServices!");
-            GD.PrintErr($"StarMapPresenter: Available root children:");
-            foreach (var child in GetTree().Root.GetChildren())
-            {
-                GD.PrintErr($"  - {child.Name} ({child.GetType().Name})");
-            }
-            throw new InvalidOperationException("StarMapPresenter: GameServices autoload is required but not found at /root/GameServices");
-        }
-
-        GD.Print("StarMapPresenter: Found GameServices");
-        _stateStore = gameServices.StateStore ?? throw new InvalidOperationException("StarMapPresenter: GameServices.StateStore is required but was null");
-
-        GD.Print($"StarMapPresenter: StateStore found, current systems count: {_stateStore.State.Systems.Count}");
-        _stateStore.StateChanged += OnStateChanged;
+        
         GD.Print("StarMapPresenter: Calling RenderGalaxy()");
         RenderGalaxy();
         GD.Print("StarMapPresenter: RenderGalaxy() completed");
@@ -699,11 +763,9 @@ public partial class StarMapPresenter : Control
         if (_stateStore.DebugSettings.DebugRendering) GD.Print("RenderGalaxy: Called");
 
         var state = _stateStore.State;
-
         if (state == null)
         {
-            GD.PrintErr("RenderGalaxy: State is null!");
-            return;
+            throw new InvalidOperationException("RenderGalaxy: State is null!");
         }
 
         var allSystems = state.Systems;
@@ -1121,12 +1183,6 @@ public partial class StarMapPresenter : Control
 
     private void UpdateTimeControlUI()
     {
-        if (_timeSpeedLabel == null)
-        {
-            if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  ✗ _timeSpeedLabel is null, cannot update UI");
-            return;
-        }
-
         if (_isPaused)
         {
             _timeSpeedLabel.Text = "Time: PAUSED";
@@ -1141,8 +1197,6 @@ public partial class StarMapPresenter : Control
 
     private void UpdateGameTimeDisplay()
     {
-        if (_gameTimeLabel == null) return;
-
         var gameTime = _stateStore.State.GameTime;
 
         // Convert hours to years and days
@@ -1521,9 +1575,9 @@ public partial class ProbeNode : Node2D
         Vector2[] vertices = new[]
         {
             new Vector2(size, 0),              // Front point
-            new Vector2(-size * 0.5f, size * 0.5f),   // Back top
-            new Vector2(-size * 0.5f, -size * 0.5f)   // Back bottom
-        };
+			new Vector2(-size * 0.5f, size * 0.5f),   // Back top
+			new Vector2(-size * 0.5f, -size * 0.5f)   // Back bottom
+		};
 
         // Rotate vertices
         for (int i = 0; i < vertices.Length; i++)
@@ -1546,4 +1600,3 @@ public partial class ProbeNode : Node2D
         }
     }
 }
-

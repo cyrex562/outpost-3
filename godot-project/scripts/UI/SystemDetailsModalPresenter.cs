@@ -84,7 +84,6 @@ public partial class SystemDetailsModalPresenter : PanelContainer
         Visible = true;
         Show();
 
-
         GD.Print($"ShowSystem: Modal visibility is now {Visible}");
     }
 
