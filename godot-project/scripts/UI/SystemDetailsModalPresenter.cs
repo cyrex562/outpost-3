@@ -48,12 +48,14 @@ public partial class SystemDetailsModalPresenter : PanelContainer
     /// </summary>
     public void ShowSystem(StarSystem system)
     {
+        GD.Print($"ShowSystem called for: {system.Name}");
+        
         _systemNameLabel.Text = system.Name;
         _starTypeValueLabel.Text = system.SpectralClass;
 
         // These properties don't exist yet in the domain model
         // TODO: Add when StarSystem is enhanced with full stellar properties
-        _luminosityValueLabel.Text = "Unknown";
+        _luminosityValueLabel.Text = $"{system.Luminosity:F2} L☉";
         _ageValueLabel.Text = "Unknown";
         _massValueLabel.Text = "Unknown";
 
@@ -71,7 +73,11 @@ public partial class SystemDetailsModalPresenter : PanelContainer
             bodyItem.SetBodyData(body);
         }
 
+        // Make sure the modal is visible
+        Visible = true;
         Show();
+        
+        GD.Print($"ShowSystem: Modal visibility is now {Visible}");
     }
 
     /// <summary>
@@ -79,11 +85,14 @@ public partial class SystemDetailsModalPresenter : PanelContainer
     /// </summary>
     public void HideModal()
     {
+        GD.Print("HideModal called");
         Hide();
+        GD.Print($"HideModal: Modal visibility is now {Visible}");
     }
 
     private void OnCloseButtonPressed()
     {
+        GD.Print("Close button pressed");
         HideModal();
     }
 }

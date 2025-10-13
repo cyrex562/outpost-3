@@ -14,6 +14,9 @@ namespace Outpost3.Core;
 /// </summary>
 public partial class StateStore : Node
 {
+    // Debug flag to disable verbose event persistence logs
+    private const bool DEBUG_EVENT_PERSISTENCE = false;
+    
     private GameState _state = GameState.NewGame();
     private readonly IEventStore _eventStore;
 
@@ -89,7 +92,7 @@ public partial class StateStore : Node
     /// <param name="command">The command to apply.</param>
     public void ApplyCommand(Core.Commands.ICommand command)
     {
-        GD.Print($"Applying command: {command.GetType().Name}");
+        if (DEBUG_EVENT_PERSISTENCE) GD.Print($"Applying command: {command.GetType().Name}");
 
         // Run reducer to get new state and events
         var (newState, events) = TimeSystem.Reduce(_state, command);
@@ -113,11 +116,14 @@ public partial class StateStore : Node
                 // Persist to event store
                 var startingOffset = _eventStore.Append(enrichedEvents);
                 
-                GD.Print($"Persisted {enrichedEvents.Length} event(s) starting at offset {startingOffset}");
-                
-                foreach (var evt in enrichedEvents)
+                if (DEBUG_EVENT_PERSISTENCE)
                 {
-                    GD.Print($"  Event: {evt.EventType} at game time {evt.GameTime:F2}");
+                    GD.Print($"Persisted {enrichedEvents.Length} event(s) starting at offset {startingOffset}");
+                    
+                    foreach (var evt in enrichedEvents)
+                    {
+                        GD.Print($"  Event: {evt.EventType} at game time {evt.GameTime:F2}");
+                    }
                 }
             }
             catch (EventStoreException ex)

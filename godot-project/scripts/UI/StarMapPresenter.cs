@@ -15,9 +15,20 @@ namespace Outpost3.UI;
 /// </summary>
 public partial class StarMapPresenter : Control
 {
+    // Debug flags
+    private const bool DEBUG_PANNING = false;  // Set to true to see panning logs
+    private const bool DEBUG_SELECTION = false;  // Star selection logs (was flooding console with mouse motion events)
+    private const bool DEBUG_ACTIONS = true;    // Probe launch, view details, etc.
+    private const bool DEBUG_TIME_CONTROLS = true; // Time control logs
+    private const bool DEBUG_RENDERING = false; // RenderGalaxy/RenderProbes logs
+    private const bool DEBUG_STAR_CREATION = false; // CreateStarNode detailed logs
+    
     // UI nodes
+    private SubViewportContainer _viewportContainer = null!;
+    private SubViewport _subViewport = null!;
     private Camera2D _camera = null!;
     private Node2D _starsContainer = null!;
+    private Node2D _probesContainer = null!;
     private Label _titleLabel = null!;
     private Label _zoomLabel = null!;
     private Label _systemInfoLabel = null!;
@@ -30,13 +41,28 @@ public partial class StarMapPresenter : Control
     private Button _closeButton = null!;
     private Label _screenCoordLabel = null!;
     private Label _mapCoordLabel = null!;
+    
+    // Time control UI
+    private Button _pauseButton = null!;
+    private Button _slowDownButton = null!;
+    private Button _speedUpButton = null!;
+    private Label _timeSpeedLabel = null!;
 
     // State
     private StateStore? _stateStore;
     private List<StarNode> _starNodes = new();
+    private List<ProbeNode> _probeNodes = new();
     private StarNode? _selectedStar;
     private bool _hasAutoFitView;
     private int _lastRenderedStarCount;
+    
+    // Time control
+    private double _timeScale = 1.0;
+    private bool _isPaused = false;
+    private double _autoAdvanceTimer = 0.0;
+    
+    // System details modal
+    private SystemDetailsModalPresenter? _systemDetailsModal;
 
     // Camera control
     private const float MIN_ZOOM = 0.1f; // Allow zooming out to see all stars
@@ -52,18 +78,39 @@ public partial class StarMapPresenter : Control
 
     // View constants
     private Vector2 _viewportSize;
+    
+    // Panning state
     private bool _isPanning = false;
     private Vector2 _panStartMousePos;
     private Vector2 _panStartCameraPos;
 
     public override void _Ready()
     {
-        GD.Print("StarMapPresenter _Ready() called");
+        try
+        {
+            GD.Print("=== StarMapPresenter _Ready() START ===");
 
-        // Get UI nodes
-        var viewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
-        _camera = viewport.GetNode<Camera2D>("Camera2D");
-        _starsContainer = viewport.GetNode<Node2D>("StarsContainer");
+            // Get UI nodes
+            _viewportContainer = GetNode<SubViewportContainer>("ViewportContainer");
+            _subViewport = _viewportContainer.GetNode<SubViewport>("SubViewport");
+            _camera = _subViewport.GetNode<Camera2D>("Camera2D");
+            _starsContainer = _subViewport.GetNode<Node2D>("StarsContainer");
+            GD.Print("StarMapPresenter: Got viewport, camera, and stars container");
+        
+        // Create probes container (or get if already exists)
+        _probesContainer = _subViewport.GetNodeOrNull<Node2D>("ProbesContainer");
+        if (_probesContainer == null)
+        {
+            _probesContainer = new Node2D();
+            _probesContainer.Name = "ProbesContainer";
+            _probesContainer.ZIndex = 10; // Render above stars
+            _subViewport.AddChild(_probesContainer);
+            GD.Print("StarMapPresenter: Created ProbesContainer");
+        }
+        else
+        {
+            GD.Print("StarMapPresenter: Using existing ProbesContainer");
+        }
 
         _titleLabel = GetNode<Label>("TopBar/HBoxContainer/TitleLabel");
         _zoomLabel = GetNode<Label>("TopBar/HBoxContainer/ZoomLabel");
@@ -77,6 +124,19 @@ public partial class StarMapPresenter : Control
         _closeButton = GetNode<Button>("TopBar/HBoxContainer/CloseButton");
         _screenCoordLabel = GetNode<Label>("CoordinatesPanel/VBoxContainer/ScreenCoordLabel");
         _mapCoordLabel = GetNode<Label>("CoordinatesPanel/VBoxContainer/MapCoordLabel");
+        GD.Print("StarMapPresenter: Got all UI labels and buttons");
+        
+        // Get time control nodes (create simple inline UI if they don't exist)
+        _pauseButton = GetNodeOrNull<Button>("TimeControls/PauseButton");
+        _slowDownButton = GetNodeOrNull<Button>("TimeControls/SlowDownButton");
+        _speedUpButton = GetNodeOrNull<Button>("TimeControls/SpeedUpButton");
+        _timeSpeedLabel = GetNodeOrNull<Label>("TimeControls/TimeSpeedLabel");
+        
+        // If time controls don't exist in scene, create them inline
+        if (_pauseButton == null)
+        {
+            CreateTimeControlsUI();
+        }
 
         // Configure Camera2D for proper centering
         // CRITICAL: anchor_mode must be DRAG_CENTER (1) so camera.Position defines the CENTER of view
@@ -95,24 +155,86 @@ public partial class StarMapPresenter : Control
         _launchColonyButton.Pressed += OnLaunchColonyPressed;
         _backButton.Pressed += OnBackPressed;
         _closeButton.Pressed += OnClosePressed;
-
-        // Get state store from GameServices autoload
-        var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
-        if (gameServices != null)
+        
+        // Connect time control signals
+        if (_pauseButton != null && _slowDownButton != null && _speedUpButton != null)
         {
-            GD.Print("StarMapPresenter: Using GameServices StateStore");
-            _stateStore = gameServices.StateStore;
-            _stateStore.StateChanged += OnStateChanged;
-            RenderGalaxy();
+            _pauseButton.Pressed += OnPausePressed;
+            _slowDownButton.Pressed += OnSlowDownPressed;
+            _speedUpButton.Pressed += OnSpeedUpPressed;
+        }
+        
+        // Create system details modal
+        GD.Print("StarMapPresenter: Loading SystemDetailsModal...");
+        var modalScene = GD.Load<PackedScene>("res://Scenes/UI/SystemDetailsModal.tscn");
+        if (modalScene != null)
+        {
+            var modalInstance = modalScene.Instantiate();
+            AddChild(modalInstance);
+            
+            // The modal should be the root node with the script attached
+            _systemDetailsModal = modalInstance as SystemDetailsModalPresenter;
+            if (_systemDetailsModal == null)
+            {
+                GD.PrintErr($"StarMapPresenter: Modal instance is not SystemDetailsModalPresenter! Type: {modalInstance.GetType().Name}");
+            }
+            else
+            {
+                GD.Print("StarMapPresenter: SystemDetailsModal loaded successfully");
+            }
         }
         else
         {
-            GD.PrintErr("StarMapPresenter: GameServices autoload not found!");
+            GD.PrintErr("StarMapPresenter: Could not load SystemDetailsModal.tscn");
+        }
+
+        // Get state store from GameServices autoload (it's an autoload so it's always available)
+        GD.Print("StarMapPresenter: Attempting to get GameServices...");
+        var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
+        if (gameServices != null)
+        {
+            GD.Print("StarMapPresenter: Found GameServices");
+            _stateStore = gameServices.StateStore;
+            if (_stateStore == null)
+            {
+                GD.PrintErr("StarMapPresenter: StateStore is NULL!");
+            }
+            else
+            {
+                GD.Print($"StarMapPresenter: StateStore found, current systems count: {_stateStore.State.Systems.Count}");
+                _stateStore.StateChanged += OnStateChanged;
+                GD.Print("StarMapPresenter: Calling RenderGalaxy()");
+                RenderGalaxy();
+                GD.Print("StarMapPresenter: RenderGalaxy() completed");
+            }
+        }
+        else
+        {
+            GD.PrintErr("StarMapPresenter: GameServices autoload not found at /root/GameServices!");
+            GD.PrintErr($"StarMapPresenter: Available root children:");
+            foreach (var child in GetTree().Root.GetChildren())
+            {
+                GD.PrintErr($"  - {child.Name} ({child.GetType().Name})");
+            }
         }
 
         // Add viewport resize handling
         GetTree().Root.SizeChanged += OnViewportResized;
         CallDeferred(MethodName.OnViewportResized);
+        
+        // Connect to ViewportContainer's GuiInput to handle star map interactions
+        // This is necessary because SubViewport doesn't automatically forward input
+        _viewportContainer.GuiInput += OnViewportContainerInput;
+        
+        GD.Print("=== StarMapPresenter _Ready() COMPLETE ===");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"=== StarMapPresenter _Ready() EXCEPTION ===");
+            GD.PrintErr($"Exception: {ex.Message}");
+            GD.PrintErr($"Stack trace: {ex.StackTrace}");
+            throw;
+        }
     }
 
     public override void _ExitTree()
@@ -122,30 +244,45 @@ public partial class StarMapPresenter : Control
             _stateStore.StateChanged -= OnStateChanged;
         }
         GetTree().Root.SizeChanged -= OnViewportResized;
+        
+        if (_viewportContainer != null)
+        {
+            _viewportContainer.GuiInput -= OnViewportContainerInput;
+        }
     }
 
     private void OnViewportResized()
     {
-        var subViewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
-        var viewportContainer = GetNode<SubViewportContainer>("ViewportContainer");
-        subViewport.Size = (Vector2I)viewportContainer.Size;
-        _viewportSize = subViewport.Size;
-        GD.Print($"Viewport resized to {subViewport.Size}");
+        _subViewport.Size = (Vector2I)_viewportContainer.Size;
+        _viewportSize = _subViewport.Size;
+        GD.Print($"Viewport resized to {_subViewport.Size}");
     }
 
     public override void _Process(double delta)
     {
         UpdateMouseCoordinates();
+        
+        // Auto-advance time if not paused
+        if (!_isPaused && _stateStore != null)
+        {
+            _autoAdvanceTimer += delta * _timeScale;
+            if (_autoAdvanceTimer >= 1.0) // Advance every 1 second of real time
+            {
+                var hours = _autoAdvanceTimer;
+                _autoAdvanceTimer = 0;
+                var command = new AdvanceTime(hours);
+                _stateStore.ApplyCommand(command);
+            }
+        }
     }
 
     private void UpdateMouseCoordinates()
     {
-        // Get mouse position in viewport coordinates (accounting for stretch)
-        var subViewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
+        // Get mouse position in viewport coordinates
         var mousePos = GetViewportMousePosition();
 
         // Check if mouse is within viewport bounds
-        _viewportSize = subViewport.Size;
+        _viewportSize = _subViewport.Size;
         var viewportRect = new Rect2(Vector2.Zero, _viewportSize);
         if (!viewportRect.HasPoint(mousePos))
         {
@@ -175,8 +312,7 @@ public partial class StarMapPresenter : Control
     private Vector2 ScreenToWorldPos(Vector2 screenPos)
     {
         // Use Camera2D's get_screen_center_position() and zoom to transform
-        var viewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
-        var screenCenter = viewport.Size / 2;
+        var screenCenter = _subViewport.Size / 2;
 
         // Transform from screen space to world space
         // Account for camera position and zoom
@@ -191,8 +327,7 @@ public partial class StarMapPresenter : Control
     /// </summary>
     private Vector2 WorldPosToScreen(Vector2 worldPos)
     {
-        var viewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
-        var screenCenter = viewport.Size / 2;
+        var screenCenter = _subViewport.Size / 2;
 
         // Transform from world space to screen space
         var offsetFromCamera = (worldPos - _camera.Position) * _camera.Zoom.X;
@@ -206,12 +341,9 @@ public partial class StarMapPresenter : Control
     /// </summary>
     private Vector2 GetViewportMousePosition()
     {
-        var viewportContainer = GetNode<SubViewportContainer>("ViewportContainer");
-        var viewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
-
-        var containerMousePos = viewportContainer.GetLocalMousePosition();
-        var containerSize = viewportContainer.Size;
-        var viewportSize = viewport.Size;
+        var containerMousePos = _viewportContainer.GetLocalMousePosition();
+        var containerSize = _viewportContainer.Size;
+        var viewportSize = _subViewport.Size;
 
         if (containerSize.X <= 0 || containerSize.Y <= 0)
         {
@@ -253,8 +385,11 @@ public partial class StarMapPresenter : Control
         return BASE_PIXELS_PER_LY * _camera.Zoom.X;
     }
 
-    public override void _Input(InputEvent @event)
+    public override void _UnhandledInput(InputEvent @event)
     {
+        // NOTE: Using _UnhandledInput instead of _Input so that UI buttons can handle clicks first.
+        // This prevents the star selection from intercepting button clicks.
+        
         // Handle mouse wheel zoom
         if (@event is InputEventMouseButton mouseButton)
         {
@@ -273,11 +408,23 @@ public partial class StarMapPresenter : Control
                 if (mouseButton.Pressed)
                 {
                     _isPanning = true;
-                    _panStartMousePos = GetViewportMousePosition();
+                    _panStartMousePos = mouseButton.Position;
                     _panStartCameraPos = _camera.Position;
+                    if (DEBUG_PANNING)
+                    {
+                        GD.Print($"=== PANNING START ===");
+                        GD.Print($"  Start mouse pos: {_panStartMousePos}");
+                        GD.Print($"  Start camera pos: {_panStartCameraPos}");
+                        GD.Print($"  Camera zoom: {_camera.Zoom.X}");
+                    }
                 }
                 else
                 {
+                    if (DEBUG_PANNING)
+                    {
+                        GD.Print($"=== PANNING END ===");
+                        GD.Print($"  Final camera pos: {_camera.Position}");
+                    }
                     _isPanning = false;
                 }
                 GetViewport()!.SetInputAsHandled();
@@ -289,17 +436,24 @@ public partial class StarMapPresenter : Control
             }
         }
 
-        // Handle panning
+        // Handle panning drag
         if (@event is InputEventMouseMotion mouseMotion && _isPanning)
         {
-            var currentMousePos = GetViewportMousePosition();
+            var currentMousePos = mouseMotion.Position;
             var mouseDelta = currentMousePos - _panStartMousePos;
 
-            // Convert mouse delta to world delta (accounting for zoom)
+            // Convert screen delta to world delta (accounting for zoom)
             var worldDelta = mouseDelta / _camera.Zoom.X;
             var newCameraPos = _panStartCameraPos - worldDelta;
 
             _camera.Position = newCameraPos;
+            
+            // Debug every 10th motion event to avoid spam
+            if (DEBUG_PANNING && Engine.GetProcessFrames() % 10 == 0)
+            {
+                GD.Print($"PANNING: mouse delta {mouseDelta}, world delta {worldDelta}, camera now at {newCameraPos}");
+            }
+            
             GetViewport()!.SetInputAsHandled();
         }
 
@@ -308,6 +462,89 @@ public partial class StarMapPresenter : Control
         {
             ResetView();
             GetViewport()!.SetInputAsHandled();
+        }
+    }
+
+    /// <summary>
+    /// Handles input events from the ViewportContainer to detect star map interactions.
+    /// This is called via GuiInput signal, which fires AFTER UI buttons have processed input.
+    /// </summary>
+    private void OnViewportContainerInput(InputEvent @event)
+    {
+        if (DEBUG_SELECTION) GD.Print($"OnViewportContainerInput: {@event.GetType().Name}");
+        
+        // Handle mouse wheel zoom
+        if (@event is InputEventMouseButton mouseButton)
+        {
+            if (mouseButton.ButtonIndex == MouseButton.WheelUp)
+            {
+                ZoomTowardsCursor(ZOOM_STEP, mouseButton.Position);
+                _viewportContainer.AcceptEvent();
+            }
+            else if (mouseButton.ButtonIndex == MouseButton.WheelDown)
+            {
+                ZoomTowardsCursor(-ZOOM_STEP, mouseButton.Position);
+                _viewportContainer.AcceptEvent();
+            }
+            else if (mouseButton.ButtonIndex == MouseButton.Right)
+            {
+                if (mouseButton.Pressed)
+                {
+                    _isPanning = true;
+                    _panStartMousePos = mouseButton.Position;
+                    _panStartCameraPos = _camera.Position;
+                    if (DEBUG_PANNING)
+                    {
+                        GD.Print($"=== PANNING START ===");
+                        GD.Print($"  Start mouse pos: {_panStartMousePos}");
+                        GD.Print($"  Start camera pos: {_panStartCameraPos}");
+                        GD.Print($"  Camera zoom: {_camera.Zoom.X}");
+                    }
+                }
+                else
+                {
+                    if (DEBUG_PANNING)
+                    {
+                        GD.Print($"=== PANNING END ===");
+                        GD.Print($"  Final camera pos: {_camera.Position}");
+                    }
+                    _isPanning = false;
+                }
+                _viewportContainer.AcceptEvent();
+            }
+            else if (mouseButton.ButtonIndex == MouseButton.Left && mouseButton.Pressed)
+            {
+                HandleStarClick(mouseButton.Position);
+                _viewportContainer.AcceptEvent();
+            }
+        }
+
+        // Handle panning drag
+        if (@event is InputEventMouseMotion mouseMotion && _isPanning)
+        {
+            var currentMousePos = mouseMotion.Position;
+            var mouseDelta = currentMousePos - _panStartMousePos;
+
+            // Convert screen delta to world delta (accounting for zoom)
+            var worldDelta = mouseDelta / _camera.Zoom.X;
+            var newCameraPos = _panStartCameraPos - worldDelta;
+
+            _camera.Position = newCameraPos;
+            
+            // Debug every 10th motion event to avoid spam
+            if (DEBUG_PANNING && Engine.GetProcessFrames() % 10 == 0)
+            {
+                GD.Print($"PANNING: mouse delta {mouseDelta}, world delta {worldDelta}, camera now at {newCameraPos}");
+            }
+            
+            _viewportContainer.AcceptEvent();
+        }
+
+        // Reset view with Space
+        if (@event is InputEventKey keyEvent && keyEvent.Keycode == Key.Space && keyEvent.Pressed)
+        {
+            ResetView();
+            _viewportContainer.AcceptEvent();
         }
     }
 
@@ -444,8 +681,7 @@ public partial class StarMapPresenter : Control
         var size = maxPos - minPos;
 
         // Calculate zoom to fit all stars with padding (20% on each side)
-        var viewport = GetNode<SubViewport>("ViewportContainer/SubViewport");
-        var viewportSize = viewport.Size;
+        var viewportSize = _subViewport.Size;
 
         // Add 40% padding to ensure stars aren't at screen edges
         var zoomX = viewportSize.X / (size.X * 1.4f);
@@ -465,6 +701,8 @@ public partial class StarMapPresenter : Control
     private void OnStateChanged()
     {
         RenderGalaxy();
+        RenderProbes();
+        UpdateProbePositions();
     }
 
     /// <summary>
@@ -472,10 +710,29 @@ public partial class StarMapPresenter : Control
     /// </summary>
     private void RenderGalaxy()
     {
-        if (_stateStore == null) return;
+        if (DEBUG_RENDERING) GD.Print("RenderGalaxy: Called");
+        
+        if (_stateStore == null)
+        {
+            GD.PrintErr("RenderGalaxy: StateStore is null!");
+            return;
+        }
 
         var state = _stateStore.State;
+        
+        if (state == null)
+        {
+            GD.PrintErr("RenderGalaxy: State is null!");
+            return;
+        }
+        
         var allSystems = state.Systems;
+        
+        if (allSystems == null || allSystems.Count == 0)
+        {
+            GD.PrintErr($"RenderGalaxy: No systems found! Systems list is {(allSystems == null ? "null" : "empty")}");
+            return;
+        }
 
         // For debugging, limit to DEBUG_MAX_STARS systems
         // Prioritize Sol first, then take others
@@ -490,8 +747,11 @@ public partial class StarMapPresenter : Control
         var otherSystems = allSystems.Where(s => s != sol).Take(DEBUG_MAX_STARS - (sol != null ? 1 : 0));
         systems.AddRange(otherSystems);
 
-        GD.Print($"RenderGalaxy: Limiting to {DEBUG_MAX_STARS} stars for debugging (found {allSystems.Count} total systems)");
-        GD.Print($"RenderGalaxy: Selected {systems.Count} systems to render:");
+        if (DEBUG_RENDERING)
+        {
+            GD.Print($"RenderGalaxy: Limiting to {DEBUG_MAX_STARS} stars for debugging (found {allSystems.Count} total systems)");
+            GD.Print($"RenderGalaxy: Selected {systems.Count} systems to render:");
+        }
 
         // Clear existing star nodes
         foreach (var node in _starNodes)
@@ -512,15 +772,18 @@ public partial class StarMapPresenter : Control
             _starsContainer.AddChild(starNode);
             _starNodes.Add(starNode);
 
-            // Debug output for each generated star
-            var worldPos = starNode.Position;
-            var mapPos = WorldPosToLightYears(worldPos);
-            GD.Print($"  {index + 1:D2}. {system.Name}:");
-            GD.Print($"      Raw pos: ({system.Position.X:F2}, {system.Position.Y:F2}, {system.Position.Z:F2})");
-            GD.Print($"      World pos: ({worldPos.X:F1}, {worldPos.Y:F1}) px");
-            GD.Print($"      Map pos: ({mapPos.X:F1}, {mapPos.Y:F1}) LY");
-            GD.Print($"      Distance from Sol: {system.DistanceFromSol:F2} LY");
-            GD.Print($"      Spectral class: {system.SpectralClass}");
+            if (DEBUG_RENDERING)
+            {
+                // Debug output for each generated star
+                var worldPos = starNode.Position;
+                var mapPos = WorldPosToLightYears(worldPos);
+                GD.Print($"  {index + 1:D2}. {system.Name}:");
+                GD.Print($"      Raw pos: ({system.Position.X:F2}, {system.Position.Y:F2}, {system.Position.Z:F2})");
+                GD.Print($"      World pos: ({worldPos.X:F1}, {worldPos.Y:F1}) px");
+                GD.Print($"      Map pos: ({mapPos.X:F1}, {mapPos.Y:F1}) LY");
+                GD.Print($"      Distance from Sol: {system.DistanceFromSol:F2} LY");
+                GD.Print($"      Spectral class: {system.SpectralClass}");
+            }
 
             index++;
         }
@@ -537,10 +800,12 @@ public partial class StarMapPresenter : Control
 
         if (shouldAutoFit)
         {
-            GD.Print("RenderGalaxy: Queueing ResetView() call...");
+            if (DEBUG_RENDERING) GD.Print("RenderGalaxy: Queueing ResetView() call...");
             CallDeferred(MethodName.ResetView);
             _hasAutoFitView = true;
         }
+        
+        if (DEBUG_RENDERING) GD.Print($"RenderGalaxy: Completed. Stars in container: {_starsContainer.GetChildCount()}, Stars in list: {_starNodes.Count}");
     }
 
     /// <summary>
@@ -565,7 +830,7 @@ public partial class StarMapPresenter : Control
         starNode.Position = worldPos;
 
         // Debug output for coordinate verification
-        if (system.Name == "Sol" || system.Name.Contains("Gliese") || system.Name.Contains("2MASS"))
+        if (DEBUG_STAR_CREATION && (system.Name == "Sol" || system.Name.Contains("Gliese") || system.Name.Contains("2MASS")))
         {
             GD.Print($"CreateStarNode: {system.Name}:");
             GD.Print($"  3D Position (LY): ({system.Position.X:F4}, {system.Position.Y:F4}, {system.Position.Z:F4})");
@@ -641,19 +906,66 @@ public partial class StarMapPresenter : Control
 
     private void OnLaunchProbePressed()
     {
-        if (_selectedStar == null || _stateStore == null) return;
+        if (DEBUG_ACTIONS) GD.Print($"=== LAUNCH PROBE BUTTON PRESSED ===");
+        
+        if (_selectedStar == null)
+        {
+            if (DEBUG_ACTIONS) GD.Print("  ✗ No star selected!");
+            return;
+        }
+        
+        if (_stateStore == null)
+        {
+            if (DEBUG_ACTIONS) GD.Print("  ✗ StateStore is null!");
+            return;
+        }
 
+        if (DEBUG_ACTIONS)
+        {
+            GD.Print($"  ✓ Selected star: {_selectedStar.System.Name}");
+            GD.Print($"  ✓ System ID: {_selectedStar.SystemId}");
+            GD.Print($"  Creating LaunchProbe command...");
+        }
+        
         var command = new LaunchProbe(_selectedStar.SystemId);
+        
+        if (DEBUG_ACTIONS) GD.Print($"  Applying command to StateStore...");
         _stateStore.ApplyCommand(command);
-        GD.Print($"Launched probe to {_selectedStar.System.Name}");
+        
+        if (DEBUG_ACTIONS)
+        {
+            GD.Print($"  ✓ Probe launched to {_selectedStar.System.Name}");
+            GD.Print($"  Current probes in flight: {_stateStore.State.ProbesInFlight.Count}");
+        }
+        
+        // Render probes to show the newly launched probe
+        if (DEBUG_ACTIONS) GD.Print($"  Calling RenderProbes()...");
+        RenderProbes();
+        if (DEBUG_ACTIONS) GD.Print($"  ✓ Probes rendered");
     }
 
     private void OnViewSystemPressed()
     {
-        if (_selectedStar == null) return;
+        if (DEBUG_ACTIONS) GD.Print($"=== VIEW SYSTEM DETAILS BUTTON PRESSED ===");
+        
+        if (_selectedStar == null)
+        {
+            if (DEBUG_ACTIONS) GD.Print("  ✗ No star selected!");
+            return;
+        }
+        
+        if (_systemDetailsModal == null)
+        {
+            if (DEBUG_ACTIONS) GD.Print("  ✗ SystemDetailsModal is null! (Modal not loaded)");
+            return;
+        }
 
-        GD.Print($"View system details for {_selectedStar.System.Name}");
-        // TODO: Open system details modal or switch to system view
+        if (DEBUG_ACTIONS) GD.Print($"  ✓ Selected star: {_selectedStar.System.Name}");
+        if (DEBUG_ACTIONS) GD.Print($"  ✓ Calling ShowSystem() on modal...");
+        
+        _systemDetailsModal.ShowSystem(_selectedStar.System);
+        
+        if (DEBUG_ACTIONS) GD.Print($"  ✓ Modal should be visible now");
     }
 
     private void OnLaunchColonyPressed()
@@ -709,6 +1021,196 @@ public partial class StarMapPresenter : Control
         }
 
         UpdateSelectionInfo();
+    }
+    
+    private void CreateTimeControlsUI()
+    {
+        // Create a simple inline panel for time controls
+        var timeControlsPanel = new PanelContainer();
+        timeControlsPanel.Name = "TimeControls";
+        AddChild(timeControlsPanel);
+        
+        // Position in top-right corner
+        timeControlsPanel.SetAnchorsPreset(Control.LayoutPreset.TopRight);
+        timeControlsPanel.OffsetLeft = -200;
+        timeControlsPanel.OffsetTop = 80;
+        timeControlsPanel.OffsetRight = -10;
+        timeControlsPanel.OffsetBottom = 140;
+        
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 5);
+        timeControlsPanel.AddChild(vbox);
+        
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 10);
+        margin.AddThemeConstantOverride("margin_top", 10);
+        margin.AddThemeConstantOverride("margin_right", 10);
+        margin.AddThemeConstantOverride("margin_bottom", 10);
+        vbox.AddChild(margin);
+        
+        var innerVBox = new VBoxContainer();
+        innerVBox.AddThemeConstantOverride("separation", 5);
+        margin.AddChild(innerVBox);
+        
+        _timeSpeedLabel = new Label();
+        _timeSpeedLabel.Text = "Time: 1.0x (Running)";
+        _timeSpeedLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        innerVBox.AddChild(_timeSpeedLabel);
+        
+        var buttonBox = new HBoxContainer();
+        buttonBox.AddThemeConstantOverride("separation", 5);
+        innerVBox.AddChild(buttonBox);
+        
+        _pauseButton = new Button();
+        _pauseButton.Text = "⏸";
+        _pauseButton.TooltipText = "Pause/Resume";
+        _pauseButton.CustomMinimumSize = new Vector2(50, 0);
+        buttonBox.AddChild(_pauseButton);
+        
+        _slowDownButton = new Button();
+        _slowDownButton.Text = "◀";
+        _slowDownButton.TooltipText = "Slow Down";
+        _slowDownButton.CustomMinimumSize = new Vector2(50, 0);
+        buttonBox.AddChild(_slowDownButton);
+        
+        _speedUpButton = new Button();
+        _speedUpButton.Text = "▶";
+        _speedUpButton.TooltipText = "Speed Up";
+        _speedUpButton.CustomMinimumSize = new Vector2(50, 0);
+        buttonBox.AddChild(_speedUpButton);
+    }
+    
+    private void OnPausePressed()
+    {
+        if (DEBUG_TIME_CONTROLS) GD.Print($"=== PAUSE BUTTON PRESSED ===");
+        
+        _isPaused = !_isPaused;
+        
+        if (DEBUG_TIME_CONTROLS) GD.Print($"  Time is now: {(_isPaused ? "PAUSED" : "RUNNING")}");
+        if (DEBUG_TIME_CONTROLS) GD.Print($"  Current time scale: {_timeScale}x");
+        
+        UpdateTimeControlUI();
+    }
+    
+    private void OnSlowDownPressed()
+    {
+        if (DEBUG_TIME_CONTROLS) GD.Print($"=== SLOW DOWN BUTTON PRESSED ===");
+        
+        if (_isPaused)
+        {
+            if (DEBUG_TIME_CONTROLS) GD.Print($"  ✗ Time is paused, ignoring");
+            return;
+        }
+        
+        var oldScale = _timeScale;
+        _timeScale = Mathf.Max(0.25, _timeScale * 0.5);
+        
+        if (DEBUG_TIME_CONTROLS) GD.Print($"  Time scale: {oldScale}x -> {_timeScale}x");
+        
+        UpdateTimeControlUI();
+    }
+    
+    private void OnSpeedUpPressed()
+    {
+        if (DEBUG_TIME_CONTROLS) GD.Print($"=== SPEED UP BUTTON PRESSED ===");
+        
+        if (_isPaused)
+        {
+            if (DEBUG_TIME_CONTROLS) GD.Print($"  ✗ Time is paused, ignoring");
+            return;
+        }
+        
+        var oldScale = _timeScale;
+        _timeScale = Mathf.Min(32.0, _timeScale * 2.0);
+        
+        if (DEBUG_TIME_CONTROLS) GD.Print($"  Time scale: {oldScale}x -> {_timeScale}x");
+        
+        UpdateTimeControlUI();
+    }
+    
+    private void UpdateTimeControlUI()
+    {
+        if (_timeSpeedLabel == null)
+        {
+            if (DEBUG_TIME_CONTROLS) GD.Print($"  ✗ _timeSpeedLabel is null, cannot update UI");
+            return;
+        }
+        
+        if (_isPaused)
+        {
+            _timeSpeedLabel.Text = "Time: PAUSED";
+        }
+        else
+        {
+            _timeSpeedLabel.Text = $"Time: {_timeScale:F2}x (Running)";
+        }
+        
+        if (DEBUG_TIME_CONTROLS) GD.Print($"  ✓ Time label updated: {_timeSpeedLabel.Text}");
+    }
+    
+    private void RenderProbes()
+    {
+        if (DEBUG_RENDERING) GD.Print($"=== RENDER PROBES ===");
+        
+        if (_stateStore == null)
+        {
+            if (DEBUG_RENDERING) GD.Print($"  ✗ StateStore is null!");
+            return;
+        }
+        
+        var state = _stateStore.State;
+        
+        if (DEBUG_RENDERING) GD.Print($"  Probes in flight: {state.ProbesInFlight.Count}");
+        
+        // Clear existing probe nodes
+        foreach (var probeNode in _probeNodes)
+        {
+            probeNode.QueueFree();
+        }
+        _probeNodes.Clear();
+        
+        // Create probe nodes for all probes in flight
+        int count = 0;
+        foreach (var probe in state.ProbesInFlight)
+        {
+            // Find target system
+            var targetSystem = state.Systems.FirstOrDefault(s => s.Id == probe.TargetSystemId);
+            if (targetSystem == null)
+            {
+                if (DEBUG_RENDERING) GD.Print($"  ✗ Probe {probe.Id}: Target system {probe.TargetSystemId} not found!");
+                continue;
+            }
+            
+            var probeNode = new ProbeNode();
+            probeNode.Initialize(probe, targetSystem, state.GameTime);
+            probeNode.ZIndex = 10; // Render above stars
+            _probesContainer.AddChild(probeNode);
+            _probeNodes.Add(probeNode);
+            count++;
+            
+            if (DEBUG_RENDERING)
+            {
+                GD.Print($"  ✓ Probe {count}: {probe.Id}");
+                GD.Print($"    Target: {targetSystem.Name}");
+                GD.Print($"    Launched at: {probe.LaunchedAt:F2}");
+                GD.Print($"    Arrival time: {probe.ArrivalTime:F2}");
+                GD.Print($"    Current game time: {state.GameTime:F2}");
+            }
+        }
+        
+        if (DEBUG_RENDERING) GD.Print($"  ✓ Rendered {count} probe(s)");
+    }
+    
+    private void UpdateProbePositions()
+    {
+        if (_stateStore == null) return;
+        
+        var state = _stateStore.State;
+        
+        foreach (var probeNode in _probeNodes)
+        {
+            probeNode.UpdatePosition(state.GameTime);
+        }
     }
 }
 
@@ -895,3 +1397,88 @@ public partial class OriginMarker : Node2D
         DrawCircle(Vector2.Zero, 3f * inverseZoom, crosshairColor);
     }
 }
+
+/// <summary>
+/// Visual representation of a probe in flight on the star map.
+/// Renders as a moving indicator between Sol and the target system.
+/// </summary>
+public partial class ProbeNode : Node2D
+{
+    private ProbeInFlight _probe = null!;
+    private StarSystem _targetSystem = null!;
+    private Vector2 _targetWorldPos;
+    private double _totalTravelTime;
+    
+    public void Initialize(ProbeInFlight probe, StarSystem targetSystem, double currentGameTime)
+    {
+        _probe = probe;
+        _targetSystem = targetSystem;
+        
+        // Calculate target position in world coordinates
+        var targetLYPos = new Vector2(targetSystem.Position.X, targetSystem.Position.Y);
+        _targetWorldPos = targetLYPos * StarMapPresenter.BASE_PIXELS_PER_LY;
+        
+        _totalTravelTime = probe.ArrivalTime - probe.LaunchedAt;
+        
+        UpdatePosition(currentGameTime);
+    }
+    
+    public void UpdatePosition(double currentGameTime)
+    {
+        if (_probe == null) return;
+        
+        // Calculate progress (0.0 = just launched from Sol, 1.0 = arrived at target)
+        var elapsed = currentGameTime - _probe.LaunchedAt;
+        var progress = Mathf.Clamp((float)(elapsed / _totalTravelTime), 0f, 1f);
+        
+        // Interpolate between Sol (0,0) and target system
+        Position = Vector2.Zero.Lerp(_targetWorldPos, progress);
+        
+        QueueRedraw();
+    }
+    
+    public override void _Draw()
+    {
+        if (_probe == null) return;
+        
+        // Get camera for inverse zoom scaling
+        var camera = GetViewport()?.GetCamera2D();
+        if (camera == null) return;
+        
+        float inverseZoom = 1.0f / Mathf.Max(camera.Zoom.X, 0.1f);
+        
+        // Draw probe as a small triangle pointing towards target
+        var direction = (_targetWorldPos - Position).Normalized();
+        var angle = direction.Angle();
+        
+        // Create triangle vertices (pointing right by default)
+        var size = 8f * inverseZoom;
+        Vector2[] vertices = new[]
+        {
+            new Vector2(size, 0),              // Front point
+            new Vector2(-size * 0.5f, size * 0.5f),   // Back top
+            new Vector2(-size * 0.5f, -size * 0.5f)   // Back bottom
+        };
+        
+        // Rotate vertices
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            vertices[i] = vertices[i].Rotated(angle);
+        }
+        
+        // Draw filled triangle (cyan color for probes)
+        DrawColoredPolygon(vertices, new Color(0.2f, 0.8f, 1.0f, 0.9f));
+        
+        // Draw outline
+        DrawPolyline(new[] { vertices[0], vertices[1], vertices[2], vertices[0] }, 
+                     new Color(1f, 1f, 1f, 1f), 1f * inverseZoom);
+        
+        // Draw progress trail (line from Sol to current position)
+        if (Position.LengthSquared() > 1f)
+        {
+            DrawLine(Vector2.Zero, Vector2.Zero.DirectionTo(Position) * Position.Length(), 
+                     new Color(0.2f, 0.8f, 1.0f, 0.3f), 1.5f * inverseZoom);
+        }
+    }
+}
+
