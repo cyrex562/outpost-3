@@ -15,14 +15,8 @@ namespace Outpost3.UI;
 /// </summary>
 public partial class StarMapPresenter : Control
 {
-    // Debug flags
-    private const bool DEBUG_PANNING = false;  // Set to true to see panning logs
-    private const bool DEBUG_SELECTION = false;  // Star selection logs (was flooding console with mouse motion events)
-    private const bool DEBUG_ACTIONS = true;    // Probe launch, view details, etc.
-    private const bool DEBUG_TIME_CONTROLS = true; // Time control logs
-    private const bool DEBUG_RENDERING = false; // RenderGalaxy/RenderProbes logs
-    private const bool DEBUG_STAR_CREATION = false; // CreateStarNode detailed logs
-    
+
+
     // UI nodes
     private SubViewportContainer _viewportContainer = null!;
     private SubViewport _subViewport = null!;
@@ -41,28 +35,35 @@ public partial class StarMapPresenter : Control
     private Button _closeButton = null!;
     private Label _screenCoordLabel = null!;
     private Label _mapCoordLabel = null!;
-    
+
     // Time control UI
     private Button _pauseButton = null!;
     private Button _slowDownButton = null!;
     private Button _speedUpButton = null!;
     private Label _timeSpeedLabel = null!;
+    private Label _gameTimeLabel = null!;
+
+    // Display options UI
+    private CheckBox _showLabelsCheckbox = null!;
 
     // State
-    private StateStore? _stateStore;
+    private StateStore _stateStore = null!;  // Initialized in _Ready() from GameServices autoload
     private List<StarNode> _starNodes = new();
     private List<ProbeNode> _probeNodes = new();
     private StarNode? _selectedStar;
     private bool _hasAutoFitView;
     private int _lastRenderedStarCount;
-    
+
     // Time control
     private double _timeScale = 1.0;
     private bool _isPaused = false;
     private double _autoAdvanceTimer = 0.0;
-    
+
+    // Display options
+    private bool _showLabels = true;
+
     // System details modal
-    private SystemDetailsModalPresenter? _systemDetailsModal;
+    private SystemDetailsModalPresenter _systemDetailsModal = null!;  // Initialized in _Ready() by loading scene
 
     // Camera control
     private const float MIN_ZOOM = 0.1f; // Allow zooming out to see all stars
@@ -78,7 +79,7 @@ public partial class StarMapPresenter : Control
 
     // View constants
     private Vector2 _viewportSize;
-    
+
     // Panning state
     private bool _isPanning = false;
     private Vector2 _panStartMousePos;
@@ -86,17 +87,16 @@ public partial class StarMapPresenter : Control
 
     public override void _Ready()
     {
-        try
-        {
-            GD.Print("=== StarMapPresenter _Ready() START ===");
 
-            // Get UI nodes
-            _viewportContainer = GetNode<SubViewportContainer>("ViewportContainer");
-            _subViewport = _viewportContainer.GetNode<SubViewport>("SubViewport");
-            _camera = _subViewport.GetNode<Camera2D>("Camera2D");
-            _starsContainer = _subViewport.GetNode<Node2D>("StarsContainer");
-            GD.Print("StarMapPresenter: Got viewport, camera, and stars container");
-        
+        GD.Print("=== StarMapPresenter _Ready() START ===");
+
+        // Get UI nodes
+        _viewportContainer = GetNode<SubViewportContainer>("ViewportContainer");
+        _subViewport = _viewportContainer.GetNode<SubViewport>("SubViewport");
+        _camera = _subViewport.GetNode<Camera2D>("Camera2D");
+        _starsContainer = _subViewport.GetNode<Node2D>("StarsContainer");
+        GD.Print("StarMapPresenter: Got viewport, camera, and stars container");
+
         // Create probes container (or get if already exists)
         _probesContainer = _subViewport.GetNodeOrNull<Node2D>("ProbesContainer");
         if (_probesContainer == null)
@@ -113,36 +113,46 @@ public partial class StarMapPresenter : Control
         }
 
         _titleLabel = GetNode<Label>("TopBar/HBoxContainer/TitleLabel");
-        _zoomLabel = GetNode<Label>("TopBar/HBoxContainer/ZoomLabel");
-        _systemInfoLabel = GetNode<Label>("BottomBar/VBoxContainer/SystemInfoLabel");
-        _distanceLabel = GetNode<Label>("BottomBar/VBoxContainer/DistanceLabel");
-        _spectralClassLabel = GetNode<Label>("BottomBar/VBoxContainer/SpectralClassLabel");
-        _launchProbeButton = GetNode<Button>("BottomBar/VBoxContainer/ButtonBar/LaunchProbeButton");
-        _viewSystemButton = GetNode<Button>("BottomBar/VBoxContainer/ButtonBar/ViewSystemButton");
-        _launchColonyButton = GetNode<Button>("BottomBar/VBoxContainer/ButtonBar/LaunchColonyButton");
-        _backButton = GetNode<Button>("TopBar/HBoxContainer/BackButton");
-        _closeButton = GetNode<Button>("TopBar/HBoxContainer/CloseButton");
-        _screenCoordLabel = GetNode<Label>("CoordinatesPanel/VBoxContainer/ScreenCoordLabel");
-        _mapCoordLabel = GetNode<Label>("CoordinatesPanel/VBoxContainer/MapCoordLabel");
+        _zoomLabel = GetNode<Label>("ZoomLabel");
+        _systemInfoLabel = GetNode<Label>("SystemInfoLabel");
+        _distanceLabel = GetNode<Label>("DistanceLabel");
+        _spectralClassLabel = GetNode<Label>("SpectralClassLabel");
+        _launchProbeButton = GetNode<Button>("LaunchProbeButton");
+        _viewSystemButton = GetNode<Button>("ViewSystemButton");
+        _launchColonyButton = GetNode<Button>("LaunchColonyButton");
+        _backButton = GetNode<Button>("BackButton");
+        _closeButton = GetNode<Button>("CloseButton");
+        _screenCoordLabel = GetNode<Label>("ScreenCoordLabel");
+        _mapCoordLabel = GetNode<Label>("MapCoordLabel");
         GD.Print("StarMapPresenter: Got all UI labels and buttons");
-        
+
         // Get time control nodes (create simple inline UI if they don't exist)
-        _pauseButton = GetNodeOrNull<Button>("TimeControls/PauseButton");
-        _slowDownButton = GetNodeOrNull<Button>("TimeControls/SlowDownButton");
-        _speedUpButton = GetNodeOrNull<Button>("TimeControls/SpeedUpButton");
-        _timeSpeedLabel = GetNodeOrNull<Label>("TimeControls/TimeSpeedLabel");
-        
+        _pauseButton = GetNode<Button>("PauseButton");
+        _slowDownButton = GetNode<Button>("SlowDownButton");
+        _speedUpButton = GetNode<Button>("SpeedUpButton");
+        _timeSpeedLabel = GetNode<Label>("TimeSpeedLabel");
+        _gameTimeLabel = GetNode<Label>("GameTimeLabel");
+
         // If time controls don't exist in scene, create them inline
-        if (_pauseButton == null)
-        {
-            CreateTimeControlsUI();
-        }
+        // if (_pauseButton == null)
+        // {
+        //     CreateTimeControlsUI();
+        // }
+
+        // Initialize game time display
+        UpdateGameTimeDisplay();
+
+        // Get display options checkbox
+        _showLabelsCheckbox = GetNode<CheckBox>("ShowLabelsCheckbox");
+        _showLabelsCheckbox.Toggled += OnShowLabelsToggled;
+        _showLabels = _showLabelsCheckbox.ButtonPressed;
+
 
         // Configure Camera2D for proper centering
         // CRITICAL: anchor_mode must be DRAG_CENTER (1) so camera.Position defines the CENTER of view
         // not the top-left corner
         _camera.AnchorMode = Camera2D.AnchorModeEnum.DragCenter;
-        
+
         // Initialize camera at Sol (origin) with a reasonable starting zoom
         _camera.Position = Vector2.Zero; // Sol is at world origin (0,0), so this centers view on Sol
         _camera.Zoom = new Vector2(1.0f, 1.0f); // Start at 1x zoom (2 pixels per LY)
@@ -155,7 +165,7 @@ public partial class StarMapPresenter : Control
         _launchColonyButton.Pressed += OnLaunchColonyPressed;
         _backButton.Pressed += OnBackPressed;
         _closeButton.Pressed += OnClosePressed;
-        
+
         // Connect time control signals
         if (_pauseButton != null && _slowDownButton != null && _speedUpButton != null)
         {
@@ -163,52 +173,28 @@ public partial class StarMapPresenter : Control
             _slowDownButton.Pressed += OnSlowDownPressed;
             _speedUpButton.Pressed += OnSpeedUpPressed;
         }
-        
+
         // Create system details modal
         GD.Print("StarMapPresenter: Loading SystemDetailsModal...");
         var modalScene = GD.Load<PackedScene>("res://Scenes/UI/SystemDetailsModal.tscn");
-        if (modalScene != null)
+        if (modalScene == null)
         {
-            var modalInstance = modalScene.Instantiate();
-            AddChild(modalInstance);
-            
-            // The modal should be the root node with the script attached
-            _systemDetailsModal = modalInstance as SystemDetailsModalPresenter;
-            if (_systemDetailsModal == null)
-            {
-                GD.PrintErr($"StarMapPresenter: Modal instance is not SystemDetailsModalPresenter! Type: {modalInstance.GetType().Name}");
-            }
-            else
-            {
-                GD.Print("StarMapPresenter: SystemDetailsModal loaded successfully");
-            }
+            throw new InvalidOperationException("StarMapPresenter: Could not load SystemDetailsModal.tscn");
         }
-        else
-        {
-            GD.PrintErr("StarMapPresenter: Could not load SystemDetailsModal.tscn");
-        }
+
+        var modalInstance = modalScene.Instantiate();
+        AddChild(modalInstance);
+
+        // The modal should be the root node with the script attached
+        _systemDetailsModal = modalInstance as SystemDetailsModalPresenter
+            ?? throw new InvalidOperationException($"StarMapPresenter: Modal instance is not SystemDetailsModalPresenter! Type: {modalInstance.GetType().Name}");
+
+        GD.Print("StarMapPresenter: SystemDetailsModal loaded successfully");
 
         // Get state store from GameServices autoload (it's an autoload so it's always available)
         GD.Print("StarMapPresenter: Attempting to get GameServices...");
         var gameServices = GetNodeOrNull<GameServices>("/root/GameServices");
-        if (gameServices != null)
-        {
-            GD.Print("StarMapPresenter: Found GameServices");
-            _stateStore = gameServices.StateStore;
-            if (_stateStore == null)
-            {
-                GD.PrintErr("StarMapPresenter: StateStore is NULL!");
-            }
-            else
-            {
-                GD.Print($"StarMapPresenter: StateStore found, current systems count: {_stateStore.State.Systems.Count}");
-                _stateStore.StateChanged += OnStateChanged;
-                GD.Print("StarMapPresenter: Calling RenderGalaxy()");
-                RenderGalaxy();
-                GD.Print("StarMapPresenter: RenderGalaxy() completed");
-            }
-        }
-        else
+        if (gameServices == null)
         {
             GD.PrintErr("StarMapPresenter: GameServices autoload not found at /root/GameServices!");
             GD.PrintErr($"StarMapPresenter: Available root children:");
@@ -216,35 +202,34 @@ public partial class StarMapPresenter : Control
             {
                 GD.PrintErr($"  - {child.Name} ({child.GetType().Name})");
             }
+            throw new InvalidOperationException("StarMapPresenter: GameServices autoload is required but not found at /root/GameServices");
         }
+
+        GD.Print("StarMapPresenter: Found GameServices");
+        _stateStore = gameServices.StateStore ?? throw new InvalidOperationException("StarMapPresenter: GameServices.StateStore is required but was null");
+
+        GD.Print($"StarMapPresenter: StateStore found, current systems count: {_stateStore.State.Systems.Count}");
+        _stateStore.StateChanged += OnStateChanged;
+        GD.Print("StarMapPresenter: Calling RenderGalaxy()");
+        RenderGalaxy();
+        GD.Print("StarMapPresenter: RenderGalaxy() completed");
 
         // Add viewport resize handling
         GetTree().Root.SizeChanged += OnViewportResized;
         CallDeferred(MethodName.OnViewportResized);
-        
+
         // Connect to ViewportContainer's GuiInput to handle star map interactions
         // This is necessary because SubViewport doesn't automatically forward input
         _viewportContainer.GuiInput += OnViewportContainerInput;
-        
+
         GD.Print("=== StarMapPresenter _Ready() COMPLETE ===");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"=== StarMapPresenter _Ready() EXCEPTION ===");
-            GD.PrintErr($"Exception: {ex.Message}");
-            GD.PrintErr($"Stack trace: {ex.StackTrace}");
-            throw;
-        }
     }
 
     public override void _ExitTree()
     {
-        if (_stateStore != null)
-        {
-            _stateStore.StateChanged -= OnStateChanged;
-        }
+        _stateStore.StateChanged -= OnStateChanged;
         GetTree().Root.SizeChanged -= OnViewportResized;
-        
+
         if (_viewportContainer != null)
         {
             _viewportContainer.GuiInput -= OnViewportContainerInput;
@@ -261,7 +246,8 @@ public partial class StarMapPresenter : Control
     public override void _Process(double delta)
     {
         UpdateMouseCoordinates();
-        
+        UpdateGameTimeDisplay();
+
         // Auto-advance time if not paused
         if (!_isPaused && _stateStore != null)
         {
@@ -389,7 +375,7 @@ public partial class StarMapPresenter : Control
     {
         // NOTE: Using _UnhandledInput instead of _Input so that UI buttons can handle clicks first.
         // This prevents the star selection from intercepting button clicks.
-        
+
         // Handle mouse wheel zoom
         if (@event is InputEventMouseButton mouseButton)
         {
@@ -410,7 +396,7 @@ public partial class StarMapPresenter : Control
                     _isPanning = true;
                     _panStartMousePos = mouseButton.Position;
                     _panStartCameraPos = _camera.Position;
-                    if (DEBUG_PANNING)
+                    if (_stateStore != null && _stateStore.DebugSettings.DebugPanning)
                     {
                         GD.Print($"=== PANNING START ===");
                         GD.Print($"  Start mouse pos: {_panStartMousePos}");
@@ -420,7 +406,7 @@ public partial class StarMapPresenter : Control
                 }
                 else
                 {
-                    if (DEBUG_PANNING)
+                    if (_stateStore != null && _stateStore.DebugSettings.DebugPanning)
                     {
                         GD.Print($"=== PANNING END ===");
                         GD.Print($"  Final camera pos: {_camera.Position}");
@@ -447,13 +433,13 @@ public partial class StarMapPresenter : Control
             var newCameraPos = _panStartCameraPos - worldDelta;
 
             _camera.Position = newCameraPos;
-            
+
             // Debug every 10th motion event to avoid spam
-            if (DEBUG_PANNING && Engine.GetProcessFrames() % 10 == 0)
+            if (_stateStore != null && _stateStore.DebugSettings.DebugPanning && Engine.GetProcessFrames() % 10 == 0)
             {
                 GD.Print($"PANNING: mouse delta {mouseDelta}, world delta {worldDelta}, camera now at {newCameraPos}");
             }
-            
+
             GetViewport()!.SetInputAsHandled();
         }
 
@@ -471,8 +457,8 @@ public partial class StarMapPresenter : Control
     /// </summary>
     private void OnViewportContainerInput(InputEvent @event)
     {
-        if (DEBUG_SELECTION) GD.Print($"OnViewportContainerInput: {@event.GetType().Name}");
-        
+        if (_stateStore != null && _stateStore.DebugSettings.DebugSelection) GD.Print($"OnViewportContainerInput: {@event.GetType().Name}");
+
         // Handle mouse wheel zoom
         if (@event is InputEventMouseButton mouseButton)
         {
@@ -493,7 +479,7 @@ public partial class StarMapPresenter : Control
                     _isPanning = true;
                     _panStartMousePos = mouseButton.Position;
                     _panStartCameraPos = _camera.Position;
-                    if (DEBUG_PANNING)
+                    if (_stateStore != null && _stateStore.DebugSettings.DebugPanning)
                     {
                         GD.Print($"=== PANNING START ===");
                         GD.Print($"  Start mouse pos: {_panStartMousePos}");
@@ -503,7 +489,7 @@ public partial class StarMapPresenter : Control
                 }
                 else
                 {
-                    if (DEBUG_PANNING)
+                    if (_stateStore != null && _stateStore.DebugSettings.DebugPanning)
                     {
                         GD.Print($"=== PANNING END ===");
                         GD.Print($"  Final camera pos: {_camera.Position}");
@@ -530,13 +516,13 @@ public partial class StarMapPresenter : Control
             var newCameraPos = _panStartCameraPos - worldDelta;
 
             _camera.Position = newCameraPos;
-            
+
             // Debug every 10th motion event to avoid spam
-            if (DEBUG_PANNING && Engine.GetProcessFrames() % 10 == 0)
+            if (_stateStore != null && _stateStore.DebugSettings.DebugPanning && Engine.GetProcessFrames() % 10 == 0)
             {
                 GD.Print($"PANNING: mouse delta {mouseDelta}, world delta {worldDelta}, camera now at {newCameraPos}");
             }
-            
+
             _viewportContainer.AcceptEvent();
         }
 
@@ -710,24 +696,18 @@ public partial class StarMapPresenter : Control
     /// </summary>
     private void RenderGalaxy()
     {
-        if (DEBUG_RENDERING) GD.Print("RenderGalaxy: Called");
-        
-        if (_stateStore == null)
-        {
-            GD.PrintErr("RenderGalaxy: StateStore is null!");
-            return;
-        }
+        if (_stateStore.DebugSettings.DebugRendering) GD.Print("RenderGalaxy: Called");
 
         var state = _stateStore.State;
-        
+
         if (state == null)
         {
             GD.PrintErr("RenderGalaxy: State is null!");
             return;
         }
-        
+
         var allSystems = state.Systems;
-        
+
         if (allSystems == null || allSystems.Count == 0)
         {
             GD.PrintErr($"RenderGalaxy: No systems found! Systems list is {(allSystems == null ? "null" : "empty")}");
@@ -747,7 +727,7 @@ public partial class StarMapPresenter : Control
         var otherSystems = allSystems.Where(s => s != sol).Take(DEBUG_MAX_STARS - (sol != null ? 1 : 0));
         systems.AddRange(otherSystems);
 
-        if (DEBUG_RENDERING)
+        if (_stateStore != null && _stateStore.DebugSettings.DebugRendering)
         {
             GD.Print($"RenderGalaxy: Limiting to {DEBUG_MAX_STARS} stars for debugging (found {allSystems.Count} total systems)");
             GD.Print($"RenderGalaxy: Selected {systems.Count} systems to render:");
@@ -769,10 +749,11 @@ public partial class StarMapPresenter : Control
         foreach (var system in systems)
         {
             var starNode = CreateStarNode(system);
+            starNode.SetShowLabels(_showLabels); // Apply current label visibility setting
             _starsContainer.AddChild(starNode);
             _starNodes.Add(starNode);
 
-            if (DEBUG_RENDERING)
+            if (_stateStore != null && _stateStore.DebugSettings.DebugRendering)
             {
                 // Debug output for each generated star
                 var worldPos = starNode.Position;
@@ -800,12 +781,12 @@ public partial class StarMapPresenter : Control
 
         if (shouldAutoFit)
         {
-            if (DEBUG_RENDERING) GD.Print("RenderGalaxy: Queueing ResetView() call...");
+            if (_stateStore != null && _stateStore.DebugSettings.DebugRendering) GD.Print("RenderGalaxy: Queueing ResetView() call...");
             CallDeferred(MethodName.ResetView);
             _hasAutoFitView = true;
         }
-        
-        if (DEBUG_RENDERING) GD.Print($"RenderGalaxy: Completed. Stars in container: {_starsContainer.GetChildCount()}, Stars in list: {_starNodes.Count}");
+
+        if (_stateStore != null && _stateStore.DebugSettings.DebugRendering) GD.Print($"RenderGalaxy: Completed. Stars in container: {_starsContainer.GetChildCount()}, Stars in list: {_starNodes.Count}");
     }
 
     /// <summary>
@@ -820,24 +801,24 @@ public partial class StarMapPresenter : Control
         // Sol should ALWAYS be at Vector3.Zero from galaxy generation
         // Therefore, Sol's world position in 2D should always be (0, 0)
         // All other stars are positioned relative to Sol
-        
+
         // Convert 3D position to 2D (just take X,Y, ignore Z)
         var systemPos = new Vector2(system.Position.X, system.Position.Y);
-        
+
         // Scale by BASE_PIXELS_PER_LY to convert light-years to pixels
         var worldPos = systemPos * BASE_PIXELS_PER_LY;
-        
+
         starNode.Position = worldPos;
 
         // Debug output for coordinate verification
-        if (DEBUG_STAR_CREATION && (system.Name == "Sol" || system.Name.Contains("Gliese") || system.Name.Contains("2MASS")))
+        if (_stateStore != null && _stateStore.DebugSettings.DebugStarCreation && (system.Name == "Sol" || system.Name.Contains("Gliese") || system.Name.Contains("2MASS")))
         {
             GD.Print($"CreateStarNode: {system.Name}:");
             GD.Print($"  3D Position (LY): ({system.Position.X:F4}, {system.Position.Y:F4}, {system.Position.Z:F4})");
             GD.Print($"  2D Position (LY): ({systemPos.X:F4}, {systemPos.Y:F4})");
             GD.Print($"  World pos (px): ({worldPos.X:F1}, {worldPos.Y:F1})");
             GD.Print($"  Distance from Sol: {system.DistanceFromSol:F2} LY");
-            
+
             if (system.Name == "Sol")
             {
                 if (Mathf.Abs(worldPos.X) > 0.01f || Mathf.Abs(worldPos.Y) > 0.01f)
@@ -873,11 +854,8 @@ public partial class StarMapPresenter : Control
         UpdateSelectionInfo();
 
         // Send SelectSystemCommand
-        if (_stateStore != null)
-        {
-            var command = new SelectSystemCommand(starNode.SystemId);
-            _stateStore.ApplyCommand(command);
-        }
+        var command = new SelectSystemCommand(starNode.SystemId);
+        _stateStore.ApplyCommand(command);
     }
 
     private void UpdateSelectionInfo()
@@ -906,66 +884,55 @@ public partial class StarMapPresenter : Control
 
     private void OnLaunchProbePressed()
     {
-        if (DEBUG_ACTIONS) GD.Print($"=== LAUNCH PROBE BUTTON PRESSED ===");
-        
+        if (_stateStore.DebugSettings.DebugActions) GD.Print($"=== LAUNCH PROBE BUTTON PRESSED ===");
+
         if (_selectedStar == null)
         {
-            if (DEBUG_ACTIONS) GD.Print("  ✗ No star selected!");
-            return;
-        }
-        
-        if (_stateStore == null)
-        {
-            if (DEBUG_ACTIONS) GD.Print("  ✗ StateStore is null!");
+            if (_stateStore.DebugSettings.DebugActions) GD.Print("  ✗ No star selected!");
             return;
         }
 
-        if (DEBUG_ACTIONS)
+
+        if (_stateStore.DebugSettings.DebugActions)
         {
             GD.Print($"  ✓ Selected star: {_selectedStar.System.Name}");
             GD.Print($"  ✓ System ID: {_selectedStar.SystemId}");
             GD.Print($"  Creating LaunchProbe command...");
         }
-        
+
         var command = new LaunchProbe(_selectedStar.SystemId);
-        
-        if (DEBUG_ACTIONS) GD.Print($"  Applying command to StateStore...");
+
+        if (_stateStore.DebugSettings.DebugActions) GD.Print($"  Applying command to StateStore...");
         _stateStore.ApplyCommand(command);
-        
-        if (DEBUG_ACTIONS)
+
+        if (_stateStore.DebugSettings.DebugActions)
         {
             GD.Print($"  ✓ Probe launched to {_selectedStar.System.Name}");
             GD.Print($"  Current probes in flight: {_stateStore.State.ProbesInFlight.Count}");
         }
-        
+
         // Render probes to show the newly launched probe
-        if (DEBUG_ACTIONS) GD.Print($"  Calling RenderProbes()...");
+        if (_stateStore.DebugSettings.DebugRendering) GD.Print($"  Calling RenderProbes()...");
         RenderProbes();
-        if (DEBUG_ACTIONS) GD.Print($"  ✓ Probes rendered");
+        if (_stateStore.DebugSettings.DebugRendering) GD.Print($"  ✓ Probes rendered");
     }
 
     private void OnViewSystemPressed()
     {
-        if (DEBUG_ACTIONS) GD.Print($"=== VIEW SYSTEM DETAILS BUTTON PRESSED ===");
-        
+        if (_stateStore.DebugSettings.DebugActions) GD.Print($"=== VIEW SYSTEM DETAILS BUTTON PRESSED ===");
+
         if (_selectedStar == null)
         {
-            if (DEBUG_ACTIONS) GD.Print("  ✗ No star selected!");
-            return;
-        }
-        
-        if (_systemDetailsModal == null)
-        {
-            if (DEBUG_ACTIONS) GD.Print("  ✗ SystemDetailsModal is null! (Modal not loaded)");
+            if (_stateStore.DebugSettings.DebugActions) GD.Print("  ✗ No star selected!");
             return;
         }
 
-        if (DEBUG_ACTIONS) GD.Print($"  ✓ Selected star: {_selectedStar.System.Name}");
-        if (DEBUG_ACTIONS) GD.Print($"  ✓ Calling ShowSystem() on modal...");
-        
+        if (_stateStore.DebugSettings.DebugActions) GD.Print($"  ✓ Selected star: {_selectedStar.System.Name}");
+        if (_stateStore.DebugSettings.DebugActions) GD.Print($"  ✓ Calling ShowSystem() on modal...");
+
         _systemDetailsModal.ShowSystem(_selectedStar.System);
-        
-        if (DEBUG_ACTIONS) GD.Print($"  ✓ Modal should be visible now");
+
+        if (_stateStore.DebugSettings.DebugActions) GD.Print($"  ✓ Modal should be visible now");
     }
 
     private void OnLaunchColonyPressed()
@@ -1022,120 +989,144 @@ public partial class StarMapPresenter : Control
 
         UpdateSelectionInfo();
     }
-    
-    private void CreateTimeControlsUI()
-    {
-        // Create a simple inline panel for time controls
-        var timeControlsPanel = new PanelContainer();
-        timeControlsPanel.Name = "TimeControls";
-        AddChild(timeControlsPanel);
-        
-        // Position in top-right corner
-        timeControlsPanel.SetAnchorsPreset(Control.LayoutPreset.TopRight);
-        timeControlsPanel.OffsetLeft = -200;
-        timeControlsPanel.OffsetTop = 80;
-        timeControlsPanel.OffsetRight = -10;
-        timeControlsPanel.OffsetBottom = 140;
-        
-        var vbox = new VBoxContainer();
-        vbox.AddThemeConstantOverride("separation", 5);
-        timeControlsPanel.AddChild(vbox);
-        
-        var margin = new MarginContainer();
-        margin.AddThemeConstantOverride("margin_left", 10);
-        margin.AddThemeConstantOverride("margin_top", 10);
-        margin.AddThemeConstantOverride("margin_right", 10);
-        margin.AddThemeConstantOverride("margin_bottom", 10);
-        vbox.AddChild(margin);
-        
-        var innerVBox = new VBoxContainer();
-        innerVBox.AddThemeConstantOverride("separation", 5);
-        margin.AddChild(innerVBox);
-        
-        _timeSpeedLabel = new Label();
-        _timeSpeedLabel.Text = "Time: 1.0x (Running)";
-        _timeSpeedLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        innerVBox.AddChild(_timeSpeedLabel);
-        
-        var buttonBox = new HBoxContainer();
-        buttonBox.AddThemeConstantOverride("separation", 5);
-        innerVBox.AddChild(buttonBox);
-        
-        _pauseButton = new Button();
-        _pauseButton.Text = "⏸";
-        _pauseButton.TooltipText = "Pause/Resume";
-        _pauseButton.CustomMinimumSize = new Vector2(50, 0);
-        buttonBox.AddChild(_pauseButton);
-        
-        _slowDownButton = new Button();
-        _slowDownButton.Text = "◀";
-        _slowDownButton.TooltipText = "Slow Down";
-        _slowDownButton.CustomMinimumSize = new Vector2(50, 0);
-        buttonBox.AddChild(_slowDownButton);
-        
-        _speedUpButton = new Button();
-        _speedUpButton.Text = "▶";
-        _speedUpButton.TooltipText = "Speed Up";
-        _speedUpButton.CustomMinimumSize = new Vector2(50, 0);
-        buttonBox.AddChild(_speedUpButton);
-    }
-    
+
+    // private void CreateTimeControlsUI()
+    // {
+    //     // Create a simple inline panel for time controls
+    //     var timeControlsPanel = new PanelContainer();
+    //     timeControlsPanel.Name = "TimeControls";
+    //     AddChild(timeControlsPanel);
+
+    //     // Position in top-right corner - wider to accommodate game time
+    //     timeControlsPanel.SetAnchorsPreset(Control.LayoutPreset.TopRight);
+    //     timeControlsPanel.OffsetLeft = -380;
+    //     timeControlsPanel.OffsetTop = 80;
+    //     timeControlsPanel.OffsetRight = -10;
+    //     timeControlsPanel.OffsetBottom = 140;
+
+    //     var margin = new MarginContainer();
+    //     margin.AddThemeConstantOverride("margin_left", 10);
+    //     margin.AddThemeConstantOverride("margin_top", 10);
+    //     margin.AddThemeConstantOverride("margin_right", 10);
+    //     margin.AddThemeConstantOverride("margin_bottom", 10);
+    //     timeControlsPanel.AddChild(margin);
+
+    //     var hbox = new HBoxContainer();
+    //     hbox.AddThemeConstantOverride("separation", 15);
+    //     margin.AddChild(hbox);
+
+    //     // Left side: time controls
+    //     var leftVBox = new VBoxContainer();
+    //     leftVBox.AddThemeConstantOverride("separation", 5);
+    //     hbox.AddChild(leftVBox);
+
+    //     _timeSpeedLabel = new Label();
+    //     _timeSpeedLabel.Text = "Time: 1.0x (Running)";
+    //     _timeSpeedLabel.HorizontalAlignment = HorizontalAlignment.Center;
+    //     leftVBox.AddChild(_timeSpeedLabel);
+
+    //     var buttonBox = new HBoxContainer();
+    //     buttonBox.AddThemeConstantOverride("separation", 5);
+    //     leftVBox.AddChild(buttonBox);
+
+    //     _pauseButton = new Button();
+    //     _pauseButton.Text = "⏸";
+    //     _pauseButton.TooltipText = "Pause/Resume";
+    //     _pauseButton.CustomMinimumSize = new Vector2(50, 0);
+    //     buttonBox.AddChild(_pauseButton);
+
+    //     _slowDownButton = new Button();
+    //     _slowDownButton.Text = "◀";
+    //     _slowDownButton.TooltipText = "Slow Down";
+    //     _slowDownButton.CustomMinimumSize = new Vector2(50, 0);
+    //     buttonBox.AddChild(_slowDownButton);
+
+    //     _speedUpButton = new Button();
+    //     _speedUpButton.Text = "▶";
+    //     _speedUpButton.TooltipText = "Speed Up";
+    //     _speedUpButton.CustomMinimumSize = new Vector2(50, 0);
+    //     buttonBox.AddChild(_speedUpButton);
+
+    //     // Separator
+    //     var separator = new VSeparator();
+    //     hbox.AddChild(separator);
+
+    //     // Right side: game time display
+    //     var rightVBox = new VBoxContainer();
+    //     rightVBox.AddThemeConstantOverride("separation", 3);
+    //     rightVBox.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+    //     hbox.AddChild(rightVBox);
+
+    //     var gameTimeHeaderLabel = new Label();
+    //     gameTimeHeaderLabel.Text = "Game Time";
+    //     gameTimeHeaderLabel.HorizontalAlignment = HorizontalAlignment.Center;
+    //     gameTimeHeaderLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f));
+    //     rightVBox.AddChild(gameTimeHeaderLabel);
+
+    //     _gameTimeLabel = new Label();
+    //     _gameTimeLabel.Name = "GameTimeLabel";
+    //     _gameTimeLabel.Text = "Year 0, Day 0";
+    //     _gameTimeLabel.HorizontalAlignment = HorizontalAlignment.Center;
+    //     _gameTimeLabel.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+    //     rightVBox.AddChild(_gameTimeLabel);
+    // }
+
     private void OnPausePressed()
     {
-        if (DEBUG_TIME_CONTROLS) GD.Print($"=== PAUSE BUTTON PRESSED ===");
-        
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"=== PAUSE BUTTON PRESSED ===");
+
         _isPaused = !_isPaused;
-        
-        if (DEBUG_TIME_CONTROLS) GD.Print($"  Time is now: {(_isPaused ? "PAUSED" : "RUNNING")}");
-        if (DEBUG_TIME_CONTROLS) GD.Print($"  Current time scale: {_timeScale}x");
-        
+
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  Time is now: {(_isPaused ? "PAUSED" : "RUNNING")}");
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  Current time scale: {_timeScale}x");
+
         UpdateTimeControlUI();
     }
-    
+
     private void OnSlowDownPressed()
     {
-        if (DEBUG_TIME_CONTROLS) GD.Print($"=== SLOW DOWN BUTTON PRESSED ===");
-        
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"=== SLOW DOWN BUTTON PRESSED ===");
+
         if (_isPaused)
         {
-            if (DEBUG_TIME_CONTROLS) GD.Print($"  ✗ Time is paused, ignoring");
+            if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  ✗ Time is paused, ignoring");
             return;
         }
-        
+
         var oldScale = _timeScale;
         _timeScale = Mathf.Max(0.25, _timeScale * 0.5);
-        
-        if (DEBUG_TIME_CONTROLS) GD.Print($"  Time scale: {oldScale}x -> {_timeScale}x");
-        
+
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  Time scale: {oldScale}x -> {_timeScale}x");
+
         UpdateTimeControlUI();
     }
-    
+
     private void OnSpeedUpPressed()
     {
-        if (DEBUG_TIME_CONTROLS) GD.Print($"=== SPEED UP BUTTON PRESSED ===");
-        
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"=== SPEED UP BUTTON PRESSED ===");
+
         if (_isPaused)
         {
-            if (DEBUG_TIME_CONTROLS) GD.Print($"  ✗ Time is paused, ignoring");
+            if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  ✗ Time is paused, ignoring");
             return;
         }
-        
+
         var oldScale = _timeScale;
         _timeScale = Mathf.Min(32.0, _timeScale * 2.0);
-        
-        if (DEBUG_TIME_CONTROLS) GD.Print($"  Time scale: {oldScale}x -> {_timeScale}x");
-        
+
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  Time scale: {oldScale}x -> {_timeScale}x");
+
         UpdateTimeControlUI();
     }
-    
+
     private void UpdateTimeControlUI()
     {
         if (_timeSpeedLabel == null)
         {
-            if (DEBUG_TIME_CONTROLS) GD.Print($"  ✗ _timeSpeedLabel is null, cannot update UI");
+            if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  ✗ _timeSpeedLabel is null, cannot update UI");
             return;
         }
-        
+
         if (_isPaused)
         {
             _timeSpeedLabel.Text = "Time: PAUSED";
@@ -1144,31 +1135,95 @@ public partial class StarMapPresenter : Control
         {
             _timeSpeedLabel.Text = $"Time: {_timeScale:F2}x (Running)";
         }
-        
-        if (DEBUG_TIME_CONTROLS) GD.Print($"  ✓ Time label updated: {_timeSpeedLabel.Text}");
+
+        if (_stateStore.DebugSettings.DebugTimeControls) GD.Print($"  ✓ Time label updated: {_timeSpeedLabel.Text}");
     }
-    
+
+    private void UpdateGameTimeDisplay()
+    {
+        if (_gameTimeLabel == null) return;
+
+        var gameTime = _stateStore.State.GameTime;
+
+        // Convert hours to years and days
+        const double hoursPerDay = 24.0;
+        const double daysPerYear = 365.25;
+        const double hoursPerYear = hoursPerDay * daysPerYear;
+
+        var years = (int)(gameTime / hoursPerYear);
+        var remainingHours = gameTime % hoursPerYear;
+        var days = (int)(remainingHours / hoursPerDay);
+        var hours = (int)(remainingHours % hoursPerDay);
+
+        _gameTimeLabel.Text = $"Year {years}, Day {days}\n{hours:D2}:00";
+    }
+
+    // private void CreateDisplayOptionsUI()
+    // {
+    //     // Create a panel for display options
+    //     var displayOptionsPanel = new PanelContainer();
+    //     displayOptionsPanel.Name = "DisplayOptions";
+    //     AddChild(displayOptionsPanel);
+
+    //     // Position in top-right corner, below time controls
+    //     displayOptionsPanel.SetAnchorsPreset(Control.LayoutPreset.TopRight);
+    //     displayOptionsPanel.OffsetLeft = -380;
+    //     displayOptionsPanel.OffsetTop = 150;
+    //     displayOptionsPanel.OffsetRight = -10;
+    //     displayOptionsPanel.OffsetBottom = 190;
+
+    //     var margin = new MarginContainer();
+    //     margin.AddThemeConstantOverride("margin_left", 10);
+    //     margin.AddThemeConstantOverride("margin_top", 5);
+    //     margin.AddThemeConstantOverride("margin_right", 10);
+    //     margin.AddThemeConstantOverride("margin_bottom", 5);
+    //     displayOptionsPanel.AddChild(margin);
+
+    //     var vbox = new VBoxContainer();
+    //     vbox.AddThemeConstantOverride("separation", 5);
+    //     margin.AddChild(vbox);
+
+    //     var label = new Label();
+    //     label.Text = "Display Options";
+    //     label.HorizontalAlignment = HorizontalAlignment.Center;
+    //     vbox.AddChild(label);
+
+    //     _showLabelsCheckbox = new CheckBox();
+    //     _showLabelsCheckbox.Name = "ShowLabelsCheckbox";
+    //     _showLabelsCheckbox.Text = "Show Star Labels";
+    //     _showLabelsCheckbox.ButtonPressed = _showLabels;
+    //     _showLabelsCheckbox.Toggled += OnShowLabelsToggled;
+    //     vbox.AddChild(_showLabelsCheckbox);
+    // }
+
+    private void OnShowLabelsToggled(bool pressed)
+    {
+        _showLabels = pressed;
+
+        // Update all star nodes
+        foreach (var starNode in _starNodes)
+        {
+            starNode.SetShowLabels(_showLabels);
+        }
+
+        GD.Print($"Star labels: {(_showLabels ? "ON" : "OFF")}");
+    }
+
     private void RenderProbes()
     {
-        if (DEBUG_RENDERING) GD.Print($"=== RENDER PROBES ===");
-        
-        if (_stateStore == null)
-        {
-            if (DEBUG_RENDERING) GD.Print($"  ✗ StateStore is null!");
-            return;
-        }
-        
+        if (_stateStore.DebugSettings.DebugRendering) GD.Print($"=== RENDER PROBES ===");
+
         var state = _stateStore.State;
-        
-        if (DEBUG_RENDERING) GD.Print($"  Probes in flight: {state.ProbesInFlight.Count}");
-        
+
+        if (_stateStore.DebugSettings.DebugRendering) GD.Print($"  Probes in flight: {state.ProbesInFlight.Count}");
+
         // Clear existing probe nodes
         foreach (var probeNode in _probeNodes)
         {
             probeNode.QueueFree();
         }
         _probeNodes.Clear();
-        
+
         // Create probe nodes for all probes in flight
         int count = 0;
         foreach (var probe in state.ProbesInFlight)
@@ -1177,18 +1232,18 @@ public partial class StarMapPresenter : Control
             var targetSystem = state.Systems.FirstOrDefault(s => s.Id == probe.TargetSystemId);
             if (targetSystem == null)
             {
-                if (DEBUG_RENDERING) GD.Print($"  ✗ Probe {probe.Id}: Target system {probe.TargetSystemId} not found!");
+                if (_stateStore.DebugSettings.DebugRendering) GD.Print($"  ✗ Probe {probe.Id}: Target system {probe.TargetSystemId} not found!");
                 continue;
             }
-            
+
             var probeNode = new ProbeNode();
             probeNode.Initialize(probe, targetSystem, state.GameTime);
             probeNode.ZIndex = 10; // Render above stars
             _probesContainer.AddChild(probeNode);
             _probeNodes.Add(probeNode);
             count++;
-            
-            if (DEBUG_RENDERING)
+
+            if (_stateStore.DebugSettings.DebugRendering)
             {
                 GD.Print($"  ✓ Probe {count}: {probe.Id}");
                 GD.Print($"    Target: {targetSystem.Name}");
@@ -1197,16 +1252,14 @@ public partial class StarMapPresenter : Control
                 GD.Print($"    Current game time: {state.GameTime:F2}");
             }
         }
-        
-        if (DEBUG_RENDERING) GD.Print($"  ✓ Rendered {count} probe(s)");
+
+        if (_stateStore.DebugSettings.DebugRendering) GD.Print($"  ✓ Rendered {count} probe(s)");
     }
-    
+
     private void UpdateProbePositions()
     {
-        if (_stateStore == null) return;
-        
         var state = _stateStore.State;
-        
+
         foreach (var probeNode in _probeNodes)
         {
             probeNode.UpdatePosition(state.GameTime);
@@ -1226,8 +1279,8 @@ public partial class StarNode : Node2D
     private bool _isSelected = false;
     private const float BASE_STAR_SIZE = 6f;
     private const float SELECTION_RING_SIZE = 12f;
-    private const float LABEL_VISIBILITY_THRESHOLD = 3.0f; // Show labels when zoomed in past 3x
     private float _currentZoom = 1.0f;
+    private bool _showLabels = true;
 
     public void Initialize(StarSystem system)
     {
@@ -1242,6 +1295,18 @@ public partial class StarNode : Node2D
         if (Mathf.Abs(_currentZoom - zoomLevel) > 0.01f)
         {
             _currentZoom = zoomLevel;
+            QueueRedraw();
+        }
+    }
+
+    /// <summary>
+    /// Sets whether labels should be displayed.
+    /// </summary>
+    public void SetShowLabels(bool showLabels)
+    {
+        if (_showLabels != showLabels)
+        {
+            _showLabels = showLabels;
             QueueRedraw();
         }
     }
@@ -1276,35 +1341,35 @@ public partial class StarNode : Node2D
         var color = GetStarColor();
         DrawCircle(Vector2.Zero, worldStarSize, color);
 
-        // Only show labels at reasonable zoom levels or for selected stars (or always for Sol)
-        bool shouldShowLabel = _currentZoom >= LABEL_VISIBILITY_THRESHOLD || _isSelected || isSol;
+        // Show labels if enabled, or always show for selected stars or Sol
+        bool shouldShowLabel = _showLabels || _isSelected || isSol;
 
         if (shouldShowLabel)
         {
             // For crisp text rendering, we need to:
             // 1. Use a fixed screen-space font size
             // 2. Counter-scale the canvas transform to render at screen resolution
-            
+
             var font = ThemeDB.FallbackFont;
             var fontSize = 14; // Fixed screen-space font size for crisp rendering
-            
+
             var labelOffset = GetSmartLabelPosition(screenStarSize);
             var worldLabelOffset = labelOffset * inverseZoom;
 
             // Debug mode: show coordinates
             var ly = Position / StarMapPresenter.BASE_PIXELS_PER_LY;
             var labelText = $"{System.Name} ({ly.X:F1}, {ly.Y:F1})";
-            
+
             // Save current transform
             var originalTransform = GetCanvasTransform();
-            
+
             // Counter-scale to render text at screen resolution
             // This prevents blurry text when zoomed
             DrawSetTransform(worldLabelOffset, 0.0f, new Vector2(inverseZoom, inverseZoom));
-            
+
             var fontColor = isSol ? new Color(1.0f, 0.84f, 0.0f, 1.0f) : new Color(1, 1, 1, 0.95f);
             DrawString(font, Vector2.Zero, labelText, HorizontalAlignment.Left, -1, fontSize, fontColor);
-            
+
             // Restore transform
             DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
         }
@@ -1382,7 +1447,7 @@ public partial class OriginMarker : Node2D
         if (camera == null) return;
 
         float inverseZoom = 1.0f / Mathf.Max(camera.Zoom.X, 0.1f);
-        
+
         // Draw subtle crosshairs at origin
         float crosshairSize = 30f * inverseZoom;
         float crosshairThickness = 1.5f * inverseZoom;
@@ -1392,7 +1457,7 @@ public partial class OriginMarker : Node2D
         DrawLine(new Vector2(-crosshairSize, 0), new Vector2(crosshairSize, 0), crosshairColor, crosshairThickness);
         // Vertical line
         DrawLine(new Vector2(0, -crosshairSize), new Vector2(0, crosshairSize), crosshairColor, crosshairThickness);
-        
+
         // Draw circle at center
         DrawCircle(Vector2.Zero, 3f * inverseZoom, crosshairColor);
     }
@@ -1408,49 +1473,49 @@ public partial class ProbeNode : Node2D
     private StarSystem _targetSystem = null!;
     private Vector2 _targetWorldPos;
     private double _totalTravelTime;
-    
+
     public void Initialize(ProbeInFlight probe, StarSystem targetSystem, double currentGameTime)
     {
         _probe = probe;
         _targetSystem = targetSystem;
-        
+
         // Calculate target position in world coordinates
         var targetLYPos = new Vector2(targetSystem.Position.X, targetSystem.Position.Y);
         _targetWorldPos = targetLYPos * StarMapPresenter.BASE_PIXELS_PER_LY;
-        
+
         _totalTravelTime = probe.ArrivalTime - probe.LaunchedAt;
-        
+
         UpdatePosition(currentGameTime);
     }
-    
+
     public void UpdatePosition(double currentGameTime)
     {
         if (_probe == null) return;
-        
+
         // Calculate progress (0.0 = just launched from Sol, 1.0 = arrived at target)
         var elapsed = currentGameTime - _probe.LaunchedAt;
         var progress = Mathf.Clamp((float)(elapsed / _totalTravelTime), 0f, 1f);
-        
+
         // Interpolate between Sol (0,0) and target system
         Position = Vector2.Zero.Lerp(_targetWorldPos, progress);
-        
+
         QueueRedraw();
     }
-    
+
     public override void _Draw()
     {
         if (_probe == null) return;
-        
+
         // Get camera for inverse zoom scaling
         var camera = GetViewport()?.GetCamera2D();
         if (camera == null) return;
-        
+
         float inverseZoom = 1.0f / Mathf.Max(camera.Zoom.X, 0.1f);
-        
+
         // Draw probe as a small triangle pointing towards target
         var direction = (_targetWorldPos - Position).Normalized();
         var angle = direction.Angle();
-        
+
         // Create triangle vertices (pointing right by default)
         var size = 8f * inverseZoom;
         Vector2[] vertices = new[]
@@ -1459,24 +1524,24 @@ public partial class ProbeNode : Node2D
             new Vector2(-size * 0.5f, size * 0.5f),   // Back top
             new Vector2(-size * 0.5f, -size * 0.5f)   // Back bottom
         };
-        
+
         // Rotate vertices
         for (int i = 0; i < vertices.Length; i++)
         {
             vertices[i] = vertices[i].Rotated(angle);
         }
-        
+
         // Draw filled triangle (cyan color for probes)
         DrawColoredPolygon(vertices, new Color(0.2f, 0.8f, 1.0f, 0.9f));
-        
+
         // Draw outline
-        DrawPolyline(new[] { vertices[0], vertices[1], vertices[2], vertices[0] }, 
+        DrawPolyline(new[] { vertices[0], vertices[1], vertices[2], vertices[0] },
                      new Color(1f, 1f, 1f, 1f), 1f * inverseZoom);
-        
+
         // Draw progress trail (line from Sol to current position)
         if (Position.LengthSquared() > 1f)
         {
-            DrawLine(Vector2.Zero, Vector2.Zero.DirectionTo(Position) * Position.Length(), 
+            DrawLine(Vector2.Zero, Vector2.Zero.DirectionTo(Position) * Position.Length(),
                      new Color(0.2f, 0.8f, 1.0f, 0.3f), 1.5f * inverseZoom);
         }
     }

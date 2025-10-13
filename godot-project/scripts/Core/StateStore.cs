@@ -15,10 +15,15 @@ namespace Outpost3.Core;
 public partial class StateStore : Node
 {
     // Debug flag to disable verbose event persistence logs
-    private const bool DEBUG_EVENT_PERSISTENCE = false;
     
+
     private GameState _state = GameState.NewGame();
-    private readonly IEventStore _eventStore;
+
+    private DebugSettings _debugSettings = new DebugSettings();
+
+    public DebugSettings DebugSettings => _debugSettings;
+
+    private readonly IEventStore? _eventStore;
 
     [Signal]
     public delegate void StateChangedEventHandler();
@@ -92,7 +97,7 @@ public partial class StateStore : Node
     /// <param name="command">The command to apply.</param>
     public void ApplyCommand(Core.Commands.ICommand command)
     {
-        if (DEBUG_EVENT_PERSISTENCE) GD.Print($"Applying command: {command.GetType().Name}");
+        if (_debugSettings.DebugEventPersistence) GD.Print($"Applying command: {command.GetType().Name}");
 
         // Run reducer to get new state and events
         var (newState, events) = TimeSystem.Reduce(_state, command);
@@ -116,7 +121,7 @@ public partial class StateStore : Node
                 // Persist to event store
                 var startingOffset = _eventStore.Append(enrichedEvents);
                 
-                if (DEBUG_EVENT_PERSISTENCE)
+                if (_debugSettings.DebugEventPersistence)
                 {
                     GD.Print($"Persisted {enrichedEvents.Length} event(s) starting at offset {startingOffset}");
                     
@@ -130,6 +135,7 @@ public partial class StateStore : Node
             {
                 GD.PrintErr($"Failed to persist events: {ex.Message}");
                 // Continue even if persistence fails (for development/debugging)
+                // TODO: abort when persistence fail
             }
         }
         else if (events.Count > 0)

@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://d3vq8k7h2n4m6"]
 
-[ext_resource type="Script" path="res://scripts/UI/StarMapPresenter.cs" id="1_starmap"]
+[ext_resource type="Script" uid="uid://cbtfp2n7cjksj" path="res://scripts/UI/StarMapPresenter.cs" id="1_starmap"]
 
 [node name="StarMapScreen" type="Control"]
 layout_mode = 3
@@ -29,14 +29,13 @@ grow_horizontal = 2
 grow_vertical = 2
 stretch = true
 
- [node name="SubViewport" type="SubViewport" parent="ViewportContainer"]
+[node name="SubViewport" type="SubViewport" parent="ViewportContainer"]
 handle_input_locally = false
-size = Vector2i(1152, 648)
-render_target_update_mode = 4
+size = Vector2i(1920, 1080)
 size_2d_override_stretch = true
+render_target_update_mode = 4
 
 [node name="Camera2D" type="Camera2D" parent="ViewportContainer/SubViewport"]
-anchor_mode = 1
 
 [node name="StarsContainer" type="Node2D" parent="ViewportContainer/SubViewport"]
 
@@ -50,52 +49,49 @@ grow_horizontal = 2
 [node name="HBoxContainer" type="HBoxContainer" parent="TopBar"]
 layout_mode = 2
 
-[node name="BackButton" type="Button" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "← Back"
-
-[node name="HSeparator" type="HSeparator" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-
 [node name="TitleLabel" type="Label" parent="TopBar/HBoxContainer"]
 layout_mode = 2
 text = "Galaxy Map - 100 Light Years"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Spacer" type="Control" parent="TopBar/HBoxContainer"]
+[node name="ScreenCoordLabel" type="Label" parent="TopBar/HBoxContainer"]
 layout_mode = 2
-size_flags_horizontal = 3
+text = "Screen: (0, 0)"
+
+[node name="MapCoordLabel" type="Label" parent="TopBar/HBoxContainer"]
+layout_mode = 2
+text = "Map: (0.0 LY, 0.0 LY)"
 
 [node name="ZoomLabel" type="Label" parent="TopBar/HBoxContainer"]
 layout_mode = 2
 text = "Zoom: 1.0x"
 
-[node name="HSeparator2" type="HSeparator" parent="TopBar/HBoxContainer"]
+[node name="TimeSpeedLabel" type="Label" parent="TopBar/HBoxContainer"]
+layout_mode = 2
+text = "Time 1.0x (Running)"
+horizontal_alignment = 1
+
+[node name="GameTimeLabel" type="Label" parent="TopBar/HBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Year 0, Day 0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="SystemInfoLabel" type="Label" parent="TopBar/HBoxContainer"]
+layout_mode = 2
+text = "No system selected"
+
+[node name="DistanceLabel" type="Label" parent="TopBar/HBoxContainer"]
 layout_mode = 2
 
-[node name="CloseButton" type="Button" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Close"
-
-[node name="CoordinatesPanel" type="PanelContainer" parent="."]
-layout_mode = 1
-anchors_preset = 0
-offset_left = 10.0
-offset_top = 60.0
-offset_right = 280.0
-offset_bottom = 110.0
-
-[node name="VBoxContainer" type="VBoxContainer" parent="CoordinatesPanel"]
+[node name="SpectralClassLabel" type="Label" parent="TopBar/HBoxContainer"]
 layout_mode = 2
 
-[node name="ScreenCoordLabel" type="Label" parent="CoordinatesPanel/VBoxContainer"]
+[node name="Spacer" type="Control" parent="TopBar/HBoxContainer"]
 layout_mode = 2
-text = "Screen: (0, 0)"
-
-[node name="MapCoordLabel" type="Label" parent="CoordinatesPanel/VBoxContainer"]
-layout_mode = 2
-text = "Map: (0.0 LY, 0.0 LY)"
+size_flags_horizontal = 3
 
 [node name="BottomBar" type="PanelContainer" parent="."]
 layout_mode = 1
@@ -103,49 +99,62 @@ anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -100.0
+offset_top = -50.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="VBoxContainer" type="VBoxContainer" parent="BottomBar"]
+[node name="ButtonBar" type="HBoxContainer" parent="BottomBar"]
 layout_mode = 2
 
-[node name="SystemInfoLabel" type="Label" parent="BottomBar/VBoxContainer"]
+[node name="BackButton" type="Button" parent="BottomBar/ButtonBar"]
 layout_mode = 2
-text = "No system selected"
+text = "← Back"
 
-[node name="DistanceLabel" type="Label" parent="BottomBar/VBoxContainer"]
+[node name="LaunchProbeButton" type="Button" parent="BottomBar/ButtonBar"]
 layout_mode = 2
-text = ""
-
-[node name="SpectralClassLabel" type="Label" parent="BottomBar/VBoxContainer"]
-layout_mode = 2
-text = ""
-
-[node name="HSeparator" type="HSeparator" parent="BottomBar/VBoxContainer"]
-layout_mode = 2
-
-[node name="ButtonBar" type="HBoxContainer" parent="BottomBar/VBoxContainer"]
-layout_mode = 2
-
-[node name="LaunchProbeButton" type="Button" parent="BottomBar/VBoxContainer/ButtonBar"]
-layout_mode = 2
+disabled = true
 text = "Launch Probe"
-disabled = true
 
-[node name="ViewSystemButton" type="Button" parent="BottomBar/VBoxContainer/ButtonBar"]
+[node name="ViewSystemButton" type="Button" parent="BottomBar/ButtonBar"]
 layout_mode = 2
-text = "View System"
 disabled = true
+text = "View System"
 
-[node name="Spacer" type="Control" parent="BottomBar/VBoxContainer/ButtonBar"]
+[node name="ButtonBox" type="HBoxContainer" parent="BottomBar/ButtonBar"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="PauseButton" type="Button" parent="BottomBar/ButtonBar/ButtonBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "⏸️"
+
+[node name="SlowDownButton" type="Button" parent="BottomBar/ButtonBar/ButtonBox"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "⏩"
+
+[node name="SpeedUpButton" type="Button" parent="BottomBar/ButtonBar/ButtonBox"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "⏭️"
+
+[node name="ShowLabelsCheckbox" type="CheckBox" parent="BottomBar/ButtonBar"]
+layout_mode = 2
+text = "Show Star Labels"
+
+[node name="Spacer" type="Control" parent="BottomBar/ButtonBar"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="LaunchColonyButton" type="Button" parent="BottomBar/VBoxContainer/ButtonBar"]
+[node name="LaunchColonyButton" type="Button" parent="BottomBar/ButtonBar"]
 layout_mode = 2
-text = "🚀 Launch Colony Mission"
 disabled = true
+text = "🚀 Launch Colony Mission"
+
+[node name="CloseButton" type="Button" parent="BottomBar/ButtonBar"]
+layout_mode = 2
+text = "Close"
 
 [node name="HelpPanel" type="PanelContainer" parent="."]
 layout_mode = 1

@@ -8,17 +8,17 @@ namespace Outpost3.UI;
 /// </summary>
 public partial class SystemDetailsModalPresenter : PanelContainer
 {
-    private Label _titleLabel;
-    private Label _systemNameLabel;
-    private Label _starTypeValueLabel;
-    private Label _luminosityValueLabel;
-    private Label _ageValueLabel;
-    private Label _massValueLabel;
-    private VBoxContainer _bodiesListContainer;
-    private Button _closeButton;
-    private Button _viewSystemMapButton;
+    private Label? _titleLabel;
+    private Label? _systemNameLabel;
+    private Label? _starTypeValueLabel;
+    private Label? _luminosityValueLabel;
+    private Label? _ageValueLabel;
+    private Label? _massValueLabel;
+    private VBoxContainer? _bodiesListContainer;
+    private Button? _closeButton;
+    private Button? _viewSystemMapButton;
 
-    private PackedScene _bodyListItemScene;
+    private PackedScene? _bodyListItemScene;
 
     public override void _Ready()
     {
@@ -49,34 +49,42 @@ public partial class SystemDetailsModalPresenter : PanelContainer
     public void ShowSystem(StarSystem system)
     {
         GD.Print($"ShowSystem called for: {system.Name}");
-        
+
+        if (_systemNameLabel == null || _starTypeValueLabel == null || 
+            _luminosityValueLabel == null || _ageValueLabel == null || _massValueLabel == null)
+        {
+            GD.PrintErr("UI controls not properly initialized");
+            return;
+        }
+
         _systemNameLabel.Text = system.Name;
         _starTypeValueLabel.Text = system.SpectralClass;
 
-        // These properties don't exist yet in the domain model
-        // TODO: Add when StarSystem is enhanced with full stellar properties
-        _luminosityValueLabel.Text = $"{system.Luminosity:F2} L☉";
-        _ageValueLabel.Text = "Unknown";
-        _massValueLabel.Text = "Unknown";
-
         // Clear existing body items
-        foreach (Node child in _bodiesListContainer.GetChildren())
+        if (_bodiesListContainer != null)
         {
-            child.QueueFree();
-        }
+            foreach (Node child in _bodiesListContainer.GetChildren())
+            {
+                child.QueueFree();
+            }
 
-        // Instantiate body list items
-        foreach (var body in system.Bodies)
-        {
-            var bodyItem = _bodyListItemScene.Instantiate<BodyListItemComponent>();
-            _bodiesListContainer.AddChild(bodyItem);
-            bodyItem.SetBodyData(body);
+            // Instantiate body list items
+            if (_bodyListItemScene != null)
+            {
+                foreach (var body in system.Bodies)
+                {
+                    var bodyItem = _bodyListItemScene.Instantiate<BodyListItemComponent>();
+                    _bodiesListContainer.AddChild(bodyItem);
+                    bodyItem.SetBodyData(body);
+                }
+            }
         }
 
         // Make sure the modal is visible
         Visible = true;
         Show();
-        
+
+
         GD.Print($"ShowSystem: Modal visibility is now {Visible}");
     }
 
