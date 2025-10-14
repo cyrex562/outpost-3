@@ -19,6 +19,41 @@ public record GameState
     /// </summary>
     public Ulid? SelectedSystemId { get; init; }
 
+    // NEW: Session 2.2 - Star System Map additions
+
+    /// <summary>
+    /// The currently selected celestial body (for UI display).
+    /// Null if no body is selected.
+    /// </summary>
+    public Ulid? SelectedBodyId { get; init; }
+
+    /// <summary>
+    /// Navigation history stack (FILO - First In, Last Out).
+    /// Used for back button navigation between screens.
+    /// </summary>
+    public Stack<ScreenId> NavigationStack { get; init; } = new();
+
+    /// <summary>
+    /// Per-system camera state persistence.
+    /// Key: SystemId (as Ulid), Value: CameraState (pan/zoom).
+    /// </summary>
+    public Dictionary<Ulid, CameraState> CameraStates { get; init; } = new();
+
+    /// <summary>
+    /// Whether the system overview panel is open.
+    /// </summary>
+    public bool SystemOverviewPanelOpen { get; init; } = false;
+
+    /// <summary>
+    /// Current game speed multiplier.
+    /// </summary>
+    public GameSpeed CurrentSpeed { get; init; } = GameSpeed.Normal;
+
+    /// <summary>
+    /// Whether the game is paused.
+    /// </summary>
+    public bool IsPaused { get; init; } = false;
+
     /// <summary>
     /// Create new initial game state
     /// </summary>

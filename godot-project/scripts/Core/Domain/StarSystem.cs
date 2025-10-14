@@ -34,6 +34,43 @@ public record StarSystem
     public DiscoveryLevel DiscoveryLevel { get; init; } = DiscoveryLevel.Detected;
 
     public List<CelestialBody> Bodies { get; init; } = new();
+
+    /// <summary>
+    /// Seed for deterministic procedural generation of system details.
+    /// Null if not yet generated.
+    /// </summary>
+    public SystemSeed? Seed { get; init; } = null;
+
+    /// <summary>
+    /// Asteroid belts in this system.
+    /// Empty list if none or not yet generated.
+    /// </summary>
+    public List<AsteroidBelt> Belts { get; init; } = new();
+
+    /// <summary>
+    /// Oort cloud boundary.
+    /// Null if not yet generated.
+    /// </summary>
+    public OortCloud? OortCloud { get; init; } = null;
+}
+
+/// <summary>
+/// Represents an asteroid belt or debris field in a star system.
+/// </summary>
+public record AsteroidBelt
+{
+    public Ulid Id { get; init; }
+    public string Name { get; init; } = "";
+    public double InnerRadiusAU { get; init; }
+    public double OuterRadiusAU { get; init; }
+}
+
+/// <summary>
+/// Represents the Oort cloud boundary of a star system.
+/// </summary>
+public record OortCloud
+{
+    public double RadiusAU { get; init; }
 }
 
 public record CelestialBody
@@ -85,5 +122,25 @@ public record CelestialBody
     /// Known hazards - null if not explored.
     /// </summary>
     public List<string>? Hazards { get; init; } = null;
+
+    // NEW: Orbital mechanics (added for Session 2.2)
+
+    /// <summary>
+    /// Orbital parameters for this body.
+    /// Null for the star itself or if not yet generated.
+    /// </summary>
+    public OrbitalParameters? OrbitalParams { get; init; } = null;
+
+    /// <summary>
+    /// Mass in Earth masses.
+    /// 0 if not yet generated.
+    /// </summary>
+    public double MassEarthMasses { get; init; } = 0.0;
+
+    /// <summary>
+    /// Radius in kilometers.
+    /// 0 if not yet generated.
+    /// </summary>
+    public double RadiusKm { get; init; } = 0.0;
 }
 

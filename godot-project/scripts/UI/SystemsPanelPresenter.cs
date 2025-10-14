@@ -18,7 +18,7 @@ public partial class SystemsPanelPresenter : MarginContainer
     private VBoxContainer _systemListContainer;
     private StateStore _stateStore;
     private Ulid? _currentSelectedSystemId;
-    private SystemDetailsModalPresenter _systemDetailsModal;
+    private GalaxyMapSystemDetailsModalPresenter _systemDetailsModal;
 
     public override void _Ready()
     {
@@ -30,7 +30,7 @@ public partial class SystemsPanelPresenter : MarginContainer
         _stateStore = gameServices.StateStore;
 
         // Create and add system details modal to the scene tree root
-        _systemDetailsModal = GD.Load<PackedScene>("res://Scenes/UI/SystemDetailsModal.tscn").Instantiate<SystemDetailsModalPresenter>();
+        _systemDetailsModal = GD.Load<PackedScene>("res://Scenes/UI/SystemDetailsModal.tscn").Instantiate<GalaxyMapSystemDetailsModalPresenter>();
         GetTree().Root.AddChild(_systemDetailsModal);
 
         // Subscribe to state changes

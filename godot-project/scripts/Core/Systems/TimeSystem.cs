@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Outpost3.Core.Commands;
 using Outpost3.Core.Domain;
 using Outpost3.Core.Events;
@@ -12,10 +13,28 @@ public static class TimeSystem
     {
         return command switch
         {
+            // Time & Core
             AdvanceTime cmd => ReduceAdvanceTime(state, cmd),
             LaunchProbe cmd => ReduceLaunchProbe(state, cmd),
-            SelectSystemCommand cmd => SystemSelectionSystem.HandleSelectSystem(state, cmd),
             InitializeGalaxy cmd => ReduceInitializeGalaxy(state, cmd),
+
+            // System Selection (legacy)
+            SelectSystemCommand cmd => SystemSelectionSystem.HandleSelectSystem(state, cmd),
+
+            // Navigation
+            PushScreen cmd => NavigationReducer.HandlePushScreen(state, cmd),
+            PopScreen cmd => NavigationReducer.HandlePopScreen(state, cmd),
+            NavigateToScreen cmd => NavigationReducer.HandleNavigateToScreen(state, cmd),
+
+            // Star System
+            GenerateSystemDetails cmd => StarSystemReducer.HandleGenerateSystemDetails(state, cmd),
+            SelectCelestialBody cmd => StarSystemReducer.HandleSelectCelestialBody(state, cmd),
+            UpdateCamera cmd => StarSystemReducer.HandleUpdateCamera(state, cmd),
+            ResetCamera cmd => StarSystemReducer.HandleResetCamera(state, cmd),
+            ToggleSystemOverviewPanel cmd => StarSystemReducer.HandleToggleSystemOverviewPanel(state, cmd),
+            SetGameSpeed cmd => StarSystemReducer.HandleSetGameSpeed(state, cmd),
+            TogglePause cmd => StarSystemReducer.HandleTogglePause(state, cmd),
+
             _ => (state, new List<IGameEvent>())
         };
     }
@@ -61,8 +80,27 @@ public static class TimeSystem
         LaunchProbe command
     )
     {
-        var travelTime = 100.0;
-        var arrivalTime = state.GameTime + travelTime;
+        // Find the target system to get its distance from Sol
+        var targetSystem = state.Systems.FirstOrDefault(s => s.Id == command.TargetSystemId);
+        if (targetSystem == null)
+        {
+            // If system not found, use a default travel time (shouldn't happen in normal gameplay)
+            var defaultTravelTime = PhysicsConstants.CalculateProbeTraverTime(10.0); // 10 light-years default
+            var defaultArrivalTime = state.GameTime + defaultTravelTime;
+
+            var defaultState = state.WithProbeLaunched(command.TargetSystemId, defaultArrivalTime, out var defaultProbeId);
+            var defaultEvents = new List<IGameEvent>
+            {
+                new ProbeLaunched(defaultProbeId, command.TargetSystemId, defaultArrivalTime)
+                { GameTime = (float)state.GameTime }
+            };
+            return (defaultState, defaultEvents);
+        }
+
+        // Calculate realistic travel time based on distance and 0.9c probe speed
+        var distanceLightYears = (double)targetSystem.DistanceFromSol;
+        var travelTimeHours = PhysicsConstants.CalculateProbeTraverTime(distanceLightYears);
+        var arrivalTime = state.GameTime + travelTimeHours;
 
         var newState = state.WithProbeLaunched(
             command.TargetSystemId,
