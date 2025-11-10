@@ -239,28 +239,28 @@
 
 - Purpose: Planet/moon map segmented into sectors
 - Elements
-    - Rectangular map divided into sectors; divisions drawn with borders
-    - Click to select sector -> display details in sector details modal
-    - Toggle layers
-        - Topography
-        - Structures
-        - Roads
-        - Subsurface
-        - Energy grid
-        - Temperatures/weather/atmosphere
-        - Resource deposits
-        - hazards/anomalies
-        - missions list
-        - Colony site candidates (heat map for desirability)
-            - Filters for desirability
-    - Sector Details Modal
-        - Terrain info
-        - Hazards/anomalies
-        - Resources
-        - Atmosphere/weather
-        - Missions list
-        - Exploration status
-    - Launch Mission btn -> send expedition, send probe, select for colonization
+  - Rectangular map divided into sectors; divisions drawn with borders
+  - Click to select sector -> display details in sector details modal
+  - Toggle layers
+    - Topography
+    - Structures
+    - Roads
+    - Subsurface
+    - Energy grid
+    - Temperatures/weather/atmosphere
+    - Resource deposits
+    - hazards/anomalies
+    - missions list
+    - Colony site candidates (heat map for desirability)
+      - Filters for desirability
+  - Sector Details Modal
+    - Terrain info
+    - Hazards/anomalies
+    - Resources
+    - Atmosphere/weather
+    - Missions list
+    - Exploration status
+  - Launch Mission btn -> send expedition, send probe, select for colonization
 
 ## Celestial Body Sector Map (Single Sector) Screen
 

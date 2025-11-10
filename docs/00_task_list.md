@@ -1,0 +1,475 @@
+
+
+# TO DO list for Outpost 3
+
+## Scenes
+
+### Main Menu Scene
+
+- Purpose: Entry point; access to game start, load, settings, credits, exit
+- Elements:
+  - "New" Game btn -> "New Game Configuration" Screen
+  - "Load" Game btn -> "Load Game" Screen
+  - "Settings" btn -> "Game Settings" Screen
+  - "Mods" btn -> "Mod Management" Screen
+  - "Credits" btn -> Credis Screen
+  - "Exit" btn -> Exit to Desktop
+  - "Continue" btn (If compatible save exists) -> Load Gamen and Show Last Screen
+  - Background: Dynamic animated view
+  - Version & Build Info
+
+### Game Settings Scene
+
+- Purpose: Adjust global settings
+- Elements
+  - Tabs
+    - Audio Tab
+    - Graphics Tab
+    - Controls Tab
+      - Keybindings
+      - Controller configuration
+    - Gameplay Tab
+    - Accessibility Tab
+  - "Back" btn -> Return to "Main Menu" Screen
+
+### Load Game Scene
+
+- Purpose: List and manage save files
+- Elements:
+  - Save file list (date, colony name, system name)
+  - Preview info: screenshot, summary stats
+  - "Load" btn -> Load selected save file: show confirmation modal
+  - "Delete" btn -> Delete selected save file; show confirmation modal
+  - "Back" btn -> Return to Main Menu Screen or to In-Game Settings Screen
+  - Quick save/Quick load
+
+### Save Mode
+
+- Same screen, but called from in-game
+- Adds ability to create a save game or save to an existing file
+- Quick save / quick load features
+
+### Mod Management Scene
+
+- Purpose: show mods detected in folder, display information about them including compatibility, and allow them to be enabled/disabled. Indicate if a mod will result in disabling achievements
+- Elements
+  - version compatiblity
+  - load order controls
+  - enable/disable all btn
+  - dependency conflict indicator
+
+### Pause / In-Game Menu Scene
+
+- Purpose: in-session access to settings, save/load, exit, and help functions
+- Accessed by ESC key or menu button
+- Elements
+  - Resume
+  - Save/Load -> Save/Load Screen
+  - Settings -> Settings Screen
+  - Exit to Main Menu -> Main Menu Screen (with confirmation modal)
+  - Exit to Desktop -> Exit to desktop (with confirmation modal)
+
+### Help/Codex Scene
+
+- Purpose: provide a wiki-like document about all aspects of the game
+- Elements
+  - Search bar
+  - Tabs, other wiki elements
+
+### Game Credits Scene
+
+- Contains information about the developer and publisher, along with a scrollable (scrolling?) list of attributions
+
+### New Game Configuration Scene
+
+- Purpose: Define player, difficulty, and starting conditions
+- Elements:
+  - Input for player name
+  - Dropdowns, sliders, input boxes, check boxes for difficulty, starting conditions
+  - Mod selector modal
+  - Advanced settings button -> Advanced settings modal/screen
+  - "Next" btn -> Star System Selection
+
+## Star System Selection Map Scene
+
+- Purpose: Select target system for colonization
+- Elements:
+  - Map of nearby stars with with probe coverage indicators
+  - Hover tooltips showing distance, type, probe data completeness
+  - Travel time indicator
+  - Ship power indicator?
+  - Star System Details Modal
+    - Purpose: Show information about selected star system
+    - Elements
+      - System name
+      - Spectral type
+      - Estimated planet count
+      - Known resources
+      - Anomalies
+      - Habitability
+      - (If probe sent): Sensor uncertainty
+      - Select system btn -> Select system as colony target
+      - Send probe btn -> Send probe
+  - mini-map of galaxy for context
+  - Filters for distance, habitability, richness, risk
+
+## Ship Configuration Scene
+
+- Purpose: Prepare the colony ship
+- Elements
+  - Tabs
+    - Crew
+    - Cargo
+    - Robots/Vehicles
+    - Modules
+    - Supplies
+  - Resource bars
+    - Mass
+    - Volume
+    - Power Budget
+    - Cost?
+  - Toggle for "Generation Ship" or "Sleeper Ship"
+  - Summary/manifest preview
+  - "Launch Mission" btn
+  - "Cargo Details" Modal: Show a breakdown of item types, dependencies, storage, location, and warnings
+  - Template management
+  - (Future) ship schematic graphic
+  - Warning indicator
+
+## Ship Journey Log Scene
+
+- Purpose: Event-driven narrative during travel
+- Elements
+  - Timeline or scrollable log wiith events
+  - Illustrations, comm logs, crew messages
+  - Player choice modals for events
+  - System integrity and morale meters
+  - Outcome summary modal: Show the impact of events during the journey to the colony mission
+    - Enable player to review choices?
+
+## Star System Map Scene
+
+- Purpose: Primary map view of destination system
+- Elements
+  - Map
+    - Star at center
+    - Orbit lines
+    - Planet Icons
+    - Asteroid and comet zones
+    - Ship orbit and position
+    - Indicators for explored/unexplored bodies
+  - Send probe btn
+  - Visit btn
+  - Celestial body details modal
+    - image
+    - type
+    - atmosphere/climate
+    - gravity
+    - resources summary
+    - anomalies
+    - hazards
+    - missions
+    - "View Orbit" btn -> "Celstial Body Orbital View" Screen
+    - "Send Probe" btn -> send probe; events; update info
+    - "Travel to Orbit" btn -> move ship to orbit around body
+    - "Mission" btn -> select for establishing a colony, sending a mission, etc.
+
+## Celestial Body Orbital View Scene
+
+- Purpose: Transition point between system and surface maps
+- Elements
+  - Planet rotating view (2.5 D)
+  - Buttons to deploy satellites, landers, or scan surface
+  - Readouts: fuel
+  - Satellite deployment modal
+  - Surface scan results modal
+  - Missions summary list
+  - "Show Surface Map" btn -> "Celestial Body Surface Map"
+  - Button to dock at a station or de-orbit/land
+  - Btn to view orbital assets in an overview list
+  - Orbital asset list panel/modal
+    - list of orbital assets
+    - action buttons
+    - double-click for details modal
+
+## Celestial Body Surface Map Scene
+
+
+- Purpose: Planet/moon map segmented into sectors
+- Elements
+  - Rectangular map divided into sectors; divisions drawn with borders
+  - Click to select sector -> display details in sector details modal
+  - Toggle layers
+    - Topography
+    - Structures
+    - Roads
+    - Subsurface
+    - Energy grid
+    - Temperatures/weather/atmosphere
+    - Resource deposits
+    - hazards/anomalies
+    - missions list
+    - Colony site candidates (heat map for desirability)
+      - Filters for desirability
+  - Sector Details Modal
+    - Terrain info
+    - Hazards/anomalies
+    - Resources
+    - Atmosphere/weather
+    - Missions list
+    - Exploration status
+  - Launch Mission btn -> send expedition, send probe, select for colonization
+
+## Celestial Body Site Map Scene
+
+- Purpose: Main colony management and construction view
+- Elements
+  - Tile-based layout showing terrain, structures, vehicles, resources
+  - Layer: topography, structures, roads, infrastructure
+  - Elevation toggle for different levels
+  - Unit/building summary panel
+  - Selected Tile summary panel
+  - Action buttons
+    - Game speed/pause btn
+    - Settings btn
+  - Map Tile Details Modal
+    - Terrain
+    - Resources
+    - Structures
+    - Weather conditions
+    - Contextual Actions like Build, Excavate, Survey, Repair, etc.
+  - Mini-map for navigation
+  - Zoom btn for zooming in/out
+
+## Random Event/Encounter Scene
+
+- Purpose: Deliver narrative decisions or random challenges
+- Elements
+  - Text description
+  - character/scene images
+  - Data readouts
+  - Choice buttons
+
+## Building Details/Configuration Scene
+
+- Tabs for status, orders, upgrades, crew, maintenance, and history
+- Action buttons
+  - automate/manual control
+  - go to location
+  - start/pause/stop/abort orders
+  - return to base
+- alerts
+
+## Vehicle Details/Configuration Scene
+
+- Tabs for power, production, storage, workforce, upgrades
+- Action buttons
+  - Repair
+  - Deconstruct
+  - Pause/resume building (mothball)
+- Alerts
+
+## Colony Overview Scene
+
+- Purpose: Central hub for the entire colony
+- Elements
+  - Aggregate stats: population, morale, resources
+  - Graphs for production and consumption
+  - Btn to display summary/list screens
+    - Settlement/Installation Overview
+    - Celestial Body Overview
+    - Vehicle Overview
+    - Policy & Governance
+    - Research Overview
+    - Trade Overview
+
+## Trade / Logistics Network Overview Scene
+
+- Visual map of resource flows between settlements and installations
+- Manual and automated route configuration
+- Graphs for volume
+- Stats/lists for supply/demand
+- Special mode for system map to create/edit routes
+
+## Settlement/Installation Overview Scene
+
+- Purpose: A list of all settlements and installations, their status, and way to navigate to them
+- Elements
+  - List of settlements/installations
+  - Double click on list element to go to overview screen for that settlement/installation
+  - Search/Filter
+
+## Celestial Body Overview Scene
+
+- Purpose: a list of all major celestial bodies in the system and their properties
+- Elements
+  - List of bodies and info about each
+  - Double click to go to overview screen for Celestial body
+  - Search/Filter
+
+## Policy & Governance Scene
+
+- Purpose: Manage laws, research priorities, taxes, rationing, worker conditions, etc.
+- Elements
+  - Charts and graphs of status
+  - Modals to manage policies and other configurations
+
+## Research  Scene
+
+- Purpose: Tech tree, lab projects, engineering projects
+- Elements
+  - Tech tree view
+    - Researchable tech
+    - Engineering projects
+    - Status of each task (researchable, in progress, not available)
+  - Lab overview
+    - Lab assignment
+    - Progress/status
+
+## Vehicle Overview Scene
+
+- Purpose: list all vehicles in the game
+- Elements
+  - Select by X
+  - Search/Filter
+  - Double click for details
+  - List of vehicles and basic info for them in each row
+  - Action buttons to upgrade, decommission, return to base/storage, stop/pause work, edit orders/automation
+
+## Settlement/Installation Details/Configuration Scene
+
+- Purpose:  Filtered-down version of Colony Overview just for the current settlement/installation in the sector
+- Elements
+  - Resource/production graphs
+  - Colonist info
+  - Labor allocation
+  - Other resource allocation
+  - Action buttons: upgrade, decommission, reassign staff, set policies
+
+## Production Chain Details/Configuration Screen
+
+- Purpose: Visualize and manage product chains of vehicles and structures. Production chain can entail one single item from extraction to production or a more complex system to produce a finished product like a vehicle (should other production chains be selectable?)
+- Elements
+  - Flow diagram
+    - Nodes
+      - Location for a resource
+      - Extracting vehicle/installation
+      - Processing vehicle/installation
+      - Manufacturing vehicle/installation
+      - Storage/disposition vehicle/installation
+    - Edges
+      - Transport links like roads, rails, maritime, pipelines, conveyors, interplanetary routes
+    - Create new node modal
+    - Edit node modal
+    - Drag points between nodes or edit nodes to select destinations, sources
+  - Toggle automation/manual
+  - Template use and management
+  - Also script mode that displays highlighted text (YAML format?) for hand editing
+  - Export/load YAML file
+  - Validate chain btn
+  - Highlight on map btn -> show highlights on different maps for production chain elements
+
+## Probe/Mission Details/Configuration Modal
+
+- Purpose: create and manage missions
+- Elements
+  - Mission objectives
+  - Duration indicator
+  - Risk indicator
+  - Current status
+  - Log list
+  - Cost
+  - Launch, pause, abort
+  - Template management
+
+## Automation Details/Configuration Scene
+
+- Purpose: Script-like interface for management and automation
+- Elements
+  - Flow diagram
+    - Nodes: triggers, actions
+    - Edges: if/then/repeat
+  - Template management
+  - Text editor
+    - Syntax highlighted procedure in YAML
+  - Load/Export YAML
+
+## Messages Panel Scene
+
+- Present on every gameplay screen
+- Display event notifications on every screen.
+- List of events
+- Flashing/other indicators for new messages
+- Dismiss without reading or open message to make choice, go to location/screen for message, etc
+
+## Event Log Scene
+
+- Persistent list of all major events, choices, and outcomes
+- Search/filter
+- Generate a report for debugging or narrative
+- Color coding
+- Pinning (good for journal entries too -- could help with tutorial)
+
+## Analytics Scene
+
+- Show graphs of different statistics over time
+- Export data
+- Time range and filtering
+
+## Achievements/Milestones Scene
+
+- Show completed achievements and player milestones in-session/all-time
+
+## Debug Chat Prompt Scene
+
+- [ ] the debug panel should be displayable from any scene using the `~` key or the equivalent binding.
+- [ ] The debug panel should have a prompt for entering commands
+- [ ] the debug panel should have a search and filter bar at the top
+- [ ] the debug panel should be toggleable enabled/disabled from game settings (either file or menu)
+
+### Star System Selection Scene
+
+- add tooltips to hovering over stars with basic known stats about star: name, spectral class, number of bodies if known
+- show a notification and possibly flash the target body when a probe arrives
+- add a debugging command, valid only on this scene to toggle a system explored/unexplored
+- events that happen to launched probes
+
+### Ship Journey Log
+
+- events that happen during the ship's journey
+
+### Planet Map Scene
+
+#### New Site Mode
+
+- instead of sectors, player can click any point on the map to create a new site; maybe have a maximum number of sites per planet based on site size or something like that.
+
+## Game Mechanics
+
+- Colonists should have mini character sheets to track their abilities and experience. How would this scale in-game if we have billions of colonists? is there a better way to model this but maintain high fidelity in event generation and outcomes?
+- procedurally generate planet map.
+- procedurally generate the site
+- site size can expand over time.
+- sites can be linked with infrastructure and routes for trade like rails, highways, etc.
+- big infra projects should be possible to improve planet-wide infrastructure like bridges, roads, rail, canals, dams, etc.
+- research does more than science. Engineering teams take known science and apply it to building versions of systems and platforms tailored to the colonized environment. those are also "discoveries"
+
+### Events
+
+- event effects, event description/narrative, link to image/animation to display, choices and effects of choices with probabilities if random
+- specific types of events should be loaded from disk in a YAML format to enable modding support and content creation support
+- in logging display event logs should have specific colors for types of events, styling of text, nerdfont-like symbols and emoji
+- events should have pre-requisites to make sure they occur under the right circumstances like what scene, what is going on, state of the game, etc. Ex: some events can happen to a ship that is a generation ship but may not make sense to happen to a sleeper ship and vice versa.
+- Events should take into account things like the skills of colonists.
+
+
+1. **YAML Export**: Add YamlDotNet NuGet package and implement ExportToYaml
+2. **Icon Loading**: Implement GetIconForEventType in JourneyEventEntry
+3. **Choice Commands**: Implement command creation in OnEventChoiceSelected
+4. **Proper DI**: Replace service locator pattern with proper dependency injection
+5. **Pin Persistence**: Implement scene persistence for debug panel pin mode
+6. **Phase/Session Tracking**: Implement proper phase and session tracking for time filters
+7. **Navigation**: Implement CanNavigateToEvent and NavigateToEvent methods
+8. **UI Testing**: Add Godot-specific UI tests when framework is available
+9. **Performance**: Add performance tests for 1000+ events
+10. **Concurrency**: Add multi-reader concurrency tests
