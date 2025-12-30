@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use super::{PlanetId, ResourceType};
+use super::PlanetId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TrainId(pub u64);

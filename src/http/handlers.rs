@@ -1,10 +1,144 @@
 use actix_web::{web, HttpResponse, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use rusqlite::Connection;
 
 use crate::domain::*;
 use crate::events::{EventStore, GameEvent, EventType};
 use crate::commands::{Command, FoundColony, ConstructBuilding, AdvanceTurn};
 use crate::db::DbPool;
+
+// Helper functions for database operations
+fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources> {
+    let mut resources = Resources::new();
+
+    let mut stmt = conn.prepare(
+        "SELECT resource_type, quantity FROM resource_stockpiles WHERE colony_id = ?1"
+    )?;
+
+    let rows = stmt.query_map([colony_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+
+    for row_result in rows {
+        let (resource_type_str, quantity) = row_result?;
+        let resource_type = match resource_type_str.as_str() {
+            "Credits" => ResourceType::Credits,
+            "Energy" => ResourceType::Energy,
+            "IronOre" => ResourceType::IronOre,
+            "Food" => ResourceType::Food,
+            "Water" => ResourceType::Water,
+            "Steel" => ResourceType::Steel,
+            "Electronics" => ResourceType::Electronics,
+            _ => continue,
+        };
+        resources.set(resource_type, quantity);
+    }
+
+    // If no resources in DB, initialize with starting resources
+    if resources.get(ResourceType::Credits) == 0 {
+        resources = Resources::starting_resources();
+        save_resources(conn, colony_id, &resources)?;
+    }
+
+    Ok(resources)
+}
+
+fn save_resources(conn: &Connection, colony_id: u64, resources: &Resources) -> anyhow::Result<()> {
+    for (resource_type, quantity) in resources.iter() {
+        let resource_type_str = format!("{:?}", resource_type);
+        conn.execute(
+            "INSERT OR REPLACE INTO resource_stockpiles (colony_id, resource_type, quantity)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![colony_id, resource_type_str, quantity],
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct ResourcesView {
+    credits: i64,
+    energy: i64,
+    iron_ore: i64,
+    food: i64,
+    water: i64,
+    steel: i64,
+    electronics: i64,
+}
+
+impl From<&Resources> for ResourcesView {
+    fn from(resources: &Resources) -> Self {
+        Self {
+            credits: resources.get(ResourceType::Credits),
+            energy: resources.get(ResourceType::Energy),
+            iron_ore: resources.get(ResourceType::IronOre),
+            food: resources.get(ResourceType::Food),
+            water: resources.get(ResourceType::Water),
+            steel: resources.get(ResourceType::Steel),
+            electronics: resources.get(ResourceType::Electronics),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ColonyView {
+    id: u64,
+    planet_id: u64,
+    name: String,
+    founded_at: String,
+    population: u64,
+    morale: f32,
+    pollution_level: f32,
+}
+
+impl From<&Colony> for ColonyView {
+    fn from(colony: &Colony) -> Self {
+        Self {
+            id: colony.id.0,
+            planet_id: colony.planet_id.0,
+            name: colony.name.clone(),
+            founded_at: colony.founded_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+            population: colony.population,
+            morale: colony.morale,
+            pollution_level: colony.pollution_level,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BuildingView {
+    id: u64,
+    type_name: String,
+    state: String,
+    description: String,
+}
+
+impl BuildingView {
+    fn from_type(id: u64, building_type: &BuildingType, state: &str) -> Self {
+        let (type_name, description) = match building_type {
+            BuildingType::Mine { resource_type, output_rate } => {
+                (format!("Mine ({:?})", resource_type), format!("Produces {} {:?} per turn", output_rate, resource_type))
+            }
+            BuildingType::PowerPlant { output_mw, .. } => {
+                ("Power Plant".to_string(), format!("Generates {} MW per turn", output_mw))
+            }
+            BuildingType::Housing { capacity, .. } => {
+                ("Housing".to_string(), format!("Capacity: {} residents", capacity))
+            }
+            BuildingType::Farm { output_rate } => {
+                ("Farm".to_string(), format!("Produces {} Food per turn", output_rate))
+            }
+            _ => ("Unknown".to_string(), "".to_string()),
+        };
+
+        Self {
+            id,
+            type_name,
+            state: state.to_string(),
+            description,
+        }
+    }
+}
 
 pub async fn index(tmpl: web::Data<tera::Tera>) -> Result<HttpResponse> {
     let mut context = tera::Context::new();
@@ -43,6 +177,9 @@ pub async fn view_colony(
 
     let colony = match colony_result {
         Ok((id, planet_id, name, founded_at, population, morale, pollution_level)) => {
+            let resources = load_resources(&conn, id)
+                .unwrap_or_else(|_| Resources::starting_resources());
+
             Colony {
                 id: ColonyId(id),
                 planet_id: PlanetId(planet_id),
@@ -50,7 +187,7 @@ pub async fn view_colony(
                 founded_at: chrono::DateTime::parse_from_rfc3339(&founded_at)
                     .unwrap()
                     .with_timezone(&chrono::Utc),
-                resources: Resources::starting_resources(), // TODO: Load from db
+                resources,
                 population,
                 morale,
                 pollution_level,
@@ -87,15 +224,29 @@ pub async fn view_colony(
         "SELECT building_id, building_type, state FROM buildings WHERE colony_id = ?1"
     ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
-    let buildings: Vec<(u64, String, String)> = stmt.query_map([*colony_id], |row| {
+    let building_data: Vec<(u64, String, String)> = stmt.query_map([*colony_id], |row| {
         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     })
     .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
     .filter_map(|r| r.ok())
     .collect();
 
+    // Convert to BuildingView
+    let buildings: Vec<BuildingView> = building_data.iter()
+        .filter_map(|(id, type_str, state)| {
+            serde_json::from_str::<BuildingType>(type_str)
+                .ok()
+                .map(|bt| BuildingView::from_type(*id, &bt, state))
+        })
+        .collect();
+
+    let colony_view = ColonyView::from(&colony);
+    let resources_view = ResourcesView::from(&colony.resources);
+
     let mut context = tera::Context::new();
-    context.insert("colony", &colony);
+    context.insert("colony", &colony_view);
+    context.insert("resources", &resources_view);
+    context.insert("buildings", &buildings);
     context.insert("buildings_count", &buildings.len());
 
     let html = tmpl.render("colony.html", &context)
@@ -198,17 +349,21 @@ pub async fn construct_building(
         _ => BuildingType::Farm { output_rate: 20 },
     };
 
+    // Load actual resources
+    let mut resources = load_resources(&conn, *colony_id)
+        .unwrap_or_else(|_| Resources::starting_resources());
+
     let command = ConstructBuilding {
         building_id: BuildingId(building_id),
         colony_id: ColonyId(*colony_id),
         building_type: building_type.clone(),
-        available_resources: Resources::starting_resources(), // TODO: Get actual resources
+        available_resources: resources.clone(),
     };
 
     let events = command.execute()
         .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
 
-    // Save events
+    // Save events and apply to state
     for event in events {
         let game_event = GameEvent::new(
             event_store.get_next_event_id()
@@ -221,17 +376,28 @@ pub async fn construct_building(
             .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
         // Apply event to database
-        if let EventType::BuildingConstructionStarted { building_id, colony_id, building_type } = event {
-            conn.execute(
-                "INSERT INTO buildings (building_id, colony_id, building_type, state) VALUES (?1, ?2, ?3, 'UnderConstruction')",
-                rusqlite::params![
-                    building_id.0,
-                    colony_id.0,
-                    serde_json::to_string(&building_type).unwrap(),
-                ],
-            ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        match event {
+            EventType::BuildingConstructionStarted { building_id, colony_id, building_type } => {
+                conn.execute(
+                    "INSERT INTO buildings (building_id, colony_id, building_type, state) VALUES (?1, ?2, ?3, 'Operational')",
+                    rusqlite::params![
+                        building_id.0,
+                        colony_id.0,
+                        serde_json::to_string(&building_type).unwrap(),
+                    ],
+                ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+            }
+            EventType::ResourcesConsumed { colony_id, resource_type, amount } => {
+                let current = resources.get(resource_type);
+                resources.set(resource_type, current - amount);
+            }
+            _ => {}
         }
     }
+
+    // Save updated resources
+    save_resources(&conn, *colony_id, &resources)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok()
         .insert_header(("HX-Trigger", "buildingAdded"))
@@ -239,7 +405,7 @@ pub async fn construct_building(
 }
 
 pub async fn advance_turn(
-    _colony_id: web::Path<u64>,
+    colony_id: web::Path<u64>,
     event_store: web::Data<EventStore>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse> {
@@ -253,12 +419,37 @@ pub async fn advance_turn(
         |row| row.get(0)
     ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
-    let command = AdvanceTurn { current_turn };
+    // Load buildings
+    let mut buildings = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT building_type FROM buildings WHERE colony_id = ?1 AND state = 'Operational'"
+    ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    let building_rows = stmt.query_map([*colony_id], |row| {
+        row.get::<_, String>(0)
+    }).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    for row_result in building_rows {
+        let building_type_str = row_result
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        if let Ok(building_type) = serde_json::from_str::<BuildingType>(&building_type_str) {
+            buildings.push((ColonyId(*colony_id), building_type));
+        }
+    }
+
+    // Load current resources for this colony
+    let mut resources = load_resources(&conn, *colony_id)
+        .unwrap_or_else(|_| Resources::starting_resources());
+
+    let command = AdvanceTurn {
+        current_turn,
+        buildings,
+    };
 
     let events = command.execute()
         .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
 
-    // Save events
+    // Save events and apply to state
     for event in events {
         let game_event = GameEvent::new(
             event_store.get_next_event_id()
@@ -270,14 +461,25 @@ pub async fn advance_turn(
         event_store.save_event(&game_event)
             .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
-        // Update game state
-        if let EventType::TurnAdvanced { turn_number } = event {
-            conn.execute(
-                "UPDATE game_state SET current_turn = ?1 WHERE id = 1",
-                [turn_number],
-            ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        // Apply events
+        match event {
+            EventType::TurnAdvanced { turn_number } => {
+                conn.execute(
+                    "UPDATE game_state SET current_turn = ?1 WHERE id = 1",
+                    [turn_number],
+                ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+            }
+            EventType::ResourcesProduced { resource_type, amount, .. } => {
+                let current = resources.get(resource_type);
+                resources.set(resource_type, current + amount);
+            }
+            _ => {}
         }
     }
+
+    // Save updated resources
+    save_resources(&conn, *colony_id, &resources)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok()
         .insert_header(("HX-Refresh", "true"))

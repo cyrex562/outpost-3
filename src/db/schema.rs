@@ -55,3 +55,14 @@ CREATE TABLE IF NOT EXISTS game_state (
     credits INTEGER NOT NULL DEFAULT 10000
 );
 "#;
+
+pub const RESOURCE_STOCKPILES_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS resource_stockpiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    colony_id INTEGER NOT NULL,
+    resource_type TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (colony_id) REFERENCES colonies(colony_id),
+    UNIQUE(colony_id, resource_type)
+);
+"#;
