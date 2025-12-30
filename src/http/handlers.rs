@@ -27,6 +27,31 @@ impl From<&Resources> for ResourcesView {
     }
 }
 
+#[derive(Serialize)]
+struct ColonyView {
+    id: u64,
+    planet_id: u64,
+    name: String,
+    founded_at: String,
+    population: u64,
+    morale: f32,
+    pollution_level: f32,
+}
+
+impl From<&Colony> for ColonyView {
+    fn from(colony: &Colony) -> Self {
+        Self {
+            id: colony.id.0,
+            planet_id: colony.planet_id.0,
+            name: colony.name.clone(),
+            founded_at: colony.founded_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+            population: colony.population,
+            morale: colony.morale,
+            pollution_level: colony.pollution_level,
+        }
+    }
+}
+
 pub async fn index(tmpl: web::Data<tera::Tera>) -> Result<HttpResponse> {
     let mut context = tera::Context::new();
     context.insert("title", "Outpost 3: Wormhole Empire");
@@ -115,10 +140,11 @@ pub async fn view_colony(
     .filter_map(|r| r.ok())
     .collect();
 
+    let colony_view = ColonyView::from(&colony);
     let resources_view = ResourcesView::from(&colony.resources);
 
     let mut context = tera::Context::new();
-    context.insert("colony", &colony);
+    context.insert("colony", &colony_view);
     context.insert("resources", &resources_view);
     context.insert("buildings_count", &buildings.len());
 

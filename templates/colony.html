@@ -7,7 +7,7 @@
     <header class="colony-header">
         <h2>{{ colony.name }}</h2>
         <div class="colony-meta">
-            <span>Planet ID: {{ colony.planet_id.0 }}</span>
+            <span>Planet ID: {{ colony.planet_id }}</span>
             <span>Founded: {{ colony.founded_at }}</span>
         </div>
     </header>
@@ -75,7 +75,7 @@
         <section class="build-panel">
             <h3>Construct Building</h3>
             <form class="build-form"
-                  hx-post="/colony/{{ colony.id.0 }}/building"
+                  hx-post="/colony/{{ colony.id }}/building"
                   hx-target="#building-list"
                   hx-swap="beforeend">
                 <label for="building-type">Building Type:</label>
@@ -102,7 +102,7 @@
         <section class="turn-panel">
             <h3>Turn Control</h3>
             <button class="btn btn-large btn-turn"
-                    hx-post="/colony/{{ colony.id.0 }}/turn"
+                    hx-post="/colony/{{ colony.id }}/turn"
                     hx-swap="none">
                 Advance Turn
             </button>
