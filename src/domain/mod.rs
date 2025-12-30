@@ -10,4 +10,4 @@ pub use building::{Building, BuildingId, BuildingType, BuildingState};
 pub use resource::{Resource, ResourceType, Resources};
 pub use planet::{Planet, PlanetId, PlanetType};
 pub use wormhole::{WormholeGate, WormholeId};
-pub use train::{Train, TrainId, Route, RouteId};
+pub use train::{Train, TrainId, TrainType, TrainSize, TrainState, Route, RouteId};
