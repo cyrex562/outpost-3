@@ -1,10 +1,31 @@
 use actix_web::{web, HttpResponse, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::*;
 use crate::events::{EventStore, GameEvent, EventType};
 use crate::commands::{Command, FoundColony, ConstructBuilding, AdvanceTurn};
 use crate::db::DbPool;
+
+#[derive(Serialize)]
+struct ResourcesView {
+    credits: i64,
+    energy: i64,
+    iron_ore: i64,
+    food: i64,
+    water: i64,
+}
+
+impl From<&Resources> for ResourcesView {
+    fn from(resources: &Resources) -> Self {
+        Self {
+            credits: resources.get(ResourceType::Credits),
+            energy: resources.get(ResourceType::Energy),
+            iron_ore: resources.get(ResourceType::IronOre),
+            food: resources.get(ResourceType::Food),
+            water: resources.get(ResourceType::Water),
+        }
+    }
+}
 
 pub async fn index(tmpl: web::Data<tera::Tera>) -> Result<HttpResponse> {
     let mut context = tera::Context::new();
@@ -94,8 +115,11 @@ pub async fn view_colony(
     .filter_map(|r| r.ok())
     .collect();
 
+    let resources_view = ResourcesView::from(&colony.resources);
+
     let mut context = tera::Context::new();
     context.insert("colony", &colony);
+    context.insert("resources", &resources_view);
     context.insert("buildings_count", &buildings.len());
 
     let html = tmpl.render("colony.html", &context)

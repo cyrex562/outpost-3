@@ -29,12 +29,18 @@ fn create_tables(conn: &Connection) -> Result<()> {
     conn.execute(GAME_STATE_TABLE, [])
         .context("Failed to create game_state table")?;
 
+    conn.execute(RESOURCE_STOCKPILES_TABLE, [])
+        .context("Failed to create resource_stockpiles table")?;
+
     // Create indexes
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_turn ON events(turn_number)", [])
         .context("Failed to create events index")?;
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_buildings_colony ON buildings(colony_id)", [])
         .context("Failed to create buildings index")?;
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stockpiles_colony ON resource_stockpiles(colony_id)", [])
+        .context("Failed to create resource_stockpiles index")?;
 
     Ok(())
 }
