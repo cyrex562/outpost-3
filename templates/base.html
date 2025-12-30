@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Outpost 3: Wormhole Empire{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <header class="app-header">
+        <h1>Outpost 3: Wormhole Empire</h1>
+        <nav class="main-nav">
+            <a href="/">Home</a>
+            <a href="/colony/1">Colony</a>
+            <a href="/network">Network</a>
+            <a href="/trains">Trains</a>
+            <a href="/exploration">Exploration</a>
+        </nav>
+    </header>
+
+    <main class="app-main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+        <p>Outpost 3: Wormhole Empire - v0.1.0</p>
+    </footer>
+</body>
+</html>
