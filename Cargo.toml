@@ -48,7 +48,7 @@ rand = "0.8"
 config = "0.14"
 
 [dev-dependencies]
-actix-web-test = "0.1"
+# Testing utilities - not needed yet, will add when implementing tests
 
 [profile.dev]
 opt-level = 0
