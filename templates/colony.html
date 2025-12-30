@@ -7,7 +7,7 @@
     <header class="colony-header">
         <h2>{{ colony.name }}</h2>
         <div class="colony-meta">
-            <span>Planet ID: {{ colony.planet_id.0 }}</span>
+            <span>Planet ID: {{ colony.planet_id }}</span>
             <span>Founded: {{ colony.founded_at }}</span>
         </div>
     </header>
@@ -19,23 +19,31 @@
             <div class="resource-list">
                 <div class="resource-item">
                     <span class="resource-name">Credits:</span>
-                    <span class="resource-value">{{ colony.resources.get(resource_type="Credits") | default(value=0) }}</span>
+                    <span class="resource-value">{{ resources.credits | default(value=0) }}</span>
                 </div>
                 <div class="resource-item">
                     <span class="resource-name">Energy:</span>
-                    <span class="resource-value">{{ colony.resources.get(resource_type="Energy") | default(value=0) }} MW</span>
+                    <span class="resource-value">{{ resources.energy | default(value=0) }} MW</span>
                 </div>
                 <div class="resource-item">
                     <span class="resource-name">Iron Ore:</span>
-                    <span class="resource-value">{{ colony.resources.get(resource_type="IronOre") | default(value=0) }}</span>
+                    <span class="resource-value">{{ resources.iron_ore | default(value=0) }}</span>
                 </div>
                 <div class="resource-item">
                     <span class="resource-name">Food:</span>
-                    <span class="resource-value">{{ colony.resources.get(resource_type="Food") | default(value=0) }}</span>
+                    <span class="resource-value">{{ resources.food | default(value=0) }}</span>
                 </div>
                 <div class="resource-item">
                     <span class="resource-name">Water:</span>
-                    <span class="resource-value">{{ colony.resources.get(resource_type="Water") | default(value=0) }}</span>
+                    <span class="resource-value">{{ resources.water | default(value=0) }}</span>
+                </div>
+                <div class="resource-item">
+                    <span class="resource-name">Steel:</span>
+                    <span class="resource-value">{{ resources.steel | default(value=0) }}</span>
+                </div>
+                <div class="resource-item">
+                    <span class="resource-name">Electronics:</span>
+                    <span class="resource-value">{{ resources.electronics | default(value=0) }}</span>
                 </div>
             </div>
         </section>
@@ -65,9 +73,21 @@
 
         <!-- Buildings Panel -->
         <section class="buildings-panel">
-            <h3>Buildings</h3>
+            <h3>Buildings ({{ buildings_count }})</h3>
             <div id="building-list" class="building-list">
-                <p class="placeholder">No buildings yet. Construct your first building below.</p>
+                {% if buildings_count > 0 %}
+                    {% for building in buildings %}
+                    <div class="building-item">
+                        <div class="building-header">
+                            <strong>{{ building.type_name }}</strong>
+                            <span class="building-state">{{ building.state }}</span>
+                        </div>
+                        <p class="building-description">{{ building.description }}</p>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="placeholder">No buildings yet. Construct your first building below.</p>
+                {% endif %}
             </div>
         </section>
 
@@ -75,7 +95,7 @@
         <section class="build-panel">
             <h3>Construct Building</h3>
             <form class="build-form"
-                  hx-post="/colony/{{ colony.id.0 }}/building"
+                  hx-post="/colony/{{ colony.id }}/building"
                   hx-target="#building-list"
                   hx-swap="beforeend">
                 <label for="building-type">Building Type:</label>
@@ -102,7 +122,7 @@
         <section class="turn-panel">
             <h3>Turn Control</h3>
             <button class="btn btn-large btn-turn"
-                    hx-post="/colony/{{ colony.id.0 }}/turn"
+                    hx-post="/colony/{{ colony.id }}/turn"
                     hx-swap="none">
                 Advance Turn
             </button>

@@ -4,7 +4,7 @@ pub mod events;
 pub mod commands;
 pub mod queries;
 pub mod services;
-pub mod web;
+pub mod http;
 pub mod db;
 pub mod simulation;
 pub mod utils;

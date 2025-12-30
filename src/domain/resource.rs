@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::ops::{Add, Sub, AddAssign, SubAssign};
+use std::ops::{Add, AddAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceType {
@@ -67,6 +67,8 @@ impl Resources {
         resources.set(ResourceType::IronOre, 50);
         resources.set(ResourceType::Food, 200);
         resources.set(ResourceType::Water, 500);
+        resources.set(ResourceType::Steel, 50);
+        resources.set(ResourceType::Electronics, 20);
         resources
     }
 
@@ -128,7 +130,8 @@ impl Add for Resources {
     fn add(self, other: Resources) -> Resources {
         let mut result = self.clone();
         for (resource_type, quantity) in other.resources {
-            result.add(resource_type, quantity);
+            let current = result.get(resource_type);
+            result.set(resource_type, current + quantity);
         }
         result
     }
@@ -137,7 +140,8 @@ impl Add for Resources {
 impl AddAssign for Resources {
     fn add_assign(&mut self, other: Resources) {
         for (resource_type, quantity) in other.resources {
-            self.add(resource_type, quantity);
+            let current = self.get(resource_type);
+            self.set(resource_type, current + quantity);
         }
     }
 }

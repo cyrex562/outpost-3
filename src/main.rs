@@ -9,7 +9,7 @@ mod events;
 mod commands;
 mod queries;
 mod services;
-mod web as web_layer;
+mod http;
 mod db;
 mod simulation;
 mod utils;
@@ -57,7 +57,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(tera.clone())
             .wrap(middleware::Logger::default())
             .wrap(middleware::Compress::default())
-            .configure(web_layer::routes::configure)
+            .configure(http::routes::configure)
             .service(fs::Files::new("/static", "./static").show_files_listing())
     })
     .bind(&bind_address)?

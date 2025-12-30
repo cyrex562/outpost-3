@@ -139,6 +139,7 @@ impl Command for ConstructBuilding {
 
 pub struct AdvanceTurn {
     pub current_turn: u64,
+    pub buildings: Vec<(ColonyId, BuildingType)>,
 }
 
 impl Command for AdvanceTurn {
@@ -149,8 +150,41 @@ impl Command for AdvanceTurn {
     }
 
     fn execute(&self) -> Result<Vec<EventType>, Self::Error> {
-        Ok(vec![EventType::TurnAdvanced {
+        let mut events = vec![];
+
+        // Process each building's production
+        for (colony_id, building_type) in &self.buildings {
+            match building_type {
+                BuildingType::Mine { resource_type, output_rate } => {
+                    events.push(EventType::ResourcesProduced {
+                        colony_id: *colony_id,
+                        resource_type: *resource_type,
+                        amount: *output_rate as i64,
+                    });
+                }
+                BuildingType::Farm { output_rate } => {
+                    events.push(EventType::ResourcesProduced {
+                        colony_id: *colony_id,
+                        resource_type: ResourceType::Food,
+                        amount: *output_rate as i64,
+                    });
+                }
+                BuildingType::PowerPlant { output_mw, .. } => {
+                    events.push(EventType::ResourcesProduced {
+                        colony_id: *colony_id,
+                        resource_type: ResourceType::Energy,
+                        amount: *output_mw as i64,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        // Advance turn
+        events.push(EventType::TurnAdvanced {
             turn_number: self.current_turn + 1,
-        }])
+        });
+
+        Ok(events)
     }
 }
