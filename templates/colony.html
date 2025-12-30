@@ -37,6 +37,14 @@
                     <span class="resource-name">Water:</span>
                     <span class="resource-value">{{ resources.water | default(value=0) }}</span>
                 </div>
+                <div class="resource-item">
+                    <span class="resource-name">Steel:</span>
+                    <span class="resource-value">{{ resources.steel | default(value=0) }}</span>
+                </div>
+                <div class="resource-item">
+                    <span class="resource-name">Electronics:</span>
+                    <span class="resource-value">{{ resources.electronics | default(value=0) }}</span>
+                </div>
             </div>
         </section>
 
@@ -65,9 +73,21 @@
 
         <!-- Buildings Panel -->
         <section class="buildings-panel">
-            <h3>Buildings</h3>
+            <h3>Buildings ({{ buildings_count }})</h3>
             <div id="building-list" class="building-list">
-                <p class="placeholder">No buildings yet. Construct your first building below.</p>
+                {% if buildings_count > 0 %}
+                    {% for building in buildings %}
+                    <div class="building-item">
+                        <div class="building-header">
+                            <strong>{{ building.type_name }}</strong>
+                            <span class="building-state">{{ building.state }}</span>
+                        </div>
+                        <p class="building-description">{{ building.description }}</p>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="placeholder">No buildings yet. Construct your first building below.</p>
+                {% endif %}
             </div>
         </section>
 
