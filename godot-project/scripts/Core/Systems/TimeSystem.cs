@@ -3,6 +3,7 @@ using System.Linq;
 using Outpost3.Core.Commands;
 using Outpost3.Core.Domain;
 using Outpost3.Core.Events;
+using Outpost3.Core.Services;
 using System;
 
 namespace Outpost3.Core.Systems;
@@ -35,8 +36,35 @@ public static class TimeSystem
             SetGameSpeed cmd => StarSystemReducer.HandleSetGameSpeed(state, cmd),
             TogglePause cmd => StarSystemReducer.HandleTogglePause(state, cmd),
 
+            // Phase 3: Colony commands
+            CreateShipCommand cmd => ReduceColonyCommand(state, cmd),
+            LaunchShipCommand cmd => ReduceColonyCommand(state, cmd),
+            GenerateSurfaceMapCommand cmd => ReduceColonyCommand(state, cmd),
+            SelectLandingSiteCommand cmd => ReduceColonyCommand(state, cmd),
+            LandShipCommand cmd => ReduceColonyCommand(state, cmd),
+            EstablishColonyCommand cmd => ReduceColonyCommand(state, cmd),
+            BuildStructureCommand cmd => ReduceColonyCommand(state, cmd),
+
             _ => (state, new List<IGameEvent>())
         };
+    }
+
+    /// <summary>
+    /// Reduces colony-related commands by executing them and applying their events.
+    /// </summary>
+    private static (GameState, List<IGameEvent>) ReduceColonyCommand(GameState state, Commands.ICommand command)
+    {
+        // Execute the command to get events
+        var events = command.Execute(state);
+
+        // Apply each event to build the new state
+        var newState = state;
+        foreach (var @event in events)
+        {
+            newState = ColonyEventApplicator.Apply(newState, @event);
+        }
+
+        return (newState, events);
     }
 
     private static (GameState, List<IGameEvent>) ReduceAdvanceTime(

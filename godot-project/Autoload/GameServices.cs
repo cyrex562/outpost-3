@@ -145,4 +145,35 @@ public partial class GameServices : Node
         _saveLoadService.AutoSave();
         GD.Print("⏰ Auto-save triggered");
     }
+
+    // NEW: Phase 3 - Helper methods for UI access
+
+    /// <summary>
+    /// Gets the current game state.
+    /// </summary>
+    public GameState GameState => _stateStore.State;
+
+    /// <summary>
+    /// Applies a list of events to the game state without a command.
+    /// Useful for direct event application from UI.
+    /// </summary>
+    /// <param name="events">The events to apply.</param>
+    public void ApplyEvents(System.Collections.Generic.List<IGameEvent> events)
+    {
+        foreach (var @event in events)
+        {
+            var newState = ColonyEventApplicator.Apply(_stateStore.State, @event);
+            _stateStore.LoadState(newState);
+        }
+    }
+
+    /// <summary>
+    /// Sets the game state directly.
+    /// Use with caution - prefer using commands and events.
+    /// </summary>
+    /// <param name="newState">The new game state.</param>
+    public void SetGameState(GameState newState)
+    {
+        _stateStore.LoadState(newState);
+    }
 }

@@ -32,6 +32,9 @@ public record ScreenId(string Value)
     public static ScreenId StarSystemMap => new("StarSystemMap");
     public static ScreenId ShipJourneyLog => new("ShipJourneyLog");
     public static ScreenId SystemDetails => new("SystemDetails");
+    public static ScreenId ShipConfiguration => new("ShipConfiguration");
+    public static ScreenId SurfaceMap => new("SurfaceMap");
+    public static ScreenId ColonyOverview => new("ColonyOverview");
 
     public override string ToString() => Value;
 }
