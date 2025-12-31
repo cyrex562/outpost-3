@@ -21,15 +21,40 @@ fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources
 
     for row_result in rows {
         let (resource_type_str, quantity) = row_result?;
+
+        // Parse resource type string back to enum
+        // The string format is the Debug representation (e.g., "IronOre", "AdvancedComponents")
         let resource_type = match resource_type_str.as_str() {
             "Credits" => ResourceType::Credits,
             "Energy" => ResourceType::Energy,
             "IronOre" => ResourceType::IronOre,
-            "Food" => ResourceType::Food,
+            "CopperOre" => ResourceType::CopperOre,
+            "RareMetals" => ResourceType::RareMetals,
             "Water" => ResourceType::Water,
+            "Timber" => ResourceType::Timber,
+            "Food" => ResourceType::Food,
+            "Coal" => ResourceType::Coal,
+            "Uranium" => ResourceType::Uranium,
+            "Silicon" => ResourceType::Silicon,
+            "Titanium" => ResourceType::Titanium,
+            "Platinum" => ResourceType::Platinum,
+            "Aluminum" => ResourceType::Aluminum,
+            "CrystalOre" => ResourceType::CrystalOre,
+            "Gas" => ResourceType::Gas,
+            "Oil" => ResourceType::Oil,
             "Steel" => ResourceType::Steel,
             "Electronics" => ResourceType::Electronics,
-            _ => continue,
+            "Machinery" => ResourceType::Machinery,
+            "Concrete" => ResourceType::Concrete,
+            "Plastics" => ResourceType::Plastics,
+            "Fuel" => ResourceType::Fuel,
+            "Chemicals" => ResourceType::Chemicals,
+            "AdvancedComponents" => ResourceType::AdvancedComponents,
+            "Medicine" => ResourceType::Medicine,
+            "Research" => ResourceType::Research,
+            "ConsumerGoods" => ResourceType::ConsumerGoods,
+            "Luxuries" => ResourceType::Luxuries,
+            _ => continue, // Skip unknown resource types for forward compatibility
         };
         resources.set(resource_type, quantity);
     }
@@ -56,27 +81,100 @@ fn save_resources(conn: &Connection, colony_id: u64, resources: &Resources) -> a
 }
 
 #[derive(Serialize)]
+struct ResourceItem {
+    name: String,
+    quantity: i64,
+    resource_type: String,
+}
+
+#[derive(Serialize)]
+struct ResourceCategory {
+    name: String,
+    resources: Vec<ResourceItem>,
+}
+
+#[derive(Serialize)]
 struct ResourcesView {
-    credits: i64,
-    energy: i64,
-    iron_ore: i64,
-    food: i64,
-    water: i64,
-    steel: i64,
-    electronics: i64,
+    categories: Vec<ResourceCategory>,
 }
 
 impl From<&Resources> for ResourcesView {
     fn from(resources: &Resources) -> Self {
-        Self {
-            credits: resources.get(ResourceType::Credits),
-            energy: resources.get(ResourceType::Energy),
-            iron_ore: resources.get(ResourceType::IronOre),
-            food: resources.get(ResourceType::Food),
-            water: resources.get(ResourceType::Water),
-            steel: resources.get(ResourceType::Steel),
-            electronics: resources.get(ResourceType::Electronics),
+        use std::collections::HashMap;
+
+        // Group resources by category
+        let mut categories_map: HashMap<String, Vec<ResourceItem>> = HashMap::new();
+
+        // Define all resource types to ensure consistent ordering
+        let all_resource_types = vec![
+            ResourceType::Credits,
+            ResourceType::Energy,
+            ResourceType::IronOre,
+            ResourceType::CopperOre,
+            ResourceType::RareMetals,
+            ResourceType::Water,
+            ResourceType::Timber,
+            ResourceType::Food,
+            ResourceType::Coal,
+            ResourceType::Uranium,
+            ResourceType::Silicon,
+            ResourceType::Titanium,
+            ResourceType::Platinum,
+            ResourceType::Aluminum,
+            ResourceType::CrystalOre,
+            ResourceType::Gas,
+            ResourceType::Oil,
+            ResourceType::Steel,
+            ResourceType::Electronics,
+            ResourceType::Machinery,
+            ResourceType::Concrete,
+            ResourceType::Plastics,
+            ResourceType::Fuel,
+            ResourceType::Chemicals,
+            ResourceType::AdvancedComponents,
+            ResourceType::Medicine,
+            ResourceType::Research,
+            ResourceType::ConsumerGoods,
+            ResourceType::Luxuries,
+        ];
+
+        for resource_type in all_resource_types {
+            let quantity = resources.get(resource_type);
+            let category = resource_type.category().to_string();
+            let item = ResourceItem {
+                name: resource_type.name().to_string(),
+                quantity,
+                resource_type: format!("{:?}", resource_type),
+            };
+
+            categories_map
+                .entry(category)
+                .or_insert_with(Vec::new)
+                .push(item);
         }
+
+        // Convert HashMap to sorted Vec of categories
+        let category_order = vec![
+            "Currency",
+            "Energy",
+            "Raw Materials - Basic",
+            "Raw Materials - Advanced",
+            "Processed Goods - Basic",
+            "Processed Goods - Advanced",
+            "Specialized",
+        ];
+
+        let categories = category_order
+            .iter()
+            .filter_map(|cat_name| {
+                categories_map.remove(*cat_name).map(|resources| ResourceCategory {
+                    name: cat_name.to_string(),
+                    resources,
+                })
+            })
+            .collect();
+
+        Self { categories }
     }
 }
 

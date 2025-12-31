@@ -10,7 +10,7 @@ pub enum ResourceType {
     // Energy
     Energy,
 
-    // Raw materials
+    // Raw materials - Basic
     IronOre,
     CopperOre,
     RareMetals,
@@ -18,10 +18,34 @@ pub enum ResourceType {
     Timber,
     Food,
 
-    // Processed goods
+    // Raw materials - Advanced
+    Coal,
+    Uranium,
+    Silicon,
+    Titanium,
+    Platinum,
+    Aluminum,
+    CrystalOre,
+    Gas,
+    Oil,
+
+    // Processed goods - Basic
     Steel,
     Electronics,
     Machinery,
+
+    // Processed goods - Advanced
+    Concrete,
+    Plastics,
+    Fuel,
+    Chemicals,
+    AdvancedComponents,
+    Medicine,
+
+    // Specialized resources
+    Research,
+    ConsumerGoods,
+    Luxuries,
 }
 
 impl ResourceType {
@@ -35,9 +59,43 @@ impl ResourceType {
             ResourceType::Water => "Water",
             ResourceType::Timber => "Timber",
             ResourceType::Food => "Food",
+            ResourceType::Coal => "Coal",
+            ResourceType::Uranium => "Uranium",
+            ResourceType::Silicon => "Silicon",
+            ResourceType::Titanium => "Titanium",
+            ResourceType::Platinum => "Platinum",
+            ResourceType::Aluminum => "Aluminum",
+            ResourceType::CrystalOre => "Crystal Ore",
+            ResourceType::Gas => "Gas",
+            ResourceType::Oil => "Oil",
             ResourceType::Steel => "Steel",
             ResourceType::Electronics => "Electronics",
             ResourceType::Machinery => "Machinery",
+            ResourceType::Concrete => "Concrete",
+            ResourceType::Plastics => "Plastics",
+            ResourceType::Fuel => "Fuel",
+            ResourceType::Chemicals => "Chemicals",
+            ResourceType::AdvancedComponents => "Advanced Components",
+            ResourceType::Medicine => "Medicine",
+            ResourceType::Research => "Research",
+            ResourceType::ConsumerGoods => "Consumer Goods",
+            ResourceType::Luxuries => "Luxuries",
+        }
+    }
+
+    pub fn category(&self) -> &'static str {
+        match self {
+            ResourceType::Credits => "Currency",
+            ResourceType::Energy => "Energy",
+            ResourceType::IronOre | ResourceType::CopperOre | ResourceType::RareMetals |
+            ResourceType::Water | ResourceType::Timber | ResourceType::Food => "Raw Materials - Basic",
+            ResourceType::Coal | ResourceType::Uranium | ResourceType::Silicon |
+            ResourceType::Titanium | ResourceType::Platinum | ResourceType::Aluminum |
+            ResourceType::CrystalOre | ResourceType::Gas | ResourceType::Oil => "Raw Materials - Advanced",
+            ResourceType::Steel | ResourceType::Electronics | ResourceType::Machinery => "Processed Goods - Basic",
+            ResourceType::Concrete | ResourceType::Plastics | ResourceType::Fuel |
+            ResourceType::Chemicals | ResourceType::AdvancedComponents | ResourceType::Medicine => "Processed Goods - Advanced",
+            ResourceType::Research | ResourceType::ConsumerGoods | ResourceType::Luxuries => "Specialized",
         }
     }
 }

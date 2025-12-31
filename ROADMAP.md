@@ -14,130 +14,130 @@ This roadmap outlines the implementation plan for Outpost 3, organized by develo
 - [x] Create `CLAUDE_RUST.md` with Rust best practices
 - [x] Create `DESIGN.md` with comprehensive game design
 - [x] Create `ROADMAP.md` with feature checklist
-- [ ] Create `README.md` with setup instructions
-- [ ] Create `Cargo.toml` workspace configuration
-- [ ] Create project directory structure
+- [x] Create `README.md` with setup instructions
+- [x] Create `Cargo.toml` workspace configuration
+- [x] Create project directory structure
 
 ### Core Infrastructure
-- [ ] Set up Actix-web server with basic configuration
-- [ ] Implement database connection pooling (r2d2 + SQLite)
-- [ ] Create initial database schema
-- [ ] Set up migration system
-- [ ] Configure Tera template engine
-- [ ] Set up static file serving (CSS, JS, images)
-- [ ] Implement basic logging with tracing
-- [ ] Create configuration management (config.rs)
+- [x] Set up Actix-web server with basic configuration
+- [x] Implement database connection pooling (r2d2 + SQLite)
+- [x] Create initial database schema
+- [x] Set up migration system
+- [x] Configure Tera template engine
+- [x] Set up static file serving (CSS, JS, images)
+- [x] Implement basic logging with tracing
+- [x] Create configuration management (config.rs)
 
 ### Event Sourcing Foundation
-- [ ] Define `GameEvent` base structure
-- [ ] Implement `EventStore` trait
-- [ ] Create SQLite-based event store implementation
-- [ ] Add event serialization/deserialization (serde)
-- [ ] Implement event replay mechanism
-- [ ] Create `Command` trait definition
-- [ ] Set up command validation framework
+- [x] Define `GameEvent` base structure
+- [x] Implement `EventStore` trait
+- [x] Create SQLite-based event store implementation
+- [x] Add event serialization/deserialization (serde)
+- [x] Implement event replay mechanism
+- [x] Create `Command` trait definition
+- [x] Set up command validation framework
 
 ### Web Foundation
-- [ ] Create base HTML template (`base.html`)
-- [ ] Set up HTMX integration (CDN link)
-- [ ] Create main CSS file with reset and variables
-- [ ] Implement basic routing structure
-- [ ] Create index/home page route
-- [ ] Add 404 error handling
-- [ ] Set up HTMX response headers helper functions
+- [x] Create base HTML template (`base.html`)
+- [x] Set up HTMX integration (CDN link)
+- [x] Create main CSS file with reset and variables
+- [x] Implement basic routing structure
+- [x] Create index/home page route
+- [x] Add 404 error handling
+- [x] Set up HTMX response headers helper functions
 
 ### Testing Foundation
-- [ ] Set up test directory structure
-- [ ] Create sample unit test
-- [ ] Create sample integration test
-- [ ] Configure test database (in-memory SQLite)
+- [x] Set up test directory structure
+- [x] Create sample unit test
+- [x] Create sample integration test
+- [x] Configure test database (in-memory SQLite)
 
 ---
 
-## Phase 2: Basic Colony Screen (MVP)
+## Phase 2: Basic Colony Screen (MVP) ✅
 
 **Goal**: Implement a working colony view with basic building mechanics
 
 ### Domain Models
-- [ ] Define `ColonyId`, `BuildingId`, `PlanetId` newtypes
-- [ ] Create `Colony` entity struct
-- [ ] Create `Building` entity struct
-- [ ] Define `BuildingType` enum (Mine, PowerPlant, Housing)
-- [ ] Define `BuildingState` enum
-- [ ] Create `Resources` struct (Credits, Energy, Iron, Food)
-- [ ] Implement resource arithmetic operations
+- [x] Define `ColonyId`, `BuildingId`, `PlanetId` newtypes
+- [x] Create `Colony` entity struct
+- [x] Create `Building` entity struct
+- [x] Define `BuildingType` enum (Mine, PowerPlant, Housing)
+- [x] Define `BuildingState` enum
+- [x] Create `Resources` struct (Credits, Energy, Iron, Food)
+- [x] Implement resource arithmetic operations
 
 ### Colony Events
-- [ ] `ColonyFounded` event
-- [ ] `BuildingConstructionStarted` event
-- [ ] `BuildingConstructionCompleted` event
-- [ ] `BuildingStateChanged` event
-- [ ] `ResourcesExtracted` event
-- [ ] `ResourcesConsumed` event
-- [ ] `TurnAdvanced` event
+- [x] `ColonyFounded` event
+- [x] `BuildingConstructionStarted` event
+- [x] `BuildingConstructionCompleted` event
+- [x] `BuildingStateChanged` event
+- [x] `ResourcesExtracted` event
+- [x] `ResourcesConsumed` event
+- [x] `TurnAdvanced` event
 
 ### Colony Commands
-- [ ] `FoundColony` command with validation
-- [ ] `ConstructBuilding` command with validation
-- [ ] `ChangeBuildingState` command
-- [ ] `AdvanceTurn` command
+- [x] `FoundColony` command with validation
+- [x] `ConstructBuilding` command with validation
+- [x] `ChangeBuildingState` command
+- [x] `AdvanceTurn` command
 
 ### Colony Service
-- [ ] Create `ColonyService` struct
-- [ ] Implement `get_colony()` query
-- [ ] Implement `execute_command()` orchestration
-- [ ] Implement basic turn processing logic
-- [ ] Add resource extraction simulation
+- [x] Create `ColonyService` struct
+- [x] Implement `get_colony()` query
+- [x] Implement `execute_command()` orchestration
+- [x] Implement basic turn processing logic
+- [x] Add resource extraction simulation
 
 ### Database
-- [ ] Create `colonies` table schema
-- [ ] Create `buildings` table schema
-- [ ] Create `resource_stockpiles` table schema
-- [ ] Implement colony CRUD operations
-- [ ] Implement building CRUD operations
-- [ ] Create indexes for performance
+- [x] Create `colonies` table schema
+- [x] Create `buildings` table schema
+- [x] Create `resource_stockpiles` table schema
+- [x] Implement colony CRUD operations
+- [x] Implement building CRUD operations
+- [x] Create indexes for performance
 
 ### Colony Web Handlers
-- [ ] `GET /colony/{id}` - View colony page
-- [ ] `POST /colony/create` - Create new colony
-- [ ] `POST /colony/{id}/building` - Construct building
-- [ ] `GET /colony/{id}/resources` - Get resource stockpile (HTMX partial)
-- [ ] `POST /colony/{id}/turn` - Advance turn
-- [ ] `GET /colony/{id}/buildings` - Get building list (HTMX partial)
+- [x] `GET /colony/{id}` - View colony page
+- [x] `POST /colony/create` - Create new colony
+- [x] `POST /colony/{id}/building` - Construct building
+- [x] `GET /colony/{id}/resources` - Get resource stockpile (HTMX partial)
+- [x] `POST /colony/{id}/turn` - Advance turn
+- [x] `GET /colony/{id}/buildings` - Get building list (HTMX partial)
 
 ### Colony Templates
-- [ ] `colony.html` - Main colony screen
-- [ ] `components/colony_header.html` - Colony name and stats
-- [ ] `components/resource_display.html` - Resource stockpile
-- [ ] `components/building_list.html` - List of buildings
-- [ ] `components/build_menu.html` - Building construction form
-- [ ] `components/turn_controls.html` - Turn advancement UI
+- [x] `colony.html` - Main colony screen
+- [x] `components/colony_header.html` - Colony name and stats
+- [x] `components/resource_display.html` - Resource stockpile
+- [x] `components/building_list.html` - List of buildings
+- [x] `components/build_menu.html` - Building construction form
+- [x] `components/turn_controls.html` - Turn advancement UI
 
 ### Colony UI Features
-- [ ] Display colony name and founding date
-- [ ] Show current resource stockpile
-- [ ] List all buildings with status
-- [ ] Building construction form (select type)
-- [ ] Disable build button if insufficient resources
-- [ ] Show building construction progress
-- [ ] "Advance Turn" button
-- [ ] Display current turn number
+- [x] Display colony name and founding date
+- [x] Show current resource stockpile
+- [x] List all buildings with status
+- [x] Building construction form (select type)
+- [x] Disable build button if insufficient resources
+- [x] Show building construction progress
+- [x] "Advance Turn" button
+- [x] Display current turn number
 
 ### Colony CSS
-- [ ] Layout for colony screen (grid/flexbox)
-- [ ] Styling for resource display
-- [ ] Styling for building list
-- [ ] Styling for forms and buttons
-- [ ] Color scheme for different building types
-- [ ] Responsive layout (desktop-first)
+- [x] Layout for colony screen (grid/flexbox)
+- [x] Styling for resource display
+- [x] Styling for building list
+- [x] Styling for forms and buttons
+- [x] Color scheme for different building types
+- [x] Responsive layout (desktop-first)
 
 ### Testing
-- [ ] Unit tests for colony domain logic
-- [ ] Unit tests for colony commands
-- [ ] Unit tests for resource calculations
-- [ ] Integration test: Create colony
-- [ ] Integration test: Construct building
-- [ ] Integration test: Advance turn
+- [x] Unit tests for colony domain logic
+- [x] Unit tests for colony commands
+- [x] Unit tests for resource calculations
+- [x] Integration test: Create colony
+- [x] Integration test: Construct building
+- [x] Integration test: Advance turn
 
 ---
 
