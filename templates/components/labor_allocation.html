@@ -29,7 +29,7 @@
                         <input type="number"
                                name="workers"
                                min="1"
-                               max="{{ [available_workers, building.worker_capacity - building.workers_assigned] | min }}"
+                               max="{% if available_workers < (building.worker_capacity - building.workers_assigned) %}{{ available_workers }}{% else %}{{ building.worker_capacity - building.workers_assigned }}{% endif %}"
                                value="1"
                                class="worker-input"
                                {% if available_workers == 0 or building.workers_assigned >= building.worker_capacity %}disabled{% endif %}>

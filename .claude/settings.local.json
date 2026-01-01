@@ -9,7 +9,9 @@
       "Bash(timeout 5 cargo run:*)",
       "Bash(pkill:*)",
       "Bash(grep:*)",
-      "Bash(1)"
+      "Bash(1)",
+      "Bash(sqlite3:*)",
+      "Bash(timeout 8 cargo run:*)"
     ]
   }
 }

@@ -8,6 +8,7 @@ pub fn run_migrations(pool: &DbPool) -> Result<()> {
     let conn = pool.get().context("Failed to get database connection")?;
 
     create_tables(&conn)?;
+    run_schema_migrations(&conn)?;
     initialize_game_state(&conn)?;
 
     Ok(())
@@ -41,6 +42,26 @@ fn create_tables(conn: &Connection) -> Result<()> {
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stockpiles_colony ON resource_stockpiles(colony_id)", [])
         .context("Failed to create resource_stockpiles index")?;
+
+    Ok(())
+}
+
+fn run_schema_migrations(conn: &Connection) -> Result<()> {
+    // Add level column to buildings table if it doesn't exist
+    let has_level_column: Result<i64, _> = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('buildings') WHERE name='level'",
+        [],
+        |row| row.get(0)
+    );
+
+    if let Ok(count) = has_level_column {
+        if count == 0 {
+            conn.execute(
+                "ALTER TABLE buildings ADD COLUMN level INTEGER NOT NULL DEFAULT 1",
+                []
+            ).context("Failed to add level column to buildings table")?;
+        }
+    }
 
     Ok(())
 }

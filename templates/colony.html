@@ -83,13 +83,22 @@
                             <span class="building-state">{{ building.state }}</span>
                         </div>
                         <p class="building-description">{{ building.description }}</p>
-                        {% if building.can_upgrade %}
-                        <button class="btn btn-small btn-upgrade"
-                                hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/upgrade"
-                                hx-swap="none">
-                            Upgrade to Level {{ building.level + 1 }}
-                        </button>
-                        {% endif %}
+                        <div class="building-actions">
+                            {% if building.is_damaged %}
+                            <button class="btn btn-small btn-repair"
+                                    hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/repair"
+                                    hx-swap="none">
+                                Repair Building
+                            </button>
+                            {% endif %}
+                            {% if building.can_upgrade %}
+                            <button class="btn btn-small btn-upgrade"
+                                    hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/upgrade"
+                                    hx-swap="none">
+                                Upgrade to Level {{ building.level + 1 }}
+                            </button>
+                            {% endif %}
+                        </div>
                     </div>
                     {% endfor %}
                 {% else %}

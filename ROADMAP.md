@@ -203,7 +203,7 @@ This roadmap outlines the implementation plan for Outpost 3, organized by develo
 ### Additional Commands
 - [x] `AllocateLabor` command
 - [x] `UpgradeBuilding` command
-- [ ] `RepairBuilding` command
+- [x] `RepairBuilding` command
 - [x] `ShutdownBuilding` command (via ChangeBuildingState)
 
 ### UI Enhancements

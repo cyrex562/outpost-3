@@ -10,6 +10,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/colony/create", web::post().to(handlers::create_colony))
             .route("/colony/{id}/building", web::post().to(handlers::construct_building))
             .route("/colony/{colony_id}/building/{building_id}/upgrade", web::post().to(handlers::upgrade_building))
+            .route("/colony/{colony_id}/building/{building_id}/repair", web::post().to(handlers::repair_building))
             .route("/colony/{id}/turn", web::post().to(handlers::advance_turn))
     );
 }

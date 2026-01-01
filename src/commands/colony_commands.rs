@@ -364,3 +364,89 @@ impl Command for UpgradeBuilding {
         Ok(events)
     }
 }
+
+pub struct RepairBuilding {
+    pub building_id: BuildingId,
+    pub colony_id: ColonyId,
+    pub current_state: BuildingState,
+    pub available_resources: Resources,
+}
+
+impl RepairBuilding {
+    fn repair_cost(damage_severity: u8) -> Resources {
+        let mut cost = Resources::new();
+
+        // Base repair cost scales with damage severity (1-100)
+        let base_cost = (damage_severity as i64) * 10;
+        cost.set(ResourceType::Credits, base_cost);
+        cost.set(ResourceType::Steel, damage_severity as i64 / 10 + 1);
+
+        // More severe damage requires electronics for diagnostic equipment
+        if damage_severity > 50 {
+            cost.set(ResourceType::Electronics, damage_severity as i64 / 25);
+        }
+
+        cost
+    }
+}
+
+impl Command for RepairBuilding {
+    type Error = ColonyError;
+
+    fn validate(&self) -> Result<(), Self::Error> {
+        // Check if building is damaged
+        match self.current_state {
+            BuildingState::Damaged { severity } => {
+                if severity == 0 {
+                    return Err(ColonyError::InvalidCommand(
+                        "Building is not damaged".to_string()
+                    ));
+                }
+
+                // Check if enough resources for repair
+                let repair_cost = Self::repair_cost(severity);
+                if !self.available_resources.can_afford(&repair_cost) {
+                    return Err(ColonyError::InvalidCommand(
+                        "Cannot afford repair cost".to_string()
+                    ));
+                }
+            }
+            _ => {
+                return Err(ColonyError::InvalidCommand(
+                    "Building is not damaged".to_string()
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn execute(&self) -> Result<Vec<EventType>, Self::Error> {
+        self.validate()?;
+
+        let mut events = vec![];
+
+        if let BuildingState::Damaged { severity } = self.current_state {
+            let repair_cost = Self::repair_cost(severity);
+
+            // Consume resources for repair
+            for (resource_type, amount) in repair_cost.iter() {
+                if *amount > 0 {
+                    events.push(EventType::ResourcesConsumed {
+                        colony_id: self.colony_id,
+                        resource_type: *resource_type,
+                        amount: *amount,
+                    });
+                }
+            }
+
+            // Create repair event
+            events.push(EventType::BuildingRepaired {
+                building_id: self.building_id,
+                colony_id: self.colony_id,
+            });
+        }
+
+        Ok(events)
+    }
+}

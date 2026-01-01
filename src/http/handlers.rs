@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::domain::*;
 use crate::events::{EventStore, GameEvent, EventType};
-use crate::commands::{Command, FoundColony, ConstructBuilding, UpgradeBuilding, AdvanceTurn};
+use crate::commands::{Command, FoundColony, ConstructBuilding, UpgradeBuilding, RepairBuilding, AdvanceTurn};
 use crate::db::DbPool;
 
 // Helper functions for database operations
@@ -217,6 +217,7 @@ struct BuildingView {
     production_output: String,
     level: u8,
     can_upgrade: bool,
+    is_damaged: bool,
 }
 
 impl BuildingView {
@@ -291,6 +292,7 @@ impl BuildingView {
             production_output,
             level: building.level,
             can_upgrade: building.can_upgrade(),
+            is_damaged: matches!(building.state, BuildingState::Damaged { .. }),
         }
     }
 
@@ -831,6 +833,88 @@ pub async fn upgrade_building(
     Ok(HttpResponse::Ok()
         .insert_header(("HX-Trigger", "buildingUpgraded"))
         .body(format!("Building upgraded to level {}", current_level + 1)))
+}
+
+pub async fn repair_building(
+    path: web::Path<(u64, u64)>,
+    pool: web::Data<DbPool>,
+    event_store: web::Data<EventStore>,
+) -> Result<HttpResponse> {
+    let (colony_id, building_id) = path.into_inner();
+    let conn = pool.get()
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    // Load the building
+    let (type_str, state_str, workers, level): (String, String, u32, u8) = conn.query_row(
+        "SELECT building_type, state, workers_assigned, level FROM buildings WHERE building_id = ?1 AND colony_id = ?2",
+        rusqlite::params![building_id, colony_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    ).map_err(|e| actix_web::error::ErrorNotFound(format!("Building not found: {}", e)))?;
+
+    let building_type: BuildingType = serde_json::from_str(&type_str)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    let state: BuildingState = serde_json::from_str(&state_str)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    // Check if building is damaged
+    if !matches!(state, BuildingState::Damaged { .. }) {
+        return Err(actix_web::error::ErrorBadRequest("Building is not damaged"));
+    }
+
+    // Load colony resources
+    let mut resources = load_resources(&conn, colony_id)
+        .unwrap_or_else(|_| Resources::starting_resources());
+
+    // Create and execute command
+    let command = RepairBuilding {
+        building_id: BuildingId(building_id),
+        colony_id: ColonyId(colony_id),
+        current_state: state,
+        available_resources: resources.clone(),
+    };
+
+    let events = command.execute()
+        .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+
+    // Save events and apply to state
+    for event in events {
+        let game_event = GameEvent::new(
+            event_store.get_next_event_id()
+                .map_err(|e| actix_web::error::ErrorInternalServerError(e))?,
+            1,
+            event.clone(),
+        );
+
+        event_store.save_event(&game_event)
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+        // Apply event to database
+        match event {
+            EventType::BuildingRepaired { building_id, .. } => {
+                let operational_state = BuildingState::Operational;
+                conn.execute(
+                    "UPDATE buildings SET state = ?1 WHERE building_id = ?2",
+                    rusqlite::params![
+                        serde_json::to_string(&operational_state).unwrap(),
+                        building_id.0
+                    ],
+                ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+            }
+            EventType::ResourcesConsumed { resource_type, amount, .. } => {
+                let current = resources.get(resource_type);
+                resources.set(resource_type, current - amount);
+            }
+            _ => {}
+        }
+    }
+
+    // Save updated resources
+    save_resources(&conn, colony_id, &resources)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .insert_header(("HX-Trigger", "buildingRepaired"))
+        .body("Building repaired successfully"))
 }
 
 pub async fn advance_turn(
