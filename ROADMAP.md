@@ -146,80 +146,80 @@ This roadmap outlines the implementation plan for Outpost 3, organized by develo
 **Goal**: Add more building types, power grid, population, and production chains
 
 ### Domain Expansion
-- [ ] Add 10+ more `BuildingType` variants
-  - [ ] Factory (with input/output resources)
-  - [ ] Farm
-  - [ ] Refinery
-  - [ ] Warehouse
-  - [ ] Commercial Zone
-  - [ ] Medical Facility
-  - [ ] Research Facility
-  - [ ] Train Station
-  - [ ] Solar Power Plant
-  - [ ] Nuclear Power Plant
-- [ ] Create `ResourceType` comprehensive enum (20+ types)
-- [ ] Add `Population` struct with population tracking
-- [ ] Add `PowerGrid` struct with generation/consumption
-- [ ] Create `ProductionChain` definitions
+- [x] Add 10+ more `BuildingType` variants
+  - [x] Factory (with input/output resources)
+  - [x] Farm
+  - [x] Refinery
+  - [x] Warehouse
+  - [x] Commercial Zone
+  - [x] Medical Facility
+  - [x] Research Facility
+  - [x] Train Station
+  - [x] Solar Power Plant
+  - [x] Nuclear Power Plant
+- [x] Create `ResourceType` comprehensive enum (20+ types)
+- [x] Add `Population` struct with population tracking
+- [x] Add `PowerGrid` struct with generation/consumption
+- [x] Create `ProductionChain` definitions
 
 ### Building Mechanics
-- [ ] Implement building construction time (multi-turn)
-- [ ] Add building operation costs (power, fuel, maintenance)
-- [ ] Implement building outputs (resources produced)
-- [ ] Add worker requirements (population allocation)
+- [x] Implement building construction time (multi-turn)
+- [x] Add building operation costs (power, fuel, maintenance)
+- [x] Implement building outputs (resources produced)
+- [x] Add worker requirements (population allocation)
 - [ ] Implement building upgrade system
 - [ ] Add building damage and repair mechanics
 
 ### Power Grid System
-- [ ] Calculate total power generation
-- [ ] Calculate total power consumption
-- [ ] Implement brownout effects (insufficient power)
-- [ ] Add power grid UI display
+- [x] Calculate total power generation
+- [x] Calculate total power consumption
+- [x] Implement brownout effects (insufficient power)
+- [x] Add power grid UI display
 - [ ] Show power status per building
 
 ### Population System
-- [ ] Implement population count
-- [ ] Add population growth simulation
-- [ ] Create labor allocation system
-- [ ] Implement population needs (food, housing)
-- [ ] Add morale system basics
-- [ ] Track unemployment vs. labor shortage
+- [x] Implement population count
+- [x] Add population growth simulation
+- [x] Create labor allocation system
+- [x] Implement population needs (food, housing)
+- [x] Add morale system basics
+- [x] Track unemployment vs. labor shortage
 
 ### Production Chains
-- [ ] Define resource dependencies (e.g., Iron Ore → Steel)
-- [ ] Implement factory input/output processing
-- [ ] Add production efficiency calculations
-- [ ] Create resource flow visualization (optional)
+- [x] Define resource dependencies (e.g., Iron Ore → Steel)
+- [x] Implement factory input/output processing
+- [x] Add production efficiency calculations
+- [x] Create resource flow visualization (optional)
 
 ### Additional Events
-- [ ] `PowerGridUpdated` event
-- [ ] `PopulationGrew` event
-- [ ] `ResourcesProduced` event
-- [ ] `LaborAllocated` event
-- [ ] `BuildingUpgraded` event
-- [ ] `BuildingDamaged` event
-- [ ] `BuildingRepaired` event
+- [x] `PowerGridUpdated` event
+- [x] `PopulationGrew` event
+- [x] `ResourcesProduced` event
+- [x] `LaborAllocated` event
+- [x] `BuildingUpgraded` event
+- [x] `BuildingDamaged` event
+- [x] `BuildingRepaired` event
 
 ### Additional Commands
-- [ ] `AllocateLabor` command
-- [ ] `UpgradeBuilding` command
+- [x] `AllocateLabor` command
+- [x] `UpgradeBuilding` command
 - [ ] `RepairBuilding` command
-- [ ] `ShutdownBuilding` command
+- [x] `ShutdownBuilding` command (via ChangeBuildingState)
 
 ### UI Enhancements
-- [ ] Power grid status indicator
-- [ ] Population count and growth rate
-- [ ] Labor allocation interface
+- [x] Power grid status indicator
+- [x] Population count and growth rate
+- [x] Labor allocation interface
+- [x] Resource flow diagram (optional)
 - [ ] Building detail modal/panel
 - [ ] Production output indicators
-- [ ] Resource flow diagram (optional)
 
 ### Testing
-- [ ] Unit tests for power grid calculations
-- [ ] Unit tests for population growth
-- [ ] Unit tests for production chains
-- [ ] Integration test: Multi-turn production
-- [ ] Integration test: Power shortage scenario
+- [x] Unit tests for power grid calculations
+- [x] Unit tests for population growth
+- [x] Unit tests for production chains
+- [x] Integration test: Multi-turn production
+- [x] Integration test: Power shortage scenario
 
 ---
 

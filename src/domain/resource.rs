@@ -138,7 +138,7 @@ impl Resources {
         self.resources.insert(resource_type, quantity);
     }
 
-    pub fn add(&mut self, resource_type: ResourceType, quantity: i64) {
+    pub fn add_resource(&mut self, resource_type: ResourceType, quantity: i64) {
         let current = self.get(resource_type);
         self.set(resource_type, current + quantity);
     }
@@ -215,7 +215,7 @@ mod tests {
 
         assert_eq!(resources.get(ResourceType::Credits), 100);
 
-        resources.add(ResourceType::Credits, 50);
+        resources.add_resource(ResourceType::Credits, 50);
         assert_eq!(resources.get(ResourceType::Credits), 150);
 
         assert!(resources.subtract(ResourceType::Credits, 100));

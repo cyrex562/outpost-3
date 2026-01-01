@@ -1,0 +1,70 @@
+<div class="population-details">
+    <h4>Population</h4>
+    <div class="pop-stats">
+        <div class="pop-stat pop-total">
+            <span class="pop-label">Total Population:</span>
+            <span class="pop-value">{{ population.total }}</span>
+        </div>
+        <div class="pop-stat">
+            <span class="pop-label">Growth Rate:</span>
+            <span class="pop-value">{{ population.growth_rate | round(precision=2) }}% per turn</span>
+        </div>
+        <div class="pop-stat">
+            <span class="pop-label">Morale:</span>
+            <span class="pop-value">
+                <span class="morale-bar" style="--morale: {{ population.morale }}%">
+                    {{ population.morale | round(precision=1) }}%
+                </span>
+            </span>
+        </div>
+    </div>
+
+    <div class="labor-stats">
+        <h5>Labor Force</h5>
+        <div class="labor-breakdown">
+            <div class="labor-stat">
+                <span class="labor-label">Employed:</span>
+                <span class="labor-value labor-employed">{{ population.employed }}</span>
+            </div>
+            <div class="labor-stat">
+                <span class="labor-label">Unemployed:</span>
+                <span class="labor-value labor-unemployed">{{ population.unemployed }}</span>
+            </div>
+            <div class="labor-stat">
+                <span class="labor-label">Unemployment Rate:</span>
+                <span class="labor-value {% if population.unemployment_rate > 20 %}status-warning{% else %}status-ok{% endif %}">
+                    {{ population.unemployment_rate | round(precision=1) }}%
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="housing-stats">
+        <h5>Housing</h5>
+        <div class="housing-breakdown">
+            <div class="housing-stat">
+                <span class="housing-label">Capacity:</span>
+                <span class="housing-value">{{ population.housing_capacity }}</span>
+            </div>
+            <div class="housing-stat">
+                <span class="housing-label">Occupancy:</span>
+                <span class="housing-value {% if population.is_overcrowded %}status-warning{% else %}status-ok{% endif %}">
+                    {{ population.occupancy_rate | round(precision=1) }}%
+                </span>
+            </div>
+            {% if population.is_overcrowded %}
+            <div class="housing-warning">
+                ⚠️ Overcrowded! Build more housing to improve morale.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="pop-needs">
+        <h5>Population Needs</h5>
+        <div class="need-stat">
+            <span class="need-label">Food Consumption:</span>
+            <span class="need-value">{{ population.food_needed }} per turn</span>
+        </div>
+    </div>
+</div>

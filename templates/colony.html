@@ -35,18 +35,20 @@
             </div>
         </section>
 
+        <!-- Power Grid Status -->
+        <section class="power-panel">
+            {% include "components/power_grid_status.html" %}
+        </section>
+
+        <!-- Population Details -->
+        <section class="population-panel">
+            {% include "components/population_details.html" %}
+        </section>
+
         <!-- Colony Stats -->
         <section class="stats-panel">
             <h3>Colony Statistics</h3>
             <div class="stat-list">
-                <div class="stat-item">
-                    <span class="stat-name">Population:</span>
-                    <span class="stat-value">{{ colony.population }}</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-name">Morale:</span>
-                    <span class="stat-value">{{ colony.morale | round(precision=1) }}%</span>
-                </div>
                 <div class="stat-item">
                     <span class="stat-name">Pollution:</span>
                     <span class="stat-value">{{ colony.pollution_level | round(precision=1) }}</span>
@@ -58,6 +60,16 @@
             </div>
         </section>
 
+        <!-- Labor Allocation -->
+        <section class="labor-panel" id="labor-allocation-panel">
+            {% include "components/labor_allocation.html" %}
+        </section>
+
+        <!-- Resource Flow Visualization -->
+        <section class="resource-flow-panel">
+            {% include "components/resource_flow.html" %}
+        </section>
+
         <!-- Buildings Panel -->
         <section class="buildings-panel">
             <h3>Buildings ({{ buildings_count }})</h3>
@@ -67,9 +79,17 @@
                     <div class="building-item">
                         <div class="building-header">
                             <strong>{{ building.type_name }}</strong>
+                            <span class="building-level">Level {{ building.level }}</span>
                             <span class="building-state">{{ building.state }}</span>
                         </div>
                         <p class="building-description">{{ building.description }}</p>
+                        {% if building.can_upgrade %}
+                        <button class="btn btn-small btn-upgrade"
+                                hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/upgrade"
+                                hx-swap="none">
+                            Upgrade to Level {{ building.level + 1 }}
+                        </button>
+                        {% endif %}
                     </div>
                     {% endfor %}
                 {% else %}

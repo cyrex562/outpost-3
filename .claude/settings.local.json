@@ -3,7 +3,13 @@
     "allow": [
       "Bash(cat:*)",
       "Bash(cargo build:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(timeout 5 cargo run:*)",
+      "Bash(pkill:*)",
+      "Bash(grep:*)",
+      "Bash(1)"
     ]
   }
 }

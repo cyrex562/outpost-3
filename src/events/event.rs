@@ -70,6 +70,35 @@ pub enum EventType {
         generation: u32,
         consumption: u32,
     },
+    PopulationGrew {
+        colony_id: ColonyId,
+        old_population: u64,
+        new_population: u64,
+    },
+    LaborAllocated {
+        colony_id: ColonyId,
+        building_id: BuildingId,
+        workers_allocated: u32,
+    },
+    LaborDeallocated {
+        colony_id: ColonyId,
+        building_id: BuildingId,
+        workers_deallocated: u32,
+    },
+    BuildingDamaged {
+        building_id: BuildingId,
+        colony_id: ColonyId,
+        damage_severity: u8,
+    },
+    BuildingRepaired {
+        building_id: BuildingId,
+        colony_id: ColonyId,
+    },
+    BuildingUpgraded {
+        building_id: BuildingId,
+        colony_id: ColonyId,
+        new_level: u8,
+    },
 
     // Wormhole events
     PlanetDiscovered {

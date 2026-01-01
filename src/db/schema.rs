@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS buildings (
     building_type TEXT NOT NULL,
     state TEXT NOT NULL,
     workers_assigned INTEGER NOT NULL DEFAULT 0,
+    level INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (colony_id) REFERENCES colonies(colony_id)
 );
 "#;

@@ -1,0 +1,40 @@
+<div class="power-grid-status">
+    <h4>Power Grid</h4>
+    <div class="power-stats">
+        <div class="power-stat">
+            <span class="power-label">Generation:</span>
+            <span class="power-value power-generation">{{ power_grid.generation }} MW</span>
+        </div>
+        <div class="power-stat">
+            <span class="power-label">Consumption:</span>
+            <span class="power-value power-consumption">{{ power_grid.consumption }} MW</span>
+        </div>
+        <div class="power-stat">
+            <span class="power-label">Net Power:</span>
+            <span class="power-value {% if power_grid.net_power >= 0 %}power-surplus{% else %}power-deficit{% endif %}">
+                {{ power_grid.net_power }} MW
+            </span>
+        </div>
+        <div class="power-stat">
+            <span class="power-label">Utilization:</span>
+            <span class="power-value">{{ power_grid.utilization }}%</span>
+        </div>
+        <div class="power-stat">
+            <span class="power-label">Status:</span>
+            <span class="power-status {% if power_grid.has_brownout %}status-warning{% else %}status-ok{% endif %}">
+                {% if power_grid.has_brownout %}
+                    ⚠️ BROWNOUT ({{ power_grid.deficit }} MW deficit)
+                {% else %}
+                    ✓ {{ power_grid.efficiency }}
+                {% endif %}
+            </span>
+        </div>
+    </div>
+
+    {% if power_grid.has_brownout %}
+    <div class="power-warning">
+        <p><strong>Warning:</strong> Power grid is overloaded! Some buildings may operate at reduced efficiency.</p>
+        <p>Consider building more power plants or shutting down non-essential buildings.</p>
+    </div>
+    {% endif %}
+</div>

@@ -277,11 +277,21 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.5rem;
+    gap: 0.5rem;
 }
 
 .building-header strong {
     color: var(--primary-color);
     font-size: 1.1rem;
+}
+
+.building-level {
+    background-color: #6c757d;
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
 }
 
 .building-state {
@@ -297,7 +307,17 @@ body {
 .building-description {
     color: var(--text-secondary);
     font-size: 0.875rem;
-    margin: 0;
+    margin: 0 0 0.75rem 0;
+}
+
+.btn-upgrade {
+    background: #007bff;
+    color: white;
+    margin-top: 0.5rem;
+}
+
+.btn-upgrade:hover:not(:disabled) {
+    background: #0056b3;
 }
 
 /* Build Form */

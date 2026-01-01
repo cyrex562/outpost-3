@@ -90,6 +90,34 @@ impl ConstructBuilding {
                 cost.set(ResourceType::Steel, 10);
                 cost.set(ResourceType::Electronics, 10);
             }
+            BuildingType::Refinery { .. } => {
+                cost.set(ResourceType::Credits, 1200);
+                cost.set(ResourceType::Steel, 35);
+                cost.set(ResourceType::Machinery, 12);
+            }
+            BuildingType::CommercialZone { .. } => {
+                cost.set(ResourceType::Credits, 800);
+                cost.set(ResourceType::Steel, 20);
+                cost.set(ResourceType::Concrete, 25);
+            }
+            BuildingType::MedicalFacility { .. } => {
+                cost.set(ResourceType::Credits, 1000);
+                cost.set(ResourceType::Steel, 15);
+                cost.set(ResourceType::Electronics, 10);
+                cost.set(ResourceType::Medicine, 5);
+            }
+            BuildingType::SolarPowerPlant { .. } => {
+                cost.set(ResourceType::Credits, 800);
+                cost.set(ResourceType::Steel, 20);
+                cost.set(ResourceType::Electronics, 15);
+            }
+            BuildingType::NuclearPowerPlant { .. } => {
+                cost.set(ResourceType::Credits, 5000);
+                cost.set(ResourceType::Steel, 60);
+                cost.set(ResourceType::Machinery, 20);
+                cost.set(ResourceType::AdvancedComponents, 25);
+                cost.set(ResourceType::Uranium, 10);
+            }
         }
 
         cost
@@ -183,6 +211,154 @@ impl Command for AdvanceTurn {
         // Advance turn
         events.push(EventType::TurnAdvanced {
             turn_number: self.current_turn + 1,
+        });
+
+        Ok(events)
+    }
+}
+
+pub struct AllocateLabor {
+    pub colony_id: ColonyId,
+    pub building_id: BuildingId,
+    pub workers_to_allocate: u32,
+    pub available_unemployed: u32,
+    pub building_capacity: u32,
+    pub current_workers: u32,
+}
+
+impl Command for AllocateLabor {
+    type Error = ColonyError;
+
+    fn validate(&self) -> Result<(), Self::Error> {
+        if self.workers_to_allocate > self.available_unemployed {
+            return Err(ColonyError::InvalidCommand(
+                "Not enough unemployed workers available".to_string()
+            ));
+        }
+
+        if self.current_workers + self.workers_to_allocate > self.building_capacity {
+            return Err(ColonyError::InvalidCommand(
+                "Building worker capacity exceeded".to_string()
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn execute(&self) -> Result<Vec<EventType>, Self::Error> {
+        self.validate()?;
+
+        Ok(vec![EventType::LaborAllocated {
+            colony_id: self.colony_id,
+            building_id: self.building_id,
+            workers_allocated: self.workers_to_allocate,
+        }])
+    }
+}
+
+pub struct DeallocateLabor {
+    pub colony_id: ColonyId,
+    pub building_id: BuildingId,
+    pub workers_to_deallocate: u32,
+    pub current_workers: u32,
+}
+
+impl Command for DeallocateLabor {
+    type Error = ColonyError;
+
+    fn validate(&self) -> Result<(), Self::Error> {
+        if self.workers_to_deallocate > self.current_workers {
+            return Err(ColonyError::InvalidCommand(
+                "Cannot deallocate more workers than currently assigned".to_string()
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn execute(&self) -> Result<Vec<EventType>, Self::Error> {
+        self.validate()?;
+
+        Ok(vec![EventType::LaborDeallocated {
+            colony_id: self.colony_id,
+            building_id: self.building_id,
+            workers_deallocated: self.workers_to_deallocate,
+        }])
+    }
+}
+
+pub struct ChangeBuildingState {
+    pub building_id: BuildingId,
+    pub colony_id: ColonyId,
+    pub new_state: BuildingState,
+}
+
+impl Command for ChangeBuildingState {
+    type Error = ColonyError;
+
+    fn validate(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn execute(&self) -> Result<Vec<EventType>, Self::Error> {
+        self.validate()?;
+
+        Ok(vec![EventType::BuildingStateChanged {
+            building_id: self.building_id,
+            colony_id: self.colony_id,
+            new_state: self.new_state,
+        }])
+    }
+}
+
+pub struct UpgradeBuilding {
+    pub building_id: BuildingId,
+    pub colony_id: ColonyId,
+    pub current_level: u8,
+    pub available_resources: Resources,
+    pub upgrade_cost: Resources,
+}
+
+impl Command for UpgradeBuilding {
+    type Error = ColonyError;
+
+    fn validate(&self) -> Result<(), Self::Error> {
+        // Check if already at max level
+        if self.current_level >= 5 {
+            return Err(ColonyError::InvalidCommand(
+                format!("Building is already at max level ({})", self.current_level)
+            ));
+        }
+
+        // Check if enough resources
+        if !self.available_resources.can_afford(&self.upgrade_cost) {
+            return Err(ColonyError::InvalidCommand(
+                format!("Cannot afford upgrade cost")
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn execute(&self) -> Result<Vec<EventType>, Self::Error> {
+        self.validate()?;
+
+        let mut events = vec![];
+
+        // Consume resources for upgrade
+        for (resource_type, amount) in self.upgrade_cost.iter() {
+            events.push(EventType::ResourcesConsumed {
+                colony_id: self.colony_id,
+                resource_type: *resource_type,
+                amount: *amount,
+            });
+        }
+
+        // Create upgrade event
+        events.push(EventType::BuildingUpgraded {
+            building_id: self.building_id,
+            colony_id: self.colony_id,
+            new_level: self.current_level + 1,
         });
 
         Ok(events)
