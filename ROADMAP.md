@@ -2,7 +2,7 @@
 
 This roadmap outlines the implementation plan for Outpost 3, organized by development phases. Check off items as they are completed.
 
-**Last Updated**: 2025-12-30
+**Last Updated**: 2026-01-01
 
 ---
 
@@ -220,6 +220,97 @@ This roadmap outlines the implementation plan for Outpost 3, organized by develo
 - [x] Unit tests for production chains
 - [x] Integration test: Multi-turn production
 - [x] Integration test: Power shortage scenario
+
+---
+
+## Phase 3.5: UI Redesign
+
+**Goal**: Transform the UI into a game-quality interface with hex maps, charts, and modal dialogs
+
+**Reference**: See [docs/UI_REDESIGN_PLAN.md](docs/UI_REDESIGN_PLAN.md) for full design document
+
+**Design Inspiration**: Outpost (1994), Europa Universalis IV/V, SimCity
+
+### Technology Decision
+- [x] Evaluate Web App vs WASM Desktop approaches
+- [x] **Decision**: Enhanced Web App with JavaScript/Canvas
+- [ ] Technology stack: PixiJS (maps), Chart.js (graphs), Alpine.js (state)
+
+### Phase 3 Completion (Prerequisites)
+- [ ] Building upgrade system UI
+- [ ] Building detail modal/panel
+- [ ] Power status per building indicators
+- [ ] Production output indicators
+
+### Stage 1: Build System & Infrastructure
+- [ ] Set up npm/package.json with Vite bundler
+- [ ] Configure PixiJS and Chart.js dependencies
+- [ ] Create JavaScript module structure (`static/js/`)
+- [ ] Update base.html for new layout system
+- [ ] Add TypeScript configuration (optional)
+
+### Stage 2: Sidebar & Navigation
+- [ ] Create collapsible sidebar component
+- [ ] Add navigation icons (Colony, Map, Trains, Economy)
+- [ ] Implement Outliner panel (buildings list, alerts)
+- [ ] Create quick-action buttons
+- [ ] Store sidebar state in localStorage
+
+### Stage 3: Modal & Dialog System
+- [ ] Build reusable modal framework (open/close animations)
+- [ ] Create Building Detail Modal (stats, production, actions)
+- [ ] Create Construction Modal (building grid, costs, placement)
+- [ ] Add Configuration panels (labor, settings)
+- [ ] Implement keyboard navigation (Escape to close)
+
+### Stage 4: Data Visualization (Charts)
+- [ ] Set up Chart.js with dark theme
+- [ ] Population chart (line: count over turns, stacked: employed/unemployed)
+- [ ] Power grid chart (bar: generation by source, line: consumption trend)
+- [ ] Resources chart (multi-line: stock levels, production vs consumption)
+- [ ] Financial chart placeholder (for Phase 6)
+- [ ] Add turn history tracking to backend
+
+### Stage 5-6: Hex Map Foundation
+- [ ] Set up PixiJS canvas renderer
+- [ ] Implement hex coordinate system (axial: q, r)
+- [ ] Create hex grid rendering with camera pan/zoom
+- [ ] Define terrain types (plains, mountains, water, resource deposits)
+- [ ] Render buildings on hex tiles
+- [ ] Add selection highlight and hover tooltips
+- [ ] Implement building placement workflow
+- [ ] Create data layers (power, resources, pollution)
+- [ ] Add network visualization (rail lines, wormhole connections)
+
+### Stage 7: Asset Creation (Parallel)
+- [ ] Create hex terrain sprites (empty, plains, hills, mountains, water)
+- [ ] Create resource deposit sprites (iron, copper, rare metals, coal, uranium)
+- [ ] Create building sprites (all 14 building types)
+- [ ] Create UI icons (28 resource types, navigation, status)
+- [ ] Define art style guide (pixel art, space theme palette)
+
+### Stage 8: Polish & Integration
+- [ ] Add page/modal transition animations
+- [ ] Implement keyboard shortcuts (Space: turn, B: build, Escape: close)
+- [ ] Create toast notification system
+- [ ] Add event log panel to bottom bar
+- [ ] Optimize performance (lazy loading, viewport culling)
+- [ ] Add accessibility features (keyboard nav, screen reader labels)
+
+### Backend API Additions
+- [ ] `GET /api/colony/{id}/history` - Historical data for charts
+- [ ] `GET /api/colony/{id}/map` - Hex map data
+- [ ] `GET /api/colony/{id}/building/{id}` - Building detail
+- [ ] `POST /api/colony/{id}/building/place` - Place at hex coordinates
+- [ ] Add hex coordinates to building model
+- [ ] Add turn history tracking (population, power, resources)
+
+### Testing
+- [ ] Unit tests for hex coordinate calculations
+- [ ] Integration tests for new API endpoints
+- [ ] Visual regression tests for charts
+- [ ] Performance benchmarks for map rendering
+- [ ] Cross-browser testing (Chrome, Firefox, Safari)
 
 ---
 
@@ -627,4 +718,4 @@ This roadmap outlines the implementation plan for Outpost 3, organized by develo
 
 ---
 
-**Last Updated**: 2025-12-30
+**Last Updated**: 2026-01-01
