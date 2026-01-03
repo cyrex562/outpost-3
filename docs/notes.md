@@ -42,4 +42,7 @@
 - specific types of events should be loaded from disk in a YAML format to enable modding support and content creation support
 - in logging display event logs should have specific colors for types of events, styling of text, nerdfont-like symbols and emoji
 - events should have pre-requisites to make sure they occur under the right circumstances like what scene, what is going on, state of the game, etc. Ex: some events can happen to a ship that is a generation ship but may not make sense to happen to a sleeper ship and vice versa.
-- Events should take into account things like the skills of colonists. 
+- Events should take into account things like the skills of colonists.
+
+
+choose the next feature to implement from desktop_wasm_pivot.md, implement it, then mark it complete

@@ -6,6 +6,12 @@ authors = ["Outpost 3 Team"]
 description = "A colony management and wormhole trade simulation game"
 license = "MIT"
 
+[workspace]
+members = [
+    "crates/outpost-core",
+    "crates/outpost-client",
+]
+
 [dependencies]
 # Web framework
 actix-web = "4"

@@ -58,6 +58,10 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(middleware::Compress::default())
             .configure(http::routes::configure)
+            // Serve built JS/CSS from dist (Vite output)
+            .service(fs::Files::new("/static/js", "./dist/static/js"))
+            .service(fs::Files::new("/static/ext", "./dist/static/ext"))
+            // Serve other static assets from source
             .service(fs::Files::new("/static", "./static").show_files_listing())
     })
     .bind(&bind_address)?

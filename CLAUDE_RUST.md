@@ -545,6 +545,8 @@ pub async fn execute_command(
 }
 ```
 
+ make sure to write UI code in way that logs events and other data indicating when and how things are drawn. also log state changes to help with testing and debugging
+
 ### 11. Serialization
 
 **Use serde with appropriate attributes:**
