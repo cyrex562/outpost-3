@@ -1,31 +1,190 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Outpost 3: Wormhole Empire{% endblock %}</title>
+
+    <!-- Stylesheets -->
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/sidebar.css">
+    <link rel="stylesheet" href="/static/css/modal.css">
+    <link rel="stylesheet" href="/static/css/charts.css">
     <link rel="stylesheet" href="/static/css/colony-components.css">
+
+    <!-- HTMX for dynamic content -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    {% block extra_head %}{% endblock %}
 </head>
-<body>
-    <header class="app-header">
-        <h1>Outpost 3: Wormhole Empire</h1>
-        <nav class="main-nav">
-            <a href="/">Home</a>
-            <a href="/colony/1">Colony</a>
-            <a href="/network">Network</a>
-            <a href="/trains">Trains</a>
-            <a href="/exploration">Exploration</a>
-        </nav>
-    </header>
+<body class="{% block body_class %}{% endblock %}">
+    <!-- Loading Indicator -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-spinner"></div>
+        <p>Loading...</p>
+    </div>
 
-    <main class="app-main">
-        {% block content %}{% endblock %}
-    </main>
+    <!-- App Container -->
+    <div class="app-container">
 
-    <footer class="app-footer">
-        <p>Outpost 3: Wormhole Empire - v0.1.0</p>
-    </footer>
+        <!-- Header Bar -->
+        <header class="app-header">
+            <div class="header-left">
+                <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle Sidebar">
+                    <span class="toggle-icon">☰</span>
+                </button>
+                <h1 class="app-title">
+                    <span class="title-logo">⚙</span>
+                    Outpost 3
+                </h1>
+            </div>
+
+            <div class="header-center">
+                {% block header_center %}
+                <div class="colony-info">
+                    <span class="colony-name">{% block colony_name %}Colony Alpha{% endblock %}</span>
+                    <span class="turn-counter">Turn: <span id="current-turn">{% block current_turn %}1{% endblock %}</span></span>
+                </div>
+                {% endblock %}
+            </div>
+
+            <div class="header-right">
+                {% block header_right %}
+                <div class="resource-bar-compact" id="resource-bar-compact">
+                    <!-- Resource icons will be populated dynamically -->
+                </div>
+                <button class="btn-icon" id="settings-btn" aria-label="Settings">⚙</button>
+                {% endblock %}
+            </div>
+        </header>
+
+        <!-- Main Layout: Sidebar + Content -->
+        <div class="app-layout">
+
+            <!-- Collapsible Sidebar -->
+            <aside class="app-sidebar" id="app-sidebar">
+                <nav class="sidebar-nav">
+                    <a href="/colony/1" class="nav-item active" data-view="colony">
+                        <span class="nav-icon">🏢</span>
+                        <span class="nav-label">Colony</span>
+                    </a>
+                    <a href="/map" class="nav-item" data-view="map">
+                        <span class="nav-icon">🗺️</span>
+                        <span class="nav-label">Map</span>
+                    </a>
+                    <a href="/trains" class="nav-item" data-view="trains">
+                        <span class="nav-icon">🚂</span>
+                        <span class="nav-label">Trains</span>
+                    </a>
+                    <a href="/economy" class="nav-item" data-view="economy">
+                        <span class="nav-icon">💰</span>
+                        <span class="nav-label">Economy</span>
+                    </a>
+                    <a href="/research" class="nav-item" data-view="research">
+                        <span class="nav-icon">🔬</span>
+                        <span class="nav-label">Research</span>
+                    </a>
+                </nav>
+
+                <div class="sidebar-divider"></div>
+
+                <!-- Outliner Panel -->
+                <section class="outliner-panel">
+                    <h3 class="outliner-title">Outliner</h3>
+                    <div id="outliner-content" class="outliner-content">
+                        {% block outliner %}
+                        <div class="outliner-section">
+                            <h4>Buildings</h4>
+                            <div id="building-quick-list">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                        <div class="outliner-section">
+                            <h4>Alerts</h4>
+                            <div id="alerts-list">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                        {% endblock %}
+                    </div>
+                </section>
+
+                <div class="sidebar-divider"></div>
+
+                <!-- Quick Actions -->
+                <section class="quick-actions">
+                    <button class="btn-quick-action" id="btn-build" data-action="build">
+                        <span class="action-icon">🔨</span>
+                        <span class="action-label">Build</span>
+                    </button>
+                    <button class="btn-quick-action btn-primary" id="btn-advance-turn" data-action="advance-turn">
+                        <span class="action-icon">⏩</span>
+                        <span class="action-label">Next Turn</span>
+                    </button>
+                </section>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="app-main">
+                <!-- Canvas Container (for PixiJS maps) -->
+                <div id="canvas-container" class="canvas-container hidden">
+                    <canvas id="game-canvas"></canvas>
+                </div>
+
+                <!-- Content Area (for HTML/HTMX content) -->
+                <div id="content-area" class="content-area">
+                    {% block content %}{% endblock %}
+                </div>
+            </main>
+        </div>
+
+        <!-- Bottom Bar -->
+        <footer class="app-footer">
+            <div class="footer-left">
+                <div id="notification-log" class="notification-log">
+                    <span class="log-entry">Ready</span>
+                </div>
+            </div>
+            <div class="footer-center">
+                <div class="mini-map-placeholder" id="mini-map">
+                    <!-- Mini-map will be rendered here -->
+                </div>
+            </div>
+            <div class="footer-right">
+                <div class="speed-controls">
+                    <span class="version-info">v0.3.5</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal Container -->
+    <div id="modal-container" class="modal-container">
+        <!-- Modals will be inserted here dynamically -->
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container">
+        <!-- Toast notifications will appear here -->
+    </div>
+
+    <!-- JavaScript Modules (loaded via Vite) -->
+    <script type="module" src="/static/js/main.js"></script>
+
+    {% block extra_scripts %}{% endblock %}
+
+    <!-- Keyboard Shortcuts Help (hidden by default) -->
+    <div id="shortcuts-help" class="shortcuts-help hidden">
+        <h3>Keyboard Shortcuts</h3>
+        <ul>
+            <li><kbd>Space</kbd> - Advance Turn</li>
+            <li><kbd>B</kbd> - Open Build Menu</li>
+            <li><kbd>S</kbd> - Toggle Sidebar</li>
+            <li><kbd>Escape</kbd> - Close Modal</li>
+            <li><kbd>1-5</kbd> - Switch Views</li>
+        </ul>
+        <p class="help-hint">Press <kbd>?</kbd> to toggle this help</p>
+    </div>
 </body>
 </html>

@@ -1,0 +1,43 @@
+%% Mermaid architecture diagram for Outpost 3 Desktop/WASM pivot (Phase 3.5)
+%% View with GitHub's Mermaid support or any Mermaid renderer
+
+flowchart LR
+  %% Core and Client separation
+  subgraph CORE[crates/outpost-core]
+    CORE_LIB["Core Library\nGameState, Commands, Events\nQueries & Simulation"]
+  end
+
+  subgraph CLIENT[crates/outpost-client]
+    BEVY["Bevy App\n(Window, Render, Input)"]
+    EGUI["bevy_egui UI\nPanels, Modals, Toolbars"]
+    PLOTS["egui_plot\nCharts (Power/Resources/Population)"]
+    STORAGE_T["Storage Trait\nload/save/list_profiles"]
+  end
+
+  %% Platform backends
+  subgraph DESKTOP[Desktop (default feature)]
+    FS["FsStorage\n(JSON/RON in user data dir)"]
+  end
+
+  subgraph WASM[WASM (feature wasm)]
+    IDB["IndexedDbStorage\n(IndexedDB via web APIs)"]
+  end
+
+  %% Relationships
+  EGUI --> PLOTS
+  BEVY --> EGUI
+  CLIENT <--> CORE
+  CLIENT -.commands/events/queries.-> CORE
+  CLIENT -.save/load.-> STORAGE_T
+  STORAGE_T -.cfg(desktop).-> FS
+  STORAGE_T -.cfg(wasm).-> IDB
+
+  %% UI Layer toggles
+  EGUI -.toggles.-> BEVY
+  BEVY -.visualizes.-> CORE
+
+  %% Notes
+  classDef accent fill:#dfefff,stroke:#4a7bd1,color:#000
+  classDef platform fill:#eef9f0,stroke:#3a9d5d,color:#000
+  class CORE,CLIENT accent
+  class DESKTOP,WASM platform

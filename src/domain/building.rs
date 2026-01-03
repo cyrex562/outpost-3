@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use super::{ColonyId, ResourceType, Resources, ProductionChains};
+use super::{ColonyId, ResourceType, Resources};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BuildingId(pub u64);

@@ -1,10 +1,24 @@
-# Outpost 3: Wormhole Empire
+Option A — wasm-server-runner (simple):
+```
+$env:CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER = "wasm-server-runner"    # PowerShell
+cargo run -p outpost-client --target wasm32-unknown-unknown --no-default-features --features wasm
+```
 
-A colony management and wormhole trade simulation game combining the settlement building of Outpost with the wormhole train mechanics of Peter F. Hamilton's Commonwealth universe.
+Option B — Trunk (alternative):
+```
+cargo install trunk
+trunk serve
+```
 
-**Version**: 0.1.0 (Early Prototype)
-**Tech Stack**: Rust, Actix-web, HTMX, SQLite
-**Architecture**: Event Sourcing with CQRS
+### Architecture Diagram
+See `docs/diagrams/architecture.md` for a high-level diagram of the Phase 3.5 Desktop/WASM architecture (core <-> client and storage backends), with Mermaid source in `docs/diagrams/architecture.mmd`.
+
+Controls (current):
+- Pan: WASD or drag
+- Zoom: Mouse wheel
+- Space: Advance turn
+- B: Open build/placement
+- Esc: Close top-most modal
 
 ## Overview
 
@@ -167,7 +181,7 @@ SELECT * FROM events;
 ### Key Documents
 
 - **[DESIGN.md](DESIGN.md)** - Comprehensive game design and technical architecture
-- **[ROADMAP.md](ROADMAP.md)** - Feature implementation checklist organized by phase
+- **[ROADMAP.md](docs/archive/ROADMAP.md)** - Feature implementation checklist organized by phase
 - **[CLAUDE_RUST.md](CLAUDE_RUST.md)** - Rust best practices for AI assistants working on this project
 
 ### Architecture Highlights
@@ -231,7 +245,7 @@ SELECT * FROM events;
 
 ### In Development
 
-See [ROADMAP.md](ROADMAP.md) for detailed feature list and implementation plan.
+See [ROADMAP.md](docs/archive/ROADMAP.md) for detailed feature list and implementation plan.
 
 ## Configuration
 
@@ -283,7 +297,7 @@ This is an early prototype. Contributions welcome!
 
 ### Development Workflow
 
-1. Check [ROADMAP.md](ROADMAP.md) for planned features
+1. Check [ROADMAP.md](docs/archive/ROADMAP.md) for planned features
 2. Pick an uncompleted feature
 3. Implement following patterns in [CLAUDE_RUST.md](CLAUDE_RUST.md)
 4. Write tests

@@ -1,0 +1,20 @@
+{
+  "name": "outpost-3",
+  "version": "0.3.5",
+  "description": "Outpost 3: Wormhole Empire - UI Layer",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "watch": "vite build --watch"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "pixi.js": "^8.0.0",
+    "chart.js": "^4.4.0",
+    "alpinejs": "^3.13.0"
+  }
+}
