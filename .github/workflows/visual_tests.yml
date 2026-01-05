@@ -1,0 +1,137 @@
+name: Visual Tests
+
+on:
+    push:
+        branches: [main, claude/**]
+    pull_request:
+        branches: [main]
+
+env:
+    CARGO_TERM_COLOR: always
+    RUST_BACKTRACE: 1
+
+jobs:
+    visual-tests-desktop:
+        name: Desktop Visual Tests (Linux + xvfb)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: x86_64-unknown-linux-gnu
+
+            - name: Cache cargo registry
+              uses: actions/cache@v3
+              with:
+                  path: ~/.cargo/registry
+                  key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+            - name: Cache cargo index
+              uses: actions/cache@v3
+              with:
+                  path: ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+            - name: Cache cargo build
+              uses: actions/cache@v3
+              with:
+                  path: target
+                  key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+            - name: Install xvfb
+              run: sudo apt-get update && sudo apt-get install -y xvfb
+
+            - name: Run desktop visual tests
+              run: |
+                  xvfb-run -a cargo test -p outpost-client --test visual_ui_panels -- --nocapture
+                  xvfb-run -a cargo test -p outpost-client --test visual_hex_grid -- --nocapture
+                  xvfb-run -a cargo test -p outpost-client --test visual_charts -- --nocapture
+                  xvfb-run -a cargo test -p outpost-client --test visual_scene_transitions -- --nocapture
+              env:
+                  RUST_LOG: info
+
+            - name: Archive failed visual diffs (if any)
+              if: failure()
+              uses: actions/upload-artifact@v3
+              with:
+                  name: desktop-visual-diffs
+                  path: target/debug/**/*__diff.png
+                  retention-days: 7
+
+    visual-tests-wasm:
+        name: WASM Visual Tests (headless Chrome)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
+
+            - name: Install wasm-pack
+              run: curl https://rustwasm.org/wasm-pack/installer/init.sh -sSf | sh
+
+            - name: Install Chrome headless
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y chromium-browser
+
+            - name: Cache cargo registry
+              uses: actions/cache@v3
+              with:
+                  path: ~/.cargo/registry
+                  key: ${{ runner.os }}-cargo-registry-wasm-${{ hashFiles('**/Cargo.lock') }}
+
+            - name: Cache cargo index
+              uses: actions/cache@v3
+              with:
+                  path: ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-git-wasm-${{ hashFiles('**/Cargo.lock') }}
+
+            - name: Cache wasm-pack build
+              uses: actions/cache@v3
+              with:
+                  path: target/wasm32-unknown-unknown
+                  key: ${{ runner.os }}-wasm-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+            - name: Build WASM visual tests
+              run: |
+                  cd crates/outpost-client
+                  wasm-pack build --test visual_ui_panels --target web --dev
+                  wasm-pack build --test visual_hex_grid --target web --dev
+                  wasm-pack build --test visual_charts --target web --dev
+                  wasm-pack build --test visual_scene_transitions --target web --dev
+              env:
+                  RUST_LOG: info
+
+            - name: Run WASM tests in headless Chrome
+              run: |
+                  cargo test -p outpost-client --lib screenshot::wasm_tests --target wasm32-unknown-unknown || true
+              env:
+                  CHROMIUM_BIN: $(which chromium-browser)
+                  RUST_LOG: info
+
+            - name: Archive failed visual diffs (if any)
+              if: failure()
+              uses: actions/upload-artifact@v3
+              with:
+                  name: wasm-visual-diffs
+                  path: target/wasm32-unknown-unknown/debug/**/*__diff.png
+                  retention-days: 7
+
+    visual-tests-summary:
+        name: Visual Tests Summary
+        runs-on: ubuntu-latest
+        needs: [visual-tests-desktop, visual-tests-wasm]
+        if: always()
+        steps:
+            - name: Check test results
+              run: |
+                  if [ "${{ needs.visual-tests-desktop.result }}" != "success" ] || [ "${{ needs.visual-tests-wasm.result }}" != "success" ]; then
+                    echo "❌ Visual tests failed. Check artifacts for diff images."
+                    exit 1
+                  fi
+                  echo "✅ All visual tests passed."

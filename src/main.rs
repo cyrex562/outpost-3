@@ -1,3 +1,5 @@
+#![cfg(feature = "server")]
+
 use actix_files as fs;
 use actix_web::{middleware, web, App, HttpServer};
 use tracing::{info, Level};

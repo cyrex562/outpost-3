@@ -6,17 +6,30 @@ authors = ["Outpost 3 Team"]
 description = "A colony management and wormhole trade simulation game"
 license = "MIT"
 
+[lib]
+# Only compile lib.rs when server feature is enabled
+required-features = ["server"]
+
 [workspace]
-members = [
-    "crates/outpost-core",
-    "crates/outpost-client",
-]
+members = ["crates/outpost-core", "crates/outpost-client"]
+# When running from workspace root, use the client by default
+default-members = ["crates/outpost-client"]
+
+# Legacy actix web server (optional, built with --features server)
+[[bin]]
+name = "outpost3-server"
+path = "src/main.rs"
+required-features = ["server"]
+
+[features]
+# Enable the legacy actix web server
+server = ["actix-web", "actix-rt", "actix-files", "tera"]
 
 [dependencies]
-# Web framework
-actix-web = "4"
-actix-rt = "2"
-actix-files = "0.6"
+# Web framework (optional, only when "server" feature enabled)
+actix-web = { version = "4", optional = true }
+actix-rt = { version = "2", optional = true }
+actix-files = { version = "0.6", optional = true }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -25,8 +38,8 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Templating
-tera = "1"
+# Templating (optional, only when "server" feature enabled)
+tera = { version = "1", optional = true }
 
 # Date and time
 chrono = { version = "0.4", features = ["serde"] }
@@ -54,7 +67,7 @@ rand = "0.8"
 config = "0.14"
 
 [dev-dependencies]
-# Testing utilities - not needed yet, will add when implementing tests
+proptest = "1"
 
 [profile.dev]
 opt-level = 0

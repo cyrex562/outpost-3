@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::domain::*;
 
@@ -99,6 +99,12 @@ pub enum EventType {
         colony_id: ColonyId,
         new_level: u8,
     },
+    BuildingRecipeChanged {
+        building_id: BuildingId,
+        colony_id: ColonyId,
+        old_recipe_index: u32,
+        new_recipe_index: u32,
+    },
 
     // Wormhole events
     PlanetDiscovered {
@@ -146,4 +152,91 @@ pub enum EventType {
     TurnAdvanced {
         turn_number: u64,
     },
+
+    // Market events
+    MarketPriceChanged {
+        resource: ResourceType,
+        old_price: f64,
+        new_price: f64,
+    },
+
+    // Trading events
+    ResourceTraded {
+        colony_id: ColonyId,
+        resource_type: ResourceType,
+        quantity: i64,
+        price: f64,
+        side: TradeSide,
+    },
+
+    // Economy events
+    EconomySnapshot {
+        colony_id: ColonyId,
+        gdp: i64,
+        income: i64,
+        expenses: i64,
+        net_worth: i64,
+    },
+
+    // Banking events
+    LoanIssued {
+        loan_id: LoanId,
+        colony_id: ColonyId,
+        principal: f64,
+        interest_rate: f64,
+        term_turns: u32,
+    },
+    LoanPaymentMade {
+        loan_id: LoanId,
+        colony_id: ColonyId,
+        amount: f64,
+        principal_paid: f64,
+        interest_paid: f64,
+        remaining_principal: f64,
+    },
+    LoanPaidOff {
+        loan_id: LoanId,
+        colony_id: ColonyId,
+    },
+
+    // Rail events
+    RailConstructionStarted {
+        segment_id: SegmentId,
+        colony_id: ColonyId,
+        from: HexCoord,
+        to: HexCoord,
+        rail_type: RailType,
+    },
+    RailConstructionCompleted {
+        segment_id: SegmentId,
+        colony_id: ColonyId,
+    },
+    RailUpgraded {
+        segment_id: SegmentId,
+        colony_id: ColonyId,
+        new_type: RailType,
+        new_count: u8,
+    },
+    RailRemoved {
+        segment_id: SegmentId,
+        colony_id: ColonyId,
+    },
+
+    // Station events
+    StationBuilt {
+        station_id: StationId,
+        colony_id: ColonyId,
+        building_id: BuildingId,
+        connected_segments: Vec<SegmentId>,
+    },
+    StationRemoved {
+        station_id: StationId,
+        colony_id: ColonyId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TradeSide {
+    Buy,
+    Sell,
 }

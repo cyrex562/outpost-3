@@ -1,5 +1,6 @@
-use outpost3::domain::*;
 use outpost3::commands::*;
+use outpost3::domain::production_chain::ProductionChains;
+use outpost3::domain::*;
 use outpost3::events::*;
 
 #[test]
@@ -73,7 +74,9 @@ fn test_multi_turn_production_workflow() {
     assert_eq!(iron_produced, 5); // 10 * 0.5 efficiency = 5
 
     // Apply production to colony
-    colony.resources.add_resource(ResourceType::IronOre, iron_produced);
+    colony
+        .resources
+        .add_resource(ResourceType::IronOre, iron_produced);
     assert_eq!(colony.resources.get(ResourceType::IronOre), 205);
 
     // Verify population stats
@@ -99,6 +102,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     // Create energy-consuming buildings
@@ -112,6 +116,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     let factory = Building {
@@ -125,6 +130,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     // Calculate power grid status
@@ -156,6 +162,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     let research_facility = Building {
@@ -165,6 +172,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     let train_station = Building {
@@ -177,6 +185,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     total_consumption += refinery.power_consumption(); // +12
@@ -201,6 +210,7 @@ fn test_power_shortage_scenario() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     };
 
     total_consumption += medical_facility.power_consumption(); // +6
@@ -255,6 +265,7 @@ fn test_population_growth_and_labor_allocation() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     });
 
     // Farm
@@ -265,6 +276,7 @@ fn test_population_growth_and_labor_allocation() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     });
 
     // Factory
@@ -279,6 +291,7 @@ fn test_population_growth_and_labor_allocation() {
         state: BuildingState::Operational,
         workers_assigned: 0,
         level: 1,
+        recipe_index: 0,
     });
 
     // Allocate workers to each building
@@ -287,7 +300,9 @@ fn test_population_growth_and_labor_allocation() {
         let workers_to_allocate = (capacity / 2).min(colony.population.unemployed as u32);
 
         if workers_to_allocate > 0 {
-            assert!(colony.population.allocate_workers(workers_to_allocate as u64));
+            assert!(colony
+                .population
+                .allocate_workers(workers_to_allocate as u64));
             building.workers_assigned = workers_to_allocate;
         }
     }
@@ -349,6 +364,7 @@ fn test_complete_production_chain() {
         state: BuildingState::Operational,
         workers_assigned: 15, // Full capacity
         level: 1,
+        recipe_index: 0,
     };
 
     // Check production requirements
@@ -420,16 +436,14 @@ fn test_building_construction_with_commands() {
     assert!(!events.is_empty());
 
     // Verify BuildingConstructionStarted event
-    assert!(events.iter().any(|e| matches!(
-        e,
-        EventType::BuildingConstructionStarted { .. }
-    )));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, EventType::BuildingConstructionStarted { .. })));
 
     // Verify resource consumption events
-    assert!(events.iter().any(|e| matches!(
-        e,
-        EventType::ResourcesConsumed { .. }
-    )));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, EventType::ResourcesConsumed { .. })));
 }
 
 #[test]
@@ -518,6 +532,7 @@ fn test_building_upgrade_system() {
         state: BuildingState::Operational,
         workers_assigned: 10,
         level: 1,
+        recipe_index: 0,
     };
 
     // Verify initial state
@@ -534,7 +549,7 @@ fn test_building_upgrade_system() {
     let upgrade_cost_l2 = mine.upgrade_cost();
     assert_eq!(upgrade_cost_l2.get(ResourceType::Credits), 2000); // 1000 * (1 + 1)
     assert_eq!(upgrade_cost_l2.get(ResourceType::Steel), 20); // 10 * (1 + 1)
-    // Mine doesn't require Machinery for upgrades
+                                                              // Mine doesn't require Machinery for upgrades
 
     // Set up resources for upgrade
     let mut resources = Resources::new();
@@ -557,10 +572,9 @@ fn test_building_upgrade_system() {
     assert!(!events.is_empty());
 
     // Verify BuildingUpgraded event
-    assert!(events.iter().any(|e| matches!(
-        e,
-        EventType::BuildingUpgraded { new_level: 2, .. }
-    )));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, EventType::BuildingUpgraded { new_level: 2, .. })));
 
     // Verify resource consumption events
     let resource_events: Vec<_> = events
@@ -629,6 +643,7 @@ fn test_upgrade_with_insufficient_resources() {
         state: BuildingState::Operational,
         workers_assigned: 10,
         level: 1,
+        recipe_index: 0,
     };
 
     let upgrade_cost = mine.upgrade_cost();
@@ -665,6 +680,7 @@ fn test_upgrade_at_max_level() {
         state: BuildingState::Operational,
         workers_assigned: 10,
         level: 5,
+        recipe_index: 0,
     };
 
     assert!(!max_level_mine.can_upgrade());
@@ -685,4 +701,245 @@ fn test_upgrade_at_max_level() {
 
     // Should fail validation due to max level
     assert!(upgrade_cmd.validate().is_err());
+}
+
+#[test]
+fn test_building_recipe_switching_validation() {
+    // Test SetRecipe command validation
+    let set_recipe = SetRecipe {
+        building_id: BuildingId(1),
+        colony_id: ColonyId(1),
+        recipe_index: 0,
+        current_recipe_index: 0,
+    };
+
+    // Should fail if recipe_index equals current_recipe_index
+    assert!(set_recipe.validate().is_err());
+
+    // Should succeed if recipe_index differs
+    let set_recipe_valid = SetRecipe {
+        building_id: BuildingId(1),
+        colony_id: ColonyId(1),
+        recipe_index: 1,
+        current_recipe_index: 0,
+    };
+    assert!(set_recipe_valid.validate().is_ok());
+
+    // Should fail if recipe_index is out of valid range
+    let set_recipe_invalid_range = SetRecipe {
+        building_id: BuildingId(1),
+        colony_id: ColonyId(1),
+        recipe_index: 100,
+        current_recipe_index: 0,
+    };
+    assert!(set_recipe_invalid_range.validate().is_err());
+}
+
+#[test]
+fn test_building_recipe_switching_event_generation() {
+    // Test that SetRecipe command generates correct event
+    let set_recipe = SetRecipe {
+        building_id: BuildingId(1),
+        colony_id: ColonyId(1),
+        recipe_index: 2,
+        current_recipe_index: 0,
+    };
+
+    let events = set_recipe.execute().expect("Should execute successfully");
+    assert_eq!(events.len(), 1);
+
+    match &events[0] {
+        EventType::BuildingRecipeChanged {
+            building_id,
+            colony_id,
+            old_recipe_index,
+            new_recipe_index,
+        } => {
+            assert_eq!(*building_id, BuildingId(1));
+            assert_eq!(*colony_id, ColonyId(1));
+            assert_eq!(*old_recipe_index, 0);
+            assert_eq!(*new_recipe_index, 2);
+        }
+        _ => panic!("Expected BuildingRecipeChanged event"),
+    }
+}
+
+#[test]
+fn test_building_recipe_index_initialization() {
+    // Test that new buildings initialize with recipe_index 0
+    let building = Building::new(
+        BuildingId(1),
+        ColonyId(1),
+        BuildingType::Farm { output_rate: 5 },
+    );
+
+    assert_eq!(building.recipe_index, 0);
+    assert_eq!(building.level, 1);
+}
+
+#[test]
+fn test_switch_recipe_mid_game() {
+    // Test switching recipe while building is operational
+    let mut building = Building::new(
+        BuildingId(1),
+        ColonyId(1),
+        BuildingType::Farm { output_rate: 5 },
+    );
+
+    // Set building to operational (simulate construction completion)
+    building.state = BuildingState::Operational;
+    assert!(building.is_operational());
+
+    // Initial recipe is 0 (traditional farm: Water → Food)
+    assert_eq!(building.recipe_index, 0);
+
+    // Create command to switch to recipe 1 (hydroponic: Water + Nutrients + Energy → Food)
+    let set_recipe = SetRecipe {
+        building_id: building.id,
+        colony_id: building.colony_id,
+        recipe_index: 1,
+        current_recipe_index: building.recipe_index,
+    };
+
+    assert!(set_recipe.validate().is_ok());
+    let events = set_recipe.execute().expect("Should execute successfully");
+    assert_eq!(events.len(), 1);
+
+    // Verify event contains correct recipe change
+    match &events[0] {
+        EventType::BuildingRecipeChanged {
+            old_recipe_index,
+            new_recipe_index,
+            ..
+        } => {
+            assert_eq!(*old_recipe_index, 0);
+            assert_eq!(*new_recipe_index, 1);
+        }
+        _ => panic!("Expected BuildingRecipeChanged event"),
+    }
+}
+
+#[test]
+fn test_recipe_switching_sequence() {
+    // Test multiple sequential recipe changes
+    let building_id = BuildingId(1);
+    let colony_id = ColonyId(1);
+
+    // Start with recipe 0
+    let mut current_recipe = 0u32;
+
+    // Switch 0 → 1
+    let cmd1 = SetRecipe {
+        building_id,
+        colony_id,
+        recipe_index: 1,
+        current_recipe_index: current_recipe,
+    };
+    assert!(cmd1.validate().is_ok());
+    let events = cmd1.execute().expect("Should execute");
+    assert_eq!(events.len(), 1);
+    current_recipe = 1;
+
+    // Switch 1 → 2 (chemical synthesis: Chemicals + Energy → Food)
+    let cmd2 = SetRecipe {
+        building_id,
+        colony_id,
+        recipe_index: 2,
+        current_recipe_index: current_recipe,
+    };
+    assert!(cmd2.validate().is_ok());
+    let events = cmd2.execute().expect("Should execute");
+    assert_eq!(events.len(), 1);
+    current_recipe = 2;
+
+    // Try to switch back to 1
+    let cmd3 = SetRecipe {
+        building_id,
+        colony_id,
+        recipe_index: 1,
+        current_recipe_index: current_recipe,
+    };
+    assert!(cmd3.validate().is_ok());
+    let events = cmd3.execute().expect("Should execute");
+    assert_eq!(events.len(), 1);
+
+    // Verify no duplicate switches
+    let dup_cmd = SetRecipe {
+        building_id,
+        colony_id,
+        recipe_index: 1,
+        current_recipe_index: 1,
+    };
+    assert!(dup_cmd.validate().is_err());
+}
+
+#[test]
+fn test_recipe_logging_format() {
+    // Test that recipe switching events are properly formatted
+    let set_recipe = SetRecipe {
+        building_id: BuildingId(42),
+        colony_id: ColonyId(7),
+        recipe_index: 1,
+        current_recipe_index: 0,
+    };
+
+    let events = set_recipe.execute().expect("Should execute");
+    match &events[0] {
+        EventType::BuildingRecipeChanged {
+            building_id,
+            colony_id,
+            old_recipe_index,
+            new_recipe_index,
+        } => {
+            // Verify format matches logging spec: "Building {id} switched recipe: {old} -> {new}"
+            let log_msg = format!(
+                "Building {:?} switched recipe: {} -> {}",
+                building_id, old_recipe_index, new_recipe_index
+            );
+            assert!(log_msg.contains("Building"));
+            assert!(log_msg.contains("switched recipe"));
+            assert!(log_msg.contains("0 -> 1"));
+            assert_eq!(*colony_id, ColonyId(7));
+        }
+        _ => panic!("Expected BuildingRecipeChanged event"),
+    }
+}
+
+#[test]
+fn test_multiple_buildings_independent_recipes() {
+    // Test that multiple buildings have independent recipe indices
+    let colony_id = ColonyId(1);
+
+    let building1 = Building::new(
+        BuildingId(1),
+        colony_id,
+        BuildingType::Farm { output_rate: 5 },
+    );
+
+    let building2 = Building::new(
+        BuildingId(2),
+        colony_id,
+        BuildingType::Farm { output_rate: 5 },
+    );
+
+    assert_eq!(building1.recipe_index, 0);
+    assert_eq!(building2.recipe_index, 0);
+
+    // Switch recipe for building 1
+    let cmd1 = SetRecipe {
+        building_id: building1.id,
+        colony_id,
+        recipe_index: 2,
+        current_recipe_index: building1.recipe_index,
+    };
+    assert!(cmd1.validate().is_ok());
+
+    // Building 2 still on recipe 0
+    let cmd2_attempt = SetRecipe {
+        building_id: building2.id,
+        colony_id,
+        recipe_index: 1,
+        current_recipe_index: building2.recipe_index,
+    };
+    assert!(cmd2_attempt.validate().is_ok());
 }

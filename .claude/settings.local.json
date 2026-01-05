@@ -13,7 +13,9 @@
       "Bash(sqlite3:*)",
       "Bash(timeout 8 cargo run:*)",
       "Bash(npm install)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)"
     ]
   }
 }

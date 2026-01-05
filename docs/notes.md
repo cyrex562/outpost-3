@@ -45,4 +45,17 @@
 - Events should take into account things like the skills of colonists.
 
 
+- display and manually check/debug individual UI components and other visual systems
+- provide a mechanism for both mods and debugging to modify the input requirements and output multipliers for a given recipe
+- modding support for new recipes
+- do performance testing for various numbers of buildings and apply optimizations as needed
+- atmosphere
+- biomes
+- terrain
+- resource deposits
+- placeholder texture for everything - random color, plus number, plus abbreviatio
+- roads and higheways
+- stations for road to rail transfer
+- 
+
 choose the next feature to implement from desktop_wasm_pivot.md, implement it, then mark it complete

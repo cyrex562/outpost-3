@@ -311,6 +311,7 @@ impl BuildingView {
             },
             workers_assigned: 0,
             level: 1,
+            recipe_index: 0,
         };
         Self::from_building(&temp_building)
     }
@@ -439,6 +440,7 @@ pub async fn view_colony(
                 state,
                 workers_assigned: *workers,
                 level: *level,
+                recipe_index: 0,
             };
 
             Some(BuildingView::from_building(&building))
@@ -505,6 +507,7 @@ pub async fn view_colony(
                 state,
                 workers_assigned: *workers,
                 level: *level,
+                recipe_index: 0,
             };
 
             let inputs = temp_building.production_inputs();
@@ -773,6 +776,7 @@ pub async fn upgrade_building(
         state,
         workers_assigned: workers,
         level: current_level,
+        recipe_index: 0,
     };
 
     // Check if upgrade is possible
@@ -978,6 +982,7 @@ pub async fn advance_turn(
                         state,
                         workers_assigned: 0,
                         level: 1,
+                        recipe_index: 0,
                     };
 
                     let completed = temp_building.advance_construction();
