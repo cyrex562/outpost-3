@@ -369,6 +369,7 @@ fn main() {
     .insert_resource(DebugLogFilter::default())
     .insert_resource(RailInspector::default())
     .insert_resource(SandboxMode::default())
+    .insert_resource(SegmentBottlenecks::default())
     .add_systems(Startup, setup_camera)
     .add_systems(Startup, setup_hex_grid)
     .add_systems(Startup, setup_rail_segments)
@@ -1892,27 +1893,29 @@ fn visibility_culling_system(
     q_cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     cfg: Res<GridConfig>,
     culling: Res<CullingConfig>,
-    mut tiles: Query<(&HexTile, &mut Visibility)>,
-    mut buildings: Query<(&GlobalTransform, &mut Visibility), With<BuildingSprite>>,
-    mut rails: Query<(&RailSegmentVisual, &mut Visibility)>,
-    mut trains: Query<(&Transform, &mut Visibility), With<TrainIndicator>>,
-    mut cargos: Query<(&Transform, &mut Visibility), With<CargoParticle>>,
+    mut param_set: ParamSet<(
+        Query<(&HexTile, &mut Visibility)>,
+        Query<(&GlobalTransform, &mut Visibility), With<BuildingSprite>>,
+        Query<(&RailSegmentVisual, &mut Visibility)>,
+        Query<(&Transform, &mut Visibility), With<TrainIndicator>>,
+        Query<(&Transform, &mut Visibility), With<CargoParticle>>,
+    )>,
 ) {
     // If culling disabled, ensure everything is visible and exit
     if !culling.enabled {
-        for (_, mut vis) in tiles.iter_mut() {
+        for (_, mut vis) in param_set.p0().iter_mut() {
             *vis = Visibility::Visible;
         }
-        for (_, mut vis) in buildings.iter_mut() {
+        for (_, mut vis) in param_set.p1().iter_mut() {
             *vis = Visibility::Visible;
         }
-        for (_, mut vis) in rails.iter_mut() {
+        for (_, mut vis) in param_set.p2().iter_mut() {
             *vis = Visibility::Visible;
         }
-        for (_, mut vis) in trains.iter_mut() {
+        for (_, mut vis) in param_set.p3().iter_mut() {
             *vis = Visibility::Visible;
         }
-        for (_, mut vis) in cargos.iter_mut() {
+        for (_, mut vis) in param_set.p4().iter_mut() {
             *vis = Visibility::Visible;
         }
         return;
@@ -1949,7 +1952,7 @@ fn visibility_culling_system(
     max_y += culling.margin_world;
 
     // Cull tiles by computing their world positions from axial coords
-    for (tile, mut vis) in tiles.iter_mut() {
+    for (tile, mut vis) in param_set.p0().iter_mut() {
         let pos = axial_to_world(tile.q, tile.r, cfg.radius);
         let inside = pos.x >= min_x && pos.x <= max_x && pos.y >= min_y && pos.y <= max_y;
         *vis = if inside {
@@ -1960,7 +1963,7 @@ fn visibility_culling_system(
     }
 
     // Cull standalone building sprites using their world transform
-    for (gt, mut vis) in buildings.iter_mut() {
+    for (gt, mut vis) in param_set.p1().iter_mut() {
         let p = gt.translation();
         let inside = p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y;
         *vis = if inside {
@@ -1971,7 +1974,7 @@ fn visibility_culling_system(
     }
 
     // Cull rail segments using their midpoints
-    for (seg, mut vis) in rails.iter_mut() {
+    for (seg, mut vis) in param_set.p2().iter_mut() {
         let p = seg.midpoint;
         let inside = p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y;
         *vis = if inside {
@@ -1982,7 +1985,7 @@ fn visibility_culling_system(
     }
 
     // Cull trains by their world position
-    for (tf, mut vis) in trains.iter_mut() {
+    for (tf, mut vis) in param_set.p3().iter_mut() {
         let p = tf.translation;
         let inside = p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y;
         *vis = if inside {
@@ -1993,7 +1996,7 @@ fn visibility_culling_system(
     }
 
     // Cull cargo particles by their world position
-    for (tf, mut vis) in cargos.iter_mut() {
+    for (tf, mut vis) in param_set.p4().iter_mut() {
         let p = tf.translation;
         let inside = p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y;
         *vis = if inside {
