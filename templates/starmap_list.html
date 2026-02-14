@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Stellar Cartography{% endblock %}
+
+{% block header_center %}
+<div class="header-title-section">
+    <h2>Stellar Cartography Database</h2>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="starmap-container">
+    <!-- Controls / Filters -->
+    <div class="dashboard-grid">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Database Filters</h3>
+            </div>
+            <div class="filter-controls">
+                <form hx-get="/map" hx-target="#starmap-table-body" hx-trigger="change">
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <label>
+                            Sort By:
+                            <select name="sort" class="form-select">
+                                <option value="distance">Distance (Asc)</option>
+                                <option value="name">Name (A-Z)</option>
+                                <option value="class">Spectral Class</option>
+                            </select>
+                        </label>
+                        <label>
+                            Status:
+                            <select name="status" class="form-select">
+                                <option value="all">All Systems</option>
+                                <option value="scanned">Scanned Only</option>
+                                <option value="unknown">Unknown Only</option>
+                            </select>
+                        </label>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Exploration Summary</h3>
+            </div>
+            <div style="display: flex; justify-content: space-around;">
+                <div class="stat-item">
+                    <span class="text-secondary">Known Systems</span>
+                    <div class="text-xl text-mono">{{ systems_count | default(value=0) }}</div>
+                </div>
+                <div class="stat-item">
+                    <span class="text-secondary">Scanned</span>
+                    <div class="text-xl text-mono text-success">{{ scanned_count | default(value=0) }}</div>
+                </div>
+                <div class="stat-item">
+                    <span class="text-secondary">Probes Active</span>
+                    <div class="text-xl text-mono">{{ active_probes | default(value=0) }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Systems Table -->
+    <div class="data-table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>System Name</th>
+                    <th>Spectral Class</th>
+                    <th>Distance (LY)</th>
+                    <th>Status</th>
+                    <th>Celestial Bodies</th>
+                    <th style="text-align: right;">Operations</th>
+                </tr>
+            </thead>
+            <tbody id="starmap-table-body">
+                {% for system in systems %}
+                <tr>
+                    <td class="text-mono font-bold">{{ system.name }}</td>
+                    <td>
+                        <span class="status-badge" style="background-color: rgba(255,255,255,0.1);">
+                            {{ system.spectral_class }}
+                        </span>
+                    </td>
+                    <td class="numeric">{{ system.distance | round(precision=2) }}</td>
+                    <td>
+                        {% if system.status == "Unknown" %}
+                        <span class="status-badge inactive">Unknown</span>
+                        {% elif system.status == "Scanned" %}
+                        <span class="status-badge active">Scanned</span>
+                        {% else %}
+                        <span class="status-badge">{{ system.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if system.body_count > 0 %}
+                        {{ system.body_count }} Bodies
+                        {% else %}
+                        <span class="text-secondary">-</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right;">
+                        {% if system.distance == 0 %}
+                        <a href="/colony/{{ system.id }}" class="btn-action btn-sm">View Colony</a>
+                        {% else %}
+                        <button class="btn-action btn-sm" hx-post="/map/probe/{{ system.id }}"
+                            hx-confirm="Launch probe to {{ system.name }}?">
+                            Launch Probe
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

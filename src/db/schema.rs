@@ -67,3 +67,22 @@ CREATE TABLE IF NOT EXISTS resource_stockpiles (
     UNIQUE(colony_id, resource_type)
 );
 "#;
+pub const STAR_SYSTEMS_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS star_systems (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    spectral_class TEXT NOT NULL,
+    distance_from_sol REAL NOT NULL,
+    discovery_level TEXT NOT NULL
+);
+"#;
+
+pub const CELESTIAL_BODIES_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS celestial_bodies (
+    id TEXT PRIMARY KEY,
+    system_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    body_type TEXT NOT NULL,
+    FOREIGN KEY (system_id) REFERENCES star_systems(id)
+);
+"#;

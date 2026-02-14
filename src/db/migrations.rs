@@ -34,6 +34,12 @@ fn create_tables(conn: &Connection) -> Result<()> {
     conn.execute(RESOURCE_STOCKPILES_TABLE, [])
         .context("Failed to create resource_stockpiles table")?;
 
+    conn.execute(STAR_SYSTEMS_TABLE, [])
+        .context("Failed to create star_systems table")?;
+
+    conn.execute(CELESTIAL_BODIES_TABLE, [])
+        .context("Failed to create celestial_bodies table")?;
+
     // Create indexes
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_events_turn ON events(turn_number)",

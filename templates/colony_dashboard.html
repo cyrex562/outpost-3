@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}Colony Operations: {{ colony.name }}{% endblock %}
+
+{% block header_center %}
+<div class="colony-info">
+    <span class="colony-name">{{ colony.name }}</span>
+    <span class="turn-counter">Turn: <span id="current-turn">{{ current_turn }}</span></span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="colony-dashboard" x-data="{ activeTab: 'infrastructure' }">
+
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+        <button class="tab-btn" :class="{ 'active': activeTab === 'infrastructure' }"
+            @click="activeTab = 'infrastructure'">
+            Infrastructure
+        </button>
+        <button class="tab-btn" :class="{ 'active': activeTab === 'labor' }" @click="activeTab = 'labor'">
+            Population & Labor
+        </button>
+        <button class="tab-btn" :class="{ 'active': activeTab === 'resources' }" @click="activeTab = 'resources'">
+            Resource Stockpile
+        </button>
+    </div>
+
+    <!-- Infrastructure Tab -->
+    <div x-show="activeTab === 'infrastructure'">
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Construction Queue</h3>
+                </div>
+                <div class="u-text-center text-secondary p-4">
+                    No active construction projects.
+                </div>
+                <div class="u-text-right mt-2">
+                    <button class="btn-action" hx-get="/colony/{{ colony.id }}/build-menu" hx-target="#modal-container">
+                        + New Project
+                    </button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Power Grid</h3>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="flex justify-between mb-1">
+                        <span>Load: {{ power_grid.consumption }} MW</span>
+                        <span>Capacity: {{ power_grid.generation }} MW</span>
+                    </div>
+                    <!-- Simple CSS progress bar -->
+                    <div style="height: 8px; background: #333; border-radius: 4px; overflow: hidden;">
+                        <div
+                            style="width: {% if power_grid.generation > 0 %}{{ (power_grid.consumption / power_grid.generation * 100) | round }}{% else %}0{% endif %}%; background: var(--accent-color); height: 100%;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Facility</th>
+                        <th>Level</th>
+                        <th>Status</th>
+                        <th>Workers</th>
+                        <th>Output/Turn</th>
+                        <th style="text-align: right;">Control</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for building in buildings %}
+                    <tr>
+                        <td class="font-bold">{{ building.name }}</td>
+                        <td class="text-mono">{{ building.level }}</td>
+                        <td>
+                            {% if building.state == "Operational" %}
+                            <span class="status-badge active">Operational</span>
+                            {% else %}
+                            <span class="status-badge inactive">Offline</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-mono">{{ building.workers_assigned }} / {{ building.worker_capacity }}</td>
+                        <td class="text-mono text-success">{{ building.production_output }}</td>
+                        <td style="text-align: right;" class="flex justify-end gap-2">
+                            <form hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/allocate_labor"
+                                hx-swap="none">
+                                <input type="hidden" name="workers" value="10">
+                                <button type="submit" class="btn-action btn-sm" {% if available_workers < 10 or
+                                    building.workers_assigned>= building.worker_capacity %}disabled{% endif %}>
+                                    +10 Workers
+                                </button>
+                            </form>
+                            <form hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/deallocate_labor"
+                                hx-swap="none">
+                                <input type="hidden" name="workers" value="10">
+                                <button type="submit" class="btn-action btn-sm btn-danger" {% if
+                                    building.workers_assigned < 10 %}disabled{% endif %}>
+                                    -10 Workers
+                                </button>
+                            </form>
+                            <form hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/toggle" hx-swap="none">
+                                <button type="submit" class="btn-action btn-sm">
+                                    {% if building.state == "Operational" or building.state == "Damaged" %}Shutdown{%
+                                    else %}Power On{% endif %}
+                                </button>
+                            </form>
+                            {% if building.is_damaged %}
+                            <form hx-post="/colony/{{ colony.id }}/building/{{ building.id }}/repair" hx-swap="none">
+                                <button type="submit" class="btn-action btn-sm btn-warning">
+                                    Repair
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Labor Tab -->
+    <div x-show="activeTab === 'labor'" style="display: none;">
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Demographics</h3>
+                </div>
+                <table class="w-full">
+                    <tr>
+                        <td class="py-2 text-secondary">Total Population</td>
+                        <td class="py-2 text-right text-mono font-bold">{{ colony.population }}</td>
+                    </tr>
+                    <tr>
+                        <td class="py-2 text-secondary">Available Workforce</td>
+                        <td class="py-2 text-right text-mono">{{ available_workers }}</td>
+                    </tr>
+                    <tr>
+                        <td class="py-2 text-secondary">Unemployment</td>
+                        <td class="py-2 text-right text-mono">{{ ((available_workers / colony.population) * 100)
+                            | round }}%</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Resources Tab -->
+    <div x-show="activeTab === 'resources'" style="display: none;">
+        <div class="data-table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Resource</th>
+                        <th class="text-right">Stockpile</th>
+                        <th class="text-right">Cap</th>
+                        <th class="text-right">Net Change</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in resources.categories %}
+                    <tr class="bg-darker">
+                        <td colspan="4" class="font-bold text-secondary">{{ category.name }}</td>
+                    </tr>
+                    {% for res in category.resources %}
+                    <tr>
+                        <td>{{ res.name }}</td>
+                        <td class="numeric font-bold">{{ res.amount }}</td>
+                        <td class="numeric text-secondary">{{ res.capacity }}</td>
+                        <td class="numeric">
+                            {% if res.net_change > 0 %}
+                            <span class="text-success">+{{ res.net_change }}</span>
+                            {% elif res.net_change < 0 %} <span class="text-danger">{{ res.net_change }}</span>
+                                {% else %}
+                                <span class="text-secondary">0</span>
+                                {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Alpine.js for tab switching (lightweight) -->
+<script src="//unpkg.com/alpinejs" defer></script>
+{% endblock %}

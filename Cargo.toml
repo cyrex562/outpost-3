@@ -7,21 +7,18 @@ description = "A colony management and wormhole trade simulation game"
 license = "MIT"
 
 [lib]
-# Only compile lib.rs when server feature is enabled
-required-features = ["server"]
 
-[workspace]
-members = ["crates/outpost-core", "crates/outpost-client"]
-# When running from workspace root, use the client by default
-default-members = ["crates/outpost-client"]
+
+
 
 # Legacy actix web server (optional, built with --features server)
 [[bin]]
 name = "outpost3-server"
 path = "src/main.rs"
-required-features = ["server"]
+
 
 [features]
+default = ["server"]
 # Enable the legacy actix web server
 server = ["actix-web", "actix-rt", "actix-files", "tera"]
 

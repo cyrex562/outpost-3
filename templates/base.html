@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,12 +13,14 @@
     <link rel="stylesheet" href="/static/css/modal.css">
     <link rel="stylesheet" href="/static/css/charts.css">
     <link rel="stylesheet" href="/static/css/colony-components.css">
+    <link rel="stylesheet" href="/static/css/data-dense.css">
 
     <!-- HTMX for dynamic content -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 
     {% block extra_head %}{% endblock %}
 </head>
+
 <body class="{% block body_class %}{% endblock %}">
     <!-- Loading Indicator -->
     <div id="loading-overlay" class="loading-overlay hidden">
@@ -44,7 +47,8 @@
                 {% block header_center %}
                 <div class="colony-info">
                     <span class="colony-name">{% block colony_name %}Colony Alpha{% endblock %}</span>
-                    <span class="turn-counter">Turn: <span id="current-turn">{% block current_turn %}1{% endblock %}</span></span>
+                    <span class="turn-counter">Turn: <span id="current-turn">{% block current_turn %}1{% endblock
+                            %}</span></span>
                 </div>
                 {% endblock %}
             </div>
@@ -127,10 +131,7 @@
 
             <!-- Main Content Area -->
             <main class="app-main">
-                <!-- Canvas Container (for PixiJS maps) -->
-                <div id="canvas-container" class="canvas-container hidden">
-                    <canvas id="game-canvas"></canvas>
-                </div>
+
 
                 <!-- Content Area (for HTML/HTMX content) -->
                 <div id="content-area" class="content-area">
@@ -187,4 +188,5 @@
         <p class="help-hint">Press <kbd>?</kbd> to toggle this help</p>
     </div>
 </body>
+
 </html>

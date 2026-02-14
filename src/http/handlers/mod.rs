@@ -7,8 +7,10 @@ use crate::events::{EventStore, GameEvent, EventType};
 use crate::commands::{Command, FoundColony, ConstructBuilding, UpgradeBuilding, RepairBuilding, AdvanceTurn};
 use crate::db::DbPool;
 
+pub mod colony_actions;
+
 // Helper functions for database operations
-fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources> {
+pub(crate) fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources> {
     let mut resources = Resources::new();
 
     let mut stmt = conn.prepare(
@@ -68,7 +70,7 @@ fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources
     Ok(resources)
 }
 
-fn save_resources(conn: &Connection, colony_id: u64, resources: &Resources) -> anyhow::Result<()> {
+pub(crate) fn save_resources(conn: &Connection, colony_id: u64, resources: &Resources) -> anyhow::Result<()> {
     for (resource_type, quantity) in resources.iter() {
         let resource_type_str = format!("{:?}", resource_type);
         conn.execute(
@@ -83,8 +85,10 @@ fn save_resources(conn: &Connection, colony_id: u64, resources: &Resources) -> a
 #[derive(Serialize)]
 struct ResourceItem {
     name: String,
-    quantity: i64,
+    amount: i64,
     resource_type: String,
+    capacity: i64,
+    net_change: i64,
 }
 
 #[derive(Serialize)]
@@ -98,8 +102,8 @@ struct ResourcesView {
     categories: Vec<ResourceCategory>,
 }
 
-impl From<&Resources> for ResourcesView {
-    fn from(resources: &Resources) -> Self {
+impl ResourcesView {
+    fn from(resources: &Resources, net_production: &std::collections::HashMap<String, i64>) -> Self {
         use std::collections::HashMap;
 
         // Group resources by category
@@ -139,12 +143,17 @@ impl From<&Resources> for ResourcesView {
         ];
 
         for resource_type in all_resource_types {
-            let quantity = resources.get(resource_type);
+            let amount = resources.get(resource_type);
             let category = resource_type.category().to_string();
+            let type_str = format!("{:?}", resource_type);
+            let net = *net_production.get(&type_str).unwrap_or(&0);
+            
             let item = ResourceItem {
                 name: resource_type.name().to_string(),
-                quantity,
-                resource_type: format!("{:?}", resource_type),
+                amount,
+                resource_type: type_str,
+                capacity: 1000, // Default capacity for now
+                net_change: net,
             };
 
             categories_map
@@ -448,7 +457,6 @@ pub async fn view_colony(
         .collect();
 
     let colony_view = ColonyView::from(&colony);
-    let resources_view = ResourcesView::from(&colony.resources);
 
     // Calculate actual employment from buildings
     let total_employed: u32 = buildings.iter().map(|b| b.workers_assigned).sum();
@@ -572,6 +580,15 @@ pub async fn view_colony(
         a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or(""))
     });
 
+    // Get current turn
+    let current_turn: i64 = conn.query_row(
+        "SELECT current_turn FROM game_state WHERE id = 1",
+        [],
+        |row| row.get(0)
+    ).unwrap_or(1);
+
+    let resources_view = ResourcesView::from(&colony.resources, &net_production);
+
     let mut context = tera::Context::new();
     context.insert("colony", &colony_view);
     context.insert("resources", &resources_view);
@@ -583,8 +600,9 @@ pub async fn view_colony(
     context.insert("colony_id", &colony_mut.id.0);
     context.insert("resource_flows", &resource_flows);
     context.insert("net_production", &net_production_list);
+    context.insert("current_turn", &current_turn);
 
-    let html = tmpl.render("colony.html", &context)
+    let html = tmpl.render("colony_dashboard.html", &context)
         .map_err(|e| {
             eprintln!("Template rendering error: {:?}", e);
             eprintln!("Error details: {}", e);
@@ -839,87 +857,7 @@ pub async fn upgrade_building(
         .body(format!("Building upgraded to level {}", current_level + 1)))
 }
 
-pub async fn repair_building(
-    path: web::Path<(u64, u64)>,
-    pool: web::Data<DbPool>,
-    event_store: web::Data<EventStore>,
-) -> Result<HttpResponse> {
-    let (colony_id, building_id) = path.into_inner();
-    let conn = pool.get()
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
-    // Load the building
-    let (type_str, state_str, workers, level): (String, String, u32, u8) = conn.query_row(
-        "SELECT building_type, state, workers_assigned, level FROM buildings WHERE building_id = ?1 AND colony_id = ?2",
-        rusqlite::params![building_id, colony_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-    ).map_err(|e| actix_web::error::ErrorNotFound(format!("Building not found: {}", e)))?;
-
-    let building_type: BuildingType = serde_json::from_str(&type_str)
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-    let state: BuildingState = serde_json::from_str(&state_str)
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-
-    // Check if building is damaged
-    if !matches!(state, BuildingState::Damaged { .. }) {
-        return Err(actix_web::error::ErrorBadRequest("Building is not damaged"));
-    }
-
-    // Load colony resources
-    let mut resources = load_resources(&conn, colony_id)
-        .unwrap_or_else(|_| Resources::starting_resources());
-
-    // Create and execute command
-    let command = RepairBuilding {
-        building_id: BuildingId(building_id),
-        colony_id: ColonyId(colony_id),
-        current_state: state,
-        available_resources: resources.clone(),
-    };
-
-    let events = command.execute()
-        .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
-
-    // Save events and apply to state
-    for event in events {
-        let game_event = GameEvent::new(
-            event_store.get_next_event_id()
-                .map_err(|e| actix_web::error::ErrorInternalServerError(e))?,
-            1,
-            event.clone(),
-        );
-
-        event_store.save_event(&game_event)
-            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-
-        // Apply event to database
-        match event {
-            EventType::BuildingRepaired { building_id, .. } => {
-                let operational_state = BuildingState::Operational;
-                conn.execute(
-                    "UPDATE buildings SET state = ?1 WHERE building_id = ?2",
-                    rusqlite::params![
-                        serde_json::to_string(&operational_state).unwrap(),
-                        building_id.0
-                    ],
-                ).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-            }
-            EventType::ResourcesConsumed { resource_type, amount, .. } => {
-                let current = resources.get(resource_type);
-                resources.set(resource_type, current - amount);
-            }
-            _ => {}
-        }
-    }
-
-    // Save updated resources
-    save_resources(&conn, colony_id, &resources)
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-
-    Ok(HttpResponse::Ok()
-        .insert_header(("HX-Trigger", "buildingRepaired"))
-        .body("Building repaired successfully"))
-}
 
 pub async fn advance_turn(
     colony_id: web::Path<u64>,
@@ -1048,4 +986,83 @@ pub async fn advance_turn(
     Ok(HttpResponse::Ok()
         .insert_header(("HX-Refresh", "true"))
         .body(format!("Turn advanced to {}", current_turn + 1)))
+}
+#[derive(Serialize)]
+struct StarSystemView {
+    id: String,
+    name: String,
+    spectral_class: String,
+    distance: f32,
+    status: String,
+    body_count: i32,
+}
+
+#[derive(Deserialize)]
+pub struct StarmapFilter {
+    sort: Option<String>,
+    status: Option<String>,
+}
+
+pub async fn view_starmap(
+    tmpl: web::Data<tera::Tera>,
+    pool: web::Data<DbPool>,
+    query: web::Query<StarmapFilter>,
+) -> Result<HttpResponse> {
+    let conn = pool.get()
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    let mut sql = "SELECT id, name, spectral_class, distance_from_sol, discovery_level, 
+                   (SELECT COUNT(*) FROM celestial_bodies WHERE system_id = star_systems.id) as body_count 
+                   FROM star_systems".to_string();
+    
+    // Apply status filter
+    if let Some(status) = &query.status {
+        match status.as_str() {
+            "scanned" => sql.push_str(" WHERE discovery_level >= 'Scanned'"),
+            "unknown" => sql.push_str(" WHERE discovery_level = 'Unknown'"),
+            _ => {}
+        }
+    }
+
+    // Apply sorting
+    match query.sort.as_deref() {
+        Some("name") => sql.push_str(" ORDER BY name ASC"),
+        Some("class") => sql.push_str(" ORDER BY spectral_class ASC"),
+        _ => sql.push_str(" ORDER BY distance_from_sol ASC"), // Default to distance
+    }
+
+    let mut stmt = conn.prepare(&sql)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    let systems_iter = stmt.query_map([], |row| {
+        Ok(StarSystemView {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            spectral_class: row.get(2)?,
+            distance: row.get(3)?,
+            status: row.get(4)?,
+            body_count: row.get(5)?,
+        })
+    }).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    let mut systems = Vec::new();
+    for system in systems_iter {
+        systems.push(system.map_err(|e| actix_web::error::ErrorInternalServerError(e))?);
+    }
+
+    let mut context = tera::Context::new();
+    context.insert("systems", &systems);
+    context.insert("systems_count", &systems.len());
+    
+    // Simple stats
+    let scanned_count = systems.iter().filter(|s| s.status != "Unknown").count();
+    context.insert("scanned_count", &scanned_count);
+    
+    // Active probes (mock for now, or query from DB)
+    context.insert("active_probes", &0);
+
+    let html = tmpl.render("starmap_list.html", &context)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }

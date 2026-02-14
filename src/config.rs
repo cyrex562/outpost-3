@@ -29,7 +29,7 @@ impl Default for AppConfig {
         Self {
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
-                port: 8080,
+                port: 8081,
             },
             database: DatabaseConfig {
                 path: "outpost3.db".to_string(),
