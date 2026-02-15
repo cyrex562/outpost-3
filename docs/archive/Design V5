@@ -1,0 +1,196 @@
+# Design
+
+## Concepts
+
+The player leads humanity’s effort to establish a self-sustaining colony beyond the Solar System.
+The game blends **strategic planning**, **resource and systems management**, and **narrative encounters** across multiple layers of scale — from starship voyages to planetary settlement and eventual interstellar expansion.
+
+
+
+- Game "Phases"
+ - Gather information about remote star systems
+ - Launch initial colony ship
+ - Survey target system
+ - Select initial colony site - surface on planet, station in orbit
+ - Build initial colony
+ - Expand to additional sites
+ - Build orbital infrastructure
+ - Expand in system
+ - Build stargate
+ - Explore new systems
+ - Establish gate pairs in new systems
+- Procedurally generate systems
+- Procedurally generate surface maps
+- Procedurally generate resource deposit locations
+- Link sites with infrastructure
+- Improve planet-wide infrastructure with big projects like bridges, dams, big plants/factories, canals, etc
+- In-Game Events
+	- Event effects
+	- Event descritpion/narrative
+	- Choices and effects of choices
+- Event log display viewable on any screen
+	- Color coded based on event type
+	- Click on event for details
+- Modding support for new resources, production chains, etc.
+- Planet atmospheres
+- Planet biomes
+- Turn based
+- Create colonies, stations/installations
+	- Require power
+	- Require resources (water, raw materials, air)
+- Create wormholes between colony worlds
+- Link colonies and other installations to wormholes via road and rails
+- Build transportation infrastructure
+- Build buildings
+	- Fixed (foudnation) or Mobile (rail, trailer-based on wheels, ship-based, event floating/air)
+	- Upgrades
+	- Configure operations / Recipe selection
+	- Link to transportation network
+	- Build modules
+	- Industrial Buildings
+	  	- Can produce pollution
+	  		- Pollution can be remediated
+		- Power plants
+			- Some consume fuel and produce waste
+		- Manufacturing
+		- Mining
+		- Refining
+		- Farming
+		- Transportation
+		- Storage
+	- Population Buildings
+		- Housing
+		- Retail
+		- Services
+		- Restaurants
+		- Entertainment
+		- Education
+		- Health
+		- Public Services
+- Configure building
+- Super deep resource chain: eventually  explore self-sufficiency from available planet resources
+	- Extract resources
+	- Process resources into materials
+	- Manufacture materials into components and goods (multiple cycles)
+	- Distribute and trade cargo
+- Excavation for settlements
+	- Surface terraforming
+	- Subsurface excavation
+- Trade between colonies
+- Research technology (science and engineering)
+- Construct megastructures
+- Mine system resources (gas giants, asteroids/comets, star material, etc)
+- Financial system with possibiity for post-scarcity, non-traditional currencies
+- Population simulation
+	- character sheets for representative "characters"
+- Even though its a web UI, the world and everything in it have locations, etc.
+- Transportation
+	- cargo
+	- routes
+		- Route management
+		- Route queueing
+- Space programs
+	- Launching satellites
+	- Launch missions
+	- Building spaceships
+- Terraforming
+	- Atmosphere
+	- Biosphere
+	- Hydrosphere
+- Logs of actual events in-world
+
+- Build and configure vehicles
+
+- Settlement governance and policies
+
+- Anomalies to explore on planets in space, etc.
+
+- Victory Conditions: none
+
+- Core gameplay loop
+ - Develop colony
+ - Extract Resources
+ - Build infrastructure
+ - Explore new worlds
+ - Establish gates
+ - Create trade routes
+ - Optimize Economy
+ - Expand Network
+
+- People need
+ - Food
+ - Water
+ - Air
+ - Housing
+ - Goods
+ - Healthcare
+ - Entertainment
+ - Education
+ - Data
+ - People have morale
+
+ - Automation
+
+ - Base setup
+
+## Views
+
+- Star System List
+- Star System Detail
+- Planet/Body List
+- Planet/Body Detail
+- Admin / Settings
+- Visualize production chain
+- Graph resources consumption and production
+- Graph economic data
+- Transportation data graphs
+- Graph diagram for transportation networks
+- Debugging panel displayable on any screen
+	- Logs
+	- Commands (like minecraft shell)
+- Load/Save Worlds
+- Manage Mods
+- Help / Codex
+- New Game Configuration
+	- player name and callsign
+	- difficulty settings
+	- starting conditions
+	- enable/disable mods
+- Trade
+- Policy / governance management
+- Research
+- Vehicle detail
+- Settlement / installation details
+- Space mission details
+- Expedition management
+- Mission planning
+	- Exploration
+		- Select system and launch probes
+		- View system data
+	- Higher investment in probe design or duration = better data resolution
+	- Projected travel time, mission difficulty, potential habitability
+	- Select target system and proceed
+	- Select ship
+		- Generation ship
+		- Sleeper ship
+	- Select cargo and crew
+- In transit voyage log
+- Star system exploration 
+	- Survey
+- Orbital view
+	- Satellite constellations and stations
+- Landing operations
+
+## Architecture
+
+- Outpost-Core: business logic library
+	- Event sourcing / CQRS
+- Outpost-Server: Actix-Web, REST API, Tera templates
+	- sqlite database
+	- (possible) Redis K/V store
+	- HTMX + Alpine.js + Typescript + other JS/TS libraries
+	- (future) WASM - for what? plugins? native client on web?
+- Outpost-Client: Rust client static library + python package wrapper
+- Outpost-Desktop (future): Native desktop client
+
+## Systems

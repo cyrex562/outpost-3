@@ -1,11 +1,3 @@
-# Game Concept
-
-Excellent — this is a strong start. You’ve already captured the core gameplay loop and its natural “zoom levels” (interstellar → system → planetary → sector → colony → infrastructure). The next step in refining this is to **tighten the structure**, eliminate repetition, and add clarity and *intent* to each phase — i.e., what the player *does*, *feels*, and *learns* in each stage, and what gameplay systems are introduced.
-
-Here’s a refined, structured rewrite that keeps your original vision but improves readability, flow, and design clarity. I’ve also annotated where further detail will help when we move to screens, mechanics, and UI flow.
-
-**Game Concept**: Outpost-Inspired Interstellar Colony Simulation
-
 ## Overview
 
 The player leads humanity’s effort to establish a self-sustaining colony beyond the Solar System.
@@ -198,8 +190,3 @@ Gameplay unfolds in **phases**, each introducing new systems, challenges, and de
 1. **Define Event System:**
 
    * Triggers, Conditions, Outcomes, Player Choices, Randomness.
-
----
-
-Would you like me to take this version and produce a **“Screen and System Mapping”** next — showing which UI screens correspond to each phase and what mechanics or systems are active in each?
-That would make an ideal bridge to implementation planning (UI → Simulation Loop → Data Model).
