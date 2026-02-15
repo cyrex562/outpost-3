@@ -1,335 +1,297 @@
-# CLAUDE_RUST.md - Rust Best Practices for Outpost 3 Prototype
+# CLAUDE_RUST.md — Rust Web Dev Guide for Outpost 3
 
-## Project Overview
+**For:** AI coding assistants (Claude, Copilot, Gemini, Cursor, etc.)
+**Project:** Outpost 3 — colony-building simulation game
+**Design:** `docs/Outpost3_Design_V5.md` (V5, the single source of truth for game design)
+**Checklist:** `docs/MVP_TRANSFORMATION_CHECKLIST.md` (tracks every task to reach MVP)
 
-This document provides Rust-specific guidelines for AI assistants working on the **Outpost 3 Game Prototype** - a web-based simulation game built with Rust, Actix-web, HTMX, and SQLite.
+---
+
+## You Are a Rust Web Developer
+
+You are working on a **Rust web application**. Your role is that of a **senior Rust web developer** building a data-driven simulation game served as a server-rendered web app. You write idiomatic, well-tested Rust. You iterate until **all unit, property, and integration tests pass**.
+
+---
 
 ## Technology Stack
 
-- **Backend**: Rust with Actix-web 4.x
-- **Database**: SQLite with rusqlite and r2d2 connection pooling
-- **Frontend**: HTMX with server-rendered HTML templates
-- **Templating**: Tera templates
-- **Architecture**: Event Sourcing with CQRS patterns
-- **Build**: Cargo with workspace organization
+| Layer | Technology | Notes |
+|---|---|---|
+| **Core Logic** | Rust (pure, no I/O) | `outpost-core` crate — all simulation, domain, events, commands |
+| **Web Server** | Actix-Web 4.x | `outpost-server` crate — HTTP, templates, DB, static files |
+| **Database** | SQLite + rusqlite + r2d2 | Connection pooling, prepared statements, parameterized queries |
+| **Templates** | Tera | Server-side HTML rendering |
+| **Frontend** | HTMX + Alpine.js | Partial page updates, lightweight client-side interactivity |
+| **Content** | YAML data files | Buildings, resources, recipes, events, tech tree loaded at startup |
+| **Testing** | `#[test]` + `proptest` | Unit tests, property-based tests, integration tests |
+| **Error Handling** | `thiserror` (domain) + `anyhow` (application) | Never `unwrap()` or `expect()` in production code |
+| **Logging** | `tracing` + `tracing-subscriber` | Structured logging in server code only (not in core) |
 
-## Project Structure
+---
+
+## Project Structure (Target — V5 Architecture)
 
 ```
 outpost-3/
-├── Cargo.toml              # Workspace root
-├── CLAUDE_RUST.md          # This file
-├── DESIGN.md               # Game design document
-├── ROADMAP.md              # Feature implementation checklist
-├── README.md               # Setup and run instructions
-├── src/                    # Main application source
-│   ├── main.rs            # Application entry point
-│   ├── lib.rs             # Library exports
-│   ├── config.rs          # Configuration management
-│   ├── domain/            # Domain models and logic
-│   │   ├── mod.rs
-│   │   ├── colony.rs      # Colony entity
-│   │   ├── building.rs    # Building types
-│   │   ├── resource.rs    # Resource types
-│   │   ├── wormhole.rs    # Wormhole gates
-│   │   ├── train.rs       # Train entities
-│   │   └── planet.rs      # Planet generation
-│   ├── events/            # Event sourcing events
-│   │   ├── mod.rs
-│   │   ├── event.rs       # Base event types
-│   │   └── store.rs       # Event store implementation
-│   ├── commands/          # Command pattern implementations
-│   │   ├── mod.rs
-│   │   └── handlers.rs    # Command handlers
-│   ├── queries/           # CQRS query side
-│   │   ├── mod.rs
-│   │   └── projections.rs # Read model projections
-│   ├── services/          # Application services
-│   │   ├── mod.rs
-│   │   ├── colony_service.rs
-│   │   └── economy_service.rs
-│   ├── web/               # Web layer
-│   │   ├── mod.rs
-│   │   ├── routes.rs      # Route definitions
-│   │   ├── handlers.rs    # HTTP handlers
-│   │   └── templates/     # Tera templates
-│   ├── db/                # Database layer
-│   │   ├── mod.rs
-│   │   ├── schema.rs      # Schema definitions
-│   │   └── migrations.rs  # Migration logic
-│   └── utils/             # Utility functions
-│       └── mod.rs
-├── static/                # Static assets
-│   ├── css/
-│   ├── js/
-│   └── images/
-├── templates/             # Tera HTML templates
-│   ├── base.html
-│   ├── colony.html
-│   └── components/
-├── tests/                 # Integration tests
-│   └── integration_tests.rs
-└── migrations/            # SQL migration files
-    └── 001_initial_schema.sql
+├── Cargo.toml                  # Workspace root
+├── crates/
+│   ├── outpost-core/           # Pure game logic (NO I/O, NO web deps)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── domain/         # Entity structs, game state, business logic
+│   │       ├── events/         # Event types (immutable, past-tense)
+│   │       ├── commands/       # Command structs (validate → produce events)
+│   │       ├── simulation/     # Tick processing, game clock
+│   │       ├── content/        # YAML content loader and definitions
+│   │       └── errors.rs       # Domain error types (thiserror)
+│   └── outpost-server/         # Web server (Actix, DB, templates)
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs         # Entry point, server startup
+│           ├── config.rs       # AppConfig loading
+│           ├── routes.rs       # Route definitions
+│           ├── handlers/       # HTTP handler functions
+│           ├── db/             # SQLite schema, migrations, queries
+│           └── services/       # Orchestration between core and DB
+├── content/                    # YAML data files (buildings, resources, recipes, events)
+├── templates/                  # Tera HTML templates
+│   ├── base.html              # Master layout (sidebar + topbar + content + ticker)
+│   ├── dashboard.html
+│   ├── site_detail.html
+│   ├── colonies.html
+│   ├── events.html
+│   ├── settings.html
+│   └── components/            # Partial templates for HTMX swaps
+├── static/
+│   ├── css/                   # Stylesheets (dark theme, data-dense tables)
+│   └── js/                    # Alpine.js components, HTMX config
+├── tests/                     # Integration tests
+└── docs/
+    ├── Outpost3_Design_V5.md  # Game design document (source of truth)
+    └── MVP_TRANSFORMATION_CHECKLIST.md
 ```
 
-## Rust Best Practices
+### Critical Rule: `outpost-core` Has Zero I/O
 
-### 1. Error Handling
+The `outpost-core` crate must **never** depend on:
+- `actix-web`, `tokio`, or any async runtime
+- `rusqlite`, `r2d2`, or any database crate
+- `tracing` (use return values, not logging, to communicate state)
+- File system access, network calls, or any side effects
 
-**Use `thiserror` for domain errors and `anyhow` for application errors:**
+All I/O happens in `outpost-server`. Core is pure functions: `(State, Command) → (State', Events[])`.
 
-```rust
-// Domain errors - use thiserror
-use thiserror::Error;
+---
 
-#[derive(Error, Debug)]
-pub enum ColonyError {
-    #[error("Insufficient resources: {resource_type}")]
-    InsufficientResources { resource_type: String },
+## Architecture: Event Sourcing + CQRS
 
-    #[error("Building {building_id} not found")]
-    BuildingNotFound { building_id: u64 },
+### The Pattern
 
-    #[error("Invalid command: {0}")]
-    InvalidCommand(String),
-}
+1. **Player action** → HTTP handler receives request
+2. **Handler** creates a **Command** and passes it to a service
+3. **Service** calls `command.execute(&current_state)` in `outpost-core`
+4. **Command** validates against state, returns `Vec<Event>` or error
+5. **Service** applies events to state, persists events to DB
+6. **UI** reads projected state (query side) and renders templates
 
-// Application errors - use anyhow
-use anyhow::{Context, Result};
-
-pub fn load_colony(id: u64) -> Result<Colony> {
-    db::get_colony(id)
-        .context("Failed to load colony from database")?
-}
-```
-
-**Never use `unwrap()` or `expect()` in production code** - always handle errors properly.
-
-### 2. Type Safety and Domain Modeling
-
-**Use newtype patterns for domain primitives:**
+### Events (Past-Tense, Immutable)
 
 ```rust
-// Good - type-safe IDs
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ColonyId(pub u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BuildingId(pub u64);
-
-// Good - strongly-typed resources
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Credits(pub i64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Energy(pub u64);
-```
-
-**Use enums for variants and states:**
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BuildingType {
-    Mine { resource_type: ResourceType, output_rate: u32 },
-    Factory { produces: ProductType, consumes: Vec<ResourceType> },
-    PowerPlant { output_mw: u32, fuel_type: FuelType },
-    Housing { capacity: u32, comfort_level: u8 },
-    TrainStation { platforms: u8, throughput: u32 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BuildingState {
-    UnderConstruction { progress: u8 },
-    Operational,
-    Damaged { severity: u8 },
-    Shutdown,
-}
-```
-
-### 3. Event Sourcing Patterns
-
-**Events should be immutable, serializable, and past-tense named:**
-
-```rust
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameEvent {
-    pub event_id: u64,
-    pub timestamp: DateTime<Utc>,
-    pub event_type: EventType,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum EventType {
-    ColonyFounded {
-        colony_id: ColonyId,
-        planet_id: PlanetId,
-        starting_resources: Resources,
-    },
-    BuildingConstructed {
-        building_id: BuildingId,
-        colony_id: ColonyId,
-        building_type: BuildingType,
-    },
-    ResourcesGathered {
-        colony_id: ColonyId,
-        resource_type: ResourceType,
-        amount: u64,
-    },
-    WormholeActivated {
-        wormhole_id: WormholeId,
-        source_planet: PlanetId,
-        destination_planet: PlanetId,
-    },
-    TrainDispatched {
-        train_id: TrainId,
-        route_id: RouteId,
-        cargo: Cargo,
-    },
+pub enum GameEvent {
+    SiteFounded { site_id: SiteId, body_id: BodyId, name: String },
+    BuildingQueued { site_id: SiteId, building_def_id: String, job_id: JobId },
+    BuildingCompleted { site_id: SiteId, building_id: BuildingId },
+    ResourcesExtracted { site_id: SiteId, resource: String, amount: f64 },
+    ResourcesConsumed { site_id: SiteId, resource: String, amount: f64 },
+    PopulationChanged { site_id: SiteId, delta: i64, reason: String },
+    MoraleChanged { site_id: SiteId, new_value: f64, factors: Vec<String> },
+    TickProcessed { tick: u64 },
 }
 ```
 
-**Commands should validate before generating events:**
+### Commands (Present-Tense, Validate → Execute)
 
 ```rust
 pub trait Command {
-    type Event;
-    type Error;
-
-    fn validate(&self) -> Result<(), Self::Error>;
-    fn execute(&self) -> Result<Vec<Self::Event>, Self::Error>;
+    fn execute(&self, state: &GameState) -> Result<Vec<GameEvent>, DomainError>;
 }
 
 pub struct ConstructBuilding {
-    pub colony_id: ColonyId,
-    pub building_type: BuildingType,
-    pub location: Location,
+    pub site_id: SiteId,
+    pub building_def_id: String,  // references YAML content
 }
 
 impl Command for ConstructBuilding {
-    type Event = EventType;
-    type Error = ColonyError;
+    fn execute(&self, state: &GameState) -> Result<Vec<GameEvent>, DomainError> {
+        let site = state.get_site(self.site_id)?;
+        let def = state.content.get_building(&self.building_def_id)?;
 
-    fn validate(&self) -> Result<(), Self::Error> {
-        // Check resources, space, prerequisites, etc.
-        Ok(())
-    }
-
-    fn execute(&self) -> Result<Vec<Self::Event>, Self::Error> {
-        self.validate()?;
+        // Validate: resources available, labor available, prerequisites met
+        site.validate_resources(&def.construction_cost)?;
+        site.validate_labor(def.construction_labor)?;
 
         Ok(vec![
-            EventType::BuildingConstructed {
-                building_id: BuildingId::new(),
-                colony_id: self.colony_id,
-                building_type: self.building_type.clone(),
+            GameEvent::BuildingQueued {
+                site_id: self.site_id,
+                building_def_id: self.building_def_id.clone(),
+                job_id: JobId::new(),
             },
-            EventType::ResourcesConsumed {
-                colony_id: self.colony_id,
-                costs: self.building_type.construction_cost(),
+            GameEvent::ResourcesConsumed {
+                site_id: self.site_id,
+                resource: "construction_materials".into(),
+                amount: def.construction_cost.total(),
             },
         ])
     }
 }
 ```
 
-### 4. Async and Actix-web Patterns
+---
 
-**Use async/await throughout the web layer:**
+## Data-Driven Content (YAML)
+
+Buildings, resources, recipes, and events are defined in YAML files under `content/`. The game loads these at startup via a `ContentLoader` in `outpost-core`.
+
+```yaml
+# content/buildings.yaml
+- id: mine
+  name: "Surface Mine"
+  category: industrial
+  construction_cost:
+    structural_components: 50
+    machine_parts: 20
+  construction_time_ticks: 24
+  labor_slots: 5
+  power_consumption: 10
+  recipes:
+    - id: mine_iron
+      inputs: { labor: 3, power: 10 }
+      outputs: { iron_ore: 15 }
+      ticks: 1
+```
+
+```yaml
+# content/resources.yaml
+- id: iron_ore
+  name: "Iron Ore"
+  category: raw
+  tier: 1
+  storage_type: bulk
+  unit: "tonnes"
+```
+
+---
+
+## Entity Hierarchy
+
+```
+GameState
+├── GameClock (tick, speed, paused)
+├── Content (loaded YAML definitions)
+├── Galaxy
+│   └── StarSystem
+│       └── CelestialBody (planet, moon, asteroid)
+│           ├── ResourceDeposit[]
+│           └── Site (settlement or installation)
+│               ├── BuildingList[]
+│               ├── ConstructionQueue[]
+│               ├── ResourceStockpile (HashMap<String, f64>)
+│               ├── Population (aggregate + representative characters)
+│               ├── PowerGrid (generation, consumption, net)
+│               ├── LifeSupport (oxygen, water, temperature)
+│               ├── LaborPool (available workers by skill)
+│               └── Morale (composite score 0-100)
+└── EventLog (fired gameplay events)
+```
+
+---
+
+## Type Safety
+
+**Use newtype wrappers for all IDs:**
 
 ```rust
-use actix_web::{web, HttpResponse, Result};
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SiteId(pub Uuid);
 
-#[derive(Deserialize)]
-pub struct BuildingForm {
-    building_type: String,
-    location_x: i32,
-    location_y: i32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BuildingId(pub Uuid);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BodyId(pub Uuid);
+```
+
+**Use enums for finite sets:**
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuildingState {
+    UnderConstruction,
+    Operational,
+    Paused,
+    Damaged,
+    Destroyed,
 }
 
-pub async fn construct_building(
-    colony_id: web::Path<u64>,
-    form: web::Form<BuildingForm>,
-    colony_service: web::Data<ColonyService>,
-) -> Result<HttpResponse> {
-    let command = ConstructBuilding {
-        colony_id: ColonyId(*colony_id),
-        building_type: parse_building_type(&form.building_type)?,
-        location: Location::new(form.location_x, form.location_y),
-    };
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SiteType {
+    Settlement,
+    Installation,
+}
 
-    colony_service.execute_command(command).await?;
-
-    Ok(HttpResponse::Ok()
-        .insert_header(("HX-Trigger", "buildingAdded"))
-        .body("Building construction started"))
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Skill {
+    Laborer, Engineer, Scientist, Farmer, Medic, Operator,
 }
 ```
 
-**Use `web::Data` for shared state and services:**
+---
+
+## Error Handling
 
 ```rust
-pub async fn configure_app(cfg: &mut web::ServiceConfig) {
-    let db_pool = create_db_pool();
-    let event_store = EventStore::new(db_pool.clone());
-    let colony_service = ColonyService::new(event_store);
+// Domain errors in outpost-core (thiserror)
+#[derive(Error, Debug)]
+pub enum DomainError {
+    #[error("Site {0} not found")]
+    SiteNotFound(SiteId),
 
-    cfg
-        .app_data(web::Data::new(colony_service))
-        .service(
-            web::scope("/colony")
-                .route("/{id}", web::get().to(get_colony))
-                .route("/{id}/building", web::post().to(construct_building))
-        );
+    #[error("Insufficient {resource}: need {needed}, have {available}")]
+    InsufficientResource { resource: String, needed: f64, available: f64 },
+
+    #[error("Content definition '{0}' not found")]
+    ContentNotFound(String),
+
+    #[error("Building {0} is not operational")]
+    BuildingNotOperational(BuildingId),
+}
+
+// Application errors in outpost-server (anyhow)
+pub async fn handle_build(/* ... */) -> Result<HttpResponse> {
+    let events = command.execute(&state)
+        .context("Failed to execute build command")?;
+    // ...
 }
 ```
 
-### 5. Database and Connection Pooling
+**Rules:**
+- `unwrap()` and `expect()` are forbidden in non-test code
+- Use `?` for propagation
+- Add `.context()` at application boundaries
+- Log errors with `tracing::error!` in the server crate
 
-**Use r2d2 for connection pooling:**
+---
 
-```rust
-use r2d2_sqlite::SqliteConnectionManager;
-use r2d2::Pool;
+## Testing Strategy — Iterate Until All Tests Pass
 
-pub type DbPool = Pool<SqliteConnectionManager>;
+Every change you make must be followed by running tests. **Do not consider a task done until all tests pass.**
 
-pub fn create_db_pool() -> DbPool {
-    let manager = SqliteConnectionManager::file("outpost3.db");
-    Pool::builder()
-        .max_size(15)
-        .build(manager)
-        .expect("Failed to create database pool")
-}
-```
+### Unit Tests (in `outpost-core`)
 
-**Use prepared statements and parameterized queries:**
-
-```rust
-pub fn save_event(pool: &DbPool, event: &GameEvent) -> Result<()> {
-    let conn = pool.get()?;
-
-    conn.execute(
-        "INSERT INTO events (event_id, timestamp, event_type, data) VALUES (?1, ?2, ?3, ?4)",
-        params![
-            event.event_id,
-            event.timestamp.to_rfc3339(),
-            serde_json::to_string(&event.event_type)?,
-            serde_json::to_string(&event)?,
-        ],
-    )?;
-
-    Ok(())
-}
-```
-
-### 6. Testing
-
-**Write unit tests for domain logic:**
+Test pure domain logic, commands, and simulation:
 
 ```rust
 #[cfg(test)]
@@ -337,358 +299,199 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_construct_building_insufficient_resources() {
-        let command = ConstructBuilding {
-            colony_id: ColonyId(1),
-            building_type: BuildingType::Mine {
-                resource_type: ResourceType::Iron,
-                output_rate: 10,
-            },
-            location: Location::new(5, 5),
-        };
-
-        let result = command.validate();
-        assert!(result.is_err());
+    fn construct_building_rejects_insufficient_resources() {
+        let state = GameState::new_test();  // helper with minimal valid state
+        let cmd = ConstructBuilding { site_id: state.first_site(), building_def_id: "mine".into() };
+        // Site has no resources
+        assert!(matches!(cmd.execute(&state), Err(DomainError::InsufficientResource { .. })));
     }
 
     #[test]
-    fn test_event_serialization() {
-        let event = EventType::ColonyFounded {
-            colony_id: ColonyId(1),
-            planet_id: PlanetId(42),
-            starting_resources: Resources::default(),
-        };
-
-        let json = serde_json::to_string(&event).unwrap();
-        let deserialized: EventType = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(event, deserialized);
+    fn tick_advances_construction_progress() {
+        let mut state = GameState::new_test_with_construction();
+        let events = state.process_tick();
+        // Construction should have progressed
+        let job = state.first_site_state().construction_queue.first().unwrap();
+        assert!(job.progress > 0);
     }
 }
 ```
 
-**Use integration tests for HTTP endpoints:**
+### Property Tests (in `outpost-core`, using `proptest`)
+
+Test invariants that must hold for all inputs:
 
 ```rust
-#[cfg(test)]
-mod integration_tests {
-    use actix_web::{test, App};
-    use super::*;
+use proptest::prelude::*;
 
-    #[actix_web::test]
-    async fn test_get_colony() {
-        let app = test::init_service(
-            App::new()
-                .configure(configure_app)
-        ).await;
+proptest! {
+    #[test]
+    fn morale_always_in_bounds(
+        food in 0.0f64..=1.0,
+        water in 0.0f64..=1.0,
+        housing in 0.0f64..=1.0,
+    ) {
+        let morale = calculate_morale(food, water, housing);
+        prop_assert!(morale >= 0.0 && morale <= 100.0);
+    }
 
-        let req = test::TestRequest::get()
-            .uri("/colony/1")
-            .to_request();
+    #[test]
+    fn resource_conservation_in_recipes(
+        input_amount in 1.0f64..1000.0,
+    ) {
+        // Total mass/value in = total mass/value out (within recipe ratio)
+        let recipe = get_test_recipe();
+        let output = execute_recipe(&recipe, input_amount);
+        prop_assert!((output.total_value() - input_amount * recipe.ratio()).abs() < 0.001);
+    }
 
-        let resp = test::call_service(&app, req).await;
-        assert!(resp.status().is_success());
+    #[test]
+    fn save_load_roundtrip(state in arb_game_state()) {
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: GameState = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(state, restored);
     }
 }
 ```
 
-### 7. Code Organization
+### Integration Tests (in `tests/` or `outpost-server`)
 
-**Keep modules focused and cohesive:**
-
-- **Domain layer**: Pure business logic, no I/O or web concerns
-- **Events layer**: Event definitions and store
-- **Commands layer**: Command pattern implementations
-- **Services layer**: Orchestration and application logic
-- **Web layer**: HTTP handlers, routing, template rendering
-- **DB layer**: Database access and queries
-
-**Use `mod.rs` to organize module exports:**
+Test HTTP endpoints end-to-end:
 
 ```rust
-// src/domain/mod.rs
-pub mod colony;
-pub mod building;
-pub mod resource;
-pub mod wormhole;
-pub mod train;
-pub mod planet;
+#[actix_web::test]
+async fn test_build_endpoint_creates_construction_job() {
+    let app = test::init_service(create_test_app()).await;
 
-pub use colony::{Colony, ColonyId};
-pub use building::{Building, BuildingType, BuildingId};
-pub use resource::{Resource, ResourceType, Resources};
-// ... etc
-```
+    let req = test::TestRequest::post()
+        .uri("/site/test-site-id/build")
+        .set_form(&BuildForm { building_def_id: "mine".into() })
+        .to_request();
 
-### 8. Performance Considerations
-
-**Use `Cow` for potentially borrowed data:**
-
-```rust
-use std::borrow::Cow;
-
-pub struct TemplateContext<'a> {
-    pub title: Cow<'a, str>,
-    pub colony_name: Cow<'a, str>,
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    // Verify construction queue contains the new job
 }
 ```
 
-**Prefer iterators over collecting when possible:**
+### Workflow: Iterate Until Green
+
+1. Write or modify code
+2. Run `cargo test --workspace`
+3. If tests fail, read the failure output, fix the issue, go to step 2
+4. Run `cargo clippy --workspace -- -D warnings`
+5. If clippy warns, fix, go to step 2
+6. Only then consider the task complete
+
+---
+
+## HTMX Integration
+
+### Full Page vs. Partial Responses
 
 ```rust
-// Good
-let total_power: u64 = buildings
-    .iter()
-    .filter_map(|b| b.power_output())
-    .sum();
-
-// Less efficient
-let power_plants: Vec<_> = buildings.iter()
-    .filter(|b| matches!(b.building_type, BuildingType::PowerPlant { .. }))
-    .collect();
-let total_power: u64 = power_plants.iter()
-    .map(|b| b.power_output().unwrap())
-    .sum();
-```
-
-**Use `Arc` for shared immutable data:**
-
-```rust
-use std::sync::Arc;
-
-#[derive(Clone)]
-pub struct GameConfig {
-    pub inner: Arc<GameConfigInner>,
+// Full page: renders within base.html layout
+pub async fn site_detail(/* ... */) -> Result<HttpResponse> {
+    let html = tmpl.render("site_detail.html", &context)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
-pub struct GameConfigInner {
-    pub building_costs: HashMap<BuildingType, Resources>,
-    pub tech_tree: TechTree,
+// Partial: returns just the component HTML (for HTMX swaps)
+pub async fn site_buildings_tab(/* ... */) -> Result<HttpResponse> {
+    let html = tmpl.render("components/buildings_table.html", &context)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 ```
 
-### 9. HTMX Integration
-
-**Structure templates for HTMX responses:**
+### HTMX Patterns in Templates
 
 ```html
-<!-- Full page template -->
-{% extends "base.html" %}
-{% block content %}
-<div id="colony-view" hx-get="/colony/{{ colony_id }}/refresh" hx-trigger="every 5s">
-    {% include "components/colony_stats.html" %}
+<!-- Tab navigation with HTMX -->
+<div class="tabs">
+  <button hx-get="/site/{{ site.id }}/buildings" hx-target="#tab-content">Buildings</button>
+  <button hx-get="/site/{{ site.id }}/resources" hx-target="#tab-content">Resources</button>
+  <button hx-get="/site/{{ site.id }}/labor" hx-target="#tab-content">Labor</button>
 </div>
-{% endblock %}
-
-<!-- Partial component for HTMX swap -->
-<!-- templates/components/colony_stats.html -->
-<div class="stats">
-    <div class="stat">
-        <span class="label">Population:</span>
-        <span class="value">{{ colony.population }}</span>
-    </div>
-    <div class="stat">
-        <span class="label">Credits:</span>
-        <span class="value">{{ colony.credits }}</span>
-    </div>
+<div id="tab-content">
+  {% include "components/buildings_table.html" %}
 </div>
+
+<!-- Auto-refresh stats via polling -->
+<div id="resource-summary" hx-get="/site/{{ site.id }}/resources/summary" hx-trigger="every 2s">
+  {% include "components/resource_summary.html" %}
+</div>
+
+<!-- Action form -->
+<form hx-post="/site/{{ site.id }}/build" hx-target="#construction-queue" hx-swap="innerHTML">
+  <select name="building_def_id">
+    {% for b in available_buildings %}
+    <option value="{{ b.id }}">{{ b.name }} ({{ b.cost_summary }})</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Build</button>
+</form>
 ```
 
-**Return appropriate HTMX headers:**
+### UI Design Principles (V5)
 
-```rust
-pub async fn refresh_colony_stats(
-    colony_id: web::Path<u64>,
-    tmpl: web::Data<tera::Tera>,
-    service: web::Data<ColonyService>,
-) -> Result<HttpResponse> {
-    let colony = service.get_colony(ColonyId(*colony_id)).await?;
+- **Text-and-tables first** — no canvas, no maps, no sprites
+- **Dark mode** default, high contrast, monospace numbers
+- **Information density** — pack data into tables and lists
+- **Sidebar + top bar + content + event ticker** layout on every page
+- **HTMX for interactivity** — partial page updates, no full reloads
+- **Alpine.js for client-side** — dropdowns, toggles, modals, collapsible sections
+- **Tooltips** on hover for detailed breakdowns
+- **Color coding** — consistent palette for resources, severity, status
 
-    let mut context = tera::Context::new();
-    context.insert("colony", &colony);
-
-    let html = tmpl.render("components/colony_stats.html", &context)?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html")
-        .body(html))
-}
-```
-
-### 10. Logging and Debugging
-
-**Use `tracing` for structured logging:**
-
-```rust
-use tracing::{info, warn, error, debug, instrument};
-
-#[instrument(skip(service))]
-pub async fn execute_command(
-    command: ConstructBuilding,
-    service: &ColonyService,
-) -> Result<()> {
-    debug!("Validating command");
-    command.validate()?;
-
-    info!(colony_id = ?command.colony_id, building_type = ?command.building_type,
-          "Executing building construction command");
-
-    let events = command.execute()?;
-
-    for event in events {
-        service.apply_event(event).await?;
-        debug!(event = ?event, "Event applied");
-    }
-
-    info!("Command executed successfully");
-    Ok(())
-}
-```
-
- make sure to write UI code in way that logs events and other data indicating when and how things are drawn. also log state changes to help with testing and debugging
-
-### 11. Serialization
-
-**Use serde with appropriate attributes:**
-
-```rust
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Colony {
-    pub id: ColonyId,
-    pub name: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    #[serde(default)]
-    pub resources: Resources,
-
-    #[serde(with = "chrono::serde::ts_seconds")]
-    pub founded_at: DateTime<Utc>,
-}
-```
-
-### 12. Common Patterns to Avoid
-
-**Don't use `clone()` excessively - prefer borrowing:**
-
-```rust
-// Bad
-fn process_colony(colony: Colony) -> Colony {
-    let mut updated = colony.clone();
-    updated.process();
-    updated
-}
-
-// Good
-fn process_colony(colony: &mut Colony) {
-    colony.process();
-}
-```
-
-**Don't use `String` when `&str` suffices:**
-
-```rust
-// Bad
-fn get_building_name(building_type: String) -> String {
-    format!("Building: {}", building_type)
-}
-
-// Good
-fn get_building_name(building_type: &str) -> String {
-    format!("Building: {}", building_type)
-}
-```
-
-**Don't ignore errors with `let _ =`:**
-
-```rust
-// Bad
-let _ = save_to_database(&data);
-
-// Good
-if let Err(e) = save_to_database(&data) {
-    error!("Failed to save to database: {}", e);
-}
-```
-
-## Dependencies to Use
-
-### Core Dependencies
-```toml
-[dependencies]
-actix-web = "4"
-actix-rt = "2"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
-tera = "1"
-thiserror = "1"
-anyhow = "1"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-rusqlite = { version = "0.31", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.24"
-uuid = { version = "1", features = ["v4", "serde"] }
-rand = "0.8"
-```
-
-### Development Dependencies
-```toml
-[dev-dependencies]
-actix-web-test = "4"
-```
+---
 
 ## Common Tasks
 
 ### Adding a New Domain Entity
-1. Create file in `src/domain/`
-2. Define struct with newtype IDs
-3. Implement business logic methods
-4. Add to `src/domain/mod.rs` exports
-5. Create related events in `src/events/`
-6. Create related commands in `src/commands/`
-7. Write unit tests
 
-### Adding a New Screen/Route
-1. Create handler in `src/web/handlers.rs`
-2. Add route to `src/web/routes.rs`
-3. Create Tera template in `templates/`
-4. Add HTMX attributes for interactivity
-5. Create CSS in `static/css/` if needed
-6. Write integration test
+1. Define struct in `outpost-core/src/domain/` with newtype ID
+2. Add serde derives (`Serialize`, `Deserialize`, `Debug`, `Clone`)
+3. Implement business logic as methods (pure, no I/O)
+4. Export from `domain/mod.rs`
+5. Define related events (past-tense) in `events/`
+6. Define related commands (validate + execute) in `commands/`
+7. Write unit tests for all logic paths
+8. Write property tests for invariants
+9. Run `cargo test --workspace` — iterate until green
 
-### Adding a New Command
-1. Define command struct in `src/commands/`
-2. Implement `Command` trait with validation
-3. Define events it generates
-4. Add handler to web layer if needed
-5. Write tests for validation and execution
+### Adding a New Page/Route
 
-## AI Assistant Guidelines
+1. Create handler in `outpost-server/src/handlers/`
+2. Add route in `outpost-server/src/routes.rs`
+3. Create Tera template in `templates/` (extend `base.html`)
+4. Create partial templates in `templates/components/` for HTMX
+5. Add CSS in `static/css/` if needed
+6. Write integration test for the endpoint
+7. Run `cargo test --workspace` — iterate until green
 
-When working on this codebase:
+### Adding a New Building/Resource/Event (Content)
 
-1. **Always use proper error handling** - no `unwrap()` or `expect()`
-2. **Follow the event sourcing pattern** - state changes go through commands and events
-3. **Keep domain logic pure** - no I/O in domain layer
-4. **Use strong typing** - newtype wrappers for IDs and domain primitives
-5. **Write tests** - unit tests for domain, integration tests for web
-6. **Keep it simple** - avoid over-engineering, focus on working features
-7. **Document complex logic** - use doc comments for public APIs
-8. **Follow Rust idioms** - prefer iterators, pattern matching, and Result types
-9. **Structure for HTMX** - return HTML fragments for dynamic updates
-10. **Log appropriately** - use tracing for debugging and monitoring
+1. Add definition to appropriate YAML file in `content/`
+2. Ensure `ContentLoader` validates the new entry (run tests)
+3. If new fields are needed, update the content structs in `outpost-core/src/content/`
+4. Update any templates that display this content type
+5. Run `cargo test --workspace` — iterate until green
 
-## Resources
+---
 
-- [Rust Book](https://doc.rust-lang.org/book/)
-- [Actix-web Documentation](https://actix.rs/)
-- [HTMX Documentation](https://htmx.org/)
-- [Tera Template Guide](https://tera.netlify.app/)
-- [Event Sourcing with Rust](https://github.com/serverlesstechnology/cqrs)
+## Key Rules for AI Assistants
+
+1. **Read `docs/Outpost3_Design_V5.md` before starting work** — it is the authoritative design
+2. **Read `docs/MVP_TRANSFORMATION_CHECKLIST.md`** — it tracks what needs to be done
+3. **Keep `outpost-core` pure** — zero I/O, zero side effects
+4. **All state changes go through commands and events** — never mutate state directly
+5. **All entity IDs use newtype wrappers** — never raw `u64` or `String` for IDs
+6. **No `unwrap()` or `expect()` in production code**
+7. **Write tests first or alongside code** — unit, property, and integration
+8. **Iterate until all tests pass** — `cargo test --workspace` must be green before you stop
+9. **Run `cargo clippy --workspace -- -D warnings`** — fix all warnings
+10. **Data-driven content** — buildings, resources, recipes, events come from YAML, not hardcoded enums
+11. **Text-and-tables UI** — no canvas, no maps, no sprites, no Pixi.js
+12. **HTMX for dynamic updates** — return HTML fragments, use `hx-` attributes
+13. **Log with `tracing`** in server code — structured, leveled, with context spans
+14. **Keep changes minimal and focused** — one feature at a time, matching the checklist
