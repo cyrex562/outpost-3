@@ -175,12 +175,11 @@ fn test_power_shortage_scenario() {
         recipe_index: 0,
     };
 
-    let train_station = Building {
+    let warehouse = Building {
         id: BuildingId(6),
         colony_id,
-        building_type: BuildingType::TrainStation {
-            platforms: 2,
-            throughput: 100,
+        building_type: BuildingType::Warehouse {
+            capacity: 1000,
         },
         state: BuildingState::Operational,
         workers_assigned: 0,
@@ -190,14 +189,14 @@ fn test_power_shortage_scenario() {
 
     total_consumption += refinery.power_consumption(); // +12
     total_consumption += research_facility.power_consumption(); // +8
-    total_consumption += train_station.power_consumption(); // +15
+    total_consumption += warehouse.power_consumption(); // +1
 
     colony.power_grid.update_consumption(total_consumption);
 
     // Now we should have brownout
-    assert_eq!(colony.power_grid.total_consumption, 50); // 5 + 10 + 12 + 8 + 15
-    assert!(!colony.power_grid.has_brownout()); // Exactly balanced
-    assert_eq!(colony.power_grid.net_power(), 0);
+    assert_eq!(colony.power_grid.total_consumption, 36); // 5 + 10 + 12 + 8 + 1
+    assert!(colony.power_grid.has_brownout()); // More consumption than generation (25 MW < 36 MW)
+    assert_eq!(colony.power_grid.net_power(), -11); // 25 - 36 = -11
 
     // Add one more building to trigger brownout
     let medical_facility = Building {

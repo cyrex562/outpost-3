@@ -1,0 +1,18 @@
+id: test_building
+name: Test Building
+description: A test
+category: manufacturing
+construction_costs:
+- resource_id: steel
+  amount: 100.0
+construction_time_ticks: 100
+power: null
+power_output_mw: null
+worker_capacity: 5
+storage_capacity: null
+housing_capacity: null
+recipes: []
+maintenance_cost: {}
+upgradeable: false
+upgrade_to: null
+morale_bonus: 0.0

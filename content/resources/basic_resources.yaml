@@ -1,0 +1,144 @@
+# Example resource definitions for Outpost 3
+# These are loaded at runtime and can be modded
+
+# Tier 0: Raw Materials
+
+- id: iron_ore
+  name: Iron Ore
+  description: Raw iron ore extracted from deposits. Contains iron oxide that must be smelted.
+  category: metallic_ore
+  storage:
+    phase: solid
+    hazardous: false
+  density_kg_per_m3: 5000.0
+  base_value: 10.0
+  tradeable: true
+  extractable: true
+  consumable: false
+  stack_size: 0
+
+- id: water
+  name: Water
+  description: H2O - essential for life support, agriculture, and industrial processes.
+  category: hydrospheric
+  storage:
+    phase: liquid
+    min_temperature_k: 273.0
+    max_temperature_k: 373.0
+    hazardous: false
+  density_kg_per_m3: 1000.0
+  base_value: 1.0
+  tradeable: true
+  extractable: true
+  consumable: true
+  stack_size: 0
+
+# Tier 1: Processed Materials
+
+- id: steel
+  name: Steel
+  description: Refined iron-carbon alloy. Primary construction material for buildings and equipment.
+  category: metal
+  storage:
+    phase: solid
+    hazardous: false
+  density_kg_per_m3: 7850.0
+  base_value: 50.0
+  tradeable: true
+  extractable: false
+  consumable: false
+  stack_size: 0
+
+- id: electronics
+  name: Electronics
+  description: Electronic components and circuits used in advanced systems.
+  category: component
+  storage:
+    phase: solid
+    hazardous: false
+    special_handling: Handle with care - sensitive to static and moisture
+  density_kg_per_m3: 2000.0
+  base_value: 200.0
+  tradeable: true
+  extractable: false
+  consumable: false
+  stack_size: 100
+
+# Life Support & Agriculture
+
+- id: oxygen
+  name: Oxygen
+  description: O2 gas - essential for colonist respiration and life support systems.
+  category: atmospheric_gas
+  storage:
+    phase: gas
+    min_pressure_atm: 0.2
+    max_pressure_atm: 100.0
+    hazardous: false
+    special_handling: Oxidizer - keep away from flammables
+  density_kg_per_m3: 1.429
+  base_value: 5.0
+  tradeable: true
+  extractable: true
+  consumable: true
+  stack_size: 0
+
+- id: food
+  name: Food
+  description: Processed food suitable for human consumption. Includes vegetables, grains, and protein.
+  category: biological_product
+  storage:
+    phase: solid
+    max_temperature_k: 278.0
+    hazardous: false
+    special_handling: Perishable - requires refrigeration
+  density_kg_per_m3: 600.0
+  base_value: 20.0
+  tradeable: true
+  extractable: false
+  consumable: true
+  stack_size: 0
+
+- id: nutrients
+  name: Nutrients
+  description: Mineral nutrients for hydroponic farming - nitrogen, phosphorus, potassium blend.
+  category: chemical
+  storage:
+    phase: solid
+    hazardous: false
+  density_kg_per_m3: 1500.0
+  base_value: 15.0
+  tradeable: true
+  extractable: false
+  consumable: false
+  stack_size: 0
+
+# Currency & Abstract Resources
+
+- id: credits
+  name: Credits
+  description: Abstract currency representing economic value.
+  category: currency
+  storage:
+    phase: virtual
+    hazardous: false
+  density_kg_per_m3: 0.0
+  base_value: 1.0
+  tradeable: true
+  extractable: false
+  consumable: false
+  stack_size: 0
+
+- id: research_data
+  name: Research Data
+  description: Scientific data and experimental results used for technological advancement.
+  category: data
+  storage:
+    phase: virtual
+    hazardous: false
+  density_kg_per_m3: 0.0
+  base_value: 100.0
+  tradeable: true
+  extractable: false
+  consumable: false
+  stack_size: 0

@@ -1,24 +1,14 @@
-#![cfg(feature = "server")]
-
 use actix_files as fs;
 use actix_web::{middleware, web, App, HttpServer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-mod config;
-mod domain;
-mod events;
-mod commands;
-mod queries;
-mod services;
-mod http;
-mod db;
-mod simulation;
-mod utils;
-
-use crate::config::AppConfig;
-use crate::db::pool::create_db_pool;
-use crate::events::store::EventStore;
+use outpost_server::config::AppConfig;
+use outpost_server::db;
+use outpost_server::event_store::EventStore;
+use outpost_server::http;
+use outpost_server::services::SimulationService;
+use outpost_core::domain::GameState;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -38,15 +28,20 @@ async fn main() -> std::io::Result<()> {
     info!("Binding to: {}", bind_address);
 
     // Initialize database
-    let db_pool = create_db_pool(&config.database.path);
+    let db_pool = db::pool::create_db_pool(&config.database.path);
     db::migrations::run_migrations(&db_pool).expect("Failed to run migrations");
 
     // Initialize event store
     let event_store = web::Data::new(EventStore::new(db_pool.clone()));
 
+    // Initialize simulation service
+    let initial_game_state = GameState::new("Outpost 3".to_string(), 42);
+    let simulation_service = web::Data::new(SimulationService::new(initial_game_state));
+
     // Initialize Tera templates
     let tera = web::Data::new(
-        tera::Tera::new("templates/**/*.html").expect("Failed to initialize Tera"),
+        tera::Tera::new("crates/outpost-server/templates/**/*.html")
+            .expect("Failed to initialize Tera"),
     );
 
     info!("Server initialized successfully");
@@ -56,15 +51,13 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
             .app_data(event_store.clone())
+            .app_data(simulation_service.clone())
             .app_data(tera.clone())
             .wrap(middleware::Logger::default())
             .wrap(middleware::Compress::default())
             .configure(http::routes::configure)
-            // Serve built JS/CSS from dist (Vite output)
-            .service(fs::Files::new("/static/js", "./dist/static/js"))
-            .service(fs::Files::new("/static/ext", "./dist/static/ext"))
-            // Serve other static assets from source
-            .service(fs::Files::new("/static", "./static").show_files_listing())
+            // Serve static CSS/JS files
+            .service(fs::Files::new("/static", "crates/outpost-server/static").show_files_listing())
     })
     .bind(&bind_address)?
     .run()

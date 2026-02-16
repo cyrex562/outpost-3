@@ -1,0 +1,178 @@
+# Placeholder Technology Tree for Outpost 3 (Alpha Phase)
+#
+# This is a minimal tech tree for demonstration purposes.
+# Full tech tree will be expanded in Alpha/Beta with:
+# - Multiple research paths and branching choices
+# - More granular unlocks and bonuses
+# - Technology synergy effects
+# - Dynamic prerequisites based on game state
+
+# Tier 1: Basic Technologies (starting tech, low cost)
+
+- id: basic_construction
+  name: Basic Construction
+  description: Foundational construction techniques for simple buildings and infrastructure.
+  category: engineering
+  tier: 1
+  research_cost: 100.0
+  research_time_ticks: 50
+  prerequisites: []
+  unlocks:
+    buildings:
+      - basic_habitat
+      - warehouse
+    bonuses:
+      - construction_speed_10_percent
+
+- id: basic_power
+  name: Basic Power Systems
+  description: Solar panel technology for sustainable energy generation.
+  category: engineering
+  tier: 1
+  research_cost: 150.0
+  research_time_ticks: 75
+  prerequisites: []
+  unlocks:
+    buildings:
+      - solar_array_mk1
+    bonuses: []
+
+- id: resource_extraction
+  name: Resource Extraction
+  description: Automated mining and extraction techniques for raw materials.
+  category: engineering
+  tier: 1
+  research_cost: 200.0
+  research_time_ticks: 100
+  prerequisites: []
+  unlocks:
+    buildings:
+      - iron_mine
+    bonuses:
+      - mining_efficiency_10_percent
+
+# Tier 2: Intermediate Technologies (require tier 1 prereqs)
+
+- id: advanced_materials
+  name: Advanced Materials Processing
+  description: Refining techniques for producing high-quality metals and alloys.
+  category: physical_sciences
+  tier: 2
+  research_cost: 500.0
+  research_time_ticks: 250
+  prerequisites:
+    - resource_extraction
+  unlocks:
+    buildings:
+      - smelter
+    resources:
+      - steel
+      - titanium
+    bonuses: []
+
+- id: hydroponics
+  name: Hydroponic Agriculture
+  description: Soil-free farming techniques optimized for enclosed environments.
+  category: life_sciences
+  tier: 2
+  research_cost: 400.0
+  research_time_ticks: 200
+  prerequisites:
+    - basic_construction
+  unlocks:
+    buildings:
+      - hydroponics_bay
+    bonuses:
+      - food_production_15_percent
+
+- id: improved_solar
+  name: Improved Solar Arrays
+  description: Higher-efficiency photovoltaic cells and energy storage.
+  category: engineering
+  tier: 2
+  research_cost: 600.0
+  research_time_ticks: 300
+  prerequisites:
+    - basic_power
+  unlocks:
+    buildings:
+      - solar_array_mk2
+    bonuses:
+      - power_generation_20_percent
+
+# Tier 3: Advanced Technologies (require multiple tier 2 prereqs)
+
+- id: automation
+  name: Industrial Automation
+  description: Robotic systems and AI-controlled processes to reduce labor requirements.
+  category: computing
+  tier: 3
+  research_cost: 1000.0
+  research_time_ticks: 500
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    bonuses:
+      - production_efficiency_25_percent
+      - labor_requirement_minus_20_percent
+  resource_costs:
+    - resource_id: electronics
+      amount: 50.0
+
+- id: fusion_basics
+  name: Fusion Fundamentals
+  description: Theoretical foundation for fusion power generation.
+  category: physical_sciences
+  tier: 3
+  research_cost: 2000.0
+  research_time_ticks: 800
+  prerequisites:
+    - improved_solar
+    - advanced_materials
+  unlocks:
+    buildings:
+      - fusion_reactor_prototype
+    bonuses: []
+  resource_costs:
+    - resource_id: research_data
+      amount: 100.0
+
+- id: genetic_engineering
+  name: Genetic Engineering
+  description: Manipulation of plant and animal genomes for improved yields and traits.
+  category: life_sciences
+  tier: 3
+  research_cost: 1500.0
+  research_time_ticks: 600
+  prerequisites:
+    - hydroponics
+  unlocks:
+    bonuses:
+      - food_production_50_percent
+      - colonist_health_bonus_15_percent
+    events:
+      - genetic_breakthrough
+  resource_costs:
+    - resource_id: research_data
+      amount: 75.0
+
+# Tier 4: Placeholder for Alpha Expansion
+
+- id: quantum_computing
+  name: Quantum Computing
+  description: Next-generation computational systems for solving complex problems.
+  category: computing
+  tier: 4
+  research_cost: 5000.0
+  research_time_ticks: 1500
+  prerequisites:
+    - automation
+  unlocks:
+    bonuses:
+      - research_speed_50_percent
+      - all_efficiency_20_percent
+  resource_costs:
+    - resource_id: electronics
+      amount: 200.0
+    - resource_id: research_data
+      amount: 500.0

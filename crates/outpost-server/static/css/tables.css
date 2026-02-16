@@ -1,0 +1,259 @@
+/*
+ * Outpost 3 — V5 Table Styles
+ * Data-dense tables for sites, buildings, resources
+ */
+
+/* ===== BASE TABLE ===== */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: var(--color-surface-1);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--border-radius-md);
+  overflow: hidden;
+}
+
+.data-table thead {
+  background-color: var(--color-surface-2);
+  border-bottom: var(--border-width-thin) solid var(--color-border-emphasis);
+}
+
+.data-table th {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.data-table th.align-right,
+.data-table td.align-right {
+  text-align: right;
+}
+
+.data-table th.align-center,
+.data-table td.align-center {
+  text-align: center;
+}
+
+.data-table tbody tr {
+  border-bottom: var(--border-width-thin) solid var(--color-border-muted);
+  transition: background-color var(--transition-fast);
+}
+
+.data-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+  background-color: var(--color-surface-2);
+}
+
+.data-table tbody tr.clickable {
+  cursor: pointer;
+}
+
+.data-table tbody tr.clickable:hover {
+  background-color: var(--color-surface-3);
+}
+
+.data-table td {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+/* ===== TABLE VARIANTS ===== */
+
+/* Compact table */
+.data-table.compact th,
+.data-table.compact td {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Striped rows */
+.data-table.striped tbody tr:nth-child(even) {
+  background-color: var(--color-surface-0);
+}
+
+/* ===== NUMERIC COLUMNS ===== */
+
+.data-table .numeric {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ===== STATUS INDICATORS ===== */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--border-radius-sm);
+  white-space: nowrap;
+}
+
+.status-badge.operational {
+  background-color: var(--color-success-muted);
+  color: var(--color-success);
+}
+
+.status-badge.construction {
+  background-color: var(--color-info-muted);
+  color: var(--color-info);
+}
+
+.status-badge.paused {
+  background-color: var(--color-warning-muted);
+  color: var(--color-warning);
+}
+
+.status-badge.damaged {
+  background-color: var(--color-danger-muted);
+  color: var(--color-danger);
+}
+
+.status-badge.offline {
+  background-color: var(--color-surface-3);
+  color: var(--color-text-tertiary);
+}
+
+/* ===== PROGRESS BARS ===== */
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: var(--color-surface-3);
+  border-radius: var(--border-radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--color-accent-primary);
+  border-radius: var(--border-radius-full);
+  transition: width var(--transition-normal);
+}
+
+.progress-fill.success {
+  background-color: var(--color-success);
+}
+
+.progress-fill.warning {
+  background-color: var(--color-warning);
+}
+
+.progress-fill.danger {
+  background-color: var(--color-danger);
+}
+
+/* Progress with label */
+.progress-with-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.progress-bar-container {
+  flex: 1;
+}
+
+.progress-label {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* ===== RESOURCE DISPLAYS ===== */
+
+.resource-display {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.resource-icon-small {
+  width: 16px;
+  height: 16px;
+  font-size: var(--font-size-sm);
+}
+
+.resource-amount {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-medium);
+}
+
+/* ===== TREND INDICATORS ===== */
+
+.trend-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.trend-indicator.up {
+  color: var(--color-success);
+}
+
+.trend-indicator.down {
+  color: var(--color-danger);
+}
+
+.trend-indicator.stable {
+  color: var(--color-text-tertiary);
+}
+
+/* ===== TABLE ACTIONS ===== */
+
+.table-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.btn-table-action {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  background-color: transparent;
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-table-action:hover {
+  background-color: var(--color-surface-3);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-emphasis);
+}
+
+/* ===== EMPTY STATE ===== */
+
+.table-empty {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.table-empty-icon {
+  font-size: var(--font-size-3xl);
+  margin-bottom: var(--space-3);
+  opacity: 0.5;
+}
+
+.table-empty-text {
+  font-size: var(--font-size-sm);
+}

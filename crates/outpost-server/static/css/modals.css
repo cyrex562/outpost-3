@@ -1,0 +1,162 @@
+/*
+ * Outpost 3 — V5 Modal Component
+ * Overlay dialogs for detail views and confirmations
+ */
+
+/* ===== MODAL OVERLAY ===== */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal-backdrop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-normal);
+}
+
+.modal-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ===== MODAL CONTAINER ===== */
+
+.modal {
+  background-color: var(--color-surface-1);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-xl);
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-modal);
+  transform: scale(0.95);
+  transition: transform var(--transition-normal);
+}
+
+.modal-overlay.active .modal {
+  transform: scale(1);
+}
+
+/* Modal sizes */
+.modal.small {
+  width: 400px;
+}
+
+.modal.medium {
+  width: 600px;
+}
+
+.modal.large {
+  width: 800px;
+}
+
+.modal.xlarge {
+  width: 1000px;
+}
+
+/* ===== MODAL HEADER ===== */
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: var(--border-width-thin) solid var(--color-border-default);
+  background-color: var(--color-surface-2);
+}
+
+.modal-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.btn-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xl);
+  cursor: pointer;
+  border-radius: var(--border-radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.btn-modal-close:hover {
+  background-color: var(--color-surface-3);
+  color: var(--color-text-primary);
+}
+
+/* ===== MODAL BODY ===== */
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+/* ===== MODAL FOOTER ===== */
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: var(--border-width-thin) solid var(--color-border-default);
+  background-color: var(--color-surface-2);
+}
+
+/* ===== MODAL BUTTONS ===== */
+
+.btn-modal {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--border-radius-md);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  background-color: var(--color-surface-3);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-modal:hover {
+  background-color: var(--color-surface-4);
+  border-color: var(--color-border-emphasis);
+}
+
+.btn-modal.primary {
+  background-color: var(--color-accent-emphasis);
+  border-color: var(--color-accent-primary);
+  color: var(--color-text-primary);
+}
+
+.btn-modal.primary:hover {
+  background-color: var(--color-accent-primary);
+}
+
+.btn-modal.danger {
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-text-primary);
+}
+
+.btn-modal.danger:hover {
+  background-color: var(--color-danger-hover);
+}

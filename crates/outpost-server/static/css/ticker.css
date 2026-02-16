@@ -1,0 +1,227 @@
+/*
+ * Outpost 3 — V5 Event Log Ticker Component
+ * Collapsible bottom ticker for game events
+ */
+
+/* ===== TICKER HEADER ===== */
+
+.ticker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  height: var(--ticker-height);
+  background-color: var(--color-surface-1);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: var(--border-width-thin) solid var(--color-border-default);
+}
+
+.ticker-header:hover {
+  background-color: var(--color-surface-2);
+}
+
+.ticker-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.ticker-expand-icon {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+}
+
+.app-ticker.expanded .ticker-expand-icon {
+  transform: rotate(180deg);
+}
+
+.ticker-recent-events {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  overflow: hidden;
+  margin: 0 var(--space-4);
+}
+
+.ticker-event {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.ticker-event-icon {
+  font-size: var(--font-size-base);
+}
+
+.ticker-event-time {
+  font-family: var(--font-family-mono);
+  color: var(--color-text-tertiary);
+}
+
+.ticker-event-text {
+  color: var(--color-text-secondary);
+}
+
+/* Event severity colors */
+.ticker-event.critical {
+  color: var(--color-danger);
+}
+
+.ticker-event.warning {
+  color: var(--color-warning);
+}
+
+.ticker-event.success {
+  color: var(--color-success);
+}
+
+.ticker-event.info {
+  color: var(--color-info);
+}
+
+/* ===== TICKER CONTENT (EXPANDED) ===== */
+
+.ticker-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3);
+  display: none;
+}
+
+.app-ticker.expanded .ticker-content {
+  display: block;
+}
+
+.ticker-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.event-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-surface-2);
+  border-left: 3px solid var(--color-border-default);
+  border-radius: var(--border-radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.event-entry:hover {
+  background-color: var(--color-surface-3);
+}
+
+.event-entry.critical {
+  border-left-color: var(--color-danger);
+  background-color: var(--color-danger-muted);
+}
+
+.event-entry.warning {
+  border-left-color: var(--color-warning);
+  background-color: var(--color-warning-muted);
+}
+
+.event-entry.success {
+  border-left-color: var(--color-success);
+  background-color: var(--color-success-muted);
+}
+
+.event-entry.info {
+  border-left-color: var(--color-info);
+  background-color: var(--color-info-muted);
+}
+
+.event-entry-icon {
+  font-size: var(--font-size-xl);
+  flex-shrink: 0;
+}
+
+.event-entry-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.event-entry-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.event-entry-time {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.event-entry-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.event-entry-description {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
+.event-entry-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.btn-event-action {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  background-color: var(--color-surface-4);
+  border: var(--border-width-thin) solid var(--color-border-default);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-event-action:hover {
+  background-color: var(--color-accent-emphasis);
+  border-color: var(--color-accent-primary);
+}
+
+/* ===== TICKER SCROLLING ANIMATION ===== */
+
+.ticker-recent-events {
+  animation: ticker-scroll 30s linear infinite;
+}
+
+.app-ticker.expanded .ticker-recent-events {
+  animation: none;
+}
+
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* Pause animation on hover */
+.ticker-recent-events:hover {
+  animation-play-state: paused;
+}
