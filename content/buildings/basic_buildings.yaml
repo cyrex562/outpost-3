@@ -161,3 +161,147 @@
   upgradeable: true
   upgrade_to: advanced_hydroponics
   morale_bonus: 2.0
+
+# Fabricator - Manufactures components
+- id: fabricator
+  name: Fabricator
+  description: Advanced manufacturing facility that produces machine parts and electronics from refined metals.
+  category: manufacturing
+  construction_costs:
+    - resource_id: steel
+      amount: 180
+    - resource_id: electronics
+      amount: 60
+  construction_time_ticks: 280
+  power:
+    base_mw: 8.0
+    per_level_mw: 2.5
+  worker_capacity: 12
+  recipes:
+    - id: craft_components
+      name: Craft Components
+      description: Manufacture structural components
+      inputs:
+        - resource_id: steel
+          amount_per_tick: 5.0
+      outputs:
+        - resource_id: components
+          amount_per_tick: 3.0
+      duration_ticks: 8
+    - id: craft_electronics
+      name: Craft Electronics
+      description: Assemble electronic components
+      inputs:
+        - resource_id: copper
+          amount_per_tick: 2.0
+        - resource_id: silicon
+          amount_per_tick: 1.0
+      outputs:
+        - resource_id: electronics
+          amount_per_tick: 1.0
+      duration_ticks: 12
+  maintenance_cost:
+    steel: 0.8
+    electronics: 0.5
+  upgradeable: true
+  upgrade_to: advanced_fabricator
+  morale_bonus: 0.0
+
+# Nuclear Reactor - High-power generation with fuel
+- id: nuclear_reactor
+  name: Nuclear Reactor
+  description: High-output fission reactor. Requires uranium fuel but provides reliable power independent of stellar proximity.
+  category: power_generation
+  construction_costs:
+    - resource_id: steel
+      amount: 300
+    - resource_id: electronics
+      amount: 100
+    - resource_id: components
+      amount: 50
+  construction_time_ticks: 500
+  power_output_mw: 50.0
+  worker_capacity: 8
+  recipes:
+    - id: generate_power
+      name: Generate Power
+      description: Consume fuel to generate electricity
+      inputs:
+        - resource_id: uranium_fuel
+          amount_per_tick: 0.1
+      outputs: []
+      duration_ticks: 1
+  maintenance_cost:
+    steel: 2.0
+    electronics: 1.0
+  upgradeable: true
+  upgrade_to: fusion_reactor
+  morale_bonus: -2.0
+
+# Water Purifier - Produces clean water
+- id: water_purifier
+  name: Water Purifier
+  description: Processes ice or contaminated water into clean, potable water for consumption and industrial use.
+  category: infrastructure
+  construction_costs:
+    - resource_id: steel
+      amount: 120
+    - resource_id: electronics
+      amount: 40
+  construction_time_ticks: 200
+  power:
+    base_mw: 6.0
+    per_level_mw: 2.0
+  worker_capacity: 4
+  recipes:
+    - id: purify_water
+      name: Purify Water
+      description: Convert ice into clean water
+      inputs:
+        - resource_id: ice
+          amount_per_tick: 10.0
+      outputs:
+        - resource_id: water
+          amount_per_tick: 8.0
+      duration_ticks: 5
+  maintenance_cost:
+    steel: 0.4
+    electronics: 0.3
+  upgradeable: true
+  upgrade_to: advanced_purifier
+  morale_bonus: 1.0
+
+# Life Support System - Air production and climate control
+- id: life_support_system
+  name: Life Support System
+  description: Critical infrastructure that generates breathable atmosphere and maintains temperature control.
+  category: infrastructure
+  construction_costs:
+    - resource_id: steel
+      amount: 250
+    - resource_id: electronics
+      amount: 80
+    - resource_id: components
+      amount: 40
+  construction_time_ticks: 350
+  power:
+    base_mw: 10.0
+    per_level_mw: 3.0
+  worker_capacity: 6
+  recipes:
+    - id: produce_oxygen
+      name: Produce Oxygen
+      description: Electrolyze water to generate breathable oxygen
+      inputs:
+        - resource_id: water
+          amount_per_tick: 5.0
+      outputs:
+        - resource_id: oxygen
+          amount_per_tick: 10.0
+      duration_ticks: 10
+  maintenance_cost:
+    steel: 1.0
+    electronics: 0.8
+  upgradeable: true
+  upgrade_to: advanced_life_support
+  morale_bonus: 3.0

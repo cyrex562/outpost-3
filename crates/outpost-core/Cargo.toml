@@ -25,6 +25,7 @@ uuid = { workspace = true }
 
 # Random number generation (for procedural generation)
 rand = { workspace = true }
+rand_chacha = { workspace = true }
 
 [dev-dependencies]
 proptest = "1"

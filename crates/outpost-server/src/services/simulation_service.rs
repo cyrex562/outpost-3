@@ -7,6 +7,7 @@
 //! - Stores events generated during ticks
 
 use outpost_core::domain::GameState;
+use outpost_core::content::ContentLoader;
 use outpost_core::events::GameEvent;
 use outpost_core::simulation::{process_tick, GameClock, TimeCommand};
 use std::sync::Arc;
@@ -19,15 +20,18 @@ use tracing::{debug, info, warn};
 pub struct SimulationService {
     /// Game state (mutable via Mutex for tick processing)
     state: Arc<Mutex<GameState>>,
+    /// Content definitions (immutable, loaded at startup)
+    content: Arc<ContentLoader>,
     /// Event log (append-only during ticks)
     events: Arc<RwLock<Vec<GameEvent>>>,
 }
 
 impl SimulationService {
-    /// Create a new simulation service with the given initial state.
-    pub fn new(initial_state: GameState) -> Self {
+    /// Create a new simulation service with the given initial state and content.
+    pub fn new(initial_state: GameState, content: ContentLoader) -> Self {
         Self {
             state: Arc::new(Mutex::new(initial_state)),
+            content: Arc::new(content),
             events: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -107,7 +111,7 @@ impl SimulationService {
                 // Process the tick
                 let tick_events = {
                     let mut state = self.state.lock().await;
-                    process_tick(&mut *state)
+                    process_tick(&mut *state, &self.content)
                 };
 
                 // Log tick processing
@@ -183,7 +187,8 @@ mod tests {
     #[tokio::test]
     async fn test_create_service() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = SimulationService::new(state);
+        let content = ContentLoader::new();
+        let service = SimulationService::new(state, content);
 
         assert_eq!(service.current_tick().await, 0);
         assert!(!service.is_paused().await);
@@ -193,7 +198,8 @@ mod tests {
     #[tokio::test]
     async fn test_execute_time_command_pause() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = SimulationService::new(state);
+        let content = ContentLoader::new();
+        let service = SimulationService::new(state, content);
 
         service.execute_time_command(TimeCommand::Pause).await.unwrap();
         assert!(service.is_paused().await);
@@ -202,7 +208,8 @@ mod tests {
     #[tokio::test]
     async fn test_execute_time_command_set_speed() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = SimulationService::new(state);
+        let content = ContentLoader::new();
+        let service = SimulationService::new(state, content);
 
         service.execute_time_command(TimeCommand::SetSpeed(5)).await.unwrap();
         assert_eq!(service.speed_multiplier().await, 5);
@@ -212,7 +219,8 @@ mod tests {
     async fn test_get_state() {
         let mut state = GameState::new("Test".to_string(), 42);
         state.advance_tick();
-        let service = SimulationService::new(state);
+        let content = ContentLoader::new();
+        let service = SimulationService::new(state, content);
 
         let retrieved_state = service.get_state().await;
         assert_eq!(retrieved_state.current_tick(), 1);
@@ -221,7 +229,8 @@ mod tests {
     #[tokio::test]
     async fn test_game_time_format() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = SimulationService::new(state);
+        let content = ContentLoader::new();
+        let service = SimulationService::new(state, content);
 
         let game_time = service.game_time().await;
         assert_eq!(game_time, "Day 0 00:00");

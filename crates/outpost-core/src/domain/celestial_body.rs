@@ -3,7 +3,7 @@
 //! This entity extends the pre-V5 Planet concept to include all types
 //! of celestial bodies that can host sites or provide resources.
 
-use crate::domain::{CelestialBodyId, StarSystemId};
+use crate::domain::{CelestialBodyId, StarSystemId, ResourceDeposit};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -125,7 +125,11 @@ pub struct CelestialBody {
     /// Axial tilt in degrees.
     pub axial_tilt_degrees: f64,
     /// Resource richness per resource type (0.0 = none, 1.0 = abundant).
+    /// This is used for procedural generation and can be replaced by deposits.
+    #[deprecated(note = "Use resource_deposits instead for detailed extraction tracking")]
     pub resource_richness: HashMap<String, f64>,
+    /// Resource deposits available for extraction.
+    pub resource_deposits: Vec<ResourceDeposit>,
     /// Overall hazard level for colonization.
     pub hazard_level: HazardLevel,
     /// Optional parent body ID (for moons orbiting planets).
@@ -159,6 +163,7 @@ impl CelestialBody {
             year_length_days: 365.25, // Default to Earth-like
             axial_tilt_degrees: 23.5, // Default to Earth-like
             resource_richness: HashMap::new(),
+            resource_deposits: Vec::new(),
             hazard_level: HazardLevel::Moderate,
             parent_body_id: None,
         }
@@ -256,6 +261,58 @@ impl CelestialBody {
     /// Returns true if this is an artificial orbital station.
     pub fn is_station(&self) -> bool {
         self.body_type == BodyType::OrbitalStation
+    }
+
+    /// Add a resource deposit to this body.
+    pub fn add_deposit(&mut self, deposit: ResourceDeposit) {
+        self.resource_deposits.push(deposit);
+    }
+
+    /// Add multiple resource deposits at once.
+    pub fn add_deposits(&mut self, deposits: Vec<ResourceDeposit>) {
+        self.resource_deposits.extend(deposits);
+    }
+
+    /// Get all deposits of a specific resource type.
+    pub fn get_deposits(&self, resource_id: &str) -> Vec<&ResourceDeposit> {
+        self.resource_deposits
+            .iter()
+            .filter(|d| d.resource_id == resource_id)
+            .collect()
+    }
+
+    /// Get mutable reference to all deposits of a specific resource type.
+    pub fn get_deposits_mut(&mut self, resource_id: &str) -> Vec<&mut ResourceDeposit> {
+        self.resource_deposits
+            .iter_mut()
+            .filter(|d| d.resource_id == resource_id)
+            .collect()
+    }
+
+    /// Calculate total remaining quantity for a specific resource across all deposits.
+    pub fn total_remaining_resource(&self, resource_id: &str) -> f64 {
+        self.resource_deposits
+            .iter()
+            .filter(|d| d.resource_id == resource_id)
+            .map(|d| d.remaining_quantity)
+            .sum()
+    }
+
+    /// Check if body has extractable resources (non-depleted deposits).
+    pub fn has_extractable_resources(&self) -> bool {
+        self.resource_deposits.iter().any(|d| !d.is_depleted())
+    }
+
+    /// Get list of all resource types present in deposits.
+    pub fn available_resources(&self) -> Vec<String> {
+        let mut resources: Vec<_> = self.resource_deposits
+            .iter()
+            .filter(|d| !d.is_depleted())
+            .map(|d| d.resource_id.clone())
+            .collect();
+        resources.sort();
+        resources.dedup();
+        resources
     }
 }
 

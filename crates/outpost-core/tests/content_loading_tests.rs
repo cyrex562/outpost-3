@@ -51,7 +51,7 @@ fn test_load_basic_buildings() {
 fn test_load_basic_resources() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/resources/basic_resources.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/resources/basic_resources.yaml")
         .expect("Failed to read resources YAML file");
     
     let result = loader.load_resources(&yaml_content);
@@ -101,10 +101,211 @@ fn test_load_basic_resources() {
 }
 
 #[test]
+fn test_mvp_resource_coverage() {
+    // Test that all MVP resources from Task 3.1 are defined
+    let mut loader = ContentLoader::new();
+    
+    let yaml_content = std::fs::read_to_string("../../content/resources/basic_resources.yaml")
+        .expect("Failed to read resources YAML file");
+    
+    loader.load_resources(&yaml_content).expect("Failed to load resources");
+    
+    // Required RAW materials (Tier 0) - 8 resources
+    let raw_resources = vec![
+        "iron_ore", "copper_ore", "silicon_ore", "ice", 
+        "regolith", "uranium_ore", "carbon_compounds", "rare_earth_ore"
+    ];
+    for resource_id in raw_resources {
+        assert!(loader.get_resource(resource_id).is_some(), 
+            "Missing raw resource: {}", resource_id);
+        let resource = loader.get_resource(resource_id).unwrap();
+        assert!(resource.extractable, "{} should be extractable", resource_id);
+    }
+    
+    // Required REFINED materials (Tier 1) - 8 resources
+    let refined_resources = vec![
+        "iron", "steel", "copper", "silicon_wafer",
+        "water", "uranium_fuel_rod", "carbon_fiber", "rare_earth_metals"
+    ];
+    for resource_id in refined_resources {
+        assert!(loader.get_resource(resource_id).is_some(), 
+            "Missing refined resource: {}", resource_id);
+        let resource = loader.get_resource(resource_id).unwrap();
+        assert!(!resource.extractable, "{} should not be extractable (refined)", resource_id);
+    }
+    
+    // Required MANUFACTURED components (Tier 2) - 4 resources
+    let manufactured_resources = vec![
+        "structural_components", "electronics", 
+        "machine_parts", "construction_materials"
+    ];
+    for resource_id in manufactured_resources {
+        assert!(loader.get_resource(resource_id).is_some(), 
+            "Missing manufactured resource: {}", resource_id);
+    }
+    
+    // Required CONSUMABLES (Tier 3) - 4 resources
+    let consumable_resources = vec![
+        "food", "oxygen", "medical_supplies", "nutrients"
+    ];
+    for resource_id in consumable_resources {
+        assert!(loader.get_resource(resource_id).is_some(), 
+            "Missing consumable resource: {}", resource_id);
+    }
+    
+    // Virtual resources (currency, data)
+    assert!(loader.get_resource("credits").is_some(), "Missing credits");
+    assert!(loader.get_resource("research_data").is_some(), "Missing research_data");
+    
+    // Verify total count (should be at least 26)
+    let stats = loader.stats();
+    assert!(stats.1 >= 26, "Expected at least 26 resources, found {}", stats.1);
+    
+    println!("✓ All {} MVP resources loaded successfully", stats.1);
+}
+
+#[test]
+fn test_load_recipes() {
+    let mut loader = ContentLoader::new();
+    
+    let yaml_content = std::fs::read_to_string("../../content/recipes.yaml")
+        .expect("Failed to read recipes YAML file");
+    
+    let result = loader.load_recipes(&yaml_content);
+    assert!(result.is_ok(), "Failed to load recipes: {:?}", result.err());
+    
+    let stats = loader.stats();
+    assert!(stats.4 > 0, "No recipes were loaded");
+    
+    // Verify extraction recipes
+    let mine_iron = loader.get_recipe("mine_iron");
+    assert!(mine_iron.is_some(), "mine_iron recipe not found");
+    
+    if let Some(recipe) = mine_iron {
+        assert_eq!(recipe.name, "Mine Iron Ore");
+        assert!(recipe.requires_deposit());
+        assert_eq!(recipe.required_deposit_resource(), Some("iron_ore"));
+        assert!(recipe.inputs.contains_key("labor"));
+        assert!(recipe.inputs.contains_key("power"));
+        assert!(recipe.outputs.contains_key("iron_ore"));
+        assert_eq!(recipe.processing_time_ticks, 1);
+        assert!(recipe.is_compatible_with_building("mine"));
+    }
+    
+    // Verify refining recipes
+    let smelt_iron = loader.get_recipe("smelt_iron");
+    assert!(smelt_iron.is_some(), "smelt_iron recipe not found");
+    
+    if let Some(recipe) = smelt_iron {
+        assert_eq!(recipe.name, "Smelt Iron");
+        assert!(!recipe.requires_deposit());
+        assert!(recipe.inputs.contains_key("iron_ore"));
+        assert!(recipe.inputs.contains_key("power"));
+        assert!(recipe.outputs.contains_key("iron_ingots"));
+        assert_eq!(recipe.processing_time_ticks, 2);
+        assert!(recipe.is_compatible_with_building("smelter"));
+    }
+    
+    // Verify manufacturing recipes
+    let fabricate = loader.get_recipe("fabricate_structural_components");
+    assert!(fabricate.is_some(), "fabricate_structural_components recipe not found");
+    
+    if let Some(recipe) = fabricate {
+        assert_eq!(recipe.name, "Fabricate Structural Components");
+        assert!(recipe.inputs.contains_key("iron_ingots"));
+        assert!(recipe.inputs.contains_key("aluminum_ingots"));
+        assert!(recipe.outputs.contains_key("structural_components"));
+        assert!(recipe.is_compatible_with_building("fabricator"));
+    }
+    
+    // Verify life support recipes
+    let purify_water = loader.get_recipe("purify_water");
+    assert!(purify_water.is_some(), "purify_water recipe not found");
+    
+    if let Some(recipe) = purify_water {
+        assert!(recipe.inputs.contains_key("ice"));
+        assert!(recipe.outputs.contains_key("water"));
+    }
+    
+    let generate_oxygen = loader.get_recipe("generate_oxygen");
+    assert!(generate_oxygen.is_some(), "generate_oxygen recipe not found");
+    
+    if let Some(recipe) = generate_oxygen {
+        assert!(recipe.inputs.contains_key("water"));
+        assert!(recipe.outputs.contains_key("oxygen"));
+        assert!(recipe.outputs.contains_key("hydrogen"));
+    }
+    
+    // Verify that all loaded recipes pass validation
+    for (id, recipe) in loader.all_recipes() {
+        assert!(recipe.validate().is_ok(), "Recipe {} failed validation", id);
+    }
+    
+    println!("✓ All {} recipes loaded and validated successfully", stats.4);
+}
+
+#[test]
+fn test_recipe_coverage() {
+    // Test that we have recipes for key MVP production chains
+    let mut loader = ContentLoader::new();
+    
+    let yaml_content = std::fs::read_to_string("../../content/recipes.yaml")
+        .expect("Failed to read recipes YAML file");
+    
+    loader.load_recipes(&yaml_content).expect("Failed to load recipes");
+    
+    // Extraction recipes (raw materials)
+    let extraction_recipes = vec![
+        "mine_iron", "mine_copper", "mine_silicon",
+        "extract_ice", "harvest_regolith",
+    ];
+    for recipe_id in extraction_recipes {
+        assert!(loader.get_recipe(recipe_id).is_some(), 
+            "Missing extraction recipe: {}", recipe_id);
+    }
+    
+    // Refining recipes (raw → refined)
+    let refining_recipes = vec![
+        "smelt_iron", "smelt_copper", "purify_water",
+        "refine_silicon", "generate_oxygen",
+    ];
+    for recipe_id in refining_recipes {
+        assert!(loader.get_recipe(recipe_id).is_some(), 
+            "Missing refining recipe: {}", recipe_id);
+    }
+    
+    // Manufacturing recipes (refined → components)
+    let manufacturing_recipes = vec![
+        "fabricate_structural_components",
+        "fabricate_machine_parts",
+        "fabricate_electronics",
+    ];
+    for recipe_id in manufacturing_recipes {
+        assert!(loader.get_recipe(recipe_id).is_some(), 
+            "Missing manufacturing recipe: {}", recipe_id);
+    }
+    
+    // Life support recipes
+    let life_support_recipes = vec![
+        "purify_water", "generate_oxygen", "grow_food",
+    ];
+    for recipe_id in life_support_recipes {
+        assert!(loader.get_recipe(recipe_id).is_some(), 
+            "Missing life support recipe: {}", recipe_id);
+    }
+    
+    // At least 20 recipes should be defined for MVP
+    let stats = loader.stats();
+    assert!(stats.4 >= 20, "Expected at least 20 MVP recipes, got {}", stats.4);
+    
+    println!("✓ Recipe coverage test passed: {} recipes covering all production chains", stats.4);
+}
+
+#[test]
 fn test_load_narrative_events() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/events/narrative_events.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/events/narrative_events.yaml")
         .expect("Failed to read events YAML file");
     
     let result = loader.load_events(&yaml_content);
@@ -167,13 +368,14 @@ fn test_load_all_content() {
         .expect("Failed to read techs");
     loader.load_techs(&techs_yaml).expect("Failed to load techs");
     
-    let (buildings, resources, events, techs) = loader.stats();
+    let (buildings, resources, events, techs, recipes) = loader.stats();
     
     println!("Loaded content:");
     println!("  - Buildings: {}", buildings);
     println!("  - Resources: {}", resources);
     println!("  - Events: {}", events);
     println!("  - Technologies: {}", techs);
+    println!("  - Recipes: {}", recipes);
     
     assert!(buildings > 0, "No buildings loaded");
     assert!(resources > 0, "No resources loaded");
@@ -185,7 +387,7 @@ fn test_load_all_content() {
 fn test_building_validation() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/buildings/basic_buildings.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/buildings/basic_buildings.yaml")
         .expect("Failed to read buildings");
     
     // All buildings should pass validation
@@ -203,7 +405,7 @@ fn test_building_validation() {
 fn test_resource_validation() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/resources/basic_resources.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/resources/basic_resources.yaml")
         .expect("Failed to read resources");
     
     // All resources should pass validation
@@ -221,7 +423,7 @@ fn test_resource_validation() {
 fn test_event_validation() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/events/narrative_events.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/events/narrative_events.yaml")
         .expect("Failed to read events");
     
     // All events should pass validation
@@ -239,7 +441,7 @@ fn test_event_validation() {
 fn test_recipe_outputs() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/buildings/basic_buildings.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/buildings/basic_buildings.yaml")
         .expect("Failed to read buildings");
     loader.load_buildings(&yaml_content).unwrap();
     
@@ -262,7 +464,7 @@ fn test_recipe_outputs() {
 fn test_building_upgrades() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/buildings/basic_buildings.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/buildings/basic_buildings.yaml")
         .expect("Failed to read buildings");
     loader.load_buildings(&yaml_content).unwrap();
     
@@ -279,7 +481,7 @@ fn test_building_upgrades() {
 fn test_resource_volume_calculations() {
     let mut loader = ContentLoader::new();
     
-    let yaml_content = std::fs::read_to_string("content/resources/basic_resources.yaml")
+    let yaml_content = std::fs::read_to_string("../../content/resources/basic_resources.yaml")
         .expect("Failed to read resources");
     loader.load_resources(&yaml_content).unwrap();
     

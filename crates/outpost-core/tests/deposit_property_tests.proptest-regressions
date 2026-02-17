@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c8319492e07fc7cd5a70a90319c4111bde9cdb4c8f69b3f13475852fb5ff2f9f # shrinks to mut deposit = ResourceDeposit { resource_id: "aa_", initial_quantity: 13280.654059255246, remaining_quantity: 13280.654059255246, difficulty: VeryEasy, accessibility: 0.0, concentration: 0.0 }, amounts = [4979.338649283064, 9568.974019489433]

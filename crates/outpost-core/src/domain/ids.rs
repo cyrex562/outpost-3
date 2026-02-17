@@ -76,6 +76,12 @@ impl Default for SiteId {
     }
 }
 
+impl std::fmt::Display for SiteId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Unique identifier for a Building.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BuildingId(pub Uuid);
@@ -90,6 +96,12 @@ impl BuildingId {
 impl Default for BuildingId {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Display for BuildingId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

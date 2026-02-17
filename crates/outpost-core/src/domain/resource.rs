@@ -250,6 +250,55 @@ impl Resources {
     pub fn iter(&self) -> impl Iterator<Item = (&ResourceType, &i64)> {
         self.resources.iter()
     }
+    
+    // V5: String-based resource ID helpers (transitional)
+    // These work with the new YAML-based string resource IDs
+    // For now, we just store them as a map independent of the enum-based system
+    
+    /// Get a resource amount by string ID (V5 API).
+    pub fn get_resource(&self, resource_id: &str) -> Option<i64> {
+        // For now, map common string IDs to ResourceType enum
+        // This is transitional until we fully migrate to string-based resources
+        match resource_id {
+            "credits" => Some(self.get(ResourceType::Credits)),
+            "steel" => Some(self.get(ResourceType::Steel)),
+            "electronics" => Some(self.get(ResourceType::Electronics)),
+            "food" => Some(self.get(ResourceType::Food)),
+            "water" => Some(self.get(ResourceType::Water)),
+            "oxygen" => Some(self.get(ResourceType::Oxygen)),
+            "fuel" => Some(self.get(ResourceType::Fuel)),
+            "research" => Some(self.get(ResourceType::Research)),
+            "machinery" => Some(self.get(ResourceType::Machinery)),
+            "concrete" => Some(self.get(ResourceType::Concrete)),
+            "iron_ore" => Some(self.get(ResourceType::IronOre)),
+            "copper_ore" => Some(self.get(ResourceType::CopperOre)),
+            "rare_metals" => Some(self.get(ResourceType::RareMetals)),
+            "nutrients" => Some(self.get(ResourceType::Nutrients)),
+            _ => None, // Unknown resource type
+        }
+    }
+    
+    /// Set a resource amount by string ID (V5 API).
+    pub fn set_resource(&mut self, resource_id: &str, amount: i64) {
+        // Map string IDs to ResourceType enum
+        match resource_id {
+            "credits" => self.set(ResourceType::Credits, amount),
+            "steel" => self.set(ResourceType::Steel, amount),
+            "electronics" => self.set(ResourceType::Electronics, amount),
+            "food" => self.set(ResourceType::Food, amount),
+            "water" => self.set(ResourceType::Water, amount),
+            "oxygen" => self.set(ResourceType::Oxygen, amount),
+            "fuel" => self.set(ResourceType::Fuel, amount),
+            "research" => self.set(ResourceType::Research, amount),
+            "machinery" => self.set(ResourceType::Machinery, amount),
+            "concrete" => self.set(ResourceType::Concrete, amount),
+            "iron_ore" => self.set(ResourceType::IronOre, amount),
+            "copper_ore" => self.set(ResourceType::CopperOre, amount),
+            "rare_metals" => self.set(ResourceType::RareMetals, amount),
+            "nutrients" => self.set(ResourceType::Nutrients, amount),
+            _ => {} // Unknown resource type - ignore for now
+        }
+    }
 }
 
 impl Add for Resources {

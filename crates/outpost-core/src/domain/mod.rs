@@ -7,6 +7,11 @@ pub mod galaxy;
 pub mod game_state;
 pub mod building_instance;
 pub mod building_queries;
+pub mod construction_queue;
+pub mod resource_deposit;
+pub mod deposit_generator;
+pub mod recipe;
+pub mod resource_mapping;
 
 // Legacy modules (pre-V5, kept for migration)
 pub mod banking;
@@ -33,6 +38,12 @@ pub use star_system::StarSystem;
 pub use galaxy::Galaxy;
 pub use game_state::GameState;
 pub use building_instance::{BuildingInstance, BuildingState as BuildingStateV5};
+pub use construction_queue::{ConstructionQueue, ConstructionJob};
+pub use resource_deposit::{ResourceDeposit, ExtractionDifficulty};
+pub use recipe::{Recipe, RecipeError};
+pub use resource_mapping::{
+    string_to_resource_type, resource_type_to_string, is_virtual_resource, MappingError,
+};
 
 // Legacy exports (pre-V5)
 pub use banking::{amortized_payment, Loan, LoanId};

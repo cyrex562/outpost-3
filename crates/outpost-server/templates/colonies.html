@@ -1,0 +1,357 @@
+{% extends "base-v5.html" %}
+
+{% block title %}Colonies - Outpost 3{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+    <a href="/dashboard">Dashboard</a>
+    <span>/</span>
+    <span>Colonies</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="colonies-container">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1>Colonies & Installations</h1>
+        <p class="page-subtitle">Manage all your settlements across the galaxy</p>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="stats-grid stats-grid-4">
+        <div class="stat-card">
+            <div class="stat-label">Total Sites</div>
+            <div class="stat-value">{{ total_sites }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Population</div>
+            <div class="stat-value">{{ total_population }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Average Morale</div>
+            <div class="stat-value">{{ average_morale }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Buildings</div>
+            <div class="stat-value">{{ total_buildings }}</div>
+        </div>
+    </div>
+
+    <!-- Filters and Search -->
+    <div class="toolbar" x-data="{ filterType: 'all' }">
+        <div class="toolbar-left">
+            <input type="text" 
+                   class="search-input" 
+                   placeholder="Search colonies..." 
+                   id="colony-search"
+                   hx-get="/colonies/search" 
+                   hx-trigger="keyup changed delay:300ms" 
+                   hx-target="#colonies-table-body"
+                   hx-include="[name='filter_type']">
+            
+            <select name="filter_type" 
+                    class="filter-select"
+                    x-model="filterType"
+                    hx-get="/colonies" 
+                    hx-trigger="change" 
+                    hx-target="#colonies-table-body">
+                <option value="all">All Sites</option>
+                <option value="settlement">Settlements Only</option>
+                <option value="installation">Installations Only</option>
+            </select>
+        </div>
+        
+        <div class="toolbar-right">
+            <button class="btn btn-primary" onclick="alert('Found new colony feature coming soon!')">
+                <span>+ Found New Colony</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Colonies Table -->
+    <div class="table-container">
+        <table class="data-table data-table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Location</th>
+                    <th class="text-right">Population</th>
+                    <th class="text-right">Morale</th>
+                    <th class="text-right">Power</th>
+                    <th class="text-right">Buildings</th>
+                    <th class="text-center">Status</th>
+                    <th class="text-center">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="colonies-table-body">
+                {% if sites %}
+                    {% for site in sites %}
+                    <tr class="clickable-row" 
+                        onclick="window.location.href='/site/{{ site.id }}'"
+                        style="cursor: pointer;">
+                        <td>
+                            <div class="site-name">
+                                <strong>{{ site.name }}</strong>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ site.site_type | lower }}">
+                                {{ site.site_type }}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="location-info">
+                                <div class="location-body">{{ site.body_name }}</div>
+                                <div class="location-system text-secondary">{{ site.system_name }}</div>
+                            </div>
+                        </td>
+                        <td class="text-right">
+                            <span class="mono">{{ site.population }}</span>
+                        </td>
+                        <td class="text-right">
+                            <div class="morale-cell">
+                                <span class="mono morale-{% if site.morale >= 70 %}high{% elif site.morale >= 40 %}medium{% else %}low{% endif %}">
+                                    {{ site.morale }}%
+                                </span>
+                                <div class="morale-bar-mini">
+                                    <div class="morale-bar-fill morale-{% if site.morale >= 70 %}high{% elif site.morale >= 40 %}medium{% else %}low{% endif %}" 
+                                         style="width: {{ site.morale }}%">
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-right">
+                            <span class="mono power-{% if site.power_net >= 0 %}positive{% else %}negative{% endif %}">
+                                {{ site.power_net }} MW
+                            </span>
+                        </td>
+                        <td class="text-right">
+                            <span class="mono">{{ site.building_count }}</span>
+                            {% if site.construction_count > 0 %}
+                            <span class="text-secondary"> (+{{ site.construction_count }})</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if site.power_net < 0 %}
+                            <span class="status-indicator status-warning" title="Power deficit">⚠</span>
+                            {% elif site.morale < 40 %}
+                            <span class="status-indicator status-danger" title="Low morale">!</span>
+                            {% else %}
+                            <span class="status-indicator status-success" title="Operational">✓</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center" onclick="event.stopPropagation()">
+                            <div class="action-buttons">
+                                <a href="/site/{{ site.id }}" 
+                                   class="btn btn-sm btn-secondary"
+                                   title="View Details">
+                                    View
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center text-secondary">
+                            <div style="padding: 2rem;">
+                                <p>No colonies founded yet.</p>
+                                <p>Start your empire by founding your first colony!</p>
+                            </div>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination (if needed in future) -->
+    {% if total_sites > 50 %}
+    <div class="pagination">
+        <button class="btn btn-sm" disabled>Previous</button>
+        <span class="pagination-info">Page 1 of 1</span>
+        <button class="btn btn-sm" disabled>Next</button>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+/* Colony-specific styles */
+.colonies-container {
+    padding: 1rem;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.page-header {
+    margin-bottom: 1.5rem;
+}
+
+.page-header h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 2rem;
+}
+
+.page-subtitle {
+    margin: 0;
+    color: var(--color-text-secondary);
+}
+
+.stats-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    gap: 1rem;
+}
+
+.toolbar-left {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
+}
+
+.toolbar-right {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.search-input {
+    min-width: 300px;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+}
+
+.filter-select {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+}
+
+.location-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.location-body {
+    font-weight: 500;
+}
+
+.location-system {
+    font-size: 0.875rem;
+}
+
+.morale-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
+}
+
+.morale-bar-mini {
+    width: 60px;
+    height: 4px;
+    background: var(--color-bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.morale-bar-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+}
+
+.morale-high {
+    color: var(--color-success);
+}
+
+.morale-medium {
+    color: var(--color-warning);
+}
+
+.morale-low {
+    color: var(--color-danger);
+}
+
+.morale-bar-fill.morale-high {
+    background: var(--color-success);
+}
+
+.morale-bar-fill.morale-medium {
+    background: var(--color-warning);
+}
+
+.morale-bar-fill.morale-low {
+    background: var(--color-danger);
+}
+
+.power-positive {
+    color: var(--color-success);
+}
+
+.power-negative {
+    color: var(--color-danger);
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
+    text-align: center;
+    border-radius: 50%;
+    font-weight: bold;
+}
+
+.status-success {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
+.status-warning {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+}
+
+.status-danger {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+}
+
+.action-buttons {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+}
+
+.clickable-row:hover {
+    background: var(--color-bg-hover);
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.pagination-info {
+    color: var(--color-text-secondary);
+}
+</style>
+{% endblock %}

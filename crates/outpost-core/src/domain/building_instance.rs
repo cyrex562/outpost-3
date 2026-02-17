@@ -62,8 +62,13 @@ pub struct BuildingInstance {
     /// Upgrade level (1 = base, 2+ = upgraded).
     pub level: u8,
     
-    /// Selected recipe index (for buildings with multiple recipes).
-    pub active_recipe_index: usize,
+    /// Currently selected recipe ID (for buildings with multiple recipes).
+    /// None if no recipe is assigned or building doesn't use recipes.
+    pub active_recipe_id: Option<String>,
+    
+    /// Progress toward completing the current recipe cycle (in ticks).
+    /// Resets to 0 when recipe completes.
+    pub recipe_progress_ticks: u64,
     
     /// Health percentage (0-100). Affects efficiency.
     pub health: u8,
@@ -89,7 +94,8 @@ impl BuildingInstance {
             state: BuildingState::UnderConstruction { progress: 0 },
             workers_assigned: 0,
             level: 1,
-            active_recipe_index: 0,
+            active_recipe_id: None,
+            recipe_progress_ticks: 0,
             health: 100,
             construction_started_at: Some(current_tick),
             last_maintained_at: current_tick,
@@ -110,7 +116,8 @@ impl BuildingInstance {
             state: BuildingState::Operational,
             workers_assigned: 0,
             level: 1,
-            active_recipe_index: 0,
+            active_recipe_id: None,
+            recipe_progress_ticks: 0,
             health: 100,
             construction_started_at: None,
             last_maintained_at: current_tick,
@@ -201,6 +208,48 @@ impl BuildingInstance {
     /// Get overall efficiency (health * labor * state).
     pub fn overall_efficiency(&self, worker_capacity: u32) -> f64 {
         self.efficiency() * self.labor_efficiency(worker_capacity)
+    }
+    
+    /// Set the active recipe for this building.
+    pub fn set_recipe(&mut self, recipe_id: String) {
+        self.active_recipe_id = Some(recipe_id);
+        self.recipe_progress_ticks = 0; // Reset progress when changing recipes
+    }
+    
+    /// Clear the active recipe.
+    pub fn clear_recipe(&mut self) {
+        self.active_recipe_id = None;
+        self.recipe_progress_ticks = 0;
+    }
+    
+    /// Check if this building has a recipe assigned.
+    pub fn has_recipe(&self) -> bool {
+        self.active_recipe_id.is_some()
+    }
+    
+    /// Get the active recipe ID, if any.
+    pub fn get_recipe_id(&self) -> Option<&str> {
+        self.active_recipe_id.as_deref()
+    }
+    
+    /// Increment recipe progress and return true if recipe completed.
+    pub fn advance_recipe_progress(&mut self, processing_time_ticks: u64) -> bool {
+        if self.has_recipe() && self.state.can_operate() {
+            self.recipe_progress_ticks += 1;
+            if self.recipe_progress_ticks >= processing_time_ticks {
+                self.recipe_progress_ticks = 0; // Reset for next cycle
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// Get current recipe progress as a percentage (0.0 to 1.0).
+    pub fn recipe_progress_percentage(&self, processing_time_ticks: u64) -> f64 {
+        if processing_time_ticks == 0 {
+            return 0.0;
+        }
+        (self.recipe_progress_ticks as f64 / processing_time_ticks as f64).min(1.0)
     }
 }
 
@@ -335,5 +384,121 @@ mod tests {
         
         // Buildings with 0 worker capacity should always have 100% labor efficiency
         assert_eq!(building.labor_efficiency(0), 1.0);
+    }
+    
+    #[test]
+    fn test_set_recipe() {
+        let mut building = BuildingInstance::new_operational(
+            SiteId::new(),
+            "iron_mine".to_string(),
+            0,
+        );
+        
+        assert!(!building.has_recipe());
+        assert_eq!(building.get_recipe_id(), None);
+        
+        building.set_recipe("mine_iron".to_string());
+        assert!(building.has_recipe());
+        assert_eq!(building.get_recipe_id(), Some("mine_iron"));
+        assert_eq!(building.recipe_progress_ticks, 0);
+    }
+    
+    #[test]
+    fn test_clear_recipe() {
+        let mut building = BuildingInstance::new_operational(
+            SiteId::new(),
+            "iron_mine".to_string(),
+            0,
+        );
+        
+        building.set_recipe("mine_iron".to_string());
+        building.recipe_progress_ticks = 5;
+        
+        building.clear_recipe();
+        assert!(!building.has_recipe());
+        assert_eq!(building.recipe_progress_ticks, 0);
+    }
+    
+    #[test]
+    fn test_recipe_progress() {
+        let mut building = BuildingInstance::new_operational(
+            SiteId::new(),
+            "smelter".to_string(),
+            0,
+        );
+        
+        building.set_recipe("smelt_iron".to_string());
+        
+        // Recipe takes 5 ticks
+        let processing_time = 5;
+        
+        // First 4 ticks: progress but not complete
+        for i in 1..=4 {
+            let completed = building.advance_recipe_progress(processing_time);
+            assert!(!completed, "Tick {}: should not be complete yet", i);
+            assert_eq!(building.recipe_progress_ticks, i);
+        }
+        
+        // 5th tick: completes
+        let completed = building.advance_recipe_progress(processing_time);
+        assert!(completed, "Recipe should complete on 5th tick");
+        assert_eq!(building.recipe_progress_ticks, 0, "Progress should reset after completion");
+    }
+    
+    #[test]
+    fn test_recipe_progress_percentage() {
+        let mut building = BuildingInstance::new_operational(
+            SiteId::new(),
+            "smelter".to_string(),
+            0,
+        );
+        
+        building.set_recipe("smelt_iron".to_string());
+        
+        let processing_time = 10;
+        
+        assert_eq!(building.recipe_progress_percentage(processing_time), 0.0);
+        
+        building.recipe_progress_ticks = 3;
+        assert_eq!(building.recipe_progress_percentage(processing_time), 0.3);
+        
+        building.recipe_progress_ticks = 7;
+        assert_eq!(building.recipe_progress_percentage(processing_time), 0.7);
+        
+        building.recipe_progress_ticks = 10;
+        assert_eq!(building.recipe_progress_percentage(processing_time), 1.0);
+    }
+    
+    #[test]
+    fn test_paused_building_does_not_progress_recipe() {
+        let mut building = BuildingInstance::new_operational(
+            SiteId::new(),
+            "smelter".to_string(),
+            0,
+        );
+        
+        building.set_recipe("smelt_iron".to_string());
+        building.pause();
+        
+        let completed = building.advance_recipe_progress(5);
+        assert!(!completed);
+        assert_eq!(building.recipe_progress_ticks, 0, "Paused building should not progress");
+    }
+    
+    #[test]
+    fn test_changing_recipe_resets_progress() {
+        let mut building = BuildingInstance::new_operational(
+            SiteId::new(),
+            "mine".to_string(),
+            0,
+        );
+        
+        building.set_recipe("mine_iron".to_string());
+        building.recipe_progress_ticks = 8;
+        
+        // Change to different recipe
+        building.set_recipe("mine_copper".to_string());
+        assert_eq!(building.get_recipe_id(), Some("mine_copper"));
+        assert_eq!(building.recipe_progress_ticks, 0, "Progress should reset when changing recipes");
     }
 }

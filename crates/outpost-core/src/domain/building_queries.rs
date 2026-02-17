@@ -39,22 +39,13 @@ pub fn net_power(
 }
 
 /// Check if a building instance is currently producing (operational + has recipe).
-pub fn is_producing(instance: &BuildingInstance, definition: &BuildingDefinition) -> bool {
-    instance.state.is_operational()
-        && !definition.recipes.is_empty()
-        && instance.active_recipe_index < definition.recipes.len()
+pub fn is_producing(instance: &BuildingInstance, _definition: &BuildingDefinition) -> bool {
+    instance.state.is_operational() && instance.has_recipe()
 }
 
-/// Get the active recipe for a building instance.
-pub fn active_recipe<'a>(
-    instance: &'a BuildingInstance,
-    definition: &'a BuildingDefinition,
-) -> Option<&'a ProductionRecipe> {
-    if instance.active_recipe_index < definition.recipes.len() {
-        Some(&definition.recipes[instance.active_recipe_index])
-    } else {
-        None
-    }
+/// Get the active recipe ID for a building instance.
+pub fn active_recipe_id(instance: &BuildingInstance) -> Option<&str> {
+    instance.get_recipe_id()
 }
 
 /// Calculate production rate multiplier based on instance state.

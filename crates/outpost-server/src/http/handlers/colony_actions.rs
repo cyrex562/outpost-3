@@ -1,3 +1,7 @@
+// TODO: Migrate to V5 building system
+// Legacy handlers temporarily disabled during V5 migration
+
+/*
 use actix_web::{web, HttpResponse, Result};
 use crate::db::DbPool;
 use crate::event_store::EventStore;
@@ -283,3 +287,4 @@ pub async fn repair_building(
         .insert_header(("Location", format!("/colony/{}", colony_id)))
         .finish())
 }
+*/

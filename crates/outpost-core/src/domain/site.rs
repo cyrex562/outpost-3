@@ -4,7 +4,7 @@
 //! This entity replaces the pre-V5 Colony concept with more granular types.
 
 use crate::domain::{
-    BuildingInstance, CelestialBodyId, Population, PowerGrid, Resources, SiteId,
+    BuildingInstance, CelestialBodyId, ConstructionQueue, Population, PowerGrid, Resources, SiteId,
 };
 use crate::domain::ids::BuildingId; // V5 BuildingId with UUID
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,8 @@ pub struct Site {
     pub founded_at_tick: u64,
     /// Buildings present at this site (V5: full BuildingInstance with state).
     pub buildings: HashMap<BuildingId, BuildingInstance>,
+    /// Construction queue for buildings being built.
+    pub construction_queue: ConstructionQueue,
     /// Resource stockpile.
     pub resources: Resources,
     /// Population (settlers for settlements, crew for installations).
@@ -62,6 +64,7 @@ impl Site {
             site_type: SiteType::Settlement,
             founded_at_tick,
             buildings: HashMap::new(),
+            construction_queue: ConstructionQueue::new(),
             resources: Resources::starting_resources(),
             population: Population::new(initial_population as u64),
             power_grid: PowerGrid::new(),
@@ -84,6 +87,7 @@ impl Site {
             site_type: SiteType::Installation,
             founded_at_tick,
             buildings: HashMap::new(),
+            construction_queue: ConstructionQueue::new(),
             resources: Resources::starting_resources(),
             population: Population::new(crew_size as u64),
             power_grid: PowerGrid::new(),
@@ -164,10 +168,89 @@ impl Site {
     pub fn is_installation(&self) -> bool {
         self.site_type == SiteType::Installation
     }
+    
+    /// Get storage capacity for a specific resource type.
+    /// Returns the maximum amount that can be stored.
+    /// Default capacity is 1000 tons; warehouses and specialized storage increase this.
+    pub fn get_storage_capacity(&self, _resource_id: &str) -> f64 {
+        // TODO: Calculate from buildings once BuildingDefinition includes storage_capacity
+        // For now, return a default capacity
+        10000.0
+    }
+    
+    /// Get resource amount by string ID (V5 interface for production system).
+    /// Uses the resource mapping layer to convert string IDs to ResourceType.
+    pub fn get_resource_by_id(&self, resource_id: &str) -> Result<f64, crate::domain::MappingError> {
+        use crate::domain::resource_mapping::{string_to_resource_type, is_virtual_resource};
+        
+        // Virtual resources (power, labor) are not stored
+        if is_virtual_resource(resource_id) {
+            return Ok(0.0);
+        }
+        
+        // Map string ID to ResourceType
+        let resource_type = string_to_resource_type(resource_id)?;
+        
+        // Get from Resources (returns i64, convert to f64)
+        Ok(self.resources.get(resource_type) as f64)
+    }
+    
+    /// Set resource amount by string ID (V5 interface for production system).
+    /// Uses the resource mapping layer to convert string IDs to ResourceType.
+    pub fn set_resource_by_id(&mut self, resource_id: &str, amount: f64) -> Result<(), crate::domain::MappingError> {
+        use crate::domain::resource_mapping::{string_to_resource_type, is_virtual_resource};
+        
+        // Virtual resources (power, labor) are not stored
+        if is_virtual_resource(resource_id) {
+            return Ok(());
+        }
+        
+        // Map string ID to ResourceType
+        let resource_type = string_to_resource_type(resource_id)?;
+        
+        // Set in Resources (convert f64 to i64, rounding)
+        self.resources.set(resource_type, amount.round() as i64);
+        
+        Ok(())
+    }
+    
+    /// Adjust resource amount by delta (add or subtract).
+    /// Convenience method for production/consumption.
+    pub fn adjust_resource_by_id(&mut self, resource_id: &str, delta: f64) -> Result<(), crate::domain::MappingError> {
+        let current = self.get_resource_by_id(resource_id)?;
+        self.set_resource_by_id(resource_id, current + delta)
+    }
 
     /// Get the total population count.
     pub fn population_count(&self) -> u32 {
         self.population.total as u32
+    }
+    
+    // Construction queue management methods
+    
+    /// Get the construction queue.
+    pub fn get_construction_queue(&self) -> &ConstructionQueue {
+        &self.construction_queue
+    }
+    
+    /// Get mutable access to the construction queue.
+    pub fn get_construction_queue_mut(&mut self) -> &mut ConstructionQueue {
+        &mut self.construction_queue
+    }
+    
+    /// Add a construction job to the queue.
+    pub fn enqueue_construction(&mut self, job: crate::domain::ConstructionJob) {
+        self.construction_queue.enqueue(job);
+    }
+    
+    /// Get the number of jobs in the construction queue.
+    pub fn construction_jobs_count(&self) -> usize {
+        self.construction_queue.len()
+    }
+    
+    /// Check if there are any construction jobs in progress.
+    pub fn has_active_construction(&self) -> bool {
+        !self.construction_queue.is_empty()
     }
 }
 
@@ -301,5 +384,65 @@ mod tests {
         site.adjust_local_morale(1.0);
         let effective = site.effective_morale();
         assert!(effective <= 100.0, "Morale should not exceed 100");
+    }
+    
+    #[test]
+    fn test_resource_mapping_interface() {
+        let body_id = CelestialBodyId::new();
+        let mut site = Site::new_settlement(body_id, "Test".to_string(), 0, 100);
+        
+        // Starting resources include some iron ore
+        let iron = site.get_resource_by_id("iron_ore").unwrap();
+        assert_eq!(iron, 50.0); // From starting_resources()
+        
+        // Set resource using string ID
+        site.set_resource_by_id("iron_ore", 100.0).unwrap();
+        assert_eq!(site.get_resource_by_id("iron_ore").unwrap(), 100.0);
+        
+        // Adjust resource (add)
+        site.adjust_resource_by_id("iron_ore", 25.0).unwrap();
+        assert_eq!(site.get_resource_by_id("iron_ore").unwrap(), 125.0);
+        
+        // Adjust resource (subtract)
+        site.adjust_resource_by_id("iron_ore", -50.0).unwrap();
+        assert_eq!(site.get_resource_by_id("iron_ore").unwrap(), 75.0);
+    }
+    
+    #[test]
+    fn test_resource_alias_mapping() {
+        let body_id = CelestialBodyId::new();
+        let mut site = Site::new_settlement(body_id, "Test".to_string(), 0, 100);
+        
+        // "iron_ingots" is an alias for Steel in the mapping
+        site.set_resource_by_id("iron_ingots", 50.0).unwrap();
+        
+        // Reading via different aliases should give same value
+        assert_eq!(site.get_resource_by_id("iron_ingots").unwrap(), 50.0);
+        assert_eq!(site.get_resource_by_id("steel").unwrap(), 50.0);
+        assert_eq!(site.get_resource_by_id("iron").unwrap(), 50.0);
+    }
+    
+    #[test]
+    fn test_virtual_resources_ignored() {
+        let body_id = CelestialBodyId::new();
+        let mut site = Site::new_settlement(body_id, "Test".to_string(), 0, 100);
+        
+        // Virtual resources (power, labor) should return 0 and not error
+        assert_eq!(site.get_resource_by_id("power").unwrap(), 0.0);
+        assert_eq!(site.get_resource_by_id("labor").unwrap(), 0.0);
+        
+        // Setting virtual resources should be a no-op
+        site.set_resource_by_id("power", 1000.0).unwrap();
+        assert_eq!(site.get_resource_by_id("power").unwrap(), 0.0);
+    }
+    
+    #[test]
+    fn test_unknown_resource_id_errors() {
+        let body_id = CelestialBodyId::new();
+        let site = Site::new_settlement(body_id, "Test".to_string(), 0, 100);
+        
+        // Unknown resource ID should return error
+        let result = site.get_resource_by_id("unknown_resource_xyz");
+        assert!(result.is_err());
     }
 }

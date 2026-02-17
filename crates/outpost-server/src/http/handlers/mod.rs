@@ -3,13 +3,17 @@ use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
 
 use outpost_core::domain::*;
+use outpost_core::building::{BuildingId, BuildingState, BuildingType};
 use outpost_core::events::{GameEvent, EventType};
 use outpost_core::commands::{Command, FoundColony, ConstructBuilding, UpgradeBuilding, RepairBuilding, AdvanceTurn};
 use crate::db::DbPool;
 use crate::event_store::EventStore;
+use crate::services::SimulationService;
 
 pub mod colony_actions;
 pub mod time_control;
+pub mod site_handlers;
+pub mod colonies_handler;
 
 // Helper functions for database operations
 pub(crate) fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources> {
@@ -340,18 +344,31 @@ pub async fn index(tmpl: web::Data<tera::Tera>) -> Result<HttpResponse> {
 
 pub async fn dashboard(
     tmpl: web::Data<tera::Tera>,
-    pool: web::Data<DbPool>,
+    simulation: web::Data<SimulationService>,
 ) -> Result<HttpResponse> {
     let mut context = tera::Context::new();
     
-    // TODO: Query actual data from database/state
-    // For now, using placeholder data
-    context.insert("colony_count", &0);
-    context.insert("total_population", &0);
-    context.insert("average_morale", &75);
+    // Get current game state
+    let game_state = simulation.get_state().await;
+    
+    // Query actual data from GameState
+    context.insert("colony_count", &game_state.total_sites());
+    context.insert("total_population", &game_state.total_population());
+    context.insert("average_morale", &75); // TODO: Calculate from sites
     context.insert("alert_count", &0);
     
-    // Empty arrays for now
+    // Get available building definitions
+    let building_defs: Vec<_> = game_state.building_definitions.iter()
+        .map(|(id, def)| {
+            serde_json::json!({
+                "id": id,
+                "name": &def.name,
+                "category": format!("{:?}", def.category),
+            })
+        })
+        .collect();
+    
+    // Empty arrays for now (will be populated as we build more features)
     let resources: Vec<serde_json::Value> = vec![];
     let construction_jobs: Vec<serde_json::Value> = vec![];
     let recent_events: Vec<serde_json::Value> = vec![];
@@ -359,6 +376,7 @@ pub async fn dashboard(
     context.insert("resources", &resources);
     context.insert("construction_jobs", &construction_jobs);
     context.insert("recent_events", &recent_events);
+    context.insert("building_defs", &building_defs);
 
     let html = tmpl.render("dashboard.html", &context)
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
@@ -366,6 +384,8 @@ pub async fn dashboard(
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
+// Legacy handlers temporarily disabled during V5 migration
+/*
 pub async fn view_colony(
     colony_id: web::Path<u64>,
     tmpl: web::Data<tera::Tera>,
@@ -1017,6 +1037,9 @@ pub async fn advance_turn(
         .insert_header(("HX-Refresh", "true"))
         .body(format!("Turn advanced to {}", current_turn + 1)))
 }
+*/
+
+// Starmap view (kept for UI navigation)
 #[derive(Serialize)]
 struct StarSystemView {
     id: String,

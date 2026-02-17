@@ -1,4 +1,5 @@
 use super::{BuildingDefinition, ResourceDefinition, EventDefinition, TechDefinition};
+use crate::domain::Recipe;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -21,6 +22,7 @@ pub struct ContentLoader {
     resources: HashMap<String, ResourceDefinition>,
     events: HashMap<String, EventDefinition>,
     techs: HashMap<String, TechDefinition>,
+    recipes: HashMap<String, Recipe>,
 }
 
 impl ContentLoader {
@@ -31,6 +33,7 @@ impl ContentLoader {
             resources: HashMap::new(),
             events: HashMap::new(),
             techs: HashMap::new(),
+            recipes: HashMap::new(),
         }
     }
     
@@ -206,9 +209,63 @@ impl ContentLoader {
         &self.techs
     }
     
+    /// Load a recipe from a YAML string
+    pub fn load_recipe(&mut self, yaml_content: &str) -> Result<(), ContentError> {
+        let recipe: Recipe = serde_yaml::from_str(yaml_content)?;
+        
+        recipe.validate()
+            .map_err(|e| ContentError::ValidationError(e.to_string()))?;
+        
+        if self.recipes.contains_key(&recipe.id) {
+            return Err(ContentError::DuplicateId(recipe.id.clone()));
+        }
+        
+        self.recipes.insert(recipe.id.clone(), recipe);
+        Ok(())
+    }
+    
+    /// Load multiple recipes from a YAML string
+    pub fn load_recipes(&mut self, yaml_content: &str) -> Result<(), ContentError> {
+        #[derive(serde::Deserialize)]
+        struct RecipeFile {
+            recipes: Vec<Recipe>,
+        }
+        
+        let file: RecipeFile = serde_yaml::from_str(yaml_content)?;
+        
+        for recipe in file.recipes {
+            recipe.validate()
+                .map_err(|e| ContentError::ValidationError(e.to_string()))?;
+            
+            if self.recipes.contains_key(&recipe.id) {
+                return Err(ContentError::DuplicateId(recipe.id.clone()));
+            }
+            
+            self.recipes.insert(recipe.id.clone(), recipe);
+        }
+        
+        Ok(())
+    }
+    
+    /// Get a recipe by ID
+    pub fn get_recipe(&self, id: &str) -> Option<&Recipe> {
+        self.recipes.get(id)
+    }
+    
+    /// Get all recipes
+    pub fn all_recipes(&self) -> &HashMap<String, Recipe> {
+        &self.recipes
+    }
+    
     /// Get count of loaded content
-    pub fn stats(&self) -> (usize, usize, usize, usize) {
-        (self.buildings.len(), self.resources.len(), self.events.len(), self.techs.len())
+    pub fn stats(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.buildings.len(),
+            self.resources.len(),
+            self.events.len(),
+            self.techs.len(),
+            self.recipes.len(),
+        )
     }
 }
 

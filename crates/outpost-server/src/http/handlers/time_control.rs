@@ -150,7 +150,8 @@ mod tests {
     #[actix_web::test]
     async fn test_get_time_status() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = web::Data::new(SimulationService::new(state));
+        let content = outpost_core::content::ContentLoader::new();
+        let service = web::Data::new(SimulationService::new(state, content));
 
         let app = test::init_service(
             App::new()
@@ -173,7 +174,8 @@ mod tests {
     #[actix_web::test]
     async fn test_pause_simulation() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = web::Data::new(SimulationService::new(state));
+        let content = outpost_core::content::ContentLoader::new();
+        let service = web::Data::new(SimulationService::new(state, content));
 
         let app = test::init_service(
             App::new()
@@ -195,7 +197,8 @@ mod tests {
     #[actix_web::test]
     async fn test_set_speed() {
         let state = GameState::new("Test".to_string(), 42);
-        let service = web::Data::new(SimulationService::new(state));
+        let content = outpost_core::content::ContentLoader::new();
+        let service = web::Data::new(SimulationService::new(state, content));
 
         let app = test::init_service(
             App::new()

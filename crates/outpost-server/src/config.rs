@@ -256,7 +256,7 @@ mod tests {
         let config = AppConfig::load_from_file("nonexistent_config.toml").unwrap();
         assert_eq!(config.game.tick_rate_ms, 60000);
         assert_eq!(config.game.idle_safety_enabled, true);
-        assert_eq!(config.server.port, 8081);
+        assert_eq!(config.server.port, 8083);
     }
     
     #[test]

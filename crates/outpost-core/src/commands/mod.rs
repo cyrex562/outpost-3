@@ -1,10 +1,12 @@
 pub mod banking_commands;
 pub mod colony_commands;
 pub mod trading_commands;
+pub mod construction_commands;
 
 pub use banking_commands::*;
 pub use colony_commands::*;
 pub use trading_commands::*;
+pub use construction_commands::*;
 
 use crate::events::EventType;
 

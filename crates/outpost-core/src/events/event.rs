@@ -105,6 +105,93 @@ pub enum EventType {
         old_recipe_index: u32,
         new_recipe_index: u32,
     },
+    
+    // V5 Construction events (using SiteId instead of ColonyId)
+    ConstructionQueued {
+        site_id: SiteId,
+        building_id: BuildingId,
+        building_def_id: String,
+        tick: u64,
+    },
+    ConstructionProgressed {
+        site_id: SiteId,
+        building_id: BuildingId,
+        progress_ticks: u64,
+        total_ticks: u64,
+        tick: u64,
+    },
+    BuildingConstructed {
+        site_id: SiteId,
+        building_id: BuildingId,
+        building_def_id: String,
+        tick: u64,
+    },
+    ConstructionCancelled {
+        site_id: SiteId,
+        building_id: BuildingId,
+        refunded_resources: std::collections::HashMap<String, f64>,
+        tick: u64,
+    },
+    ConstructionPaused {
+        site_id: SiteId,
+        building_id: BuildingId,
+        tick: u64,
+    },
+    ConstructionResumed {
+        site_id: SiteId,
+        building_id: BuildingId,
+        tick: u64,
+    },
+
+    // V5 Production events (using SiteId and string resource IDs)
+    RecipeStarted {
+        site_id: SiteId,
+        building_id: BuildingId,
+        recipe_id: String,
+        tick: u64,
+    },
+    RecipeProgressed {
+        site_id: SiteId,
+        building_id: BuildingId,
+        recipe_id: String,
+        progress_ticks: u64,
+        total_ticks: u64,
+        tick: u64,
+    },
+    RecipeCompleted {
+        site_id: SiteId,
+        building_id: BuildingId,
+        recipe_id: String,
+        tick: u64,
+    },
+    ProductionInputsConsumed {
+        site_id: SiteId,
+        building_id: BuildingId,
+        recipe_id: String,
+        inputs: std::collections::HashMap<String, f64>,
+        tick: u64,
+    },
+    ProductionOutputsProduced {
+        site_id: SiteId,
+        building_id: BuildingId,
+        recipe_id: String,
+        outputs: std::collections::HashMap<String, f64>,
+        tick: u64,
+    },
+    ProductionHalted {
+        site_id: SiteId,
+        building_id: BuildingId,
+        recipe_id: String,
+        reason: String,
+        tick: u64,
+    },
+    DepositDepleted {
+        site_id: SiteId,
+        body_id: CelestialBodyId,
+        deposit_id: String,
+        resource_type: String,
+        tick: u64,
+    },
 
     // Wormhole events
     PlanetDiscovered {
@@ -182,4 +269,234 @@ pub enum EventType {
 pub enum TradeSide {
     Buy,
     Sell,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_recipe_started_event_serialization() {
+        let event = GameEvent::new(
+            1,
+            100,
+            EventType::RecipeStarted {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "smelt_iron".to_string(),
+                tick: 100,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("RecipeStarted"));
+        assert!(json.contains("smelt_iron"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(event.event_id, deserialized.event_id);
+        assert_eq!(event.turn_number, deserialized.turn_number);
+    }
+
+    #[test]
+    fn test_recipe_progressed_event_serialization() {
+        let event = GameEvent::new(
+            2,
+            101,
+            EventType::RecipeProgressed {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "smelt_iron".to_string(),
+                progress_ticks: 5,
+                total_ticks: 10,
+                tick: 101,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("RecipeProgressed"));
+        assert!(json.contains("\"progress_ticks\":5"));
+        assert!(json.contains("\"total_ticks\":10"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        match deserialized.event_type {
+            EventType::RecipeProgressed { progress_ticks, total_ticks, .. } => {
+                assert_eq!(progress_ticks, 5);
+                assert_eq!(total_ticks, 10);
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_recipe_completed_event_serialization() {
+        let event = GameEvent::new(
+            3,
+            110,
+            EventType::RecipeCompleted {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "smelt_iron".to_string(),
+                tick: 110,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("RecipeCompleted"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(event.event_id, deserialized.event_id);
+    }
+
+    #[test]
+    fn test_production_inputs_consumed_event() {
+        let mut inputs = HashMap::new();
+        inputs.insert("iron_ore".to_string(), 15.0);
+        inputs.insert("power".to_string(), 20.0);
+
+        let event = GameEvent::new(
+            4,
+            100,
+            EventType::ProductionInputsConsumed {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "smelt_iron".to_string(),
+                inputs: inputs.clone(),
+                tick: 100,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ProductionInputsConsumed"));
+        assert!(json.contains("iron_ore"));
+        assert!(json.contains("15.0"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        match deserialized.event_type {
+            EventType::ProductionInputsConsumed { inputs: deserialized_inputs, .. } => {
+                assert_eq!(deserialized_inputs.get("iron_ore"), Some(&15.0));
+                assert_eq!(deserialized_inputs.get("power"), Some(&20.0));
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_production_outputs_produced_event() {
+        let mut outputs = HashMap::new();
+        outputs.insert("iron_ingots".to_string(), 10.0);
+
+        let event = GameEvent::new(
+            5,
+            102,
+            EventType::ProductionOutputsProduced {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "smelt_iron".to_string(),
+                outputs: outputs.clone(),
+                tick: 102,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ProductionOutputsProduced"));
+        assert!(json.contains("iron_ingots"));
+        assert!(json.contains("10.0"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        match deserialized.event_type {
+            EventType::ProductionOutputsProduced { outputs: deserialized_outputs, .. } => {
+                assert_eq!(deserialized_outputs.get("iron_ingots"), Some(&10.0));
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_production_halted_event() {
+        let event = GameEvent::new(
+            6,
+            105,
+            EventType::ProductionHalted {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "smelt_iron".to_string(),
+                reason: "Insufficient iron_ore (need 15.0, have 5.0)".to_string(),
+                tick: 105,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ProductionHalted"));
+        assert!(json.contains("Insufficient"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        match deserialized.event_type {
+            EventType::ProductionHalted { reason, .. } => {
+                assert!(reason.contains("iron_ore"));
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_deposit_depleted_event() {
+        let event = GameEvent::new(
+            7,
+            200,
+            EventType::DepositDepleted {
+                site_id: SiteId::new(),
+                body_id: CelestialBodyId::new(),
+                deposit_id: "deposit_123".to_string(),
+                resource_type: "iron_ore".to_string(),
+                tick: 200,
+            },
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("DepositDepleted"));
+        assert!(json.contains("iron_ore"));
+
+        let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+        match deserialized.event_type {
+            EventType::DepositDepleted { resource_type, .. } => {
+                assert_eq!(resource_type, "iron_ore");
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_production_events_roundtrip() {
+        // Test all production event types can serialize and deserialize
+        let events = vec![
+            EventType::RecipeStarted {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "test_recipe".to_string(),
+                tick: 1,
+            },
+            EventType::RecipeProgressed {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "test_recipe".to_string(),
+                progress_ticks: 5,
+                total_ticks: 10,
+                tick: 2,
+            },
+            EventType::RecipeCompleted {
+                site_id: SiteId::new(),
+                building_id: BuildingId::new(),
+                recipe_id: "test_recipe".to_string(),
+                tick: 3,
+            },
+        ];
+
+        for event_type in events {
+            let event = GameEvent::new(1, 1, event_type);
+            let json = serde_json::to_string(&event).unwrap();
+            let deserialized: GameEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(event.event_id, deserialized.event_id);
+        }
+    }
 }

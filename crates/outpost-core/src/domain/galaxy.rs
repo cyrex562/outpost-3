@@ -97,6 +97,49 @@ impl Galaxy {
     pub fn total_bodies(&self) -> usize {
         self.systems.values().map(|s| s.body_count()).sum()
     }
+    
+    /// Find a site by ID across all systems.
+    pub fn find_site(&self, site_id: &crate::domain::SiteId) -> Option<&crate::domain::Site> {
+        for system in self.systems.values() {
+            if let Some(site) = system.get_site(site_id) {
+                return Some(site);
+            }
+        }
+        None
+    }
+    
+    /// Find a mutable site by ID across all systems.
+    pub fn find_site_mut(&mut self, site_id: &crate::domain::SiteId) -> Option<&mut crate::domain::Site> {
+        for system in self.systems.values_mut() {
+            if let Some(site) = system.get_site_mut(site_id) {
+                return Some(site);
+            }
+        }
+        None
+    }
+    
+    /// Get all sites across all systems.
+    pub fn all_sites(&self) -> Vec<&crate::domain::Site> {
+        self.systems
+            .values()
+            .flat_map(|system| system.all_sites())
+            .collect()
+    }
+    
+    /// For testing: add a site directly (bypassing normal add_site_to_body flow).
+    #[cfg(test)]
+    pub fn add_site_for_testing(&mut self, site: crate::domain::Site) {
+        // Find or create a default system
+        let system_id = if let Some(system_id) = self.systems.keys().next().copied() {
+            system_id
+        } else {
+            let system = StarSystem::new(self.id, "Test System".to_string(), 0);
+            self.add_system(system)
+        };
+        
+        let system = self.systems.get_mut(&system_id).unwrap();
+        system.add_site(site);
+    }
 }
 
 #[cfg(test)]

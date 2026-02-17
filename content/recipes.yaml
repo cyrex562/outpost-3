@@ -1,0 +1,341 @@
+# Production Recipes for Outpost 3
+# 
+# Each recipe defines:
+#   - id: Unique identifier
+#   - name: Human-readable name
+#   - building_types: List of buildings that can execute this recipe
+#   - inputs: Resources consumed (resource_id: quantity in metric tons)
+#   - outputs: Resources produced (resource_id: quantity in metric tons)
+#   - processing_time_ticks: Ticks required to complete the recipe
+#   - requires_deposit: (optional) Must have this resource deposit on celestial body
+#   - description: (optional) UI tooltip text
+
+recipes:
+  # ============================================================================
+  # EXTRACTION RECIPES (Tier 0: Raw Materials)
+  # ============================================================================
+  
+  - id: mine_iron
+    name: "Mine Iron Ore"
+    description: "Extract iron ore from surface deposits using basic mining equipment."
+    building_types: [mine, mining_platform]
+    inputs:
+      labor: 3
+      power: 10
+    outputs:
+      iron_ore: 15
+    processing_time_ticks: 1
+    requires_deposit: iron_ore
+
+  - id: mine_copper
+    name: "Mine Copper Ore"
+    description: "Extract copper ore from mineral deposits."
+    building_types: [mine, mining_platform]
+    inputs:
+      labor: 3
+      power: 10
+    outputs:
+      copper_ore: 12
+    processing_time_ticks: 1
+    requires_deposit: copper_ore
+
+  - id: mine_silicon
+    name: "Mine Silicon Ore"
+    description: "Extract silicon-bearing minerals from regolith and rock formations."
+    building_types: [mine, mining_platform]
+    inputs:
+      labor: 2
+      power: 8
+    outputs:
+      silicon_ore: 20
+    processing_time_ticks: 1
+    requires_deposit: silicon_ore
+
+  - id: mine_uranium
+    name: "Mine Uranium Ore"
+    description: "Extract uranium ore from radioactive deposits. Requires radiation shielding."
+    building_types: [mine, advanced_mining_platform]
+    inputs:
+      labor: 4
+      power: 15
+    outputs:
+      uranium_ore: 5
+    processing_time_ticks: 2
+    requires_deposit: uranium_ore
+
+  - id: mine_rare_earths
+    name: "Mine Rare Earth Ores"
+    description: "Extract rare earth elements from concentrated deposits."
+    building_types: [mine, advanced_mining_platform]
+    inputs:
+      labor: 5
+      power: 20
+    outputs:
+      rare_earth_ore: 8
+    processing_time_ticks: 2
+    requires_deposit: rare_earth_ore
+
+  - id: harvest_regolith
+    name: "Harvest Regolith"
+    description: "Collect and process surface regolith for construction and industrial use."
+    building_types: [mine, regolith_processor]
+    inputs:
+      labor: 2
+      power: 5
+    outputs:
+      regolith: 50
+    processing_time_ticks: 1
+    requires_deposit: regolith
+
+  - id: extract_ice
+    name: "Extract Ice"
+    description: "Mine and collect water ice from subsurface deposits or polar regions."
+    building_types: [ice_extractor, mining_platform]
+    inputs:
+      labor: 2
+      power: 8
+    outputs:
+      ice: 30
+    processing_time_ticks: 1
+    requires_deposit: ice
+
+  - id: extract_carbon
+    name: "Extract Carbon Compounds"
+    description: "Collect carbon-rich materials from organic deposits or volatile ices."
+    building_types: [chemical_extractor]
+    inputs:
+      labor: 3
+      power: 12
+    outputs:
+      carbon_compounds: 10
+    processing_time_ticks: 1
+    requires_deposit: carbon_compounds
+
+  # ============================================================================
+  # REFINING RECIPES (Tier 0 → Tier 1)
+  # ============================================================================
+
+  - id: smelt_iron
+    name: "Smelt Iron"
+    description: "Refine iron ore into pure iron ingots using high-temperature smelting."
+    building_types: [smelter, industrial_smelter]
+    inputs:
+      iron_ore: 15
+      power: 25
+    outputs:
+      iron_ingots: 10
+    processing_time_ticks: 2
+
+  - id: smelt_copper
+    name: "Smelt Copper"
+    description: "Refine copper ore into pure copper ingots."
+    building_types: [smelter, industrial_smelter]
+    inputs:
+      copper_ore: 12
+      power: 20
+    outputs:
+      copper_ingots: 8
+    processing_time_ticks: 2
+
+  - id: refine_silicon
+    name: "Refine Silicon"
+    description: "Purify silicon ore into semiconductor-grade silicon wafers."
+    building_types: [refinery, electronics_fab]
+    inputs:
+      silicon_ore: 20
+      power: 30
+    outputs:
+      silicon_wafers: 12
+    processing_time_ticks: 3
+
+  - id: refine_aluminum
+    name: "Refine Aluminum"
+    description: "Extract aluminum from regolith using electrolysis (energy-intensive)."
+    building_types: [refinery, electrolyzer]
+    inputs:
+      regolith: 50
+      power: 80
+    outputs:
+      aluminum_ingots: 15
+    processing_time_ticks: 4
+
+  - id: process_uranium
+    name: "Process Uranium Fuel"
+    description: "Enrich uranium ore into reactor-grade fuel rods."
+    building_types: [fuel_processor, nuclear_facility]
+    inputs:
+      uranium_ore: 10
+      power: 50
+    outputs:
+      uranium_fuel_rods: 3
+    processing_time_ticks: 5
+
+  - id: refine_rare_earths
+    name: "Refine Rare Earth Metals"
+    description: "Separate and purify rare earth elements from ore concentrates."
+    building_types: [refinery, advanced_refinery]
+    inputs:
+      rare_earth_ore: 8
+      power: 40
+    outputs:
+      rare_earth_metals: 4
+    processing_time_ticks: 4
+
+  - id: produce_polymers
+    name: "Produce Polymers"
+    description: "Synthesize plastic polymers from carbon compounds and hydrogen."
+    building_types: [chemical_plant]
+    inputs:
+      carbon_compounds: 10
+      hydrogen: 5
+      power: 25
+    outputs:
+      polymers: 12
+    processing_time_ticks: 3
+
+  - id: refine_titanium
+    name: "Refine Titanium"
+    description: "Extract titanium from regolith using advanced metallurgical processes."
+    building_types: [advanced_refinery]
+    inputs:
+      regolith: 100
+      power: 120
+    outputs:
+      titanium_alloys: 8
+    processing_time_ticks: 6
+
+  # ============================================================================
+  # MANUFACTURING RECIPES (Tier 1 → Tier 2)
+  # ============================================================================
+
+  - id: fabricate_structural_components
+    name: "Fabricate Structural Components"
+    description: "Manufacture beams, plates, and structural elements for construction."
+    building_types: [fabricator, construction_fab]
+    inputs:
+      iron_ingots: 10
+      aluminum_ingots: 5
+      power: 15
+    outputs:
+      structural_components: 12
+    processing_time_ticks: 2
+
+  - id: fabricate_machine_parts
+    name: "Fabricate Machine Parts"
+    description: "Produce gears, motors, actuators, and mechanical components."
+    building_types: [fabricator, machine_shop]
+    inputs:
+      iron_ingots: 8
+      copper_ingots: 6
+      power: 20
+    outputs:
+      machine_parts: 10
+    processing_time_ticks: 3
+
+  - id: fabricate_electronics
+    name: "Fabricate Electronics"
+    description: "Assemble circuit boards, processors, and electronic components."
+    building_types: [electronics_fab]
+    inputs:
+      silicon_wafers: 5
+      copper_ingots: 3
+      rare_earth_metals: 1
+      power: 30
+    outputs:
+      electronics: 8
+    processing_time_ticks: 4
+
+  - id: fabricate_advanced_components
+    name: "Fabricate Advanced Components"
+    description: "Produce high-tech systems requiring multiple refined materials."
+    building_types: [advanced_fabricator]
+    inputs:
+      titanium_alloys: 5
+      electronics: 4
+      rare_earth_metals: 2
+      power: 40
+    outputs:
+      advanced_components: 6
+    processing_time_ticks: 5
+
+  # ============================================================================
+  # LIFE SUPPORT RECIPES (Consumables Production)
+  # ============================================================================
+
+  - id: purify_water
+    name: "Purify Water"
+    description: "Melt and purify ice into potable water for consumption and industrial use."
+    building_types: [water_purifier, life_support]
+    inputs:
+      ice: 30
+      power: 10
+    outputs:
+      water: 25
+    processing_time_ticks: 1
+
+  - id: generate_oxygen
+    name: "Generate Oxygen"
+    description: "Electrolyze water to produce breathable oxygen (hydrogen byproduct)."
+    building_types: [life_support, oxygen_generator]
+    inputs:
+      water: 10
+      power: 20
+    outputs:
+      oxygen: 8
+      hydrogen: 1
+    processing_time_ticks: 2
+
+  - id: grow_food
+    name: "Grow Food"
+    description: "Cultivate edible crops in controlled hydroponic systems."
+    building_types: [greenhouse, hydroponic_farm]
+    inputs:
+      water: 15
+      nutrients: 3
+      labor: 4
+      power: 12
+    outputs:
+      food_rations: 20
+    processing_time_ticks: 5
+
+  - id: produce_nutrients
+    name: "Produce Nutrients"
+    description: "Synthesize fertilizers and growth nutrients from organic waste and minerals."
+    building_types: [chemical_plant, bioprocessor]
+    inputs:
+      regolith: 10
+      carbon_compounds: 5
+      power: 15
+    outputs:
+      nutrients: 12
+    processing_time_ticks: 3
+
+  # ============================================================================
+  # ENERGY RECIPES
+  # ============================================================================
+
+  - id: nuclear_power_generation
+    name: "Nuclear Power Generation"
+    description: "Generate large amounts of power from uranium fuel rods via fission."
+    building_types: [nuclear_reactor]
+    inputs:
+      uranium_fuel_rods: 1
+    outputs:
+      power: 5000
+    processing_time_ticks: 100
+
+  # ============================================================================
+  # RECYCLING RECIPES (Future expansion)
+  # ============================================================================
+
+  - id: recycle_scrap
+    name: "Recycle Scrap Metal"
+    description: "Reclaim usable metals from damaged components and waste."
+    building_types: [recycler]
+    inputs:
+      scrap_metal: 20
+      power: 15
+    outputs:
+      iron_ingots: 5
+      copper_ingots: 3
+    processing_time_ticks: 2

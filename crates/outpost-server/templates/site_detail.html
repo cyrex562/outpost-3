@@ -1,0 +1,414 @@
+{% extends "base-v5.html" %}
+
+{% block title %}{{ site.name }} - Site Detail{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+    <a href="/dashboard">Dashboard</a>
+    <span>/</span>
+    <a href="/colonies">Colonies</a>
+    <span>/</span>
+    <span>{{ site.name }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="site-detail-container" x-data="siteDetail()">
+    <!-- Site Header -->
+    <div class="site-header">
+        <div class="site-header-main">
+            <h1>{{ site.name }}</h1>
+            <span class="badge badge-{{ site.site_type | lower }}">{{ site.site_type }}</span>
+        </div>
+        <div class="site-header-location">
+            <span class="text-secondary">Located on:</span>
+            <span class="text-primary">{{ body.name }}</span>
+            <span class="text-tertiary">{{ system.name }}</span>
+        </div>
+    </div>
+
+    <!-- Quick Stats Grid -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Population</div>
+            <div class="stat-value">{{ site.population }}</div>
+            <div class="stat-trend trend-neutral">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Morale</div>
+            <div class="stat-value">{{ site.morale }}%</div>
+            <div class="stat-trend trend-{% if site.morale >= 70 %}success{% elif site.morale >= 40 %}warning{% else %}danger{% endif %}">
+                {% if site.morale >= 70 %}▲{% elif site.morale >= 40 %}—{% else %}▼{% endif %}
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Power</div>
+            <div class="stat-value">{{ site.power_net }}/{{ site.power_capacity }} MW</div>
+            <div class="stat-trend trend-{% if site.power_net >= 0 %}success{% else %}danger{% endif %}">
+                {% if site.power_net >= 0 %}✓{% else %}✗{% endif %}
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Buildings</div>
+            <div class="stat-value">{{ site.building_count }}</div>
+            <div class="stat-trend trend-neutral">{{ site.construction_count }} queued</div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button 
+            class="tab-button" 
+            :class="{ 'active': activeTab === 'overview' }"
+            @click="switchTab('overview')">
+            Overview
+        </button>
+        <button 
+            class="tab-button" 
+            :class="{ 'active': activeTab === 'buildings' }"
+            @click="switchTab('buildings')"
+            hx-get="/site/{{ site.id }}/buildings"
+            hx-trigger="click"
+            hx-target="#tab-content"
+            hx-swap="innerHTML">
+            Buildings
+        </button>
+        <button 
+            class="tab-button" 
+            :class="{ 'active': activeTab === 'construction' }"
+            @click="switchTab('construction')"
+            hx-get="/site/{{ site.id }}/construction"
+            hx-trigger="click"
+            hx-target="#tab-content"
+            hx-swap="innerHTML">
+            Construction
+            {% if site.construction_count > 0 %}
+            <span class="badge badge-primary">{{ site.construction_count }}</span>
+            {% endif %}
+        </button>
+        <button 
+            class="tab-button" 
+            :class="{ 'active': activeTab === 'resources' }"
+            @click="switchTab('resources')"
+            hx-get="/site/{{ site.id }}/resources"
+            hx-trigger="click"
+            hx-target="#tab-content"
+            hx-swap="innerHTML">
+            Resources
+        </button>
+        <button 
+            class="tab-button" 
+            :class="{ 'active': activeTab === 'labor' }"
+            @click="switchTab('labor')">
+            Labor
+        </button>
+    </div>
+
+    <!-- Tab Content -->
+    <div id="tab-content" class="tab-content">
+        <!-- Overview Tab (Default) -->
+        <div x-show="activeTab === 'overview'" class="tab-pane">
+            <div class="overview-grid">
+                <!-- General Info -->
+                <div class="info-section">
+                    <h3>General Information</h3>
+                    <table class="info-table">
+                        <tr>
+                            <td class="label">Site Type:</td>
+                            <td>{{ site.site_type }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Founded:</td>
+                            <td>Tick {{ site.founded_at_tick }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Location:</td>
+                            <td>{{ body.name }}, {{ system.name }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Population:</td>
+                            <td>{{ site.population }} {% if site.site_type == "Settlement" %}settlers{% else %}crew{% endif %}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Pollution:</td>
+                            <td>{{ site.pollution_level | round(precision=2) }}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Power Status -->
+                <div class="info-section">
+                    <h3>Power Grid</h3>
+                    <table class="info-table">
+                        <tr>
+                            <td class="label">Generation:</td>
+                            <td class="text-success">+{{ site.power_generation }} MW</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Consumption:</td>
+                            <td class="text-danger">-{{ site.power_consumption }} MW</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Net:</td>
+                            <td class="{% if site.power_net >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ site.power_net }} MW
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="label">Status:</td>
+                            <td>
+                                {% if site.power_net >= 0 %}
+                                <span class="badge badge-success">Stable</span>
+                                {% else %}
+                                <span class="badge badge-danger">Deficit</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Storage -->
+                <div class="info-section">
+                    <h3>Storage Capacity</h3>
+                    <table class="info-table">
+                        <tr>
+                            <td class="label">Total:</td>
+                            <td>{{ site.storage_capacity }} units</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Used:</td>
+                            <td>{{ site.storage_used }} units</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Available:</td>
+                            <td>{{ site.storage_capacity - site.storage_used }} units</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Utilization:</td>
+                            <td>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: {{ (site.storage_used / site.storage_capacity * 100) | round }}%"></div>
+                                </div>
+                                {{ (site.storage_used / site.storage_capacity * 100) | round }}%
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Population Info -->
+                <div class="info-section">
+                    <h3>Population Details</h3>
+                    <table class="info-table">
+                        <tr>
+                            <td class="label">Total:</td>
+                            <td>{{ site.population }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Morale:</td>
+                            <td>{{ site.morale }}%</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Available Labor:</td>
+                            <td>{{ site.available_labor }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Assigned Workers:</td>
+                            <td>{{ site.assigned_workers }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Buildings Tab (loaded via HTMX) -->
+        <!-- Construction Tab (loaded via HTMX) -->
+        <!-- Resources Tab (loaded via HTMX) -->
+        
+        <!-- Labor Tab -->
+        <div x-show="activeTab === 'labor'" class="tab-pane">
+            <div class="empty-state">
+                <p>Labor management will be available in MVP.4</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.site-detail-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: var(--spacing-4);
+}
+
+.site-header {
+    margin-bottom: var(--spacing-4);
+    padding-bottom: var(--spacing-3);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.site-header-main {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-2);
+}
+
+.site-header-main h1 {
+    margin: 0;
+    font-size: var(--font-xl);
+}
+
+.site-header-location {
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+}
+
+.site-header-location .text-primary {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
+}
+
+.stat-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-3);
+}
+
+.stat-label {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-1);
+}
+
+.stat-value {
+    font-family: var(--font-mono);
+    font-size: var(--font-xl);
+    font-weight: 600;
+    margin-bottom: var(--spacing-1);
+}
+
+.stat-trend {
+    font-size: var(--font-sm);
+}
+
+.tabs {
+    display: flex;
+    gap: var(--spacing-2);
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: var(--spacing-4);
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    padding: var(--spacing-2) var(--spacing-3);
+    font-size: var(--font-base);
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1);
+}
+
+.tab-button:hover {
+    color: var(--text-primary);
+}
+
+.tab-button.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+}
+
+.tab-content {
+    min-height: 400px;
+}
+
+.tab-pane {
+    animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--spacing-4);
+}
+
+.info-section {
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-3);
+}
+
+.info-section h3 {
+    margin: 0 0 var(--spacing-3) 0;
+    font-size: var(--font-lg);
+    color: var(--text-primary);
+}
+
+.info-table {
+    width: 100%;
+    font-size: var(--font-sm);
+}
+
+.info-table tr {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.info-table tr:last-child {
+    border-bottom: none;
+}
+
+.info-table td {
+    padding: var(--spacing-2) 0;
+}
+
+.info-table td.label {
+    color: var(--text-secondary);
+    width: 40%;
+}
+
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-8);
+    color: var(--text-secondary);
+}
+
+.badge-settlement {
+    background: var(--accent-primary);
+}
+
+.badge-installation {
+    background: var(--accent-info);
+}
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function siteDetail() {
+    return {
+        activeTab: 'overview',
+        switchTab(tab) {
+            this.activeTab = tab;
+        }
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,272 @@
+<div class="resources-tab">
+    <h3>Resource Stockpile</h3>
+    
+    {% if resources and resources | length > 0 %}
+    <table class="data-table resource-table">
+        <thead>
+            <tr>
+                <th>Resource</th>
+                <th class="numeric">Quantity</th>
+                <th class="numeric">Storage</th>
+                <th class="numeric">Production</th>
+                <th class="numeric">Consumption</th>
+                <th class="numeric">Net Rate</th>
+                <th>Trend</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for resource in resources %}
+            <tr class="resource-row status-{{ resource.status | lower }}">
+                <td class="resource-name">
+                    <span class="resource-icon">{{ resource.icon }}</span>
+                    {{ resource.name }}
+                </td>
+                <td class="numeric quantity">
+                    {{ resource.quantity | round(precision=2) }}
+                </td>
+                <td class="numeric storage">
+                    <div class="storage-bar-container">
+                        <div class="storage-bar">
+                            <div class="storage-fill status-{{ resource.utilization_status | lower }}" 
+                                 style="width: {{ resource.utilization_percent }}%"></div>
+                        </div>
+                        <span class="storage-text">{{ resource.utilization_percent | round }}%</span>
+                    </div>
+                </td>
+                <td class="numeric production text-success">
+                    +{{ resource.production_rate | round(precision=2) }}/tick
+                </td>
+                <td class="numeric consumption text-danger">
+                    -{{ resource.consumption_rate | round(precision=2) }}/tick
+                </td>
+                <td class="numeric net-rate {% if resource.net_rate > 0 %}text-success{% elif resource.net_rate < 0 %}text-danger{% else %}text-secondary{% endif %}">
+                    {% if resource.net_rate > 0 %}+{% endif %}{{ resource.net_rate | round(precision=2) }}/tick
+                </td>
+                <td class="trend">
+                    <span class="trend-indicator {% if resource.net_rate > 0 %}trend-up{% elif resource.net_rate < 0 %}trend-down{% else %}trend-neutral{% endif %}">
+                        {% if resource.net_rate > 0 %}▲{% elif resource.net_rate < 0 %}▼{% else %}—{% endif %}
+                    </span>
+                </td>
+                <td class="status">
+                    <span class="badge badge-{{ resource.status | lower }}">{{ resource.status }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <!-- Storage Summary by Category -->
+    <div class="storage-summary">
+        <h4>Storage Utilization</h4>
+        <div class="storage-categories">
+            {% for category in storage_categories %}
+            <div class="category-bar">
+                <div class="category-label">{{ category.name }}</div>
+                <div class="category-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill status-{{ category.utilization_status | lower }}" 
+                             style="width: {{ category.utilization_percent }}%"></div>
+                    </div>
+                    <span class="category-stats">
+                        {{ category.used | round(precision=1) }} / {{ category.capacity | round(precision=1) }} 
+                        ({{ category.utilization_percent | round }}%)
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    {% else %}
+    <div class="empty-state">
+        <p>No resources in stockpile. Start production to accumulate resources.</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.resources-tab {
+    padding: var(--spacing-3);
+}
+
+.resources-tab h3 {
+    margin: 0 0 var(--spacing-3) 0;
+    color: var(--text-primary);
+}
+
+.resource-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-sm);
+    font-family: var(--font-mono);
+}
+
+.resource-table thead {
+    background: var(--surface-2);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.resource-table th {
+    padding: var(--spacing-2);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: var(--font-xs);
+    letter-spacing: 0.05em;
+}
+
+.resource-table th.numeric {
+    text-align: right;
+}
+
+.resource-table tbody tr {
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.2s;
+}
+
+.resource-table tbody tr:hover {
+    background: var(--surface-1);
+}
+
+.resource-table td {
+    padding: var(--spacing-2);
+}
+
+.resource-table td.numeric {
+    text-align: right;
+}
+
+.resource-name {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-weight: 500;
+}
+
+.resource-icon {
+    font-size: var(--font-lg);
+}
+
+.storage-bar-container {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.storage-bar {
+    flex: 1;
+    height: 16px;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    position: relative;
+}
+
+.storage-fill {
+    height: 100%;
+    transition: width 0.3s, background-color 0.3s;
+}
+
+.storage-fill.status-good {
+    background: var(--success-color);
+}
+
+.storage-fill.status-warning {
+    background: var(--warning-color);
+}
+
+.storage-fill.status-critical {
+    background: var(--danger-color);
+}
+
+.storage-text {
+    min-width: 40px;
+    text-align: right;
+    font-size: var(--font-xs);
+}
+
+.trend-indicator {
+    font-size: var(--font-lg);
+}
+
+.trend-up {
+    color: var(--success-color);
+}
+
+.trend-down {
+    color: var(--danger-color);
+}
+
+.trend-neutral {
+    color: var(--text-tertiary);
+}
+
+.resource-row.status-surplus {
+    background: rgba(0, 255, 0, 0.02);
+}
+
+.resource-row.status-deficit {
+    background: rgba(255, 0, 0, 0.02);
+}
+
+.resource-row.status-depleted {
+    background: rgba(255, 0, 0, 0.05);
+    opacity: 0.7;
+}
+
+.storage-summary {
+    margin-top: var(--spacing-4);
+    padding: var(--spacing-3);
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.storage-summary h4 {
+    margin: 0 0 var(--spacing-3) 0;
+    font-size: var(--font-base);
+    color: var(--text-primary);
+}
+
+.storage-categories {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.category-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+}
+
+.category-label {
+    font-size: var(--font-sm);
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.category-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.category-progress .progress-bar {
+    flex: 1;
+    height: 20px;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.category-stats {
+    min-width: 180px;
+    text-align: right;
+    font-size: var(--font-sm);
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+</style>
