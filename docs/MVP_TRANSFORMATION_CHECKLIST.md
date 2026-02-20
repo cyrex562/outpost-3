@@ -898,15 +898,17 @@
   - [x] 8 serialization and roundtrip tests
 - **Result:** 15 new tests (7 production + 8 events), all passing. **309 total tests** (up from 294).
 
-**Remaining Work (Phase 3):**
-- [ ] Integrate `process_building_production()` with `GameState::process_tick()`
-- [ ] Test integration with actual game tick processing
+**Remaining Work (Phase 3):** ✅ Complete
+- [x] Integrate `process_building_production()` with `GameState::process_tick()` — already wired via `process_production_tick`; verified with integration tests
+- [x] Test integration with actual game tick processing — 4 new integration tests covering progress events, completion events, stockpile updates, and halted events
 
-**Remaining Work (Phase 4 & 5):**
-- [ ] Storage capacity calculation from buildings (currently hardcoded 10000.0)
-- [ ] Property tests for resource conservation
-- [ ] Integration tests for multi-step production chains
-- [ ] Integration tests for storage limits
+**Remaining Work (Phase 4 & 5):** ✅ Complete
+- [x] Storage capacity calculation from buildings — `validate_output_storage` now calls `compute_site_storage(site, content.all_buildings())` from `storage_helpers`; base capacity 5000 + operational warehouses
+- [x] Property tests for resource conservation — 3 proptest properties: inputs conserved, outputs match recipe, halted does not modify stockpile
+- [x] Integration tests for multi-step production chains — `test_multi_step_chain_produces_final_output` verifies 2-building chain (mine → smelt) over 3 ticks
+- [x] Integration tests for storage limits — `test_production_halts_when_storage_full` and `test_production_resumes_when_storage_has_space`
+
+**Total tests after Phase 3–5:** 342 (up from 294).
 
 **Notes:**
 - Recipe system supports 26 MVP recipes: mine_iron, mine_copper, smelt_iron, smelt_copper, fabricate_structural_components, grow_food, purify_water, etc.
@@ -918,13 +920,16 @@
 
 ### 3.4 Resources UI
 
-- [ ] Site Detail — Resources tab:
+- [x] Site Detail — Resources tab:
   - Stockpile table: resource name, quantity, storage capacity, production rate, consumption rate, net rate, trend
   - Color coding: green (surplus), yellow (low), red (deficit/depleted)
   - Storage utilization bar per resource category
-- [ ] Global resource summary in top bar: key resources with trend arrows (HTMX polling)
-- [ ] Tooltips on resource rows: show which buildings produce/consume, current rates, projections
-- [ ] Write integration tests: resource tab renders correct data after production ticks
+- [x] Global resource summary in top bar: key resources with trend arrows (HTMX polling)
+  - `_resource_summary.html` shows ▲/▼/— trend arrows per resource based on net production rate
+  - `resource_api_handlers.rs` computes per-resource net rates via `compute_resource_rates`
+- [x] Tooltips on resource rows: show which buildings produce/consume, current rates, projections
+- [x] Write integration tests: resource tab renders correct data after production ticks
+  - `power_and_resources_tests.rs`: `test_resources_tab_shows_food_after_production_tick`, `test_resources_tab_shows_rate_for_active_recipe`
 
 ---
 
@@ -932,64 +937,64 @@
 
 ### 4.1 Population Model
 
-- [ ] Implement aggregate population on `Site`: total count, demographic breakdown (age buckets), skill distribution
-- [ ] Skill categories: `Laborer`, `Engineer`, `Scientist`, `Farmer`, `Medic`, `Operator`
-- [ ] Implement `RepresentativeCharacter` struct: name, age, skills, traits, health, morale, assigned role
-- [ ] Generate 5-10 starting representative characters with procedural names and skill assignments
-- [ ] Write unit tests: population creation and skill distribution
+- [x] Implement aggregate population on `Site`: total count, demographic breakdown (age buckets), skill distribution
+- [x] Skill categories: `Laborer`, `Engineer`, `Scientist`, `Farmer`, `Medic`, `Operator`
+- [x] Implement `RepresentativeCharacter` struct: name, age, skills, traits, health, morale, assigned role
+- [x] Generate 5-10 starting representative characters with procedural names and skill assignments
+- [x] Write unit tests: population creation and skill distribution
 
 ### 4.2 Needs System
 
-- [ ] Implement `ColonistNeeds` tracker per site: food, water, oxygen, housing satisfaction (0.0–1.0 each)
-- [ ] Each tick: calculate demand (population × per-capita consumption rates)
-- [ ] Each tick: compare demand to available supply (stockpile + production)
-- [ ] Satisfaction = min(supply / demand, 1.0) per need
-- [ ] Unmet needs effects:
+- [x] Implement `ColonistNeeds` tracker per site: food, water, oxygen, housing satisfaction (0.0–1.0 each)
+- [x] Each tick: calculate demand (population × per-capita consumption rates)
+- [x] Each tick: compare demand to available supply (stockpile + production)
+- [x] Satisfaction = min(supply / demand, 1.0) per need
+- [x] Unmet needs effects:
   - Food < threshold → health decline, eventual deaths
   - Water < threshold → health decline, eventual deaths
   - Oxygen < threshold → rapid death
   - Housing < threshold → morale penalty
-- [ ] Write unit tests: needs calculation for various supply/demand scenarios
-- [ ] Write property tests: satisfaction is always in [0.0, 1.0]
+- [x] Write unit tests: needs calculation for various supply/demand scenarios
+- [x] Write property tests: satisfaction is always in [0.0, 1.0]
 
 ### 4.3 Labor Assignment
 
-- [ ] Implement labor pool per site: available workers by skill
-- [ ] Buildings declare labor requirements (slots by skill type)
-- [ ] `AssignLabor` command: assign worker(s) to building
-- [ ] `DeallocateLabor` command: remove worker(s) from building
-- [ ] Buildings with insufficient labor operate at reduced efficiency
-- [ ] Efficiency formula: `min(assigned_workers / required_workers, 1.0) * morale_modifier`
-- [ ] Write unit tests: labor assignment and efficiency calculation
-- [ ] Write integration tests: labor assignment via HTTP endpoint
+- [x] Implement labor pool per site: available workers by skill
+- [x] Buildings declare labor requirements (slots by skill type)
+- [x] `AssignLabor` command: assign worker(s) to building
+- [x] `DeallocateLabor` command: remove worker(s) from building
+- [x] Buildings with insufficient labor operate at reduced efficiency
+- [x] Efficiency formula: `min(assigned_workers / required_workers, 1.0) * morale_modifier`
+- [x] Write unit tests: labor assignment and efficiency calculation
+- [x] Write integration tests: labor assignment via HTTP endpoint
 
 ### 4.4 Morale System
 
-- [ ] Implement `Morale` as a composite score on `Site` (0–100 scale)
-- [ ] Morale factors:
+- [x] Implement `Morale` as a composite score on `Site` (0–100 scale)
+- [x] Morale factors:
   - Needs satisfaction (food, water, housing, oxygen) — weighted heavily
-  - Entertainment / recreation availability
-  - Working conditions
-  - Recent events (positive/negative modifiers with decay)
-  - Governance policies
-- [ ] Morale effects:
+  - Entertainment / recreation availability (future work)
+  - Working conditions (future work)
+  - Recent events — positive/negative modifiers (future work)
+  - Governance policies (future work)
+- [x] Morale effects:
   - High morale (>70): productivity bonus (+10-20%)
   - Neutral morale (40-70): no modifier
   - Low morale (<40): productivity penalty (-10-30%)
-  - Very low morale (<20): risk of event triggers (strikes, unrest)
-- [ ] Morale updates each tick based on current conditions
-- [ ] Write unit tests: morale calculation from factors
-- [ ] Write property tests: morale is always in [0, 100]
+  - Very low morale (<20): risk of event triggers (future work)
+- [x] Morale updates each tick based on current conditions
+- [x] Write unit tests: morale calculation from factors
+- [x] Write property tests: morale is always in [0, 100]
 
 ### 4.5 Labor & Population UI
 
-- [ ] Site Detail — Labor tab:
+- [x] Site Detail — Labor tab:
   - Worker pool summary: total workers, employed, unemployed, by skill
   - Building labor table: building name, slots filled/required, efficiency
   - Assign/deallocate controls per building
-- [ ] Population panel on Site Overview: total pop, morale gauge, growth rate, key needs status
-- [ ] Character roster (collapsible): list of representative characters with key stats
-- [ ] Write integration tests: labor tab renders and assignment endpoints work
+- [x] Population panel on Site Overview: total pop, morale gauge, growth rate, key needs status
+- [x] Character roster (collapsible): list of representative characters with key stats
+- [x] Write integration tests: labor tab renders and assignment endpoints work
 
 ---
 
@@ -997,33 +1002,33 @@
 
 ### 5.1 Power Grid
 
-- [ ] Implement `PowerGrid` per site: total generation, total consumption, net surplus/deficit
-- [ ] Power-generating buildings contribute to generation (when operational and fueled)
-- [ ] Power-consuming buildings draw from the grid
-- [ ] Brownout mechanic: if deficit, buildings lose efficiency proportional to shortfall
-- [ ] Priority system: essential buildings (life support, habitat) prioritized during brownout
-- [ ] `ToggleBuildingPower` command: manually enable/disable power to a building
-- [ ] Write unit tests: power grid calculation, brownout priority
-- [ ] Write property tests: total consumption never exceeds total generation + deficit tolerance
+- [x] Implement `PowerGrid` per site: total generation, total consumption, net surplus/deficit
+- [x] Power-generating buildings contribute to generation (when operational and fueled)
+- [x] Power-consuming buildings draw from the grid
+- [x] Brownout mechanic: if deficit, buildings lose efficiency proportional to shortfall
+- [x] Priority system: essential buildings (life support, habitat) prioritized during brownout
+- [x] `ToggleBuildingPower` command: manually enable/disable power to a building
+- [x] Write unit tests: power grid calculation, brownout priority
+- [x] Write property tests: total consumption never exceeds total generation + deficit tolerance
 
 ### 5.2 Life Support
 
-- [ ] Implement `LifeSupport` tracker per site: oxygen level, water level, temperature
-- [ ] Life support buildings produce oxygen and regulate temperature
-- [ ] Per-tick consumption based on population
+- [x] Implement `LifeSupport` tracker per site: oxygen level, water level, temperature
+- [x] Life support buildings produce oxygen and regulate temperature
+- [x] Per-tick consumption based on population
 - [ ] Failure cascade: if life support fails, oxygen depletes → colonist death within ticks
-- [ ] Idle safety mode: auto-pause simulation if life support critical
-- [ ] Alerts and event log entries for life support warnings/failures
-- [ ] Write unit tests: life support depletion and failure scenarios
-- [ ] Write integration tests: idle safety triggers auto-pause
+- [x] Idle safety mode: auto-pause simulation if life support critical
+- [x] Alerts and event log entries for life support warnings/failures
+- [x] Write unit tests: life support depletion and failure scenarios
+- [x] Write integration tests: idle safety triggers auto-pause
 
 ### 5.3 Power & Life Support UI
 
-- [ ] Site Overview: power status widget (generation vs consumption bar, surplus/deficit number)
-- [ ] Site Overview: life support status (oxygen, water, temp indicators with green/yellow/red)
-- [ ] Power detail section: table of all power-generating and power-consuming buildings with values
+- [x] Site Overview: power status widget (generation vs consumption bar, surplus/deficit number)
+- [x] Site Overview: life support status (oxygen, water, temp indicators with green/yellow/red)
+- [x] Power detail section: table of all power-generating and power-consuming buildings with values
 - [ ] Brownout alerts in event log
-- [ ] Write integration tests: power and life support UI reflects state correctly
+- [x] Write integration tests: power and life support UI reflects state correctly
 
 ---
 
@@ -1031,15 +1036,15 @@
 
 ### 6.1 Game Event Engine
 
-- [ ] Implement `GameEventEngine` in `outpost-core` (distinct from event sourcing `EventStore`)
-- [ ] Event engine evaluates trigger conditions each tick against game state
-- [ ] Trigger conditions: expressions on game state (e.g., `site.building_count >= 5`)
-- [ ] Probability-based firing: when conditions met, roll against probability
-- [ ] Event effects: modify game state (resources, morale, building health, population)
-- [ ] Event choices: player-facing decisions with different outcomes
+- [x] Implement `GameEventEngine` in `outpost-core` (distinct from event sourcing `EventStore`)
+- [x] Event engine evaluates trigger conditions each tick against game state
+- [x] Trigger conditions: expressions on game state (e.g., `site.building_count >= 5`)
+- [x] Probability-based firing: when conditions met, roll against probability
+- [x] Event effects: modify game state (resources, morale, building health, population)
+- [x] Event choices: player-facing decisions with different outcomes
 - [ ] Skill checks: representative character skills affect outcome probabilities
-- [ ] Write unit tests: trigger evaluation, probability rolling, effect application
-- [ ] Write property tests: event effects stay within defined bounds
+- [x] Write unit tests: trigger evaluation, probability rolling, effect application
+- [x] Write property tests: event effects stay within defined bounds
 
 ### 6.2 Event Data Definitions
 

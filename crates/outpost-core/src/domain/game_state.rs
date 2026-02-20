@@ -7,7 +7,31 @@ use crate::content::{BuildingDefinition, ResourceDefinition, EventDefinition, Te
 use crate::domain::Galaxy;
 use crate::simulation::GameClock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Per-site event engine state: which events have fired and when cooldowns expire.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EventEngineState {
+    /// Events that are non-repeatable and have already fired for a specific site.
+    /// Key: `"{site_id}:{event_id}"`
+    pub fired_non_repeatable: HashSet<String>,
+    /// Cooldown expiry tick for events per site.
+    /// Key: `"{site_id}:{event_id}"`, value: tick at which cooldown ends.
+    pub cooldown_until: HashMap<String, u64>,
+    /// Pending player choices: events that have fired but await player resolution.
+    /// Key: `"{site_id}:{event_id}"`, value: event id.
+    pub pending_choices: Vec<PendingEventChoice>,
+}
+
+/// An event that has fired and is awaiting a player choice.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingEventChoice {
+    pub site_id: String,
+    pub event_id: String,
+    pub fired_at_tick: u64,
+    pub title: String,
+    pub description: String,
+}
 
 /// The root game state containing all entities and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +52,8 @@ pub struct GameState {
     /// Tech definitions loaded from content files.
     #[serde(skip)]
     pub tech_definitions: HashMap<String, TechDefinition>,
+    /// Event engine runtime state (cooldowns, fired set, pending choices).
+    pub event_engine: EventEngineState,
 }
 
 impl GameState {
@@ -40,6 +66,7 @@ impl GameState {
             resource_definitions: HashMap::new(),
             event_definitions: HashMap::new(),
             tech_definitions: HashMap::new(),
+            event_engine: EventEngineState::default(),
         }
     }
 
@@ -52,6 +79,7 @@ impl GameState {
             resource_definitions: HashMap::new(),
             event_definitions: HashMap::new(),
             tech_definitions: HashMap::new(),
+            event_engine: EventEngineState::default(),
         }
     }
 

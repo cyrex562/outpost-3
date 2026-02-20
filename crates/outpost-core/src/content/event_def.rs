@@ -47,7 +47,30 @@ pub enum EventOutcome {
     NarrativeText { text: String },
 }
 
-/// A choice the player can make in response to an event
+/// Category of a gameplay event
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EventCategory {
+    Disaster,
+    Discovery,
+    Social,
+    Technical,
+    Economic,
+    #[default]
+    General,
+}
+
+/// Severity level for prioritisation and auto-pause
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSeverity {
+    Info,
+    #[default]
+    Warning,
+    Critical,
+}
+
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventChoice {
     pub id: String,
@@ -62,25 +85,37 @@ pub struct EventChoice {
 pub struct EventDefinition {
     /// Unique identifier
     pub id: String,
-    
+
     /// Display title
     pub title: String,
-    
+
     /// Event description/narrative text
     pub description: String,
-    
-    /// Trigger conditions
+
+    /// Category for filtering and display
+    #[serde(default)]
+    pub category: EventCategory,
+
+    /// Severity — affects auto-pause behaviour
+    #[serde(default)]
+    pub severity: EventSeverity,
+
+    /// If true, auto-pause the simulation when this event fires
+    #[serde(default)]
+    pub auto_pause: bool,
+
+    /// Trigger conditions (ALL must be satisfied simultaneously)
     pub triggers: Vec<EventTrigger>,
-    
+
     /// Choices the player can make
     pub choices: Vec<EventChoice>,
-    
+
     /// Can this event repeat
     pub repeatable: bool,
-    
+
     /// Cooldown in ticks before event can trigger again
     pub cooldown_ticks: Option<u64>,
-    
+
     /// Weight for random selection (higher = more likely)
     pub weight: f64,
 }
@@ -124,6 +159,9 @@ mod tests {
             id: "first_colony".to_string(),
             title: "A New Beginning".to_string(),
             description: "The first colonists arrive at the landing site.".to_string(),
+            category: EventCategory::Social,
+            severity: EventSeverity::Info,
+            auto_pause: false,
             triggers: vec![
                 EventTrigger::PopulationReached { threshold: 1 }
             ],

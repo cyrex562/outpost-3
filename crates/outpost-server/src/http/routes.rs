@@ -14,6 +14,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/site/{id}/buildings", web::get().to(handlers::site_handlers::site_buildings_tab))
             .route("/site/{id}/construction", web::get().to(handlers::site_handlers::site_construction_tab))
             .route("/site/{id}/resources", web::get().to(handlers::site_handlers::site_resources_tab))
+            .route("/site/{id}/labor", web::get().to(handlers::labor_handlers::site_labor_tab))
+            .route("/site/{id}/building/{bid}/assign", web::post().to(handlers::labor_handlers::assign_labor))
+            .route("/site/{id}/building/{bid}/deallocate", web::post().to(handlers::labor_handlers::deallocate_labor))
             .route("/site/{id}/build", web::post().to(handlers::site_handlers::start_construction))
             .route("/site/{id}/construction/{job_id}/cancel", web::post().to(handlers::site_handlers::cancel_construction))
             .route("/site/{id}/construction/{job_id}/pause", web::post().to(handlers::site_handlers::toggle_pause_construction))
@@ -36,5 +39,12 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/api/time/speed", web::post().to(handlers::time_control::set_speed))
             .route("/api/time/idle-safety/enable", web::post().to(handlers::time_control::enable_idle_safety))
             .route("/api/time/idle-safety/disable", web::post().to(handlers::time_control::disable_idle_safety))
+            // Resource polling API
+            .route("/api/resources/summary", web::get().to(handlers::resource_api_handlers::resource_summary))
+            // Power grid routes
+            .route("/site/{id}/power", web::get().to(handlers::power_handlers::site_power_tab))
+            .route("/site/{id}/building/{bid}/power/toggle", web::post().to(handlers::power_handlers::toggle_building_power))
+            // Life support routes
+            .route("/site/{id}/life-support", web::get().to(handlers::life_support_handlers::site_life_support_tab))
     );
 }

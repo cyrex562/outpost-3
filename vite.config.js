@@ -1,21 +1,26 @@
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 export default defineConfig({
-  root: 'static',
+  root: 'crates/outpost-server',
   base: '/static/',
+  plugins: [
+    tailwindcss(),
+  ],
   build: {
-    outDir: '../dist/static',
-    emptyOutDir: true,
+    // Output built CSS/JS into the static directory that Actix serves
+    outDir: 'static',
+    emptyOutDir: false, // Don't wipe source CSS files in static/css/
     sourcemap: true,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'static/js/main.js'),
+        main: path.resolve(__dirname, 'crates/outpost-server/static/js/main.js'),
       },
       output: {
         entryFileNames: 'js/[name].js',
         chunkFileNames: 'js/[name].js',
-        assetFileNames: '[ext]/[name].[ext]',
+        assetFileNames: 'css/[name].[ext]',
       },
     },
   },

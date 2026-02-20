@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,14 +16,18 @@
     <link rel="stylesheet" href="/static/css/modals.css">
     <link rel="stylesheet" href="/static/css/forms.css">
 
+    <!-- Compiled Tailwind and DaisyUI CSS -->
+    <link rel="stylesheet" href="/static/css/main.css">
+
     <!-- HTMX for dynamic content -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    
+
     <!-- Alpine.js for interactivity -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     {% block extra_head %}{% endblock %}
 </head>
+
 <body>
     <!-- Loading Indicator -->
     <div class="loading-overlay hidden" id="loading-overlay">
@@ -31,9 +36,8 @@
     </div>
 
     <!-- App Container -->
-    <div class="app-container" 
-         x-data="{ sidebarCollapsed: false, tickerExpanded: false }"
-         :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+    <div class="app-container" x-data="{ sidebarCollapsed: false, tickerExpanded: false }"
+        :class="{ 'sidebar-collapsed': sidebarCollapsed }">
 
         <!-- ===== TOP BAR ===== -->
         <header class="app-topbar">
@@ -47,9 +51,7 @@
 
             <!-- Center: Time controls -->
             <div class="topbar-center">
-                <div class="time-controls"
-                     x-data="timeControls()"
-                     x-init="init()">
+                <div class="time-controls" x-data="timeControls()" x-init="init()">
                     <!-- Game time display -->
                     <div class="time-display">
                         <div class="time-label">Game Time</div>
@@ -58,29 +60,21 @@
 
                     <!-- Control buttons -->
                     <div class="time-buttons">
-                        <button class="btn-time-control" 
-                                x-on:click="pause()"
-                                :class="{ 'active': paused }"
-                                title="Pause">
+                        <button class="btn-time-control" x-on:click="pause()" :class="{ 'active': paused }"
+                            title="Pause">
                             ⏸
                         </button>
-                        <button class="btn-time-control"
-                                x-on:click="resume()"
-                                :class="{ 'active': !paused }"
-                                title="Resume">
+                        <button class="btn-time-control" x-on:click="resume()" :class="{ 'active': !paused }"
+                            title="Resume">
                             ▶
                         </button>
-                        <button class="btn-time-control"
-                                x-on:click="decreaseSpeed()"
-                                title="Decrease Speed">
+                        <button class="btn-time-control" x-on:click="decreaseSpeed()" title="Decrease Speed">
                             ◀
                         </button>
                         <div class="speed-indicator">
                             <span x-text="speedMultiplier + 'x'" class="speed-value">1x</span>
                         </div>
-                        <button class="btn-time-control"
-                                x-on:click="increaseSpeed()"
-                                title="Increase Speed">
+                        <button class="btn-time-control" x-on:click="increaseSpeed()" title="Increase Speed">
                             ▶
                         </button>
                     </div>
@@ -95,9 +89,10 @@
 
             <!-- Right: Resource summary and alerts -->
             <div class="topbar-right">
-                <div class="resource-summary" id="resource-summary">
+                <div class="resource-summary" id="resource-summary" hx-get="/api/resources/summary"
+                    hx-trigger="load, every 5s" hx-swap="innerHTML">
                     {% block resource_summary %}
-                    <!-- Resources will be loaded via HTMX -->
+                    <!-- Resources loaded via HTMX polling -->
                     {% endblock %}
                 </div>
 
@@ -115,41 +110,27 @@
         <!-- ===== SIDEBAR ===== -->
         <aside class="app-sidebar">
             <div class="sidebar-header">
-                <button class="btn-sidebar-toggle" 
-                        x-on:click="sidebarCollapsed = !sidebarCollapsed"
-                        title="Toggle Sidebar">
+                <button class="btn-sidebar-toggle" x-on:click="sidebarCollapsed = !sidebarCollapsed"
+                    title="Toggle Sidebar">
                     ☰
                 </button>
             </div>
 
             <nav class="sidebar-nav">
-                <a href="/" 
-                   hx-get="/" 
-                   hx-target="#main-content" 
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="nav-item" 
-                   :class="{ 'active': window.location.pathname === '/' }">
+                <a href="/" hx-get="/" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="nav-item"
+                    :class="{ 'active': window.location.pathname === '/' }">
                     <span class="nav-icon">📊</span>
                     <span class="nav-label">Dashboard</span>
                 </a>
 
-                <a href="/colonies" 
-                   hx-get="/colonies" 
-                   hx-target="#main-content" 
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="nav-item">
+                <a href="/colonies" hx-get="/colonies" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                    class="nav-item">
                     <span class="nav-icon">🏛️</span>
                     <span class="nav-label">Colonies</span>
                 </a>
 
-                <a href="/events" 
-                   hx-get="/events" 
-                   hx-target="#main-content" 
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="nav-item">
+                <a href="/events" hx-get="/events" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                    class="nav-item">
                     <span class="nav-icon">📜</span>
                     <span class="nav-label">Event Log</span>
                     <span class="nav-badge" x-show="false">5</span>
@@ -157,12 +138,8 @@
 
                 <div class="sidebar-divider"></div>
 
-                <a href="/settings" 
-                   hx-get="/settings" 
-                   hx-target="#main-content" 
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="nav-item">
+                <a href="/settings" hx-get="/settings" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                    class="nav-item">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-label">Settings</span>
                 </a>
@@ -180,16 +157,16 @@
                 {% if breadcrumbs %}
                 <nav class="breadcrumbs" aria-label="Breadcrumb">
                     {% for crumb in breadcrumbs %}
-                        <div class="breadcrumb-item">
-                            {% if crumb.url %}
-                                <a href="{{ crumb.url }}" class="breadcrumb-link">{{ crumb.label }}</a>
-                            {% else %}
-                                <span class="breadcrumb-current">{{ crumb.label }}</span>
-                            {% endif %}
-                            {% if not loop.last %}
-                                <span class="breadcrumb-separator">/</span>
-                            {% endif %}
-                        </div>
+                    <div class="breadcrumb-item">
+                        {% if crumb.url %}
+                        <a href="{{ crumb.url }}" class="breadcrumb-link">{{ crumb.label }}</a>
+                        {% else %}
+                        <span class="breadcrumb-current">{{ crumb.label }}</span>
+                        {% endif %}
+                        {% if not loop.last %}
+                        <span class="breadcrumb-separator">/</span>
+                        {% endif %}
+                    </div>
                     {% endfor %}
                 </nav>
                 {% endif %}
@@ -338,4 +315,5 @@
 
     {% block extra_scripts %}{% endblock %}
 </body>
+
 </html>

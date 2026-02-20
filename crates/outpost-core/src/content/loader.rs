@@ -17,6 +17,7 @@ pub enum ContentError {
 
 /// Loads and validates game content from YAML strings (I/O-free)
 /// File loading should be done by the server layer, which then passes YAML strings to this loader
+#[derive(Clone)]
 pub struct ContentLoader {
     buildings: HashMap<String, BuildingDefinition>,
     resources: HashMap<String, ResourceDefinition>,

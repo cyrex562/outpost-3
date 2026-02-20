@@ -7,6 +7,7 @@
 
 use actix_web::{web, HttpResponse, Result};
 use outpost_core::domain::{BuildingId, SiteId, BuildingStateV5};
+use outpost_core::domain::resource_mapping::resource_type_to_string;
 use outpost_core::commands::{StartConstruction, CancelConstruction, PauseConstruction, ResumeConstruction};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -57,7 +58,21 @@ pub async fn site_detail(
         .sum();
     
     let power_net = power_generation - power_consumption;
-    
+    let has_brownout = power_net < 0;
+    let power_utilization_pct = if power_generation > 0 {
+        ((power_consumption as f64 / power_generation as f64) * 100.0).clamp(0.0, 100.0) as u32
+    } else if power_consumption > 0 { 100 } else { 0 };
+
+    // Read cached life support status (updated each tick; safe to read without side effects)
+    let ls = &site.life_support;
+    let ls_oxygen_pct = (ls.oxygen_sat * 100.0).round() as u32;
+    let ls_water_pct  = (ls.water_sat  * 100.0).round() as u32;
+    let ls_food_pct   = (ls.food_sat   * 100.0).round() as u32;
+    let ls_overall    = (ls.overall_score() * 100.0).round() as u32;
+    let ls_status = if ls.is_critical { "Critical" }
+                    else if ls.overall_score() < 0.75 { "Warning" }
+                    else { "Good" };
+
     // Calculate storage (placeholder - will be implemented in MVP.3)
     let storage_capacity = 1000;
     let storage_used = 450;
@@ -77,11 +92,13 @@ pub async fn site_detail(
         "name": &site.name,
         "site_type": format!("{:?}", site.site_type),
         "population": site.population.total,
-        "morale": 75, // Placeholder - will be calculated
+        "morale": site.population.morale.round() as u32,
         "power_generation": power_generation,
         "power_consumption": power_consumption,
         "power_net": power_net,
         "power_capacity": power_generation,
+        "has_brownout": has_brownout,
+        "power_utilization_pct": power_utilization_pct,
         "building_count": site.buildings.len(),
         "construction_count": site.construction_queue.all_jobs().len(),
         "founded_at_tick": site.founded_at_tick,
@@ -90,6 +107,12 @@ pub async fn site_detail(
         "storage_used": storage_used,
         "available_labor": available_labor,
         "assigned_workers": assigned_workers,
+        "ls_oxygen_pct": ls_oxygen_pct,
+        "ls_water_pct": ls_water_pct,
+        "ls_food_pct": ls_food_pct,
+        "ls_overall": ls_overall,
+        "ls_status": ls_status,
+        "ls_is_critical": ls.is_critical,
     }));
     
     context.insert("body", &serde_json::json!({
@@ -395,26 +418,50 @@ pub async fn site_resources_tab(
     
     // Get game state
     let game_state = simulation.get_state().await;
+    let content = simulation.get_content().await;
     
     // Find the site
     let site = game_state.galaxy.find_site(&site_id)
         .ok_or_else(|| actix_web::error::ErrorNotFound(format!("Site {} not found", site_id)))?;
     
-    // Build resource list with rates using the iter() method
+    // ── Storage capacity (real, aggregated from warehouse buildings) ──
+    let site_storage = outpost_core::simulation::compute_site_storage(
+        site, &game_state.building_definitions,
+    );
+
+    // ── Production / consumption rates (real, from active recipes) ──
+    let rates = outpost_core::simulation::compute_resource_rates(
+        site, &game_state.building_definitions, &content,
+    );
+
+    // ── Tooltip data: which buildings produce/consume each resource ──
+    let producers = outpost_core::simulation::list_resource_producers(
+        &game_state.building_definitions, &content,
+    );
+    let consumers = outpost_core::simulation::list_resource_consumers(
+        &game_state.building_definitions, &content,
+    );
+
+    // ── Active production chains ──
+    let chains_raw = outpost_core::simulation::active_production_chains(
+        site, &game_state.building_definitions, &content,
+    );
+
+    // Build resource list
     let mut resources_list = Vec::new();
-    
     for (resource_type, quantity) in site.resources.iter() {
-        // TODO: Calculate actual production/consumption rates from buildings
-        // For now, use placeholder values
-        let production_rate = 0.0;
-        let consumption_rate = 0.0;
-        let net_rate = production_rate - consumption_rate;
-        
-        // Storage capacity (placeholder - will use actual per-resource caps in future)
-        let capacity = 10000.0;
+        let resource_name = resource_type.name().to_string();
         let quantity_f64 = *quantity as f64;
-        let utilization_percent = (quantity_f64 / capacity * 100.0).min(100.0).max(0.0);
-        
+        let resource_id = resource_type_to_string(*resource_type).to_string();
+
+        // Rates
+        let rate = rates.get(&resource_id).cloned().unwrap_or_default();
+        let production_rate = rate.production;
+        let consumption_rate = rate.consumption;
+        let net_rate = rate.net();
+
+        // Storage: per-resource share of site capacity
+        let utilization_percent = (quantity_f64 / site_storage * 100.0).clamp(0.0, 100.0);
         let utilization_status = if utilization_percent >= 90.0 {
             "critical"
         } else if utilization_percent >= 70.0 {
@@ -422,7 +469,7 @@ pub async fn site_resources_tab(
         } else {
             "good"
         };
-        
+
         let status = if *quantity <= 0 {
             "Depleted"
         } else if net_rate < -0.01 {
@@ -432,55 +479,89 @@ pub async fn site_resources_tab(
         } else {
             "Stable"
         };
-        
+
+        // Tooltip: producer and consumer building names
+        let resource_producers = producers.get(&resource_id)
+            .cloned()
+            .unwrap_or_default();
+        let resource_consumers = consumers.get(&resource_id)
+            .cloned()
+            .unwrap_or_default();
+
+        // Icon mapping
+        let icon = resource_icon(&resource_id);
+
         resources_list.push(serde_json::json!({
-            "name": resource_type.name(),
-            "icon": "📦", // TODO: Map resource types to icons
+            "id": resource_id,
+            "name": resource_name,
+            "icon": icon,
             "quantity": quantity_f64,
+            "capacity": site_storage,
+            "utilization_percent": utilization_percent,
+            "utilization_status": utilization_status,
             "production_rate": production_rate,
             "consumption_rate": consumption_rate,
             "net_rate": net_rate,
-            "utilization_percent": utilization_percent,
-            "utilization_status": utilization_status,
             "status": status,
+            "producers": resource_producers,
+            "consumers": resource_consumers,
         }));
     }
     
-    // Sort resources alphabetically by name
+    // Sort: first by status priority (deficit/depleted first), then name
     resources_list.sort_by(|a, b| {
-        a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or(""))
+        let status_order = |s: &str| match s {
+            "Depleted" => 0,
+            "Deficit"  => 1,
+            "Stable"   => 2,
+            "Surplus"  => 3,
+            _          => 4,
+        };
+        let sa = status_order(a["status"].as_str().unwrap_or(""));
+        let sb = status_order(b["status"].as_str().unwrap_or(""));
+        sa.cmp(&sb).then(
+            a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or(""))
+        )
     });
     
-    // Calculate total storage usage
+    // Storage summary
     let total_quantity: i64 = site.resources.iter().map(|(_, q)| q).sum();
-    let total_capacity = 100000.0; // Placeholder
-    let utilization_pct = if total_capacity > 0.0 {
-        (total_quantity as f64 / total_capacity * 100.0).min(100.0)
-    } else {
-        0.0
-    };
-    
-    // Calculate storage by category (placeholder - will use actual categories in future)
+    let utilization_pct = (total_quantity as f64 / site_storage * 100.0).clamp(0.0, 100.0);
     let storage_categories = vec![
         serde_json::json!({
-            "name": "All Resources",
+            "name": "Total Storage",
             "used": total_quantity as f64,
-            "capacity": total_capacity,
+            "capacity": site_storage,
             "utilization_percent": utilization_pct,
-            "utilization_status": if utilization_pct >= 90.0 {
-                "critical"
-            } else if utilization_pct >= 70.0 {
-                "warning"
-            } else {
-                "good"
-            },
+            "utilization_status": if utilization_pct >= 90.0 { "critical" }
+                                   else if utilization_pct >= 70.0 { "warning" }
+                                   else { "good" },
         }),
     ];
+
+    // Active chains for the production chains panel
+    let chains: Vec<serde_json::Value> = chains_raw.iter().map(|c| {
+        let inputs: Vec<_> = c.inputs.iter()
+            .map(|(k, v)| serde_json::json!({ "resource": k, "amount": v }))
+            .collect();
+        let outputs: Vec<_> = c.outputs.iter()
+            .map(|(k, v)| serde_json::json!({ "resource": k, "amount": v }))
+            .collect();
+        serde_json::json!({
+            "building_name": c.building_name,
+            "recipe_name": c.recipe_name,
+            "progress_pct": c.progress_pct,
+            "inputs": inputs,
+            "outputs": outputs,
+        })
+    }).collect();
     
     // Prepare context
     let mut context = tera::Context::new();
     context.insert("resources", &resources_list);
     context.insert("storage_categories", &storage_categories);
+    context.insert("active_chains", &chains);
+    context.insert("site_id", &site_id_str);
     
     // Render template
     let html = tmpl.render("components/resources_tab.html", &context)
@@ -488,3 +569,23 @@ pub async fn site_resources_tab(
     
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
+
+/// Map a resource string ID to an emoji icon.
+fn resource_icon(resource_id: &str) -> &'static str {
+    match resource_id {
+        "iron_ore"    => "⛏️",
+        "iron_ingots" | "steel" => "🔩",
+        "copper_ore" | "copper" => "🟠",
+        "water"       => "💧",
+        "food"        => "🌿",
+        "oxygen"      => "💨",
+        "electronics" => "⚡",
+        "components"  => "⚙️",
+        "silicon"     => "💎",
+        "uranium_fuel"| "uranium" => "☢️",
+        "ice"         => "🧊",
+        "nutrients"   => "🧪",
+        _             => "📦",
+    }
+}
+

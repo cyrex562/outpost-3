@@ -7,8 +7,10 @@
 use crate::domain::GameState;
 use crate::events::{EventType, GameEvent};
 use crate::simulation::production::{process_building_production, ProductionResult, ProductionError};
+use crate::simulation::power_processor::process_power_tick;
+use crate::simulation::life_support_processor::process_life_support_tick;
+use crate::simulation::event_engine::process_events_tick;
 use crate::content::ContentLoader;
-use std::collections::HashMap;
 
 /// Process a single simulation tick.
 ///
@@ -49,16 +51,34 @@ pub fn process_tick(state: &mut GameState, content: &ContentLoader) -> Vec<GameE
         },
     ));
 
-    // Process production chains (buildings produce resources)
+    // 1. Power grid — compute generation vs. consumption, set brownout efficiency
+    let power_events = process_power_tick(state, content);
+    events.extend(power_events.into_iter().map(|e| GameEvent::new(0, new_tick, e)));
+
+    // 2. Production chains (buildings produce resources)
     let production_events = process_production_tick(state, content, new_tick);
     events.extend(production_events);
 
-    // TODO: Process other game systems:
-    // - Population consumption (colonists consume food, water, oxygen)
-    // - Power grid balancing (batteries charge/discharge)
-    // - Research progress (if tech system implemented)
-    // - Random events (anomalies, failures, conflicts)
-    // - Idle safety checks (auto-pause if critical resources depleted)
+    // 3. Life support — consume oxygen/water/food, update population needs
+    let life_events = process_life_support_tick(state, content);
+
+    // Idle safety: auto-pause if any site has critical life support
+    let any_critical = life_events.iter().any(|e| {
+        matches!(e, EventType::LifeSupportCritical { .. })
+    });
+    if any_critical && state.clock.idle_safety_enabled {
+        state.pause();
+    }
+
+    events.extend(life_events.into_iter().map(|e| GameEvent::new(0, new_tick, e)));
+
+    // 4. Population growth and needs-based deaths
+    let pop_events = process_population_tick(state, new_tick);
+    events.extend(pop_events);
+
+    // 5. Gameplay event engine (fires story/random events from event definitions)
+    let engine_events = process_events_tick(state);
+    events.extend(engine_events);
 
     events
 }
@@ -237,13 +257,125 @@ pub fn process_ticks(state: &mut GameState, content: &ContentLoader, count: u64)
     all_events
 }
 
+/// Process population growth and needs-based deaths for all sites.
+///
+/// Each tick:
+/// 1. Grow population (if housing permits and morale is positive)
+/// 2. Apply deaths from critical unmet needs
+fn process_population_tick(state: &mut GameState, tick: u64) -> Vec<GameEvent> {
+    let mut events = Vec::new();
+
+    // Collect site IDs first to avoid borrow issues
+    let site_ids: Vec<_> = state
+        .galaxy
+        .systems
+        .values()
+        .flat_map(|sys| sys.sites.keys().copied())
+        .collect();
+
+    for site_id in site_ids {
+        let site = state
+            .galaxy
+            .systems
+            .values_mut()
+            .find_map(|sys| sys.sites.get_mut(&site_id));
+
+        let site = match site {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let old_pop = site.population.total;
+
+        // Population growth (only every 10 ticks to avoid explosive growth)
+        if tick % 10 == 0 {
+            site.population.grow();
+            let new_pop = site.population.total;
+            if new_pop > old_pop {
+                events.push(GameEvent::new(
+                    0,
+                    tick,
+                    EventType::PopulationGrewV5 {
+                        site_id,
+                        old_population: old_pop,
+                        new_population: new_pop,
+                        tick,
+                    },
+                ));
+            }
+        }
+
+        // Needs-based deaths
+        let deaths = site.population.apply_needs_deaths();
+        if deaths > 0 {
+            let cause = {
+                let n = &site.population.needs;
+                if n.oxygen < 0.3 { "oxygen_critical" }
+                else if n.food < 0.2 { "food_critical" }
+                else { "water_critical" }
+            };
+            events.push(GameEvent::new(
+                0,
+                tick,
+                EventType::ColonistsDiedV5 {
+                    site_id,
+                    deaths,
+                    cause: cause.to_string(),
+                    tick,
+                },
+            ));
+        }
+    }
+
+    events
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::content::ContentLoader;
+    use crate::domain::{
+        Atmosphere, BodyType, BuildingInstance, CelestialBody, Site, StarSystem, Temperature,
+    };
 
     fn create_test_content() -> ContentLoader {
         ContentLoader::new()
+    }
+
+    /// Build a minimal GameState with one system, one body, one site, and one operational
+    /// building with the given recipe assigned. Returns `(state, site_id, building_id)`.
+    fn state_with_building_and_recipe(
+        recipe_yaml: &str,
+        recipe_id: &str,
+    ) -> (GameState, crate::domain::SiteId, crate::domain::ids::BuildingId, ContentLoader) {
+        let mut state = GameState::new("Test".to_string(), 42);
+        let mut content = ContentLoader::new();
+        content.load_recipes(recipe_yaml).expect("Failed to load recipes");
+
+        let mut system = StarSystem::new(state.galaxy.id, "Sol".to_string(), 1);
+        let body = CelestialBody::new(
+            system.id,
+            "Earth".to_string(),
+            BodyType::TerrestrialPlanet,
+            Atmosphere::None,
+            Temperature::Temperate,
+            1.0,
+            6371.0,
+            1.0,
+        );
+        let body_id = system.add_body(body);
+
+        let mut site = Site::new_settlement(body_id, "Alpha Base".to_string(), 0, 100);
+        let mut building = BuildingInstance::new_operational(site.id, "smelter".to_string(), 0);
+        building.set_recipe(recipe_id.to_string());
+        let building_id = building.id;
+        site.buildings.insert(building_id, building);
+
+        let site_id = site.id;
+        system.sites.insert(site_id, site);
+        state.galaxy.add_system(system);
+
+        (state, site_id, building_id, content)
     }
 
     #[test]
@@ -400,5 +532,345 @@ mod tests {
         let events3 = process_tick(&mut state, &content);
         assert_eq!(events3.len(), 1); // TurnAdvanced
         assert_eq!(state.current_tick(), 2);
+    }
+
+    // ── Phase 3: Integration tests — production with real game state ──────────
+
+    const SMELT_IRON_YAML: &str = r#"
+recipes:
+  - id: smelt_iron
+    name: "Smelt Iron"
+    building_types: [smelter]
+    inputs:
+      iron_ore: 15
+    outputs:
+      iron_ingots: 10
+    processing_time_ticks: 2
+"#;
+
+    #[test]
+    fn test_production_event_generated_during_tick() {
+        let (mut state, site_id, _building_id, content) =
+            state_with_building_and_recipe(SMELT_IRON_YAML, "smelt_iron");
+
+        // Seed the site with enough iron_ore to start production
+        let system = state.galaxy.systems.values_mut().next().unwrap();
+        let site = system.sites.get_mut(&site_id).unwrap();
+        site.set_resource_by_id("iron_ore", 100.0).unwrap();
+
+        // First tick should start the recipe and emit RecipeProgressed
+        let events = process_tick(&mut state, &content);
+        let has_progress = events.iter().any(|e| matches!(&e.event_type, EventType::RecipeProgressed { .. }));
+        assert!(has_progress, "Expected RecipeProgressed event on first tick");
+    }
+
+    #[test]
+    fn test_production_completes_after_processing_ticks() {
+        let (mut state, site_id, _building_id, content) =
+            state_with_building_and_recipe(SMELT_IRON_YAML, "smelt_iron");
+
+        let system = state.galaxy.systems.values_mut().next().unwrap();
+        let site = system.sites.get_mut(&site_id).unwrap();
+        site.set_resource_by_id("iron_ore", 100.0).unwrap();
+
+        // Tick 1: start progress
+        process_tick(&mut state, &content);
+
+        // Tick 2: recipe completes (processing_time_ticks = 2)
+        let events = process_tick(&mut state, &content);
+        let has_completed = events.iter().any(|e| matches!(&e.event_type, EventType::RecipeCompleted { .. }));
+        assert!(has_completed, "Expected RecipeCompleted event on second tick");
+
+        let has_outputs = events.iter().any(|e| matches!(&e.event_type, EventType::ProductionOutputsProduced { .. }));
+        assert!(has_outputs, "Expected ProductionOutputsProduced event on second tick");
+    }
+
+    #[test]
+    fn test_stockpile_updated_after_production_tick() {
+        let (mut state, site_id, _building_id, content) =
+            state_with_building_and_recipe(SMELT_IRON_YAML, "smelt_iron");
+
+        let system_id = *state.galaxy.systems.keys().next().unwrap();
+        {
+            let system = state.galaxy.systems.get_mut(&system_id).unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            site.set_resource_by_id("iron_ore", 100.0).unwrap();
+            site.set_resource_by_id("iron_ingots", 0.0).unwrap();
+        }
+
+        // 2 ticks = one complete cycle
+        process_ticks(&mut state, &content, 2);
+
+        let system = state.galaxy.systems.get(&system_id).unwrap();
+        let site = system.sites.get(&site_id).unwrap();
+        let ore = site.get_resource_by_id("iron_ore").unwrap();
+        let ingots = site.get_resource_by_id("iron_ingots").unwrap();
+        assert_eq!(ore, 85.0,    "15 ore should have been consumed");
+        assert_eq!(ingots, 10.0, "10 ingots should have been produced");
+    }
+
+    #[test]
+    fn test_halted_event_when_no_inputs() {
+        let (mut state, site_id, _building_id, content) =
+            state_with_building_and_recipe(SMELT_IRON_YAML, "smelt_iron");
+
+        // Clear the starting iron_ore so the recipe has nothing to consume
+        let system = state.galaxy.systems.values_mut().next().unwrap();
+        let site = system.sites.get_mut(&site_id).unwrap();
+        site.set_resource_by_id("iron_ore", 0.0).unwrap();
+
+        let events = process_tick(&mut state, &content);
+        let has_halted = events.iter().any(|e| matches!(&e.event_type, EventType::ProductionHalted { .. }));
+        assert!(has_halted, "Expected ProductionHalted event when inputs are missing");
+    }
+
+    // ── Phase 5: Multi-step chain integration tests ───────────────────────────
+
+    const TWO_STEP_CHAIN_YAML: &str = r#"
+recipes:
+  - id: mine_iron
+    name: "Mine Iron Ore"
+    building_types: [mine]
+    inputs:
+      power: 5
+    outputs:
+      iron_ore: 20
+    processing_time_ticks: 1
+  - id: smelt_iron_chain
+    name: "Smelt Iron (chain)"
+    building_types: [smelter]
+    inputs:
+      iron_ore: 20
+    outputs:
+      iron_ingots: 15
+    processing_time_ticks: 1
+"#;
+
+    fn state_with_two_buildings(
+        recipe_yaml: &str,
+        recipe_a: &str,
+        building_type_a: &str,
+        recipe_b: &str,
+        building_type_b: &str,
+    ) -> (GameState, crate::domain::SiteId, ContentLoader) {
+        let mut state = GameState::new("Chain Test".to_string(), 7);
+        let mut content = ContentLoader::new();
+        content.load_recipes(recipe_yaml).expect("load recipes");
+
+        let mut system = StarSystem::new(state.galaxy.id, "Sol".to_string(), 1);
+        let body = CelestialBody::new(
+            system.id, "Earth".to_string(), BodyType::TerrestrialPlanet,
+            Atmosphere::None, Temperature::Temperate, 1.0, 6371.0, 1.0,
+        );
+        let body_id = system.add_body(body);
+
+        let mut site = Site::new_settlement(body_id, "Chain Base".to_string(), 0, 100);
+
+        let mut bld_a = BuildingInstance::new_operational(site.id, building_type_a.to_string(), 0);
+        bld_a.set_recipe(recipe_a.to_string());
+        site.buildings.insert(bld_a.id, bld_a);
+
+        let mut bld_b = BuildingInstance::new_operational(site.id, building_type_b.to_string(), 0);
+        bld_b.set_recipe(recipe_b.to_string());
+        site.buildings.insert(bld_b.id, bld_b);
+
+        let site_id = site.id;
+        system.sites.insert(site_id, site);
+        state.galaxy.add_system(system);
+
+        (state, site_id, content)
+    }
+
+    #[test]
+    fn test_multi_step_chain_produces_final_output() {
+        // mine_iron (1 tick) produces iron_ore → smelt_iron_chain (1 tick) consumes iron_ore, produces iron_ingots
+        let (mut state, site_id, content) = state_with_two_buildings(
+            TWO_STEP_CHAIN_YAML,
+            "mine_iron", "mine",
+            "smelt_iron_chain", "smelter",
+        );
+
+        let system_id = *state.galaxy.systems.keys().next().unwrap();
+        {
+            let system = state.galaxy.systems.get_mut(&system_id).unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            site.set_resource_by_id("iron_ore", 0.0).unwrap();
+            site.set_resource_by_id("iron_ingots", 0.0).unwrap();
+        }
+
+        // Tick 1: mine produces 20 iron_ore; smelter halts (no ore yet at cycle start)
+        // Tick 2: smelter can now consume the 20 ore; mine produces another 20
+        // Tick 3: smelter completes → 15 ingots; mine produces 20 more
+        process_ticks(&mut state, &content, 3);
+
+        let system = state.galaxy.systems.get(&system_id).unwrap();
+        let site = system.sites.get(&site_id).unwrap();
+        let ingots = site.get_resource_by_id("iron_ingots").unwrap();
+        assert!(ingots >= 15.0, "Should have produced at least 15 ingots in 3 ticks, got {}", ingots);
+    }
+
+    // ── Phase 5: Storage limit integration tests ──────────────────────────────
+
+    const PRODUCE_ONLY_YAML: &str = r#"
+recipes:
+  - id: produce_ore
+    name: "Produce Ore"
+    building_types: [mine]
+    inputs:
+      power: 1
+    outputs:
+      iron_ore: 500
+    processing_time_ticks: 1
+"#;
+
+    #[test]
+    fn test_production_halts_when_storage_full() {
+        // BASE_STORAGE_CAPACITY is 5000; each cycle produces 500
+        // After 10 cycles there is no space left → production should halt
+        let (mut state, site_id, _building_id, content) =
+            state_with_building_and_recipe(PRODUCE_ONLY_YAML, "produce_ore");
+
+        let system_id = *state.galaxy.systems.keys().next().unwrap();
+        {
+            let system = state.galaxy.systems.get_mut(&system_id).unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            // Pre-fill to near capacity (BASE = 5000; leave 499 space → less than one batch)
+            site.set_resource_by_id("iron_ore", 4501.0).unwrap();
+        }
+
+        // One tick: storage has 499 free < 500 output → should halt
+        let events = process_tick(&mut state, &content);
+        let has_halted = events.iter().any(|e| matches!(&e.event_type, EventType::ProductionHalted { .. }));
+        assert!(has_halted, "Expected ProductionHalted when storage is too full");
+
+        // Confirm stockpile was NOT increased
+        let system = state.galaxy.systems.get(&system_id).unwrap();
+        let site = system.sites.get(&site_id).unwrap();
+        let ore = site.get_resource_by_id("iron_ore").unwrap();
+        assert_eq!(ore, 4501.0, "Storage should not have changed when halted");
+    }
+
+    #[test]
+    fn test_production_resumes_when_storage_has_space() {
+        let (mut state, site_id, _building_id, content) =
+            state_with_building_and_recipe(PRODUCE_ONLY_YAML, "produce_ore");
+
+        let system_id = *state.galaxy.systems.keys().next().unwrap();
+        {
+            let system = state.galaxy.systems.get_mut(&system_id).unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            // Empty storage — plenty of space (BASE = 5000)
+            site.set_resource_by_id("iron_ore", 0.0).unwrap();
+        }
+
+        // One tick: enough space → produces 500
+        let events = process_tick(&mut state, &content);
+        let has_completed = events.iter().any(|e| matches!(&e.event_type, EventType::RecipeCompleted { .. }));
+        assert!(has_completed, "Expected RecipeCompleted when storage has space");
+
+        let system = state.galaxy.systems.get(&system_id).unwrap();
+        let site = system.sites.get(&site_id).unwrap();
+        let ore = site.get_resource_by_id("iron_ore").unwrap();
+        assert_eq!(ore, 500.0, "Should have added 500 ore to stockpile");
+    }
+
+    // ── Phase 5.2: Life support idle safety tests ─────────────────────────────
+
+    /// Build a minimal state with one site and the given population, no resources.
+    fn state_with_site_and_pop(pop: u32) -> (GameState, crate::domain::SiteId) {
+        use crate::domain::{CelestialBodyId, Site};
+        let mut state = GameState::new("LS Test".into(), 99);
+        let galaxy_id = state.galaxy.id;
+        let mut system = StarSystem::new(galaxy_id, "Sol".into(), 0);
+        let site = Site::new_settlement(CelestialBodyId::new(), "Test Base".into(), 0, pop);
+        let site_id = site.id;
+        system.add_site(site);
+        state.galaxy.add_system(system);
+        (state, site_id)
+    }
+
+    #[test]
+    fn test_idle_safety_pauses_on_critical_life_support() {
+        let (mut state, site_id) = state_with_site_and_pop(100);
+        let content = create_test_content();
+
+        // Ensure idle safety is enabled
+        assert!(state.clock.idle_safety_enabled);
+
+        // No oxygen stockpile → critical life support on first tick
+        {
+            let system = state.galaxy.systems.values_mut().next().unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            site.resources.set(crate::domain::ResourceType::Oxygen, 0);
+            site.resources.set(crate::domain::ResourceType::Water,  10000);
+            site.resources.set(crate::domain::ResourceType::Food,   10000);
+        }
+
+        assert!(!state.is_paused());
+        process_tick(&mut state, &content);
+
+        assert!(state.is_paused(), "Idle safety must pause simulation when life support is critical");
+    }
+
+    #[test]
+    fn test_idle_safety_disabled_does_not_pause() {
+        let (mut state, site_id) = state_with_site_and_pop(100);
+        let content = create_test_content();
+
+        // Disable idle safety
+        state.clock.disable_idle_safety();
+
+        // No oxygen → critical, but idle safety off
+        {
+            let system = state.galaxy.systems.values_mut().next().unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            site.resources.set(crate::domain::ResourceType::Oxygen, 0);
+            site.resources.set(crate::domain::ResourceType::Water,  10000);
+            site.resources.set(crate::domain::ResourceType::Food,   10000);
+        }
+
+        process_tick(&mut state, &content);
+
+        assert!(!state.is_paused(), "Simulation must not auto-pause when idle safety is disabled");
+    }
+
+    #[test]
+    fn test_no_pause_when_life_support_adequate() {
+        let (mut state, site_id) = state_with_site_and_pop(10);
+        let content = create_test_content();
+
+        // Plenty of resources — no critical condition
+        {
+            let system = state.galaxy.systems.values_mut().next().unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            site.resources.set(crate::domain::ResourceType::Oxygen, 10000);
+            site.resources.set(crate::domain::ResourceType::Water,  10000);
+            site.resources.set(crate::domain::ResourceType::Food,   10000);
+        }
+
+        process_tick(&mut state, &content);
+
+        assert!(!state.is_paused(), "Simulation must not pause when life support is adequate");
+    }
+
+    #[test]
+    fn test_life_support_critical_event_emitted_in_tick() {
+        let (mut state, site_id) = state_with_site_and_pop(50);
+        let content = create_test_content();
+
+        {
+            let system = state.galaxy.systems.values_mut().next().unwrap();
+            let site = system.sites.get_mut(&site_id).unwrap();
+            site.resources.set(crate::domain::ResourceType::Oxygen, 0);
+            site.resources.set(crate::domain::ResourceType::Water,  10000);
+            site.resources.set(crate::domain::ResourceType::Food,   10000);
+        }
+
+        let events = process_tick(&mut state, &content);
+
+        let has_critical = events.iter().any(|e| {
+            matches!(&e.event_type, EventType::LifeSupportCritical { site_id: s, .. } if *s == site_id)
+        });
+        assert!(has_critical, "Expected LifeSupportCritical event in tick events");
     }
 }

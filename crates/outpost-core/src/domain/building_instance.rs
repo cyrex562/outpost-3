@@ -69,6 +69,11 @@ pub struct BuildingInstance {
     /// Progress toward completing the current recipe cycle (in ticks).
     /// Resets to 0 when recipe completes.
     pub recipe_progress_ticks: u64,
+
+    /// Fractional labor progress accumulator (0–99).
+    /// Accumulates `floor(efficiency * 100)` each tick; advances recipe when it reaches 100.
+    #[serde(default)]
+    pub labor_progress_accumulator: u8,
     
     /// Health percentage (0-100). Affects efficiency.
     pub health: u8,
@@ -96,6 +101,7 @@ impl BuildingInstance {
             level: 1,
             active_recipe_id: None,
             recipe_progress_ticks: 0,
+            labor_progress_accumulator: 0,
             health: 100,
             construction_started_at: Some(current_tick),
             last_maintained_at: current_tick,
@@ -118,6 +124,7 @@ impl BuildingInstance {
             level: 1,
             active_recipe_id: None,
             recipe_progress_ticks: 0,
+            labor_progress_accumulator: 0,
             health: 100,
             construction_started_at: None,
             last_maintained_at: current_tick,
@@ -238,6 +245,36 @@ impl BuildingInstance {
             self.recipe_progress_ticks += 1;
             if self.recipe_progress_ticks >= processing_time_ticks {
                 self.recipe_progress_ticks = 0; // Reset for next cycle
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Advance recipe progress scaled by labor efficiency.
+    ///
+    /// Accumulates fractional progress each tick. The recipe only advances when
+    /// the accumulator reaches 100. At 100% efficiency, advances every tick.
+    /// At 50% efficiency, advances every 2 ticks on average.
+    ///
+    /// Returns true if the recipe cycle completed.
+    pub fn advance_recipe_progress_with_efficiency(
+        &mut self,
+        processing_time_ticks: u64,
+        labor_efficiency: f64,
+    ) -> bool {
+        if !self.has_recipe() || !self.state.can_operate() {
+            return false;
+        }
+        // Add fractional progress scaled to 0–100 range
+        let increment = (labor_efficiency.clamp(0.0, 1.0) * 100.0).floor() as u8;
+        self.labor_progress_accumulator = self.labor_progress_accumulator.saturating_add(increment);
+        if self.labor_progress_accumulator >= 100 {
+            self.labor_progress_accumulator -= 100;
+            self.recipe_progress_ticks += 1;
+            if self.recipe_progress_ticks >= processing_time_ticks {
+                self.recipe_progress_ticks = 0;
+                self.labor_progress_accumulator = 0;
                 return true;
             }
         }

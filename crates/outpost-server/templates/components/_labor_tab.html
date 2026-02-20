@@ -1,0 +1,717 @@
+{# Labor tab partial — loaded via HTMX GET /site/{id}/labor #}
+
+<div class="labor-tab" x-data="laborTab()">
+
+    {# ================================================================
+    SECTION 1: Morale & Needs Summary
+    ================================================================ #}
+    <div class="labor-morale-row">
+
+        <div class="morale-card">
+            <div class="morale-gauge-wrap">
+                <svg class="morale-ring" viewBox="0 0 64 64" width="80" height="80">
+                    <circle class="ring-bg" cx="32" cy="32" r="26" />
+                    <circle
+                        class="ring-fill {% if morale >= 70 %}ring-good{% elif morale >= 40 %}ring-warn{% else %}ring-bad{% endif %}"
+                        cx="32" cy="32" r="26" stroke-dasharray="{{ (morale * 1.634) | round }} 163.4"
+                        stroke-dashoffset="40.85" />
+                </svg>
+                <span class="morale-number">{{ morale }}</span>
+            </div>
+            <div class="morale-label">Colony Morale</div>
+            <div class="morale-growth text-sm text-muted">
+                Growth rate: <strong>+{{ growth_rate_pct }}%</strong>/tick
+            </div>
+        </div>
+
+        <div class="needs-card">
+            <h4 class="needs-title">Colonist Needs</h4>
+            <div class="needs-list">
+                <div class="need-row">
+                    <span class="need-icon">🍎</span>
+                    <span class="need-name">Food</span>
+                    <div class="need-bar-wrap">
+                        <div class="need-bar {% if food_pct >= 80 %}bar-good{% elif food_pct >= 50 %}bar-warn{% else %}bar-bad{% endif %}"
+                            style="width: {{ food_pct }}%">
+                        </div>
+                    </div>
+                    <span class="need-pct">{{ food_pct }}%</span>
+                </div>
+                <div class="need-row">
+                    <span class="need-icon">💧</span>
+                    <span class="need-name">Water</span>
+                    <div class="need-bar-wrap">
+                        <div class="need-bar {% if water_pct >= 80 %}bar-good{% elif water_pct >= 50 %}bar-warn{% else %}bar-bad{% endif %}"
+                            style="width: {{ water_pct }}%">
+                        </div>
+                    </div>
+                    <span class="need-pct">{{ water_pct }}%</span>
+                </div>
+                <div class="need-row">
+                    <span class="need-icon">🫧</span>
+                    <span class="need-name">Oxygen</span>
+                    <div class="need-bar-wrap">
+                        <div class="need-bar {% if oxygen_pct >= 80 %}bar-good{% elif oxygen_pct >= 50 %}bar-warn{% else %}bar-bad{% endif %}"
+                            style="width: {{ oxygen_pct }}%">
+                        </div>
+                    </div>
+                    <span class="need-pct">{{ oxygen_pct }}%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="workforce-card">
+            <h4 class="needs-title">Workforce Summary</h4>
+            <table class="info-table">
+                <tr>
+                    <td class="label">Total Population</td>
+                    <td class="val">{{ total_workers }}</td>
+                </tr>
+                <tr>
+                    <td class="label">Employed</td>
+                    <td class="val text-success">{{ employed }}</td>
+                </tr>
+                <tr>
+                    <td class="label">Unassigned</td>
+                    <td class="val {% if unemployed > 0 %}text-warning{% else %}text-muted{% endif %}">{{ unemployed }}
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+    </div>
+
+    {# ================================================================
+    SECTION 2: Available Labor Pool
+    ================================================================ #}
+    <div class="labor-section">
+        <h3 class="section-title">Available Workforce</h3>
+        <div class="skill-pool-grid">
+            {% for skill in labor_pool %}
+            <div class="skill-chip {% if skill.available > 0 %}chip-available{% else %}chip-empty{% endif %}">
+                <span class="skill-count">{{ skill.available }}</span>
+                <span class="skill-name">{{ skill.skill }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# ================================================================
+    SECTION 3: Building Labor Assignments
+    ================================================================ #}
+    <div class="labor-section">
+        <h3 class="section-title">Building Assignments</h3>
+        {% if building_assignments | length == 0 %}
+        <div class="empty-state-sm">
+            <p>No buildings require workers at this site.</p>
+        </div>
+        {% else %}
+        <div class="assignments-table-wrap">
+            <table class="assignments-table">
+                <thead>
+                    <tr>
+                        <th>Building</th>
+                        <th>Category</th>
+                        <th>Assigned / Slots</th>
+                        <th>Efficiency</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in building_assignments %}
+                    <tr class="{% if not b.is_operational %}row-inactive{% endif %}">
+                        <td class="building-name">
+                            {{ b.name }}
+                            {% if not b.is_operational %}
+                            <span class="badge-small badge-muted">{{ b.state }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted text-sm">{{ b.category }}</td>
+                        <td>
+                            <span
+                                class="{% if b.workers_assigned >= b.worker_capacity %}text-success{% elif b.workers_assigned > 0 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ b.workers_assigned }}
+                            </span>
+                            / {{ b.worker_capacity }}
+                        </td>
+                        <td>
+                            <div class="eff-bar-wrap">
+                                <div class="eff-bar {% if b.efficiency_pct >= 80 %}bar-good{% elif b.efficiency_pct >= 40 %}bar-warn{% else %}bar-bad{% endif %}"
+                                    style="width: {{ b.efficiency_pct }}%">
+                                </div>
+                            </div>
+                            <span class="text-sm">{{ b.efficiency_pct }}%</span>
+                        </td>
+                        <td class="action-cell">
+                            {% if b.is_operational %}
+                            {# Assign +1 worker #}
+                            <form hx-post="/site/{{ site_id }}/building/{{ b.id }}/assign" hx-target="#tab-content"
+                                hx-swap="innerHTML" style="display:inline">
+                                <input type="hidden" name="skill" value="Laborer">
+                                <input type="hidden" name="count" value="1">
+                                <button type="submit" class="btn-icon btn-add" title="Assign 1 Laborer" {% if
+                                    unemployed==0 %}disabled{% endif %}>
+                                    +
+                                </button>
+                            </form>
+                            {# Deallocate -1 worker #}
+                            <form hx-post="/site/{{ site_id }}/building/{{ b.id }}/deallocate" hx-target="#tab-content"
+                                hx-swap="innerHTML" style="display:inline">
+                                <input type="hidden" name="skill" value="Laborer">
+                                <input type="hidden" name="count" value="1">
+                                <button type="submit" class="btn-icon btn-remove" title="Remove 1 worker" {% if
+                                    b.workers_assigned==0 %}disabled{% endif %}>
+                                    −
+                                </button>
+                            </form>
+                            {% else %}
+                            <span class="text-muted text-sm">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    {# ================================================================
+    SECTION 4: Representative Characters
+    ================================================================ #}
+    <div class="labor-section">
+        <button class="section-title collapsible-trigger" @click="showCharacters = !showCharacters" type="button">
+            <span>Colony Representatives</span>
+            <span class="collapse-icon" :class="{ 'rotated': showCharacters }">▶</span>
+        </button>
+        <div x-show="showCharacters" x-transition class="character-roster">
+            {% if characters | length == 0 %}
+            <div class="empty-state-sm">
+                <p>No representatives recorded.</p>
+            </div>
+            {% else %}
+            <div class="character-grid">
+                {% for c in characters %}
+                <div class="character-card {% if c.is_assigned %}card-assigned{% endif %}">
+                    <div class="char-header">
+                        <span class="char-name">{{ c.name }}</span>
+                        <span class="char-age text-muted text-sm">Age {{ c.age }}</span>
+                    </div>
+                    <div class="char-skill">
+                        <span class="skill-badge skill-{{ c.primary_skill | lower }}">{{ c.primary_skill }}</span>
+                    </div>
+                    <div class="char-stats">
+                        <div class="char-stat">
+                            <span class="stat-label-sm">Morale</span>
+                            <div class="mini-bar-wrap">
+                                <div class="mini-bar {% if c.morale >= 70 %}bar-good{% elif c.morale >= 40 %}bar-warn{% else %}bar-bad{% endif %}"
+                                    style="width: {{ c.morale }}%"></div>
+                            </div>
+                            <span class="stat-num">{{ c.morale }}%</span>
+                        </div>
+                        <div class="char-stat">
+                            <span class="stat-label-sm">Health</span>
+                            <div class="mini-bar-wrap">
+                                <div class="mini-bar bar-good" style="width: {{ c.health }}%"></div>
+                            </div>
+                            <span class="stat-num">{{ c.health }}%</span>
+                        </div>
+                    </div>
+                    {% if c.traits | length > 0 %}
+                    <div class="char-traits">
+                        {% for trait in c.traits %}
+                        <span class="trait-tag">{{ trait }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if c.is_assigned %}
+                    <div class="char-assigned text-sm text-muted">📍 On duty</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+<style>
+    /* ---- Labor Tab Layout ---- */
+    .labor-tab {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-4);
+    }
+
+    .labor-morale-row {
+        display: grid;
+        grid-template-columns: auto 1fr 1fr;
+        gap: var(--spacing-3);
+    }
+
+    /* ---- Morale Gauge ---- */
+    .morale-card {
+        background: var(--surface-1);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--spacing-3);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--spacing-2);
+        min-width: 140px;
+    }
+
+    .morale-gauge-wrap {
+        position: relative;
+        width: 80px;
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .morale-ring {
+        position: absolute;
+        top: 0;
+        left: 0;
+        transform: rotate(-90deg);
+    }
+
+    .ring-bg {
+        fill: none;
+        stroke: var(--border-color);
+        stroke-width: 6;
+    }
+
+    .ring-fill {
+        fill: none;
+        stroke-width: 6;
+        stroke-linecap: round;
+        transition: stroke-dasharray 0.5s;
+    }
+
+    .ring-good {
+        stroke: var(--color-success);
+    }
+
+    .ring-warn {
+        stroke: var(--color-warning, #f59e0b);
+    }
+
+    .ring-bad {
+        stroke: var(--color-danger, #ef4444);
+    }
+
+    .morale-number {
+        position: relative;
+        font-family: var(--font-mono);
+        font-size: var(--font-lg);
+        font-weight: 700;
+        z-index: 1;
+    }
+
+    .morale-label {
+        font-size: var(--font-sm);
+        color: var(--text-secondary);
+    }
+
+    .morale-growth {
+        font-size: var(--font-xs, 0.75rem);
+        color: var(--text-secondary);
+    }
+
+    /* ---- Needs Card ---- */
+    .needs-card,
+    .workforce-card {
+        background: var(--surface-1);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--spacing-3);
+    }
+
+    .needs-title {
+        margin: 0 0 var(--spacing-2) 0;
+        font-size: var(--font-base);
+    }
+
+    .needs-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-2);
+    }
+
+    .need-row {
+        display: grid;
+        grid-template-columns: 1.5em 5em 1fr 3em;
+        align-items: center;
+        gap: var(--spacing-2);
+        font-size: var(--font-sm);
+    }
+
+    .need-bar-wrap {
+        background: var(--surface-2, var(--surface-0));
+        border-radius: 4px;
+        height: 8px;
+        overflow: hidden;
+    }
+
+    .need-bar {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.4s;
+    }
+
+    .bar-good {
+        background: var(--color-success, #22c55e);
+    }
+
+    .bar-warn {
+        background: var(--color-warning, #f59e0b);
+    }
+
+    .bar-bad {
+        background: var(--color-danger, #ef4444);
+    }
+
+    .need-pct {
+        text-align: right;
+        font-family: var(--font-mono);
+    }
+
+    /* ---- Section Layout ---- */
+    .labor-section {
+        background: var(--surface-1);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--spacing-3);
+    }
+
+    .section-title {
+        font-size: var(--font-base);
+        font-weight: 600;
+        margin: 0 0 var(--spacing-3) 0;
+        color: var(--text-primary);
+    }
+
+    button.section-title.collapsible-trigger {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-2);
+        width: 100%;
+        margin-bottom: var(--spacing-3);
+    }
+
+    .collapse-icon {
+        transition: transform 0.2s;
+        display: inline-block;
+        font-size: var(--font-xs, 0.7rem);
+    }
+
+    .collapse-icon.rotated {
+        transform: rotate(90deg);
+    }
+
+    /* ---- Skill Pool Chips ---- */
+    .skill-pool-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--spacing-2);
+    }
+
+    .skill-chip {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: var(--surface-2, var(--surface-0));
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--spacing-2) var(--spacing-3);
+        min-width: 80px;
+    }
+
+    .chip-available {
+        border-color: var(--color-success, #22c55e);
+    }
+
+    .chip-empty {
+        opacity: 0.4;
+    }
+
+    .skill-count {
+        font-family: var(--font-mono);
+        font-size: var(--font-xl);
+        font-weight: 700;
+    }
+
+    .skill-name {
+        font-size: var(--font-xs, 0.75rem);
+        color: var(--text-secondary);
+    }
+
+    /* ---- Assignment Table ---- */
+    .assignments-table-wrap {
+        overflow-x: auto;
+    }
+
+    .assignments-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-sm);
+    }
+
+    .assignments-table th {
+        text-align: left;
+        padding: var(--spacing-2);
+        border-bottom: 2px solid var(--border-color);
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: var(--font-xs, 0.75rem);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .assignments-table td {
+        padding: var(--spacing-2);
+        border-bottom: 1px solid var(--border-color);
+        vertical-align: middle;
+    }
+
+    .row-inactive {
+        opacity: 0.5;
+    }
+
+    .building-name {
+        font-weight: 500;
+    }
+
+    .eff-bar-wrap {
+        width: 80px;
+        height: 6px;
+        background: var(--surface-2, var(--surface-0));
+        border-radius: 3px;
+        overflow: hidden;
+        display: inline-block;
+        margin-right: var(--spacing-1);
+        vertical-align: middle;
+    }
+
+    .eff-bar {
+        height: 100%;
+        border-radius: 3px;
+    }
+
+    .action-cell {
+        white-space: nowrap;
+    }
+
+    .btn-icon {
+        border: 1px solid var(--border-color);
+        background: var(--surface-2, transparent);
+        border-radius: var(--radius-sm);
+        width: 28px;
+        height: 28px;
+        cursor: pointer;
+        font-size: 1.1em;
+        font-weight: 700;
+        transition: all 0.15s;
+        margin: 0 2px;
+    }
+
+    .btn-add:not(:disabled):hover {
+        background: var(--color-success, #22c55e);
+        color: white;
+        border-color: transparent;
+    }
+
+    .btn-remove:not(:disabled):hover {
+        background: var(--color-danger, #ef4444);
+        color: white;
+        border-color: transparent;
+    }
+
+    .btn-icon:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
+    .badge-small {
+        font-size: 0.65em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 4px;
+        vertical-align: middle;
+    }
+
+    .badge-muted {
+        background: var(--surface-2, #374151);
+        color: var(--text-secondary);
+    }
+
+    /* ---- Character Roster ---- */
+    .character-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--spacing-3);
+        padding-top: var(--spacing-2);
+    }
+
+    .character-card {
+        background: var(--surface-2, var(--surface-0));
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--spacing-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-2);
+    }
+
+    .card-assigned {
+        border-color: var(--accent-primary);
+    }
+
+    .char-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .char-name {
+        font-weight: 600;
+        font-size: var(--font-sm);
+    }
+
+    .skill-badge {
+        display: inline-block;
+        font-size: 0.68em;
+        padding: 2px 7px;
+        border-radius: 9999px;
+        font-weight: 500;
+    }
+
+    .skill-laborer {
+        background: #4b5563;
+        color: #d1d5db;
+    }
+
+    .skill-engineer {
+        background: #1d4ed8;
+        color: #bfdbfe;
+    }
+
+    .skill-scientist {
+        background: #7e22ce;
+        color: #e9d5ff;
+    }
+
+    .skill-farmer {
+        background: #166534;
+        color: #bbf7d0;
+    }
+
+    .skill-medic {
+        background: #be185d;
+        color: #fce7f3;
+    }
+
+    .skill-operator {
+        background: #b45309;
+        color: #fef3c7;
+    }
+
+    .char-stats {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .char-stat {
+        display: grid;
+        grid-template-columns: 3.5em 1fr 2.5em;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--font-xs, 0.7rem);
+    }
+
+    .stat-label-sm {
+        color: var(--text-secondary);
+    }
+
+    .mini-bar-wrap {
+        height: 5px;
+        background: var(--surface-1);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .mini-bar {
+        height: 100%;
+        border-radius: 3px;
+    }
+
+    .stat-num {
+        text-align: right;
+        font-family: var(--font-mono);
+    }
+
+    .char-traits {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .trait-tag {
+        font-size: 0.65em;
+        padding: 2px 6px;
+        background: var(--surface-1);
+        border: 1px solid var(--border-color);
+        border-radius: 9999px;
+        color: var(--text-secondary);
+    }
+
+    .char-assigned {
+        color: var(--text-secondary);
+    }
+
+    .empty-state-sm {
+        text-align: center;
+        padding: var(--spacing-4);
+        color: var(--text-secondary);
+        font-size: var(--font-sm);
+    }
+
+    /* ---- Misc Utilities ---- */
+    .val {
+        font-family: var(--font-mono);
+        font-weight: 600;
+    }
+
+    .text-success {
+        color: var(--color-success, #22c55e);
+    }
+
+    .text-warning {
+        color: var(--color-warning, #f59e0b);
+    }
+
+    .text-danger {
+        color: var(--color-danger, #ef4444);
+    }
+
+    .text-muted {
+        color: var(--text-secondary);
+    }
+</style>
+
+<script>
+    function laborTab() {
+        return {
+            showCharacters: false,
+        };
+    }
+</script>

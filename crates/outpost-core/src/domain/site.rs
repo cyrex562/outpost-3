@@ -5,8 +5,10 @@
 
 use crate::domain::{
     BuildingInstance, CelestialBodyId, ConstructionQueue, Population, PowerGrid, Resources, SiteId,
+    RepresentativeCharacter, SkillCategory,
 };
-use crate::domain::ids::BuildingId; // V5 BuildingId with UUID
+use crate::domain::ids::BuildingId;
+use crate::domain::life_support::LifeSupportStatus;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -47,6 +49,12 @@ pub struct Site {
     /// Morale modifier specific to this site (-1.0 to 1.0).
     /// Combines with colony-wide morale factors.
     pub local_morale_modifier: f64,
+    /// Named representative colonists present at this site.
+    pub characters: Vec<RepresentativeCharacter>,
+    /// Current power grid efficiency (1.0 = full power, <1.0 = brownout).
+    pub power_efficiency: f64,
+    /// Current life support satisfaction status (recalculated each tick).
+    pub life_support: LifeSupportStatus,
 }
 
 impl Site {
@@ -70,6 +78,12 @@ impl Site {
             power_grid: PowerGrid::new(),
             pollution_level: 0.0,
             local_morale_modifier: 0.0,
+            characters: crate::domain::generate_characters(
+                initial_population as u64 ^ founded_at_tick,
+                7,
+            ),
+            power_efficiency: 1.0,
+            life_support: LifeSupportStatus::satisfied(),
         }
     }
 
@@ -93,6 +107,12 @@ impl Site {
             power_grid: PowerGrid::new(),
             pollution_level: 0.0,
             local_morale_modifier: 0.0,
+            characters: crate::domain::generate_characters(
+                crew_size as u64 ^ founded_at_tick,
+                5,
+            ),
+            power_efficiency: 1.0,
+            life_support: LifeSupportStatus::satisfied(),
         }
     }
 
@@ -251,6 +271,45 @@ impl Site {
     /// Check if there are any construction jobs in progress.
     pub fn has_active_construction(&self) -> bool {
         !self.construction_queue.is_empty()
+    }
+
+    // -----------------------------------------------------------------------
+    // Labor & Population Methods
+    // -----------------------------------------------------------------------
+
+    /// Get available workers grouped by skill category.
+    pub fn labor_pool_by_skill(&self) -> HashMap<SkillCategory, u32> {
+        self.population.skills.clone()
+    }
+
+    /// Update colonist needs and apply morale effects.
+    ///
+    /// Call once per game tick with current resource supply amounts.
+    pub fn tick_population_needs(
+        &mut self,
+        food_supply: f64,
+        water_supply: f64,
+        oxygen_supply: f64,
+    ) {
+        self.population.update_needs(food_supply, water_supply, oxygen_supply);
+
+        // Propagate average population morale to characters
+        let pop_morale = self.population.morale;
+        for character in &mut self.characters {
+            // Characters slowly shift towards population morale
+            let delta = (pop_morale - character.morale) * 0.05;
+            character.adjust_morale(delta);
+        }
+    }
+
+    /// Get total workers assigned across all buildings.
+    pub fn total_workers_assigned(&self) -> u32 {
+        self.buildings.values().map(|b| b.workers_assigned).sum()
+    }
+
+    /// Get workers available (unassigned) total.
+    pub fn total_workers_available(&self) -> u64 {
+        self.population.unemployed
     }
 }
 

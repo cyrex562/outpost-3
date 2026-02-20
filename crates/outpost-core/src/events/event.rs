@@ -263,6 +263,78 @@ pub enum EventType {
         loan_id: LoanId,
         colony_id: ColonyId,
     },
+
+    // V5 Power and Life Support events (use SiteId)
+    PowerGridUpdatedV5 {
+        site_id: SiteId,
+        generation_mw: f64,
+        consumption_mw: f64,
+        has_brownout: bool,
+        power_efficiency: f64,
+        tick: u64,
+    },
+    LifeSupportUpdated {
+        site_id: SiteId,
+        oxygen_sat: f32,
+        water_sat: f32,
+        food_sat: f32,
+        is_critical: bool,
+        tick: u64,
+    },
+    /// Life support has dropped to warning level (overall score < 0.75 but not critical).
+    LifeSupportWarning {
+        site_id: SiteId,
+        oxygen_sat: f32,
+        water_sat: f32,
+        food_sat: f32,
+        tick: u64,
+    },
+    /// Life support is in critical state (any satisfaction < 0.25). Triggers auto-pause.
+    LifeSupportCritical {
+        site_id: SiteId,
+        oxygen_sat: f32,
+        water_sat: f32,
+        food_sat: f32,
+        tick: u64,
+    },
+    BuildingPowerToggled {
+        site_id: SiteId,
+        building_id: BuildingId,
+        powered_on: bool,
+        tick: u64,
+    },
+
+    // V5 Population events (using SiteId)
+    PopulationGrewV5 {
+        site_id: SiteId,
+        old_population: u64,
+        new_population: u64,
+        tick: u64,
+    },
+    ColonistsDiedV5 {
+        site_id: SiteId,
+        deaths: u64,
+        cause: String,
+        tick: u64,
+    },
+
+    /// A gameplay event (from the event engine / events.yaml) has fired for a site.
+    GameEventFired {
+        site_id: SiteId,
+        event_id: String,
+        title: String,
+        tick: u64,
+        /// True if the event has choices the player must resolve.
+        requires_choice: bool,
+    },
+
+    /// A player has resolved a pending event choice.
+    GameEventChoiceResolved {
+        site_id: SiteId,
+        event_id: String,
+        choice_id: String,
+        tick: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

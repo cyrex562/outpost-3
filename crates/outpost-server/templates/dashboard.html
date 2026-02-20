@@ -4,45 +4,86 @@
 
 {% block content %}
 <div class="dashboard">
-    <h2 class="dashboard-title">Dashboard</h2>
-    
+    <div class="flex justify-between items-center mb-4">
+        <h2
+            class="dashboard-title text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+            Dashboard</h2>
+        <div class="space-x-2">
+            <button class="btn btn-primary" onclick="alert('DaisyUI styles working!')">DaisyUI Test</button>
+            <div id="d3-test" class="inline-block w-8 h-8 rounded-full border border-primary"></div>
+            <script>
+                // Small D3.js test
+                document.addEventListener('DOMContentLoaded', () => {
+                    if (window.d3) {
+                        d3.select('#d3-test').style('background-color', 'var(--fallback-p,oklch(var(--p)/var(--tw-bg-opacity, 1)))');
+                    }
+                });
+            </script>
+        </div>
+    </div>
+
     <!-- Quick Stats Grid -->
-    <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--space-4); margin: var(--space-6) 0;">
+    <div class="stats-grid"
+        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--space-4); margin: var(--space-6) 0;">
         <!-- Colony Summary -->
-        <div class="stat-card" style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
-            <div style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">Colonies</div>
-            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-text-primary);">{{ colony_count | default(value=0) }}</div>
-            <div style="font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: var(--space-1);">Active sites</div>
+        <div class="stat-card"
+            style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
+            <div
+                style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">
+                Colonies</div>
+            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-text-primary);">{{
+                colony_count | default(value=0) }}</div>
+            <div
+                style="font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: var(--space-1);">
+                Active sites</div>
         </div>
 
         <!-- Population Summary -->
-        <div class="stat-card" style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
-            <div style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">Population</div>
-            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-text-primary);">{{ total_population | default(value=0) }}</div>
+        <div class="stat-card"
+            style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
+            <div
+                style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">
+                Population</div>
+            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-text-primary);">{{
+                total_population | default(value=0) }}</div>
             <div class="trend-indicator up" style="font-size: var(--font-size-xs); margin-top: var(--space-1);">
                 <span>↑ 2.3%</span>
             </div>
         </div>
 
         <!-- Morale Summary -->
-        <div class="stat-card" style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
-            <div style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">Average Morale</div>
-            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-success);">{{ average_morale | default(value=75) }}%</div>
-            <div style="font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: var(--space-1);">Good</div>
+        <div class="stat-card"
+            style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
+            <div
+                style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">
+                Average Morale</div>
+            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-success);">{{
+                average_morale | default(value=75) }}%</div>
+            <div
+                style="font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: var(--space-1);">
+                Good</div>
         </div>
 
         <!-- Alerts Summary -->
-        <div class="stat-card" style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
-            <div style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">Active Alerts</div>
-            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-warning);">{{ alert_count | default(value=0) }}</div>
-            <div style="font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: var(--space-1);">Requires attention</div>
+        <div class="stat-card"
+            style="background: var(--color-surface-1); padding: var(--space-4); border-radius: var(--border-radius-lg); border: var(--border-width-thin) solid var(--color-border-default);">
+            <div
+                style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-bottom: var(--space-2);">
+                Active Alerts</div>
+            <div class="data-value" style="font-size: var(--font-size-3xl); color: var(--color-warning);">{{ alert_count
+                | default(value=0) }}</div>
+            <div
+                style="font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: var(--space-1);">
+                Requires attention</div>
         </div>
     </div>
 
     <!-- Resource Overview -->
     <section style="margin: var(--space-6) 0;">
-        <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin-bottom: var(--space-4);">Resource Overview</h3>
-        
+        <h3
+            style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin-bottom: var(--space-4);">
+            Resource Overview</h3>
+
         <table class="data-table">
             <thead>
                 <tr>
@@ -69,119 +110,124 @@
                         <div class="trend-indicator up">
                             <span>{{ resource.rate }}/tick</span>
                         </div>
-                        {% elif resource.rate < 0 %}
-                        <div class="trend-indicator down">
+                        {% elif resource.rate < 0 %} <div class="trend-indicator down">
                             <span>{{ resource.rate }}/tick</span>
-                        </div>
-                        {% else %}
-                        <div class="trend-indicator stable">
-                            <span>{{ resource.rate | default(value=0) }}/tick</span>
-                        </div>
-                        {% endif %}
-                    </td>
-                    <td class="align-right numeric">{{ resource.capacity | default(value=0) }}</td>
-                    <td class="align-center">
-                        <div class="progress-bar">
-                            {% if resource.percent < 20 %}
-                            <div class="progress-fill danger" style="width: {{ resource.percent | default(value=0) }}%"></div>
-                            {% elif resource.percent < 50 %}
-                            <div class="progress-fill warning" style="width: {{ resource.percent | default(value=0) }}%"></div>
-                            {% else %}
-                            <div class="progress-fill success" style="width: {{ resource.percent | default(value=0) }}%"></div>
-                            {% endif %}
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-                {% else %}
-                <tr>
-                    <td colspan="5" class="table-empty">
-                        <div class="table-empty-icon">📭</div>
-                        <div class="table-empty-text">No resources tracked yet</div>
-                    </td>
-                </tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </section>
+</div>
+{% else %}
+<div class="trend-indicator stable">
+    <span>{{ resource.rate | default(value=0) }}/tick</span>
+</div>
+{% endif %}
+</td>
+<td class="align-right numeric">{{ resource.capacity | default(value=0) }}</td>
+<td class="align-center">
+    <div class="progress-bar">
+        {% if resource.percent < 20 %} <div class="progress-fill danger"
+            style="width: {{ resource.percent | default(value=0) }}%">
+    </div>
+    {% elif resource.percent < 50 %} <div class="progress-fill warning"
+        style="width: {{ resource.percent | default(value=0) }}%">
+        </div>
+        {% else %}
+        <div class="progress-fill success" style="width: {{ resource.percent | default(value=0) }}%"></div>
+        {% endif %}
+        </div>
+</td>
+</tr>
+{% endfor %}
+{% else %}
+<tr>
+    <td colspan="5" class="table-empty">
+        <div class="table-empty-icon">📭</div>
+        <div class="table-empty-text">No resources tracked yet</div>
+    </td>
+</tr>
+{% endif %}
+</tbody>
+</table>
+</section>
 
-    <!-- Active Construction -->
-    <section style="margin: var(--space-6) 0;">
-        <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin-bottom: var(--space-4);">Active Construction</h3>
-        
-        <table class="data-table compact">
-            <thead>
-                <tr>
-                    <th>Site</th>
-                    <th>Building</th>
-                    <th>Progress</th>
-                    <th class="align-right">Time Remaining</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% if construction_jobs %}
-                {% for job in construction_jobs %}
-                <tr>
-                    <td>{{ job.site_name }}</td>
-                    <td>{{ job.building_name }}</td>
-                    <td>
-                        <div class="progress-with-label">
-                            <div class="progress-bar-container">
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: {{ job.progress_percent }}%"></div>
-                                </div>
+<!-- Active Construction -->
+<section style="margin: var(--space-6) 0;">
+    <h3
+        style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin-bottom: var(--space-4);">
+        Active Construction</h3>
+
+    <table class="data-table compact">
+        <thead>
+            <tr>
+                <th>Site</th>
+                <th>Building</th>
+                <th>Progress</th>
+                <th class="align-right">Time Remaining</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if construction_jobs %}
+            {% for job in construction_jobs %}
+            <tr>
+                <td>{{ job.site_name }}</td>
+                <td>{{ job.building_name }}</td>
+                <td>
+                    <div class="progress-with-label">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: {{ job.progress_percent }}%"></div>
                             </div>
-                            <span class="progress-label">{{ job.progress_percent }}%</span>
                         </div>
-                    </td>
-                    <td class="align-right numeric">{{ job.ticks_remaining }} ticks</td>
-                </tr>
-                {% endfor %}
-                {% else %}
-                <tr>
-                    <td colspan="4" class="table-empty">
-                        <div class="table-empty-icon">🏗️</div>
-                        <div class="table-empty-text">No active construction</div>
-                    </td>
-                </tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </section>
-
-    <!-- Recent Events -->
-    <section style="margin: var(--space-6) 0;">
-        <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin-bottom: var(--space-4);">Recent Events</h3>
-        
-        <div class="ticker-events-list">
-            {% if recent_events %}
-            {% for event in recent_events %}
-            <div class="event-entry {{ event.severity | default(value='info') }}">
-                <div class="event-entry-icon">{{ event.icon | default(value="ℹ️") }}</div>
-                <div class="event-entry-content">
-                    <div class="event-entry-header">
-                        <span class="event-entry-time mono">{{ event.game_time }}</span>
-                        <span class="event-entry-title">{{ event.title }}</span>
+                        <span class="progress-label">{{ job.progress_percent }}%</span>
                     </div>
-                    <div class="event-entry-description">{{ event.description }}</div>
-                </div>
-            </div>
+                </td>
+                <td class="align-right numeric">{{ job.ticks_remaining }} ticks</td>
+            </tr>
             {% endfor %}
             {% else %}
-            <div class="event-entry info">
-                <div class="event-entry-icon">ℹ️</div>
-                <div class="event-entry-content">
-                    <div class="event-entry-header">
-                        <span class="event-entry-time mono">Day 0 00:00</span>
-                        <span class="event-entry-title">Simulation Started</span>
-                    </div>
-                    <div class="event-entry-description">
-                        Welcome to Outpost 3. Your colony awaits.
-                    </div>
+            <tr>
+                <td colspan="4" class="table-empty">
+                    <div class="table-empty-icon">🏗️</div>
+                    <div class="table-empty-text">No active construction</div>
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</section>
+
+<!-- Recent Events -->
+<section style="margin: var(--space-6) 0;">
+    <h3
+        style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin-bottom: var(--space-4);">
+        Recent Events</h3>
+
+    <div class="ticker-events-list">
+        {% if recent_events %}
+        {% for event in recent_events %}
+        <div class="event-entry {{ event.severity | default(value='info') }}">
+            <div class="event-entry-icon">{{ event.icon | default(value="ℹ️") }}</div>
+            <div class="event-entry-content">
+                <div class="event-entry-header">
+                    <span class="event-entry-time mono">{{ event.game_time }}</span>
+                    <span class="event-entry-title">{{ event.title }}</span>
+                </div>
+                <div class="event-entry-description">{{ event.description }}</div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="event-entry info">
+            <div class="event-entry-icon">ℹ️</div>
+            <div class="event-entry-content">
+                <div class="event-entry-header">
+                    <span class="event-entry-time mono">Day 0 00:00</span>
+                    <span class="event-entry-title">Simulation Started</span>
+                </div>
+                <div class="event-entry-description">
+                    Welcome to Outpost 3. Your colony awaits.
                 </div>
             </div>
-            {% endif %}
         </div>
-    </section>
+        {% endif %}
+    </div>
+</section>
 </div>
 {% endblock %}

@@ -49,3 +49,8 @@ Thumbs.db
 # Environment
 .env
 .env.local
+# Built CSS/JS from Vite (Tailwind + D3)
+crates/outpost-server/static/css/main.css
+crates/outpost-server/static/js/main.js
+crates/outpost-server/static/js/main.js.map
+dist/

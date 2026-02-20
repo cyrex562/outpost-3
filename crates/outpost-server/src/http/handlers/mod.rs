@@ -14,6 +14,10 @@ pub mod colony_actions;
 pub mod time_control;
 pub mod site_handlers;
 pub mod colonies_handler;
+pub mod labor_handlers;
+pub mod resource_api_handlers;
+pub mod power_handlers;
+pub mod life_support_handlers;
 
 // Helper functions for database operations
 pub(crate) fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources> {
@@ -354,7 +358,16 @@ pub async fn dashboard(
     // Query actual data from GameState
     context.insert("colony_count", &game_state.total_sites());
     context.insert("total_population", &game_state.total_population());
-    context.insert("average_morale", &75); // TODO: Calculate from sites
+    
+    // Calculate real average morale across all sites
+    let sites = game_state.galaxy.all_sites();
+    let average_morale: u32 = if sites.is_empty() {
+        75
+    } else {
+        let sum: f64 = sites.iter().map(|s| s.effective_morale()).sum();
+        (sum / sites.len() as f64).round() as u32
+    };
+    context.insert("average_morale", &average_morale);
     context.insert("alert_count", &0);
     
     // Get available building definitions

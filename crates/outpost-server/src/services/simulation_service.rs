@@ -42,6 +42,30 @@ impl SimulationService {
         state.clone()
     }
 
+    /// Get a clone of the content loader (read-only).
+    pub async fn get_content(&self) -> ContentLoader {
+        (*self.content).clone()
+    }
+
+    /// Apply a building power state change directly to the live game state.
+    ///
+    /// Used by the power toggle endpoint to persist the state change without
+    /// requiring a full state clone-replace cycle.
+    pub async fn apply_power_toggle(
+        &self,
+        site_id: outpost_core::domain::SiteId,
+        building_id: outpost_core::domain::BuildingId,
+        new_state: outpost_core::domain::BuildingStateV5,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().await;
+        let site = state.galaxy.find_site_mut(&site_id)
+            .ok_or_else(|| format!("Site {:?} not found", site_id))?;
+        let building = site.buildings.get_mut(&building_id)
+            .ok_or_else(|| format!("Building {:?} not found", building_id))?;
+        building.state = new_state;
+        Ok(())
+    }
+
     /// Execute a time command (pause, resume, set speed, etc.)
     pub async fn execute_time_command(&self, command: TimeCommand) -> Result<(), String> {
         let mut state = self.state.lock().await;

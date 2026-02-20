@@ -305,3 +305,27 @@
   upgradeable: true
   upgrade_to: advanced_life_support
   morale_bonus: 3.0
+
+# Large Warehouse - Tier-2 bulk storage
+- id: large_warehouse
+  name: Large Warehouse
+  description: High-capacity storage complex for bulk solid resources and manufactured goods. Multi-wing structure with automated handling systems.
+  category: storage
+  construction_costs:
+    - resource_id: steel
+      amount: 300
+    - resource_id: components
+      amount: 50
+  construction_time_ticks: 300
+  power:
+    base_mw: 2.0
+    per_level_mw: 1.0
+  worker_capacity: 6
+  storage_capacity: 25000.0
+  recipes: []
+  maintenance_cost:
+    steel: 0.5
+    electronics: 0.1
+  upgradeable: false
+  upgrade_to: null
+  morale_bonus: 0.0

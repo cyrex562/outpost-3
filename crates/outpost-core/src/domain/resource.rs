@@ -195,6 +195,7 @@ impl Resources {
         resources.set(ResourceType::IronOre, 50);
         resources.set(ResourceType::Food, 200);
         resources.set(ResourceType::Water, 500);
+        resources.set(ResourceType::Oxygen, 1000);
         resources.set(ResourceType::Steel, 50);
         resources.set(ResourceType::Electronics, 20);
         resources
