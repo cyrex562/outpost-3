@@ -1,0 +1,25 @@
+{
+  "name": "outpost-3",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "test:e2e": "npx playwright test",
+    "test:e2e:headed": "npx playwright test --headed",
+    "test:e2e:ui": "npx playwright test --ui"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyrex562/outpost-3.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/cyrex562/outpost-3/issues"
+  },
+  "homepage": "https://github.com/cyrex562/outpost-3#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
