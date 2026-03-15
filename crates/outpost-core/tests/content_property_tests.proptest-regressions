@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 3c0947d4870c40278172efb75e813c58fbef80af8236a1f5656524f4279ea455 # shrinks to tech = TechDefinition { id: "aaa", name: "AAa  a", description: ". aA.,AAA ", category: Engineering, tier: 1, research_cost: 1.0, research_time_ticks: 1, prerequisites: [], unlocks: TechUnlocks { buildings: [], resources: [], recipes: [], bonuses: [], events: [] }, resource_costs: [ResearchCost { resource_id: "___", amount: 448.77752489341435 }] }
-cc c5c9f1ac62634b171128fb9ed5e8ea52982049a89fa86c99a029644183ed8b00 # shrinks to building = BuildingDefinition { id: "_aa", name: "Aa  A ", description: "A..,aA.,AA", category: PowerGeneration, construction_costs: [ConstructionCost { resource_id: "_a_", amount: 1331.3329963049403 }], construction_time_ticks: 1, power: None, power_output_mw: None, worker_capacity: 0, storage_capacity: None, housing_capacity: None, recipes: [], maintenance_cost: {}, upgradeable: false, upgrade_to: None, morale_bonus: 0.0 }
-cc 1fc37d2948877ed5ec3494a99ddfb3431b4d7539671958cace78993689d3de3d # shrinks to event = EventDefinition { id: "__a", title: "A A A ", description: "aa ,AaAA,a", triggers: [BuildingConstructed { building_id: "aaa" }], choices: [EventChoice { id: "a_a", text: "A Aa A", description: "A,.a. a.AA", outcomes: [ResourceChange { resource_id: "aa_", amount: -991.4191657007009 }], cost: {} }], repeatable: false, cooldown_ticks: None, weight: 0.1 }
