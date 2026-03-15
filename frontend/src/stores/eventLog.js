@@ -1,7 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-const MAX_EVENTS = 500
+const MAX_EVENTS = 1000
+
+const SEVERITY_RANK = {
+  debug: 0,
+  info: 1,
+  notable: 2,
+  critical: 3,
+  milestone: 4,
+}
 
 export const useEventLogStore = defineStore('eventLog', () => {
   const events = ref([])
@@ -9,7 +17,10 @@ export const useEventLogStore = defineStore('eventLog', () => {
 
   const filteredEvents = computed(() => {
     if (!severityFilter.value) return events.value
-    return events.value.filter((e) => e.severity === severityFilter.value)
+    const minRank = SEVERITY_RANK[severityFilter.value] ?? 0
+    return events.value.filter(
+      (e) => (SEVERITY_RANK[e.severity] ?? 0) >= minRank
+    )
   })
 
   function addEvent(event) {
@@ -18,7 +29,6 @@ export const useEventLogStore = defineStore('eventLog', () => {
       _id: events.value.length,
       _ts: Date.now(),
     })
-    // Cap the buffer
     if (events.value.length > MAX_EVENTS) {
       events.value = events.value.slice(-MAX_EVENTS)
     }

@@ -80,8 +80,8 @@ function onScroll() {
         class="flex gap-2 leading-snug"
         :class="severityColors[event.severity] || 'text-panel-text'"
       >
-        <span class="text-panel-muted shrink-0 w-20 text-right tabular-nums">
-          Y{{ event.game_time?.year ?? '?' }} D{{ event.game_time?.day ?? '?' }}
+        <span class="text-panel-muted shrink-0 w-28 text-right tabular-nums">
+          Y{{ event.game_time?.year ?? '?' }}.M{{ event.game_time?.month ?? '?' }}.D{{ event.game_time?.day_of_month ?? event.game_time?.day ?? '?' }}
         </span>
         <span>{{ event.text || event.event_type }}</span>
       </div>

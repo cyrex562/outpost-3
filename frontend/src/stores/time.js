@@ -3,7 +3,9 @@ import { ref } from 'vue'
 
 export const useTimeStore = defineStore('time', () => {
   const year = ref(1)
+  const month = ref(1)
   const day = ref(1)
+  const dayOfMonth = ref(1)
   const dayOffset = ref(0)
   const speed = ref(1)
   const paused = ref(true)
@@ -11,7 +13,9 @@ export const useTimeStore = defineStore('time', () => {
 
   function updateFromServer(state) {
     year.value = state.year ?? year.value
+    month.value = state.month ?? month.value
     day.value = state.day ?? day.value
+    dayOfMonth.value = state.day_of_month ?? dayOfMonth.value
     dayOffset.value = state.day_offset ?? dayOffset.value
     speed.value = state.speed ?? speed.value
     paused.value = state.paused ?? paused.value
@@ -32,7 +36,9 @@ export const useTimeStore = defineStore('time', () => {
 
   return {
     year,
+    month,
     day,
+    dayOfMonth,
     dayOffset,
     speed,
     paused,
