@@ -88,6 +88,56 @@ class Loadout:
     ship_name: str = ""
 
 
+@dataclass
+class StarSystem:
+    """A discovered candidate star system."""
+    name: str = ""
+    distance_ly: float = 0.0  # light-years from departure
+    habitability_score: float = 0.0  # 0.0–1.0 aggregate
+    num_planets: int = 0
+    selected: bool = False  # chosen as destination
+    surveyed: bool = False
+    rejected: bool = False
+
+
+@dataclass
+class Planet:
+    """A planet within a star system."""
+    name: str = ""
+    parent_system_id: int = -1
+    planet_type: str = "rocky"  # rocky, gas, ice
+    size: float = 1.0  # Earth radii
+    atmosphere: float = 0.0  # 0.0–1.0 (0=none, 1=earth-like)
+    water: float = 0.0  # 0.0–1.0 fraction
+    minerals: float = 0.0  # 0.0–1.0 richness
+    habitability: float = 0.0  # 0.0–1.0 computed
+
+
+@dataclass
+class SearchProgress:
+    """Tracks the search phase progress."""
+    systems_discovered: int = 0
+    target_discoveries: int = 4  # discover this many before choosing
+    days_since_last_discovery: int = 0
+    discovery_chance_per_day: float = 0.008  # ~3 per year
+
+
+@dataclass
+class TransitState:
+    """Tracks the ship's transit between star systems."""
+    destination_id: int = -1  # entity ID of target StarSystem
+    distance_ly: float = 0.0  # total distance
+    distance_traveled_ly: float = 0.0  # how far we've come
+    cruise_velocity_c: float = 0.5  # fraction of c
+    transit_phase: str = "accelerating"  # accelerating, cruising, decelerating
+    accel_days: int = 60  # days to accelerate
+    decel_days: int = 60  # days to decelerate
+    accel_done_day: int = 0
+    decel_start_day: int = 0
+    departure_day: int = 0
+    eta_days: int = 0  # estimated total transit days
+
+
 # ── Trait definitions ────────────────────────────────────────────
 
 TRAIT_AXES: list[tuple[str, str]] = [

@@ -113,6 +113,66 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
 
     # ── Behavior deliberations ───────────────────────────────────
     "behavior.deliberation": None,  # uses custom renderer
+
+    # ── Search phase events ──────────────────────────────────────
+    "search.system_discovered": None,  # custom renderer
+    "search.evaluation_complete": [
+        "Sensor sweep complete. {systems_evaluated} candidate systems identified. Evaluating habitability...",
+        "All {systems_evaluated} candidate systems mapped. Analyzing data for destination selection.",
+    ],
+    "search.destination_selected": None,  # custom renderer
+
+    # ── Transit phase events ─────────────────────────────────────
+    "transit.phase_change": {
+        "accelerating": ["Main engines firing — the ship accelerates toward cruise velocity."],
+        "cruising": [
+            "Acceleration complete. Cruising at relativistic velocity.",
+            "The ship has reached cruise speed. The long journey continues.",
+        ],
+        "decelerating": [
+            "Deceleration burn initiated — the destination system grows closer.",
+            "Engines reversed. Beginning approach to target system.",
+        ],
+    },
+    "transit.yearly_summary": None,  # custom renderer
+    "transit.arrival": None,  # custom renderer
+
+    # ── Transit random events ────────────────────────────────────
+    "transit.event.asteroid_field": [
+        "The ship passes through an unexpected asteroid field. Hull takes minor damage ({hull_damage}%) "
+        "and evasive maneuvers cost {fuel_cost} fuel.",
+        "Proximity alerts sound as debris impacts the hull ({hull_damage}% damage). "
+        "Navigation burns through {fuel_cost} extra fuel avoiding the worst of it.",
+    ],
+    "transit.event.equipment_failure": [
+        "Critical failure in {system} systems — {damage}% degradation. Engineering crews scramble to contain the damage.",
+        "A cascade failure drops {system} performance by {damage}%. Repair teams dispatched.",
+    ],
+    "transit.event.cosmic_phenomenon": ["{flavor}"],
+    "transit.event.resource_find": [
+        "Long-range sensors detect a resource-rich asteroid. A brief diversion yields +{gain} {resource_type}.",
+        "Opportunistic mining of a passing body adds {gain} units of {resource_type} to stores.",
+    ],
+    "transit.event.crew_conflict": [
+        "Tensions between crew factions boil over into a heated dispute. Morale drops {morale_change}%.",
+        "A disagreement over resource allocation leads to unrest. Crew morale affected ({morale_change}%).",
+    ],
+    "transit.event.celebration": [
+        "The crew holds a celebration marking another year of the journey. Spirits lift (+{morale_change}% morale).",
+        "A festival day brings the community together. Morale improves by {morale_change}%.",
+    ],
+    "transit.event.cultural_shift": ["{flavor}"],
+
+    # ── Ship maintenance events ──────────────────────────────────
+    "maintenance.breakdown": [
+        "Breakdown in {system} — {damage}% damage. Current health: {health}%.",
+        "Unexpected failure in {system} systems ({damage}% degradation). Health now at {health}%.",
+    ],
+
+    # ── Population events ────────────────────────────────────────
+    "population.yearly_report": None,  # custom renderer
+    "notable.death": None,  # custom renderer
+    "notable.succession": None,  # custom renderer
 }
 
 
@@ -201,12 +261,136 @@ def _render_deliberation(event: GameEvent) -> str:
     return "\n".join(lines)
 
 
+def _render_system_discovered(event: GameEvent) -> str:
+    d = event.data
+    name = d.get("system_name", "Unknown")
+    dist = d.get("distance_ly", 0)
+    n_planets = d.get("num_planets", 0)
+    hab = d.get("habitability_score", 0)
+    num = d.get("discovery_number", "?")
+    target = d.get("target_discoveries", "?")
+    planets = d.get("planets", [])
+
+    lines = [
+        f"Star system discovered: {name} ({dist} ly, {n_planets} planets, "
+        f"habitability: {hab:.2f}) [{num}/{target}]"
+    ]
+    for p in planets:
+        h = p.get("habitability", 0)
+        marker = " ★" if h > 0.5 else ""
+        lines.append(
+            f"  · {p.get('name', '?')} — {p.get('type', '?')}, "
+            f"size {p.get('size', '?')}R⊕, hab: {h:.2f}{marker}"
+        )
+    return "\n".join(lines)
+
+
+def _render_destination_selected(event: GameEvent) -> str:
+    d = event.data
+    templates = [
+        f"⏸ Destination selected: {d.get('system_name', '?')} "
+        f"({d.get('distance_ly', '?')} ly, habitability {d.get('habitability_score', 0):.2f}). "
+        f"Transit at {d.get('cruise_velocity_c', '?')}c — estimated {d.get('transit_years', '?')} years.",
+        f"⏸ Course set for {d.get('system_name', '?')}. "
+        f"Distance: {d.get('distance_ly', '?')} light-years. "
+        f"ETA: {d.get('transit_years', '?')} years at {d.get('cruise_velocity_c', '?')}c.",
+    ]
+    return _random.choice(templates)
+
+
+def _render_transit_yearly_summary(event: GameEvent) -> str:
+    d = event.data
+    return (
+        f"Transit year {d.get('years_in_transit', '?')}: "
+        f"{d.get('pct_complete', '?')}% complete "
+        f"({d.get('distance_traveled_ly', '?')}/{d.get('distance_total_ly', '?')} ly). "
+        f"Population: {d.get('population', '?')}. "
+        f"Fuel: {d.get('fuel_remaining', '?')}. Food: {d.get('food_remaining', '?')}. "
+        f"Phase: {d.get('transit_phase', '?')}."
+    )
+
+
+def _render_transit_arrival(event: GameEvent) -> str:
+    d = event.data
+    templates = [
+        f"⏸ The ship arrives at {d.get('system_name', '?')} after "
+        f"{d.get('transit_years', '?')} years. Population: {d.get('population', '?')}. "
+        f"Fuel remaining: {d.get('fuel_remaining', '?')}.",
+        f"⏸ Journey's end — {d.get('system_name', '?')} fills the viewports. "
+        f"{d.get('transit_years', '?')} years of travel. "
+        f"{d.get('population', '?')} souls have reached a new star.",
+    ]
+    return _random.choice(templates)
+
+
+def _render_population_yearly(event: GameEvent) -> str:
+    d = event.data
+    net = d.get("net_change", 0)
+    direction = "grew" if net > 0 else "shrank" if net < 0 else "held steady"
+    return (
+        f"Population {direction}: {d.get('total', '?')} "
+        f"(+{d.get('births', 0)} births, -{d.get('deaths', 0)} deaths). "
+        f"Morale: {int(d.get('morale', 0) * 100)}%."
+    )
+
+
+def _render_notable_death(event: GameEvent) -> str:
+    d = event.data
+    templates = [
+        f"{d.get('name', '?')}, {d.get('role', '?')}, has died at age {d.get('age', '?')}.",
+        f"The ship mourns the loss of {d.get('name', '?')} ({d.get('role', '?')}), "
+        f"who passed at {d.get('age', '?')} years old.",
+        f"{d.get('role', '?')} {d.get('name', '?')} is gone. Age {d.get('age', '?')}. "
+        f"The crew gathers to pay their respects.",
+    ]
+    return _random.choice(templates)
+
+
+def _render_notable_succession(event: GameEvent) -> str:
+    d = event.data
+    traits = ", ".join(d.get("traits", []))
+    templates = [
+        f"{d.get('name', '?')} promoted to {d.get('role', '?')} (age {d.get('age', '?')}). "
+        f"Known for being {traits}.",
+        f"New {d.get('role', '?')}: {d.get('name', '?')}, age {d.get('age', '?')}. "
+        f"Traits: {traits}.",
+    ]
+    return _random.choice(templates)
+
+
+def _render_transit_phase_change(event: GameEvent) -> str:
+    phase = event.data.get("transit_phase", "unknown")
+    days = event.data.get("days_in_transit", 0)
+    years = round(days / 365, 1)
+
+    templates = {
+        "cruising": [
+            f"Acceleration complete after {days} days. The ship settles into cruise velocity.",
+            f"Main engines throttle down — cruising speed achieved. Day {days} of transit.",
+        ],
+        "decelerating": [
+            f"Deceleration burn initiated at year {years} of transit. The destination nears.",
+            f"After {years} years of cruising, the engines fire in reverse. Approach phase begins.",
+        ],
+    }
+    options = templates.get(phase, [f"Transit phase: {phase} (day {days})."])
+    return _random.choice(options)
+
+
 # ── Custom renderer registry ────────────────────────────────────
 
 _CUSTOM_RENDERERS: dict[str, Callable[[GameEvent], str]] = {
     "loadout.notable_introduction": _render_notable_introduction,
     "phase.transition": _render_phase_transition,
     "behavior.deliberation": _render_deliberation,
+    "search.system_discovered": _render_system_discovered,
+    "search.destination_selected": _render_destination_selected,
+    "transit.yearly_summary": _render_transit_yearly_summary,
+    "transit.arrival": _render_transit_arrival,
+    "transit.phase_change": _render_transit_phase_change,
+    "population.yearly_report": _render_population_yearly,
+    "notable.death": _render_notable_death,
+    "notable.succession": _render_notable_succession,
 }
 
 

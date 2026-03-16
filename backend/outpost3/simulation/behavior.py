@@ -202,6 +202,116 @@ def _check_morale_low(population: Population) -> Deliberation | None:
     )
 
 
+def _check_water_low(resources: Resources, population: Population) -> Deliberation | None:
+    """Trigger when water stores are critically low."""
+    days_of_water = resources.water / max(population.total * 0.003, 1)
+    if days_of_water > 180:
+        return None
+
+    pct = min(100, max(0, int(days_of_water / 365 * 100)))
+    return Deliberation(
+        trigger="water_low",
+        trigger_detail=f"Water reserves at {pct}% annual supply ({int(days_of_water)} days remaining)",
+        options=[
+            Option(
+                action="water_rationing",
+                description="Implement strict water rationing",
+                pros=["Extends supply by ~30%"],
+                cons=["Morale impact", "Hygiene concerns"],
+            ),
+            Option(
+                action="reclamation_upgrade",
+                description="Upgrade water reclamation systems using spare parts",
+                pros=["Reduces net water loss", "Permanent improvement"],
+                cons=["Costs spare parts", "Engineering time required"],
+            ),
+        ],
+    )
+
+
+def _check_fuel_low(resources: Resources) -> Deliberation | None:
+    """Trigger when fuel is dangerously low."""
+    if resources.fuel > 500:
+        return None
+
+    return Deliberation(
+        trigger="fuel_low",
+        trigger_detail=f"Fuel reserves at {int(resources.fuel)} units — deceleration margin threatened",
+        options=[
+            Option(
+                action="reduce_speed",
+                description="Reduce cruise velocity to conserve fuel",
+                pros=["Extends fuel for deceleration"],
+                cons=["Adds transit time", "Crew uncertainty"],
+            ),
+            Option(
+                action="power_conservation",
+                description="Switch non-essential systems to low-power mode",
+                pros=["Reduces fuel consumption 10-15%"],
+                cons=["Reduced sensor range", "Minor comfort loss"],
+            ),
+            Option(
+                action="maintain_course",
+                description="Maintain current velocity and hope reserves suffice",
+                pros=["No disruption"],
+                cons=["Risk of insufficient deceleration fuel"],
+            ),
+        ],
+    )
+
+
+def _check_engine_critical(ship_systems: ShipSystems) -> Deliberation | None:
+    """Trigger when engines are severely damaged."""
+    if ship_systems.engines > 0.50:
+        return None
+
+    pct = int(ship_systems.engines * 100)
+    return Deliberation(
+        trigger="engine_critical",
+        trigger_detail=f"Engine systems at {pct}% — propulsion compromised",
+        options=[
+            Option(
+                action="engine_overhaul",
+                description="Major engine overhaul using spare parts reserves",
+                pros=["Significant engine restoration", "Prevents total failure"],
+                cons=["Heavy spare parts cost", "Weeks of reduced thrust"],
+            ),
+            Option(
+                action="redistribute_power",
+                description="Redistribute power from other systems to engines",
+                pros=["Stabilizes engine output"],
+                cons=["Weakens sensors or life support temporarily"],
+            ),
+        ],
+    )
+
+
+def _check_life_support_critical(ship_systems: ShipSystems) -> Deliberation | None:
+    """Trigger when life support is dangerously degraded."""
+    if ship_systems.life_support > 0.55:
+        return None
+
+    pct = int(ship_systems.life_support * 100)
+    return Deliberation(
+        trigger="life_support_critical",
+        trigger_detail=f"Life support at {pct}% — atmosphere quality declining",
+        options=[
+            Option(
+                action="life_support_repair",
+                description="Emergency life support repairs",
+                pros=["Restores atmosphere quality", "Critical safety measure"],
+                cons=["Costs spare parts", "All hands repair effort"],
+            ),
+            Option(
+                action="seal_sections",
+                description="Reduce inhabited volume to ease life support load",
+                pros=["Reduces system strain immediately"],
+                cons=["Crowding", "Morale impact"],
+            ),
+        ],
+    )
+
+
 # ── Scoring ──────────────────────────────────────────────────────
 
 def _score_options(
@@ -249,6 +359,44 @@ def _score_options(
             else:
                 score += 0.05
                 keywords = ["standard", "protocol"]
+
+        elif deliberation.trigger == "water_low":
+            if option.action == "water_rationing":
+                score += 0.15
+                keywords = ["reduce", "ration", "conserve"]
+            elif option.action == "reclamation_upgrade":
+                score += 0.15 if resources.spare_parts > 150 else -0.1
+                keywords = ["improvise", "repurpose"]
+            else:
+                keywords = ["standard"]
+
+        elif deliberation.trigger == "fuel_low":
+            if option.action == "reduce_speed":
+                score += 0.15
+                keywords = ["conserve", "slow", "reduce"]
+            elif option.action == "power_conservation":
+                score += 0.10
+                keywords = ["efficiency", "conserve"]
+            else:
+                score -= 0.05
+                keywords = ["risk", "push"]
+
+        elif deliberation.trigger == "engine_critical":
+            if option.action == "engine_overhaul":
+                score += 0.2 if resources.spare_parts > 200 else 0.05
+                keywords = ["protocol", "standard"]
+            else:
+                score += 0.1
+                keywords = ["improvise", "repurpose"]
+
+        elif deliberation.trigger == "life_support_critical":
+            if option.action == "life_support_repair":
+                score += 0.2
+                keywords = ["protocol", "standard", "medical"]
+            else:
+                score += 0.05
+                keywords = ["conserve", "efficiency"]
+
         else:
             keywords = []
 
@@ -313,6 +461,43 @@ def _apply_decision(
         delta = random.uniform(-0.05, 0.15)
         population.morale = max(0.0, min(1.0, population.morale + delta))
 
+    elif action == "water_rationing":
+        population.morale = max(0.0, population.morale - random.uniform(0.05, 0.10))
+
+    elif action == "reclamation_upgrade":
+        cost = min(resources.spare_parts, random.uniform(30, 70))
+        resources.spare_parts -= cost
+        resources.water += cost * random.uniform(0.3, 0.8)
+
+    elif action == "reduce_speed":
+        population.morale = max(0.0, population.morale - random.uniform(0.02, 0.06))
+
+    elif action == "power_conservation":
+        ship_systems.sensors = max(0.3, ship_systems.sensors - random.uniform(0.05, 0.10))
+
+    elif action == "engine_overhaul":
+        cost = min(resources.spare_parts, random.uniform(60, 150))
+        resources.spare_parts -= cost
+        repair = random.uniform(0.10, 0.25)
+        ship_systems.engines = min(1.0, ship_systems.engines + repair)
+
+    elif action == "redistribute_power":
+        # Boost engines at cost to sensors or life support
+        target = random.choice(["sensors", "life_support"])
+        current = getattr(ship_systems, target)
+        setattr(ship_systems, target, max(0.3, current - random.uniform(0.05, 0.10)))
+        ship_systems.engines = min(1.0, ship_systems.engines + random.uniform(0.05, 0.12))
+
+    elif action == "life_support_repair":
+        cost = min(resources.spare_parts, random.uniform(40, 100))
+        resources.spare_parts -= cost
+        repair = random.uniform(0.08, 0.20)
+        ship_systems.life_support = min(1.0, ship_systems.life_support + repair)
+
+    elif action == "seal_sections":
+        population.morale = max(0.0, population.morale - random.uniform(0.05, 0.12))
+        ship_systems.life_support = min(1.0, ship_systems.life_support + random.uniform(0.03, 0.08))
+
 
 # ── BehaviorSystem ───────────────────────────────────────────────
 
@@ -358,6 +543,10 @@ class BehaviorSystem(System):
             _check_food_low(resources, population),
             _check_hull_damage(ship_systems),
             _check_morale_low(population),
+            _check_water_low(resources, population),
+            _check_fuel_low(resources),
+            _check_engine_critical(ship_systems),
+            _check_life_support_critical(ship_systems),
         ]
 
         for deliberation in conditions:

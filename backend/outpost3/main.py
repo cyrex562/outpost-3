@@ -15,6 +15,10 @@ from .simulation.engine import TimeEngine, VALID_SPEEDS, SPEED_LEVELS
 from .simulation.systems import Phase
 from .simulation.components import FactionPhase
 from .simulation.generation.loadout import LoadoutSystem
+from .simulation.generation.search import SearchSystem
+from .simulation.transit import TransitSystem
+from .simulation.population import PopulationSystem
+from .simulation.maintenance import ShipMaintenanceSystem
 from .simulation.behavior import BehaviorSystem
 from .narrative import render
 
@@ -68,8 +72,12 @@ def setup_world(engine: TimeEngine) -> None:
     engine.world.add_component(faction_id, FactionPhase(phase=Phase.LOADOUT))
 
     # Register systems in execution order
-    engine.register_system(LoadoutSystem())
-    engine.register_system(BehaviorSystem())
+    engine.register_system(LoadoutSystem())       # order=1
+    engine.register_system(SearchSystem())        # order=10
+    engine.register_system(TransitSystem())       # order=20
+    engine.register_system(PopulationSystem())    # order=30
+    engine.register_system(ShipMaintenanceSystem())  # order=40
+    engine.register_system(BehaviorSystem())      # order=60
 
 
 # ── app lifecycle ─────────────────────────────────────────────────
