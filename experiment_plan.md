@@ -19,12 +19,19 @@ A colony simulation game where a human faction sets out to colonize a distant st
 - Architecture supports swapping template renderer for LLM renderer later
 - No coupling between simulation logic and display text
 
+### State Management (ECS-Lite)
+- Entities are integer IDs, components are dataclasses, systems are classes with `tick()` methods
+- World container provides typed queries: `world.get_components(Resources, ShipConstruction)`
+- No archetype tables or bitmasking — clean separation that scales toward full ECS later
+- Systems registered with engine, executed in order each tick
+
 ### Simulation
 - **Smallest time unit:** 1 day
-- **Speed levels:** 1x, 5x, 25x, 100x, max
+- **Speed levels:** 15 levels from 1 day/2.5s to 36,500 days/2.5s (~100 years/2.5s). Tick batching at high speeds to prevent browser flooding.
 - **Auto-pause system:** Extensible — configurable per event type. Initially auto-pauses on all major milestones.
-- **Decision-making:** Rules generate candidate actions, weighted random selects from them
-- **Target:** Colony ship arc (build → search → travel → found) plays out in ~2-5 minutes at max speed (~50 game-years, ~18,000 ticks)
+- **Decision-making:** Hybrid behavior tree + weighted utility scoring. Crew evaluates conditions, scores options, Named Notables advocate based on personality traits. Full deliberation records exposed to player.
+- **Travel model:** Sub-light fusion rockets (< 0.7c), generation ship for M1, cryosleep variant planned for M2+. Time dilation ignored for M1.
+- **Failure model:** No game-over states. Ship limps on if critically damaged; colony starts weakened.
 
 ### Frontend
 - Fresh codebase, borrowing panel/layout/websocket patterns from harsh_realm
@@ -51,34 +58,42 @@ A colony simulation game where a human faction sets out to colonize a distant st
 ---
 
 ## Milestone 1: Colony Ship Arc (Observe Only)
-**Goal:** Prove "watching a simulation feels like something." The player observes (no commands yet) as a faction builds a colony ship, searches for a destination star, travels there, and founds a colony.
+**Goal:** Prove "watching a simulation feels like something." The player observes
+(no commands) as a generation ship departs for a distant star, navigates challenges
+during transit, surveys the destination system, and founds a colony — or rejects
+the system and searches again.
+
+**Travel model:** Sub-light fusion rockets at relativistic velocities (< 0.7c).
+Generation ship — crew lives full lives during transit. Time dilation ignored for M1.
 
 **Narrative arc:**
-1. **Preparation Phase** — Faction gathers resources, builds ship components, recruits colonists
-2. **Search Phase** — Probes/telescopes survey candidate star systems, evaluate habitability
-3. **Transit Phase** — Ship departs, journey events (resource consumption, random encounters, morale)
-4. **Founding Phase** — Arrival, landing site selection, colony established → **auto-pause, milestone complete**
+1. **Loadout Phase** — Ship is built. Auto-generate random starting supplies, crew
+   composition (500–2000 colonists), and 5–8 named Notable individuals with roles
+   and personality traits. Immediate transition to Search.
+2. **Search Phase** — Discover 3–5 candidate star systems with procedurally generated
+   planets. Evaluate habitability, select best candidate.
+3. **Transit Phase** — Generation ship travels 20–50 years. Resource consumption, ship
+   degradation, population births/deaths/aging. Random events (abstracted with time/
+   resource costs). Crew behavior system produces deliberation records with full
+   transparency (trigger, options evaluated, advocates, chosen action).
+4. **Survey Phase** — Ship enters system, surveys planets. Evaluates habitability.
+   Can REJECT system → loops back to Search (capped at 3 rejections).
+5. **Founding Phase** — Landing, colony established → auto-pause. Colony starting
+   conditions reflect journey quality (weakened if ship limped in).
 
-**Simulation systems needed:**
-- Resource accumulation (simplified: materials, fuel, food, population)
-- Ship construction progress (% complete, component milestones)
-- Star system generation (candidates with habitability scores)
-- Transit simulation (distance → time, resource burn rate, random events)
-- Milestone detection + auto-pause
+**Architecture:** ECS-Lite (World container, dataclass components, System classes
+with typed queries). 15 speed levels (1 day/2.5s → 36,500 days/2.5s) with tick
+batching. Behavior system: hybrid behavior tree + weighted utility scoring producing
+deliberation records. Named Notable individuals with traits biasing their advocacy.
 
-**Narrative systems needed:**
-- Event types: resource_milestone, construction_progress, system_discovered, departure, transit_event, arrival, colony_founded
-- Template renderer with ~20-30 canned templates
-- Event severity levels (info, notable, critical) for log filtering
+**Frontend panels:** Time Controls (15-level speed slider), Event Log (narrative +
+deliberations), Ship Status (resources + ship systems + notable roster), Resource
+Graph (SVG sparklines), Star Map (discovered systems + ship position).
 
-**Done when:** You can click Play, watch the entire arc unfold in the event log with readable narrative, and it auto-pauses at colony founding. The arc feels like a coherent story, not a list of numbers changing.
+**See:** `docs/milestone_1_plan.md` for full session breakdown (6 sessions),
+architecture details, tuning targets, and open questions.
 
-**Design questions to answer during this milestone:**
-- How much randomness makes the arc replayable vs. feeling arbitrary?
-- Is the pacing right? (Are any phases boring? Too fast?)
-- What's the first thing you want to click/command when watching?
-
-**Estimated effort:** 3-4 sessions
+**Estimated effort:** 5–6 sessions
 
 ---
 
@@ -86,9 +101,11 @@ A colony simulation game where a human faction sets out to colonize a distant st
 **Goal:** Add player commands that influence the simulation during the colony ship arc.
 
 Scope TBD based on Milestone 1 learnings — likely:
-- Choose what to prioritize (ship construction vs. resource gathering)
+- Configure starting loadout (crew size, resource allocation, equipment priorities)
 - Select destination star system from candidates
-- Manage transit resource allocation
+- Override crew decisions during transit (accept/reject deliberation outcomes)
+- Accept/reject star systems during Survey (instead of auto-decision)
+- Cryosleep ship variant as alternative to generation ship
 
 ---
 

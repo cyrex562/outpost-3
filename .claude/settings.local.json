@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(sleep:*)",
+      "Bash(git:*)",
+      "Bash(cd:*)",
+      "Bash(npm install:*)",
+      "Bash(npx playwright:*)"
+    ]
+  }
+}
