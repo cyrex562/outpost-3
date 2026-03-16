@@ -32,7 +32,7 @@ export const useTimeStore = defineStore('time', () => {
   const pause = () => sendCommand('/api/pause')
   const resume = () => sendCommand('/api/resume')
   const togglePause = () => (paused.value ? resume() : pause())
-  const setSpeed = (s) => sendCommand(`/api/speed/${s}`)
+  const setSpeed = (level) => sendCommand(`/api/speed/${level}`)
 
   return {
     year,

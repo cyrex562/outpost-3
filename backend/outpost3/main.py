@@ -11,7 +11,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .simulation import GameEvent, GameTime, Severity
-from .simulation.engine import TimeEngine, VALID_SPEEDS
+from .simulation.engine import TimeEngine, VALID_SPEEDS, SPEED_LEVELS
 from .narrative import render
 
 # ── globals ───────────────────────────────────────────────────────
@@ -41,11 +41,7 @@ DAILY_FLAVOR: list[tuple[str, str, Severity]] = [
 
 
 async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
-    """Emit varied events each day as a proof of concept.
-
-    Generates year-start, month-start, random daily events, and
-    auto-pause milestones.
-    """
+    """Emit varied events each day as a proof of concept."""
     events: list[GameEvent] = []
 
     # Year start
@@ -94,65 +90,6 @@ async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
     return events
 
 
-async def placeholder_batch(start: GameTime, end: GameTime, num_days: int) -> list[GameEvent]:
-    """Batch handler for high-speed simulation. Summarizes a range of days."""
-    events: list[GameEvent] = []
-
-    # Emit year-start events for any year boundaries in the range
-    for d in range(start.day_offset, end.day_offset + 1):
-        gt = GameTime(d)
-        if gt.is_year_start:
-            events.append(GameEvent(
-                event_type="time.year_start",
-                severity=Severity.NOTABLE,
-                game_time=gt,
-                data={"year": gt.year},
-            ))
-            # Auto-pause on year boundary
-            if gt.year > 1:
-                events.append(GameEvent(
-                    event_type="auto_pause.year_end",
-                    severity=Severity.MILESTONE,
-                    game_time=gt,
-                    auto_pause=True,
-                    data={"year": gt.year - 1},
-                ))
-
-    # Emit month-start events for month boundaries
-    for d in range(start.day_offset, end.day_offset + 1):
-        gt = GameTime(d)
-        if gt.is_month_start and not gt.is_year_start:
-            events.append(GameEvent(
-                event_type="time.month_start",
-                severity=Severity.INFO,
-                game_time=gt,
-                data={"month": gt.month, "year": gt.year},
-            ))
-
-    # A few random events for flavor (scaled by range size)
-    num_random = max(1, num_days // 30)
-    for _ in range(num_random):
-        rand_day = random.randint(start.day_offset, end.day_offset)
-        gt = GameTime(rand_day)
-        event_type, variant, severity = random.choice(DAILY_FLAVOR)
-        events.append(GameEvent(
-            event_type=event_type,
-            severity=severity,
-            game_time=gt,
-            data={"variant": variant, "year": gt.year,
-                  "month": gt.month, "day": gt.day_of_month},
-        ))
-
-    # Sort by day offset so events appear in chronological order
-    events.sort(key=lambda e: e.game_time.day_offset)
-
-    # Render narrative text
-    for event in events:
-        event.text = render(event)
-
-    return events
-
-
 # ── broadcast helpers ─────────────────────────────────────────────
 
 async def broadcast_json(data: dict) -> None:
@@ -183,7 +120,6 @@ async def on_state_change() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     engine.on_tick(placeholder_tick)
-    engine.on_batch(placeholder_batch)
     engine.on_event(on_event)
     engine.on_state_change(on_state_change)
     engine.start()
@@ -236,7 +172,7 @@ async def resume():
 @app.post("/api/speed/{speed}")
 async def set_speed(speed: int):
     if speed not in VALID_SPEEDS:
-        return {"error": f"Invalid speed. Valid: {VALID_SPEEDS}"}
+        return {"error": f"Invalid speed level. Valid: {VALID_SPEEDS}"}
     engine.set_speed(speed)
     return engine.state_dict()
 
@@ -244,3 +180,9 @@ async def set_speed(speed: int):
 @app.get("/api/state")
 async def get_state():
     return engine.state_dict()
+
+
+@app.get("/api/speeds")
+async def get_speeds():
+    """Return the list of available speed levels with labels."""
+    return {"speeds": SPEED_LEVELS}
