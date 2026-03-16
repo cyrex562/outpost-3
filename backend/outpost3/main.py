@@ -12,6 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .simulation import GameEvent, GameTime, Severity
 from .simulation.engine import TimeEngine, VALID_SPEEDS, SPEED_LEVELS
+from .simulation.systems import Phase
+from .simulation.components import FactionPhase
+from .simulation.generation.loadout import LoadoutSystem
+from .simulation.behavior import BehaviorSystem
 from .narrative import render
 
 # ── globals ───────────────────────────────────────────────────────
@@ -20,74 +24,11 @@ engine = TimeEngine()
 connected_clients: set[WebSocket] = set()
 
 
-# ── placeholder tick handler (Milestone 0) ────────────────────────
+# ── narrative rendering tick handler ──────────────────────────────
 
-DAILY_FLAVOR: list[tuple[str, str, Severity]] = [
-    ("daily.weather", "clear_skies", Severity.DEBUG),
-    ("daily.weather", "dust_storm", Severity.INFO),
-    ("daily.weather", "solar_flare_warning", Severity.NOTABLE),
-    ("daily.survey", "mineral_deposit_found", Severity.INFO),
-    ("daily.survey", "geological_survey_complete", Severity.INFO),
-    ("daily.crew", "crew_morale_high", Severity.DEBUG),
-    ("daily.crew", "minor_injury_reported", Severity.INFO),
-    ("daily.crew", "equipment_malfunction", Severity.NOTABLE),
-    ("daily.construction", "foundation_work_continues", Severity.DEBUG),
-    ("daily.construction", "structural_milestone", Severity.INFO),
-    ("daily.power", "solar_panel_output_nominal", Severity.DEBUG),
-    ("daily.power", "power_grid_fluctuation", Severity.INFO),
-    ("daily.life_support", "oxygen_levels_stable", Severity.DEBUG),
-    ("daily.life_support", "water_recycler_maintenance", Severity.INFO),
-]
-
-
-async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
-    """Emit varied events each day as a proof of concept."""
-    events: list[GameEvent] = []
-
-    # Year start
-    if game_time.is_year_start:
-        events.append(GameEvent(
-            event_type="time.year_start",
-            severity=Severity.NOTABLE,
-            game_time=game_time,
-            data={"year": game_time.year},
-        ))
-
-    # Month start
-    if game_time.is_month_start and not game_time.is_year_start:
-        events.append(GameEvent(
-            event_type="time.month_start",
-            severity=Severity.INFO,
-            game_time=game_time,
-            data={"month": game_time.month, "year": game_time.year},
-        ))
-
-    # Random daily events (~30% chance per day)
-    if random.random() < 0.30:
-        event_type, variant, severity = random.choice(DAILY_FLAVOR)
-        events.append(GameEvent(
-            event_type=event_type,
-            severity=severity,
-            game_time=game_time,
-            data={"variant": variant, "year": game_time.year,
-                  "month": game_time.month, "day": game_time.day_of_month},
-        ))
-
-    # Auto-pause every year (365 days) as proof of concept
-    if game_time.is_year_start and game_time.year > 1:
-        events.append(GameEvent(
-            event_type="auto_pause.year_end",
-            severity=Severity.MILESTONE,
-            game_time=game_time,
-            auto_pause=True,
-            data={"year": game_time.year - 1},
-        ))
-
-    # Render narrative text onto each event
-    for event in events:
-        event.text = render(event)
-
-    return events
+async def render_narrative(game_time: GameTime) -> list[GameEvent]:
+    """No-op tick handler placeholder. Narrative rendering happens via on_event."""
+    return []
 
 
 # ── broadcast helpers ─────────────────────────────────────────────
@@ -108,6 +49,9 @@ async def broadcast_json(data: dict) -> None:
 
 
 async def on_event(event: GameEvent) -> None:
+    # Render narrative text if not already set
+    if event.text is None:
+        event.text = render(event)
     await broadcast_json({"type": "event", **event.to_dict()})
 
 
@@ -115,11 +59,24 @@ async def on_state_change() -> None:
     await broadcast_json(engine.state_dict())
 
 
+# ── world setup ──────────────────────────────────────────────────
+
+def setup_world(engine: TimeEngine) -> None:
+    """Initialize the world with a faction entity and register all systems."""
+    # Create the faction entity
+    faction_id = engine.world.create_entity()
+    engine.world.add_component(faction_id, FactionPhase(phase=Phase.LOADOUT))
+
+    # Register systems in execution order
+    engine.register_system(LoadoutSystem())
+    engine.register_system(BehaviorSystem())
+
+
 # ── app lifecycle ─────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    engine.on_tick(placeholder_tick)
+    setup_world(engine)
     engine.on_event(on_event)
     engine.on_state_change(on_state_change)
     engine.start()
