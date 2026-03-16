@@ -1,5 +1,6 @@
 import { useTimeStore } from '../stores/time'
 import { useEventLogStore } from '../stores/eventLog'
+import { useGameStateStore } from '../stores/gameState'
 
 let ws = null
 let reconnectTimer = null
@@ -8,6 +9,7 @@ export function useWebSocket() {
   function connect() {
     const timeStore = useTimeStore()
     const eventLog = useEventLogStore()
+    const gameState = useGameStateStore()
 
     // Build WebSocket URL relative to current host
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -32,6 +34,8 @@ export function useWebSocket() {
           timeStore.updateFromServer(data)
         } else if (data.type === 'event') {
           eventLog.addEvent(data)
+        } else if (data.type === 'snapshot') {
+          gameState.updateFromSnapshot(data)
         }
       } catch (err) {
         console.error('[ws] parse error:', err)

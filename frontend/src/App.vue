@@ -5,6 +5,9 @@ import { useLayoutStore } from './stores/layout'
 import PanelWindow from './components/PanelWindow.vue'
 import TimeControls from './components/TimeControls.vue'
 import EventLog from './components/EventLog.vue'
+import ShipStatus from './components/ShipStatus.vue'
+import ResourceGraph from './components/ResourceGraph.vue'
+import StarMap from './components/StarMap.vue'
 
 const layout = useLayoutStore()
 const { connect } = useWebSocket()
@@ -16,6 +19,9 @@ onMounted(() => {
 const panelComponents = {
   TimeControls,
   EventLog,
+  ShipStatus,
+  ResourceGraph,
+  StarMap,
 }
 </script>
 
