@@ -138,6 +138,38 @@ class TransitState:
     eta_days: int = 0  # estimated total transit days
 
 
+@dataclass
+class SurveyProgress:
+    """Tracks the survey phase progress for the current star system."""
+    system_id: int = -1  # entity ID of the StarSystem being surveyed
+    current_planet_index: int = 0
+    planets_surveyed: int = 0
+    total_planets: int = 0
+    survey_start_day: int = 0
+    current_planet_survey_start: int = 0
+    current_planet_survey_days: int = 0  # how long current planet takes
+    in_transit_until: int = 0  # day when transit to current planet ends
+    best_planet_name: str = ""
+    best_planet_hab: float = 0.0
+    phase: str = "in_transit"  # in_transit, surveying, evaluating, decided
+    rejections: int = 0  # number of systems rejected so far
+    max_rejections: int = 3  # force accept after this many
+    decided: bool = False
+    accepted: bool = False
+
+
+@dataclass
+class SurveyDetail:
+    """Detailed survey data revealed for a planet during SURVEY phase."""
+    planet_id: int = -1
+    atmosphere_composition: str = ""  # e.g., "nitrogen-oxygen", "carbon dioxide"
+    water_quality: str = ""  # e.g., "fresh", "saline", "toxic"
+    mineral_deposits: str = ""  # e.g., "rich iron and copper", "sparse"
+    hazards: str = ""  # e.g., "seismic activity", "none detected"
+    seasonal_pattern: str = ""  # e.g., "mild", "extreme"
+    refined_habitability: float = 0.0  # may differ from initial estimate
+
+
 # ── Trait definitions ────────────────────────────────────────────
 
 TRAIT_AXES: list[tuple[str, str]] = [

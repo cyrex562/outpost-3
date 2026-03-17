@@ -183,13 +183,17 @@ class SearchSystem(System):
     ) -> list[GameEvent]:
         events: list[GameEvent] = []
 
-        # Find all star systems and pick the best
+        # Find all non-rejected, non-surveyed star systems and pick the best
         all_systems = world.all_components_of_type(StarSystem)
-        if not all_systems:
+        candidates = {
+            eid: sys for eid, sys in all_systems.items()
+            if not sys.rejected and not sys.surveyed
+        }
+        if not candidates:
             return []
 
-        best_eid = max(all_systems, key=lambda eid: all_systems[eid].habitability_score)
-        best_system = all_systems[best_eid]
+        best_eid = max(candidates, key=lambda eid: candidates[eid].habitability_score)
+        best_system = candidates[best_eid]
         best_system.selected = True
 
         # Set up transit

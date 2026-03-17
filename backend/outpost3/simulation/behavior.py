@@ -16,6 +16,7 @@ from .ecs import World
 from .systems import System, Phase
 from .components import (
     FactionPhase, Resources, Population, ShipSystems, Notable,
+    SurveyProgress,
 )
 
 
@@ -312,6 +313,73 @@ def _check_life_support_critical(ship_systems: ShipSystems) -> Deliberation | No
     )
 
 
+def _check_survey_quality(
+    survey: SurveyProgress | None,
+    resources: Resources,
+) -> Deliberation | None:
+    """Trigger during SURVEY when best planet hab is borderline."""
+    if survey is None or survey.decided or survey.phase != "evaluating":
+        return None
+
+    # Only fires at evaluating stage with marginal habitability
+    if survey.best_planet_hab > 0.55 or survey.best_planet_hab < 0.1:
+        return None  # clearly good or clearly bad — no debate
+
+    pct = int(survey.best_planet_hab * 100)
+    return Deliberation(
+        trigger="survey_quality",
+        trigger_detail=f"Best planet {survey.best_planet_name} scores {pct}% habitability — borderline",
+        options=[
+            Option(
+                action="accept_borderline",
+                description="Accept this system despite marginal habitability",
+                pros=["End the journey", "Conserve remaining resources"],
+                cons=["Suboptimal conditions", "Higher colony risk"],
+            ),
+            Option(
+                action="push_for_better",
+                description="Reject and search for a better candidate",
+                pros=["Potential for much better world"],
+                cons=["Years more transit", "Resource depletion risk"],
+            ),
+            Option(
+                action="accept_with_preparation",
+                description="Accept, but invest extra time preparing",
+                pros=["Better founding conditions", "Reduced risk"],
+                cons=["Delays founding", "Resource cost"],
+            ),
+        ],
+    )
+
+
+def _check_rejection_fatigue(
+    survey: SurveyProgress | None,
+    population: Population,
+) -> Deliberation | None:
+    """Trigger when multiple rejections are causing crew unrest."""
+    if survey is None or survey.rejections < 2:
+        return None
+
+    return Deliberation(
+        trigger="rejection_fatigue",
+        trigger_detail=f"The crew grows weary after {survey.rejections} rejected systems — morale fraying",
+        options=[
+            Option(
+                action="lower_standards",
+                description="Lower acceptance threshold — take the next viable option",
+                pros=["Ends uncertainty", "Morale improvement"],
+                cons=["May settle for poor conditions"],
+            ),
+            Option(
+                action="rally_crew",
+                description="Rally the crew — remind them why we hold out",
+                pros=["Maintains high standards", "Inspires purpose"],
+                cons=["Risks if next system is also poor"],
+            ),
+        ],
+    )
+
+
 # ── Scoring ──────────────────────────────────────────────────────
 
 def _score_options(
@@ -396,6 +464,25 @@ def _score_options(
             else:
                 score += 0.05
                 keywords = ["conserve", "efficiency"]
+
+        elif deliberation.trigger == "survey_quality":
+            if option.action == "accept_borderline":
+                score += 0.1
+                keywords = ["conserve", "standard"]
+            elif option.action == "push_for_better":
+                score += 0.15 if resources.fuel > 500 else -0.1
+                keywords = ["push", "risk", "opportunity"]
+            else:
+                score += 0.05
+                keywords = ["standard", "protocol"]
+
+        elif deliberation.trigger == "rejection_fatigue":
+            if option.action == "lower_standards":
+                score += 0.15
+                keywords = ["conserve", "reduce", "morale"]
+            else:
+                score += 0.1
+                keywords = ["push", "risk", "opportunity"]
 
         else:
             keywords = []
@@ -498,6 +585,24 @@ def _apply_decision(
         population.morale = max(0.0, population.morale - random.uniform(0.05, 0.12))
         ship_systems.life_support = min(1.0, ship_systems.life_support + random.uniform(0.03, 0.08))
 
+    # Survey deliberation effects (mostly narrative, minor morale impact)
+    elif action == "accept_borderline":
+        population.morale = min(1.0, population.morale + random.uniform(0.02, 0.08))
+
+    elif action == "push_for_better":
+        population.morale = max(0.0, population.morale - random.uniform(0.03, 0.08))
+
+    elif action == "accept_with_preparation":
+        cost = min(resources.spare_parts, random.uniform(20, 50))
+        resources.spare_parts -= cost
+
+    elif action == "lower_standards":
+        population.morale = min(1.0, population.morale + random.uniform(0.05, 0.10))
+
+    elif action == "rally_crew":
+        delta = random.uniform(-0.03, 0.10)
+        population.morale = max(0.0, min(1.0, population.morale + delta))
+
 
 # ── BehaviorSystem ───────────────────────────────────────────────
 
@@ -537,6 +642,9 @@ class BehaviorSystem(System):
             if notable.alive:
                 notables.append(notable)
 
+        # Get survey progress (if in survey phase)
+        survey = world.get_component(faction_id, SurveyProgress)
+
         # Run condition evaluators
         events: list[GameEvent] = []
         conditions = [
@@ -547,6 +655,8 @@ class BehaviorSystem(System):
             _check_fuel_low(resources),
             _check_engine_critical(ship_systems),
             _check_life_support_critical(ship_systems),
+            _check_survey_quality(survey, resources),
+            _check_rejection_fatigue(survey, population),
         ]
 
         for deliberation in conditions:

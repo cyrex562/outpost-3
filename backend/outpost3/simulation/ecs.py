@@ -70,6 +70,12 @@ class World:
         store = self._components.get(comp_type)
         return store is not None and entity_id in store
 
+    def remove_component(self, entity_id: int, comp_type: type) -> None:
+        """Remove a component from an entity."""
+        store = self._components.get(comp_type)
+        if store is not None:
+            store.pop(entity_id, None)
+
     # ── queries ──────────────────────────────────────────────────
 
     def entities_with(self, *comp_types: type) -> list[int]:

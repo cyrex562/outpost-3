@@ -107,6 +107,21 @@
       <div>Discovered: {{ gs.search.systems_discovered }} / {{ gs.search.target_discoveries }}</div>
     </div>
 
+    <!-- Survey info -->
+    <div v-if="gs.survey && gs.phase === 'survey'">
+      <div class="text-panel-muted mb-1 uppercase tracking-wider text-[10px]">Survey</div>
+      <div class="space-y-0.5">
+        <div>Planets: {{ gs.survey.planets_surveyed }} / {{ gs.survey.total_planets }} surveyed</div>
+        <div v-if="gs.survey.best_planet_name">
+          Best: {{ gs.survey.best_planet_name }} (hab: {{ gs.survey.best_planet_hab.toFixed(2) }})
+        </div>
+        <div v-if="gs.survey.rejections > 0" class="text-yellow-400 text-[10px]">
+          Rejections: {{ gs.survey.rejections }} / {{ gs.survey.max_rejections || 3 }}
+        </div>
+        <div class="text-panel-muted text-[10px]">Phase: {{ gs.survey.phase }}</div>
+      </div>
+    </div>
+
     <!-- Notable roster -->
     <div v-if="gs.livingNotables.length">
       <div class="text-panel-muted mb-1 uppercase tracking-wider text-[10px]">Notables</div>

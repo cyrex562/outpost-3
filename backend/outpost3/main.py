@@ -16,10 +16,12 @@ from .simulation.systems import Phase
 from .simulation.components import (
     FactionPhase, Resources, Population, ShipSystems, Notable,
     Loadout, StarSystem, Planet, SearchProgress, TransitState,
+    SurveyProgress,
 )
 from .simulation.generation.loadout import LoadoutSystem
 from .simulation.generation.search import SearchSystem
 from .simulation.transit import TransitSystem
+from .simulation.survey import SurveySystem
 from .simulation.population import PopulationSystem
 from .simulation.maintenance import ShipMaintenanceSystem
 from .simulation.behavior import BehaviorSystem
@@ -84,6 +86,7 @@ def build_snapshot() -> dict:
         "star_systems": [],
         "transit": None,
         "search": None,
+        "survey": None,
         "ship_name": None,
     }
 
@@ -135,6 +138,20 @@ def build_snapshot() -> dict:
             snapshot["search"] = {
                 "systems_discovered": search.systems_discovered,
                 "target_discoveries": search.target_discoveries,
+            }
+
+        survey = world.get_component(fid, SurveyProgress)
+        if survey:
+            snapshot["survey"] = {
+                "system_id": survey.system_id,
+                "planets_surveyed": survey.planets_surveyed,
+                "total_planets": survey.total_planets,
+                "best_planet_name": survey.best_planet_name,
+                "best_planet_hab": survey.best_planet_hab,
+                "phase": survey.phase,
+                "rejections": survey.rejections,
+                "decided": survey.decided,
+                "accepted": survey.accepted,
             }
 
         loadout = world.get_component(fid, Loadout)
@@ -191,6 +208,7 @@ def setup_world(engine: TimeEngine) -> None:
     # Register systems in execution order
     engine.register_system(LoadoutSystem())       # order=1
     engine.register_system(SearchSystem())        # order=10
+    engine.register_system(SurveySystem())        # order=15
     engine.register_system(TransitSystem())       # order=20
     engine.register_system(PopulationSystem())    # order=30
     engine.register_system(ShipMaintenanceSystem())  # order=40

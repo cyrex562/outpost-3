@@ -13,6 +13,7 @@ export const useGameStateStore = defineStore('gameState', () => {
   const starSystems = ref([])
   const transit = ref(null)
   const search = ref(null)
+  const survey = ref(null)
   const shipName = ref(null)
 
   // ── Historical data ring buffer ─────────────────────────────
@@ -29,6 +30,7 @@ export const useGameStateStore = defineStore('gameState', () => {
     starSystems.value = snapshot.star_systems || []
     transit.value = snapshot.transit
     search.value = snapshot.search
+    survey.value = snapshot.survey
     if (snapshot.ship_name) shipName.value = snapshot.ship_name
 
     // Record history (at most once per game-day to avoid duplication)
@@ -91,6 +93,7 @@ export const useGameStateStore = defineStore('gameState', () => {
     starSystems,
     transit,
     search,
+    survey,
     shipName,
     history,
     livingNotables,

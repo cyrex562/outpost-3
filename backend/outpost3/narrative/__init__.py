@@ -173,6 +173,16 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
     "population.yearly_report": None,  # custom renderer
     "notable.death": None,  # custom renderer
     "notable.succession": None,  # custom renderer
+
+    # ── Survey phase events ──────────────────────────────────────
+    "survey.begin": None,  # custom renderer
+    "survey.planet_survey_begin": [
+        "Commencing survey of planet {planet_index}/{total_planets}. Estimated duration: {survey_days} days.",
+        "Survey probes deployed to planet {planet_index} of {total_planets}. Expected completion in {survey_days} days.",
+    ],
+    "survey.planet_report": None,  # custom renderer
+    "survey.system_accepted": None,  # custom renderer
+    "survey.system_rejected": None,  # custom renderer
 }
 
 
@@ -377,6 +387,74 @@ def _render_transit_phase_change(event: GameEvent) -> str:
     return _random.choice(options)
 
 
+def _render_survey_begin(event: GameEvent) -> str:
+    d = event.data
+    rejections = d.get("rejections_so_far", 0)
+    suffix = ""
+    if rejections > 0:
+        suffix = f" This is attempt #{rejections + 1}."
+    templates = [
+        f"⏸ Entering the {d.get('system_name', '?')} system. "
+        f"{d.get('num_planets', '?')} planets to survey.{suffix}",
+        f"⏸ Survey operations beginning in {d.get('system_name', '?')}. "
+        f"Probes deploying toward {d.get('num_planets', '?')} worlds.{suffix}",
+    ]
+    return _random.choice(templates)
+
+
+def _render_planet_report(event: GameEvent) -> str:
+    d = event.data
+    initial = d.get("initial_hab", 0)
+    refined = d.get("refined_hab", 0)
+    change = refined - initial
+    change_str = f"+{change:.2f}" if change >= 0 else f"{change:.2f}"
+
+    lines = [
+        f"SURVEY REPORT: {d.get('planet_name', '?')} "
+        f"({d.get('planet_type', '?')}, {d.get('size', '?')}R⊕) "
+        f"[{d.get('planet_number', '?')}/{d.get('total_planets', '?')}]",
+        f"  Atmosphere: {d.get('atmosphere', '?')}",
+        f"  Water: {d.get('water', '?')}",
+        f"  Minerals: {d.get('minerals', '?')}",
+        f"  Hazards: {d.get('hazards', '?')}",
+        f"  Seasons: {d.get('seasons', '?')}",
+        f"  Habitability: {initial:.2f} → {refined:.2f} ({change_str})",
+    ]
+    return "\n".join(lines)
+
+
+def _render_system_accepted(event: GameEvent) -> str:
+    d = event.data
+    rejections = d.get("rejections", 0)
+    journey_note = ""
+    if rejections > 0:
+        journey_note = f" After {rejections} rejected system(s), this is the one."
+
+    templates = [
+        f"⏸ System accepted: {d.get('system_name', '?')}. "
+        f"Best candidate: {d.get('best_planet', '?')} "
+        f"(habitability {d.get('best_hab', 0):.2f}, threshold {d.get('threshold', 0):.2f}).{journey_note}",
+        f"⏸ This is the one. {d.get('best_planet', '?')} in the {d.get('system_name', '?')} system "
+        f"meets our requirements (hab: {d.get('best_hab', 0):.2f}).{journey_note}",
+    ]
+    return _random.choice(templates)
+
+
+def _render_system_rejected(event: GameEvent) -> str:
+    d = event.data
+    remaining = d.get("max_rejections", 3) - d.get("rejections", 0)
+    templates = [
+        f"⏸ System rejected: {d.get('system_name', '?')}. "
+        f"Best planet {d.get('best_planet', '?')} scored only {d.get('best_hab', 0):.2f} "
+        f"(threshold: {d.get('threshold', 0):.2f}). "
+        f"Resuming search. {remaining} rejection(s) remaining before forced acceptance.",
+        f"⏸ Not good enough. {d.get('system_name', '?')} fails to meet standards "
+        f"(best: {d.get('best_hab', 0):.2f}, need: {d.get('threshold', 0):.2f}). "
+        f"The search continues. {remaining} chances left.",
+    ]
+    return _random.choice(templates)
+
+
 # ── Custom renderer registry ────────────────────────────────────
 
 _CUSTOM_RENDERERS: dict[str, Callable[[GameEvent], str]] = {
@@ -391,6 +469,10 @@ _CUSTOM_RENDERERS: dict[str, Callable[[GameEvent], str]] = {
     "population.yearly_report": _render_population_yearly,
     "notable.death": _render_notable_death,
     "notable.succession": _render_notable_succession,
+    "survey.begin": _render_survey_begin,
+    "survey.planet_report": _render_planet_report,
+    "survey.system_accepted": _render_system_accepted,
+    "survey.system_rejected": _render_system_rejected,
 }
 
 
