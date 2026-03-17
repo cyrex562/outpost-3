@@ -90,6 +90,7 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
     "loadout.ship_commissioned": [
         "⏸ The {ship_name} has been commissioned. Loadout complete.",
         "⏸ Colony ship {ship_name} stands ready. Reviewing manifest...",
+        "⏸ {ship_name} — loaded, fueled, and crewed. The departure window opens.",
     ],
 
     "loadout.summary": [
@@ -124,14 +125,20 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
 
     # ── Transit phase events ─────────────────────────────────────
     "transit.phase_change": {
-        "accelerating": ["Main engines firing — the ship accelerates toward cruise velocity."],
+        "accelerating": [
+            "Main engines firing — the ship accelerates toward cruise velocity.",
+            "The burn begins. Acceleration pushes the crew back in their couches.",
+            "Engine ignition confirmed. The stars begin to shift.",
+        ],
         "cruising": [
             "Acceleration complete. Cruising at relativistic velocity.",
             "The ship has reached cruise speed. The long journey continues.",
+            "Engines throttle down to standby. Cruise velocity achieved — years of silence ahead.",
         ],
         "decelerating": [
             "Deceleration burn initiated — the destination system grows closer.",
             "Engines reversed. Beginning approach to target system.",
+            "The long coast is over. Retro-burn commences as a faint star grows brighter.",
         ],
     },
     "transit.yearly_summary": None,  # custom renderer
@@ -143,10 +150,12 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
         "and evasive maneuvers cost {fuel_cost} fuel.",
         "Proximity alerts sound as debris impacts the hull ({hull_damage}% damage). "
         "Navigation burns through {fuel_cost} extra fuel avoiding the worst of it.",
+        "Debris field contact — {hull_damage}% hull damage sustained. {fuel_cost} fuel spent on evasive burns.",
     ],
     "transit.event.equipment_failure": [
         "Critical failure in {system} systems — {damage}% degradation. Engineering crews scramble to contain the damage.",
         "A cascade failure drops {system} performance by {damage}%. Repair teams dispatched.",
+        "Warning klaxon in {system} compartment — {damage}% capacity lost before the breach is sealed.",
     ],
     "transit.event.cosmic_phenomenon": ["{flavor}"],
     "transit.event.resource_find": [
@@ -156,10 +165,12 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
     "transit.event.crew_conflict": [
         "Tensions between crew factions boil over into a heated dispute. Morale drops {morale_change}%.",
         "A disagreement over resource allocation leads to unrest. Crew morale affected ({morale_change}%).",
+        "Factions form around a divisive issue. Arguments turn bitter before cooler heads prevail. Morale: {morale_change}%.",
     ],
     "transit.event.celebration": [
         "The crew holds a celebration marking another year of the journey. Spirits lift (+{morale_change}% morale).",
         "A festival day brings the community together. Morale improves by {morale_change}%.",
+        "Music and laughter echo through the hab decks. For a night, the void feels less empty. Morale +{morale_change}%.",
     ],
     "transit.event.cultural_shift": ["{flavor}"],
 
@@ -167,6 +178,7 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
     "maintenance.breakdown": [
         "Breakdown in {system} — {damage}% damage. Current health: {health}%.",
         "Unexpected failure in {system} systems ({damage}% degradation). Health now at {health}%.",
+        "{system} reliability drops another notch — {damage}% damage, {health}% remaining.",
     ],
 
     # ── Population events ────────────────────────────────────────
@@ -179,10 +191,26 @@ _TEMPLATES: dict[str, str | list[str] | dict | Callable] = {
     "survey.planet_survey_begin": [
         "Commencing survey of planet {planet_index}/{total_planets}. Estimated duration: {survey_days} days.",
         "Survey probes deployed to planet {planet_index} of {total_planets}. Expected completion in {survey_days} days.",
+        "Orbital insertion complete. Beginning detailed scan of planet {planet_index}/{total_planets} ({survey_days} days).",
     ],
     "survey.planet_report": None,  # custom renderer
     "survey.system_accepted": None,  # custom renderer
     "survey.system_rejected": None,  # custom renderer
+
+    # ── Founding phase events ────────────────────────────────────
+    "founding.landing_site_selected": None,  # custom renderer
+    "founding.descent_complete": [
+        "Touchdown confirmed. {population} colonists set foot on alien soil for the first time.",
+        "The landers are down. {population} souls step out into the light of a new sun.",
+        "Descent complete. {population} people stand on the surface, looking up at unfamiliar stars.",
+        "Landing successful. {population} colonists breathe open air for the first time in years.",
+    ],
+    "founding.first_structures": [
+        "First hab modules assembled from {materials_remaining} tons of materials and {salvaged_equipment} tons of salvaged ship equipment.",
+        "The first structures rise from the surface — shelter, at last. Materials: {materials_remaining}t. Salvaged gear: {salvaged_equipment}t.",
+        "Prefab shelters deployed. {materials_remaining}t of building materials remain. {salvaged_equipment}t stripped from the ship.",
+    ],
+    "founding.colony_established": None,  # custom renderer
 }
 
 
@@ -387,6 +415,88 @@ def _render_transit_phase_change(event: GameEvent) -> str:
     return _random.choice(options)
 
 
+def _render_landing_site_selected(event: GameEvent) -> str:
+    d = event.data
+    hab = d.get("habitability", 0)
+    quality = "promising" if hab > 0.6 else "adequate" if hab > 0.35 else "challenging"
+    templates = [
+        f"⏸ Landing site selected: {d.get('planet_name', '?')} in the {d.get('system_name', '?')} system. "
+        f"Habitability {hab:.2f} — a {quality} new home. Preparing descent sequence.",
+        f"⏸ {d.get('planet_name', '?')} has been chosen. "
+        f"A {quality} world (hab: {hab:.2f}) in {d.get('system_name', '?')}. "
+        f"The ship descends for the last time.",
+    ]
+    return _random.choice(templates)
+
+
+def _render_colony_established(event: GameEvent) -> str:
+    d = event.data
+    condition = d.get("condition", "moderate")
+    colony = d.get("colony_name", "the colony")
+    pop = d.get("population", 0)
+    years = d.get("journey_years", "?")
+    rejections = d.get("rejections", 0)
+    notables_alive = d.get("notables_alive", 0)
+    notables_total = d.get("notables_total", 0)
+    details = d.get("condition_details", [])
+    morale = d.get("morale", 0)
+
+    lines = [f"⏸ COLONY FOUNDED: {colony}"]
+    lines.append(f"")
+    lines.append(f"After {years} years, {pop} colonists have a new home.")
+
+    if rejections > 0:
+        lines.append(f"{rejections} star system(s) were rejected before this one was chosen.")
+
+    lines.append(f"")
+
+    # Condition assessment
+    condition_labels = {
+        "strong": "The colony begins from a position of strength.",
+        "moderate": "The colony has a reasonable start, though not without challenges.",
+        "weakened": "The journey has taken its toll. The colony starts diminished.",
+        "desperate": "Against all odds, they've made it — but barely. A desperate founding.",
+    }
+    lines.append(condition_labels.get(condition, ""))
+
+    for detail in details:
+        lines.append(f"  · {detail}")
+
+    lines.append(f"")
+    lines.append(f"Population: {pop} | Morale: {int(morale * 100)}%")
+    lines.append(f"Notables surviving: {notables_alive}/{notables_total}")
+
+    res = d.get("resources", {})
+    if res:
+        res_parts = [f"{k}: {v}" for k, v in res.items()]
+        lines.append(f"Stores: {', '.join(res_parts)}")
+
+    lines.append(f"")
+
+    # Closing flavor
+    closings = {
+        "strong": [
+            "The future looks bright for the people of " + colony + ".",
+            "A new chapter begins — and this one starts well.",
+        ],
+        "moderate": [
+            "It won't be easy, but " + colony + " has what it needs to survive.",
+            "The hard part is over. The harder part begins.",
+        ],
+        "weakened": [
+            "They've survived the journey. Now they must survive the world.",
+            colony + " will need every ounce of resilience its people have left.",
+        ],
+        "desperate": [
+            "They call it a colony. For now, it's a camp of survivors clinging to hope.",
+            "The name " + colony + " is more prayer than declaration. But they're alive.",
+        ],
+    }
+    lines.append(_random.choice(closings.get(condition, ["The colony is founded."])))
+
+    return "\n".join(lines)
+
+
 def _render_survey_begin(event: GameEvent) -> str:
     d = event.data
     rejections = d.get("rejections_so_far", 0)
@@ -473,6 +583,8 @@ _CUSTOM_RENDERERS: dict[str, Callable[[GameEvent], str]] = {
     "survey.planet_report": _render_planet_report,
     "survey.system_accepted": _render_system_accepted,
     "survey.system_rejected": _render_system_rejected,
+    "founding.landing_site_selected": _render_landing_site_selected,
+    "founding.colony_established": _render_colony_established,
 }
 
 

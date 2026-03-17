@@ -22,6 +22,7 @@ from .simulation.generation.loadout import LoadoutSystem
 from .simulation.generation.search import SearchSystem
 from .simulation.transit import TransitSystem
 from .simulation.survey import SurveySystem
+from .simulation.founding import FoundingSystem
 from .simulation.population import PopulationSystem
 from .simulation.maintenance import ShipMaintenanceSystem
 from .simulation.behavior import BehaviorSystem
@@ -87,6 +88,7 @@ def build_snapshot() -> dict:
         "transit": None,
         "search": None,
         "survey": None,
+        "founding": None,
         "ship_name": None,
     }
 
@@ -154,6 +156,14 @@ def build_snapshot() -> dict:
                 "accepted": survey.accepted,
             }
 
+        # Founding phase info
+        if fp and fp.phase == Phase.FOUNDING:
+            survey_p = world.get_component(fid, SurveyProgress)
+            snapshot["founding"] = {
+                "planet_name": survey_p.best_planet_name if survey_p else None,
+                "planet_hab": survey_p.best_planet_hab if survey_p else None,
+            }
+
         loadout = world.get_component(fid, Loadout)
         if loadout:
             snapshot["ship_name"] = loadout.ship_name
@@ -207,6 +217,7 @@ def setup_world(engine: TimeEngine) -> None:
 
     # Register systems in execution order
     engine.register_system(LoadoutSystem())       # order=1
+    engine.register_system(FoundingSystem())      # order=5
     engine.register_system(SearchSystem())        # order=10
     engine.register_system(SurveySystem())        # order=15
     engine.register_system(TransitSystem())       # order=20
