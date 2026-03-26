@@ -84,6 +84,16 @@ _TEMPLATES: dict[str, str | list[str]] = {
 
     # Engine errors
     "engine.error": "⚠ Simulation error: {error}",
+
+    # ── Loadout Phase ─────────────────────────────────────────────
+    "ship.loadout_complete": [
+        "⏸ {ship_name} is fully provisioned with {population:,} colonists and {notable_count} mission officers. Departure imminent.",
+        "⏸ Loadout complete. {ship_name} — {population:,} souls aboard, {notable_count} named officers. The stars await.",
+        "⏸ {ship_name} clears final inspection. {population:,} colonists embarked, crew of {notable_count} officers at their stations.",
+    ],
+    "notable.introduced": [
+        "{name} ({role}) — {trait_list}.",
+    ],
 }
 
 

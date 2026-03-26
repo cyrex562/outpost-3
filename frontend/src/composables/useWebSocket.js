@@ -1,5 +1,6 @@
 import { useTimeStore } from '../stores/time'
 import { useEventLogStore } from '../stores/eventLog'
+import { useWorldStore } from '../stores/world'
 
 let ws = null
 let reconnectTimer = null
@@ -8,6 +9,7 @@ export function useWebSocket() {
   function connect() {
     const timeStore = useTimeStore()
     const eventLog = useEventLogStore()
+    const worldStore = useWorldStore()
 
     // Build WebSocket URL relative to current host
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -32,6 +34,8 @@ export function useWebSocket() {
           timeStore.updateFromServer(data)
         } else if (data.type === 'event') {
           eventLog.addEvent(data)
+        } else if (data.type === 'world_state') {
+          worldStore.updateFromServer(data)
         }
       } catch (err) {
         console.error('[ws] parse error:', err)

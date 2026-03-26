@@ -12,15 +12,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .simulation import GameEvent, GameTime, Severity
 from .simulation.engine import TimeEngine, VALID_SPEEDS
+from .simulation.world import World
+from .simulation.loadout import run_loadout, world_state_dict
 from .narrative import render
 
 # ── globals ───────────────────────────────────────────────────────
 
 engine = TimeEngine()
+world = World()
 connected_clients: set[WebSocket] = set()
 
 
-# ── placeholder tick handler (Milestone 0) ────────────────────────
+# ── placeholder tick handler (Milestone 0 flavor — kept for M0 parity) ──
 
 DAILY_FLAVOR: list[tuple[str, str, Severity]] = [
     ("daily.weather", "clear_skies", Severity.DEBUG),
@@ -41,14 +44,8 @@ DAILY_FLAVOR: list[tuple[str, str, Severity]] = [
 
 
 async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
-    """Emit varied events each day as a proof of concept.
-
-    Generates year-start, month-start, random daily events, and
-    auto-pause milestones.
-    """
     events: list[GameEvent] = []
 
-    # Year start
     if game_time.is_year_start:
         events.append(GameEvent(
             event_type="time.year_start",
@@ -57,7 +54,6 @@ async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
             data={"year": game_time.year},
         ))
 
-    # Month start
     if game_time.is_month_start and not game_time.is_year_start:
         events.append(GameEvent(
             event_type="time.month_start",
@@ -66,7 +62,6 @@ async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
             data={"month": game_time.month, "year": game_time.year},
         ))
 
-    # Random daily events (~30% chance per day)
     if random.random() < 0.30:
         event_type, variant, severity = random.choice(DAILY_FLAVOR)
         events.append(GameEvent(
@@ -77,7 +72,6 @@ async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
                   "month": game_time.month, "day": game_time.day_of_month},
         ))
 
-    # Auto-pause every year (365 days) as proof of concept
     if game_time.is_year_start and game_time.year > 1:
         events.append(GameEvent(
             event_type="auto_pause.year_end",
@@ -87,7 +81,6 @@ async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
             data={"year": game_time.year - 1},
         ))
 
-    # Render narrative text onto each event
     for event in events:
         event.text = render(event)
 
@@ -95,10 +88,8 @@ async def placeholder_tick(game_time: GameTime) -> list[GameEvent]:
 
 
 async def placeholder_batch(start: GameTime, end: GameTime, num_days: int) -> list[GameEvent]:
-    """Batch handler for high-speed simulation. Summarizes a range of days."""
     events: list[GameEvent] = []
 
-    # Emit year-start events for any year boundaries in the range
     for d in range(start.day_offset, end.day_offset + 1):
         gt = GameTime(d)
         if gt.is_year_start:
@@ -108,7 +99,6 @@ async def placeholder_batch(start: GameTime, end: GameTime, num_days: int) -> li
                 game_time=gt,
                 data={"year": gt.year},
             ))
-            # Auto-pause on year boundary
             if gt.year > 1:
                 events.append(GameEvent(
                     event_type="auto_pause.year_end",
@@ -118,7 +108,6 @@ async def placeholder_batch(start: GameTime, end: GameTime, num_days: int) -> li
                     data={"year": gt.year - 1},
                 ))
 
-    # Emit month-start events for month boundaries
     for d in range(start.day_offset, end.day_offset + 1):
         gt = GameTime(d)
         if gt.is_month_start and not gt.is_year_start:
@@ -129,7 +118,6 @@ async def placeholder_batch(start: GameTime, end: GameTime, num_days: int) -> li
                 data={"month": gt.month, "year": gt.year},
             ))
 
-    # A few random events for flavor (scaled by range size)
     num_random = max(1, num_days // 30)
     for _ in range(num_random):
         rand_day = random.randint(start.day_offset, end.day_offset)
@@ -143,10 +131,8 @@ async def placeholder_batch(start: GameTime, end: GameTime, num_days: int) -> li
                   "month": gt.month, "day": gt.day_of_month},
         ))
 
-    # Sort by day offset so events appear in chronological order
     events.sort(key=lambda e: e.game_time.day_offset)
 
-    # Render narrative text
     for event in events:
         event.text = render(event)
 
@@ -182,11 +168,23 @@ async def on_state_change() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Run loadout: populate world, collect intro events
+    _result, loadout_events = run_loadout(world)
+
+    # Render narrative text for each loadout event
+    for event in loadout_events:
+        event.text = render(event)
+
+    # Register engine handlers
     engine.on_tick(placeholder_tick)
     engine.on_batch(placeholder_batch)
     engine.on_event(on_event)
     engine.on_state_change(on_state_change)
     engine.start()
+
+    # Stash loadout events so the WS handler can replay them for new clients
+    app.state.loadout_events = loadout_events
+
     yield
     engine.stop()
 
@@ -210,7 +208,12 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     connected_clients.add(ws)
     try:
+        # Send time state + world state on connect
         await ws.send_text(json.dumps(engine.state_dict()))
+        await ws.send_text(json.dumps(world_state_dict(world)))
+        # Replay loadout events so late-joining clients see the roster
+        for event in app.state.loadout_events:
+            await ws.send_text(json.dumps({"type": "event", **event.to_dict()}))
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
@@ -244,3 +247,8 @@ async def set_speed(speed: int):
 @app.get("/api/state")
 async def get_state():
     return engine.state_dict()
+
+
+@app.get("/api/world")
+async def get_world():
+    return world_state_dict(world)
