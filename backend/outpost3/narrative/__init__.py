@@ -94,6 +94,78 @@ _TEMPLATES: dict[str, str | list[str]] = {
     "notable.introduced": [
         "{name} ({role}) — {trait_list}.",
     ],
+
+    # ── Search Phase ──────────────────────────────────────────────
+    "search.candidate_found": [
+        "Long-range survey confirms {name} ({star_type}), {distance_ly} light-years out. {planet_count} worlds detected — best candidate {best_planet} at {best_habitability:.0f}% habitability.",
+        "{name}: {star_type} star, {distance_ly} ly distant. {planet_count} planetary bodies. Peak habitability {best_habitability:.0f}%.",
+        "Navigation logs {name} ({star_type}) at {distance_ly} light-years. Sensor sweep shows {planet_count} worlds; {best_planet} registers {best_habitability:.0f}% habitability.",
+    ],
+    "search.destination_selected": [
+        "⏸ Navigation committee selects {name} as primary destination. Estimated transit: {transit_years} years. {candidates_rejected} alternative system(s) set aside.",
+        "⏸ Course plotted to {name} ({star_type}), {distance_ly} light-years distant. Transit time: {transit_years} years. Best habitability: {best_habitability:.0f}%.",
+        "⏸ Destination confirmed: {name}. A {transit_years}-year voyage lies ahead. {candidates_rejected} candidate(s) were considered and rejected.",
+    ],
+
+    # ── Transit Phase ─────────────────────────────────────────────
+    "transit.year_summary": [
+        "Transit year {transit_year}: {population:,} colonists aboard. Food reserves for {food_years:.1f} more years. Destination {years_remaining:.1f} years out. Hull at {hull_integrity:.0f}%.",
+        "Year {transit_year} of transit. Pop: {population:,} (+{births} births, -{deaths} deaths). {years_remaining:.1f} years remaining. Food: {food_years:.1f} yr.",
+    ],
+    "transit.batch_summary": [
+        "Transit update — {population:,} colonists, {years_remaining:.1f} years to destination. Food reserves: {food_years:.1f} years. Hull: {hull_integrity:.0f}%.",
+    ],
+    "transit.food_critical": [
+        "⏸ Food reserves critical — {food_years:.2f} years remaining for {population:,} colonists. Rationing protocols initiated.",
+    ],
+    "transit.medicine_low": [
+        "Medical stores running low — {medicine} units remain for {population:,} colonists.",
+    ],
+    "transit.hull_warning": [
+        "⏸ Hull integrity at {hull_integrity:.0f}% — structural engineers report accelerating microcrack propagation. Emergency repair teams deployed.",
+    ],
+    "transit.arrival": [
+        "⏸ {destination} system acquired on long-range sensors. After {transit_years} years of transit, {population:,} colonists approach their new home. Hull integrity: {hull_integrity:.0f}%.",
+        "⏸ Transit complete. {destination} fills the forward viewports. {population:,} souls survived the {transit_years}-year journey. Survey operations begin.",
+    ],
+    "transit.equipment_failure": [
+        "Equipment failure in engineering section — {parts_cost} spare parts consumed in repairs.",
+        "Malfunction reported in drive systems. Repair crews respond; {parts_cost} components replaced.",
+        "Critical relay failure in habitat module 4. Resolved in {parts_cost} parts. No casualties.",
+    ],
+    "transit.medical_emergency": [
+        "Medical emergency aboard — {medicine_cost} treatment units expended. Patient stabilised.",
+        "Outbreak of respiratory illness in crew quarters. Medical team responds, {medicine_cost} medicine units consumed.",
+        "Emergency surgery required. {medicine_cost} units of medical stores used. Prognosis good.",
+    ],
+    "transit.hull_microcrack": [
+        "Micrometeorite impact detected — {parts_cost} parts used to seal minor hull breach.",
+        "Hull sensor reports new stress fracture, sector 7. Repair team dispatched; {parts_cost} components used.",
+        "Routine hull inspection finds hairline crack in outer hull panel. Patched with {parts_cost} parts.",
+    ],
+    "transit.resource_leak": [
+        "Pipe rupture in storage bay — {food_cost} food units and {water_cost} water units lost before containment.",
+        "Storage tank seal failure. {food_cost} food and {water_cost} water units vented before repairs completed.",
+    ],
+    "transit.crew_conflict": [
+        "Dispute among colonists in habitat ring B — social council intervenes. Situation resolved.",
+        "Tension in crew quarters over work rotation schedules. Leadership meets; compromise reached.",
+        "Altercation in the mess hall. Security called; minor injuries, no lasting harm.",
+    ],
+    "transit.scientific_observation": [
+        "Astronomy team records unusual pulsar timing anomaly — logged for post-arrival analysis.",
+        "Telescope array captures close-approach of rogue planetoid. Samples impossible — logged.",
+        "Cosmic ray flux measurement exceeds background model. Shielding adjusted; no crew exposure.",
+    ],
+    "transit.morale_high": [
+        "Morale survey across crew quarters returns positive results. The journey continues in good spirit.",
+        "Children born during transit hold first organised school assembly — a heartening milestone.",
+        "Crew celebrates a decade of transit with a communal gathering in the central atrium.",
+    ],
+    "transit.system_anomaly": [
+        "Navigation computer flags an unexpected gravitational perturbation — course adjusted, {parts_cost} components recalibrated.",
+        "Sensor array detects uncharted debris field — trajectory modified, minor {parts_cost}-unit equipment cost.",
+    ],
 }
 
 

@@ -75,6 +75,80 @@ class Notable:
         }
 
 
+# ── Star systems ──────────────────────────────────────────────────
+
+@dataclass
+class Planet:
+    """A single world in a candidate star system."""
+    name: str
+    type: str           # rocky | ocean | frozen | barren | volcanic | gas_giant
+    habitability: float  # 0–100
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "type": self.type,
+            "habitability": round(self.habitability, 1),
+            "notes": list(self.notes),
+        }
+
+
+@dataclass
+class CandidateSystem:
+    """A prospective colony destination discovered during the Search Phase."""
+    name: str
+    star_type: str       # e.g. "G2V", "K5V", "M3V"
+    distance_ly: float   # light-years from home
+    angle_deg: float     # 2-D map bearing (0–360°)
+    planets: list[Planet]
+    best_habitability: float = 0.0
+    selected: bool = False   # true for the chosen destination
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "star_type": self.star_type,
+            "distance_ly": round(self.distance_ly, 1),
+            "angle_deg": round(self.angle_deg, 1),
+            "planets": [p.to_dict() for p in self.planets],
+            "best_habitability": round(self.best_habitability, 1),
+            "selected": self.selected,
+        }
+
+
+# ── Transit ────────────────────────────────────────────────────────
+
+@dataclass
+class Transit:
+    """State of the interstellar transit phase."""
+    destination_name: str
+    duration_days: int    # total journey length
+    fuel_per_day: float   # propulsion units burned per day
+    days_elapsed: int = 0
+    arrived: bool = False
+
+    @property
+    def progress(self) -> float:
+        if self.duration_days == 0:
+            return 1.0
+        return min(1.0, self.days_elapsed / self.duration_days)
+
+    @property
+    def days_remaining(self) -> int:
+        return max(0, self.duration_days - self.days_elapsed)
+
+    def to_dict(self) -> dict:
+        return {
+            "destination_name": self.destination_name,
+            "duration_days": self.duration_days,
+            "days_elapsed": self.days_elapsed,
+            "days_remaining": self.days_remaining,
+            "progress": round(self.progress, 4),
+            "arrived": self.arrived,
+        }
+
+
 # ── Phase ─────────────────────────────────────────────────────────
 
 PHASES = ("loadout", "search", "transit", "survey", "founding")

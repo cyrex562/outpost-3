@@ -23,6 +23,7 @@ export const useLayoutStore = defineStore('layout', () => {
     makePanel('time-controls', 'Time Controls', 'TimeControls', 20, 20, 380, 160),
     makePanel('event-log', 'Event Log', 'EventLog', 20, 200, 500, 400),
     makePanel('ship-status', 'Ship Status', 'ShipStatus', 540, 20, 340, 580),
+    makePanel('star-map', 'Star Map', 'StarMap', 900, 20, 380, 580),
   ])
 
   const panels = computed(() =>

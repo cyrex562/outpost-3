@@ -13,7 +13,9 @@ import random as _random_module
 from dataclasses import dataclass
 
 from ..simulation import GameEvent, GameTime, Severity
-from .components import GamePhase, Notable, Population, Resources, ShipHull
+from .components import (
+    CandidateSystem, GamePhase, Notable, Population, Resources, ShipHull, Transit,
+)
 from .world import World
 
 # ── Name pools ────────────────────────────────────────────────────
@@ -103,16 +105,22 @@ def _generate_notables(
 
 
 def _starting_resources(rng: _random_module.Random, pop: int) -> Resources:
-    """Scale resources to population size with ±20 % variance."""
+    """Scale resources for a generation ship voyage (15–35 years of reserves).
+
+    Food and water are stored reserves beyond closed-loop life support.
+    Fuel is interstellar propulsion; spare parts cover decades of maintenance.
+    ±20 % variance creates meaningful resource uncertainty for the player.
+    """
     def vary(base: int) -> int:
         return int(base * rng.uniform(0.80, 1.20))
 
+    years_reserve = rng.randint(15, 35)   # unknown voyage length creates tension
     return Resources(
-        food=vary(pop * 365),          # ~1 year supply per person
-        water=vary(pop * 365),
-        medicine=vary(pop * 10),
-        fuel=vary(100_000),
-        spare_parts=vary(5_000),
+        food=vary(pop * 365 * years_reserve),
+        water=vary(pop * 365 * (years_reserve + 5)),  # extra buffer (recycled)
+        medicine=vary(pop * 100),
+        fuel=vary(1_000_000),
+        spare_parts=vary(100_000),
     )
 
 
@@ -239,6 +247,16 @@ def world_state_dict(world: World) -> dict:
     # Notables
     notables = [n.to_dict() for _, n in world.query(Notable)]
 
+    # Candidate star systems
+    systems = [s.to_dict() for _, s in world.query(CandidateSystem)]
+
+    # Transit progress
+    transit_data: dict = {}
+    transit_pair = world.query_one(Transit)
+    if transit_pair:
+        _, tr = transit_pair
+        transit_data = tr.to_dict()
+
     return {
         "type": "world_state",
         "phase": phase,
@@ -246,4 +264,6 @@ def world_state_dict(world: World) -> dict:
         "population": pop_data,
         "resources": resources_data,
         "notables": notables,
+        "systems": systems,
+        "transit": transit_data,
     }
