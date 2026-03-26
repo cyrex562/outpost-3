@@ -201,6 +201,20 @@ class PendingSearch:
     rejection_count: int = 0
 
 
+# ── Pending deliberation ──────────────────────────────────────────
+
+@dataclass
+class PendingDeliberation:
+    """Holds a crew deliberation awaiting player approval.
+
+    Created by check_and_fire(); consumed by confirm_deliberation().
+    The player may accept the crew's recommendation or pick any option.
+    """
+    trigger: str
+    scored_options: list[dict]   # same structure as deliberation.complete
+    recommendation: str           # crew's chosen_key
+
+
 # ── Resource history ──────────────────────────────────────────────
 
 @dataclass

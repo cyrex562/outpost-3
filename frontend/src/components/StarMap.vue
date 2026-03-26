@@ -32,6 +32,18 @@ async function surveyChoice(decision) {
   }
 }
 
+async function deliberationChoice(optionKey) {
+  busy.value = true
+  apiError.value = ''
+  try {
+    await api.deliberationDecision(optionKey)
+  } catch (e) {
+    apiError.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
+
 // SVG viewport: 220×220, home system at center (110, 110)
 const CX = 110
 const CY = 110
@@ -173,6 +185,40 @@ const transitLabel = computed(() => {
         </div>
         <div class="text-panel-muted" v-if="transitLabel">
           {{ transitLabel.elapsed }} yr elapsed · {{ transitLabel.remaining }} yr remaining
+        </div>
+      </div>
+
+      <!-- Pending deliberation — crew decision awaiting player input -->
+      <div v-if="world.pendingDeliberation?.trigger" class="space-y-1.5">
+        <div class="text-panel-muted uppercase tracking-wider text-[10px]">Crew Deliberation Required</div>
+        <div class="border border-yellow-700/60 rounded px-2 py-2 bg-yellow-950/20 space-y-2">
+          <div class="text-yellow-300 text-[11px] font-semibold">{{ world.pendingDeliberation.trigger_label }}</div>
+          <div class="text-panel-muted text-[10px]">
+            Crew recommends:
+            <span class="text-yellow-200 font-semibold">
+              {{ world.pendingDeliberation.options?.find(o => o.key === world.pendingDeliberation.recommendation)?.label ?? world.pendingDeliberation.recommendation }}
+            </span>
+          </div>
+          <div class="space-y-1">
+            <button
+              v-for="opt in world.pendingDeliberation.options"
+              :key="opt.key"
+              class="w-full text-left px-2 py-1 rounded border text-[10px] transition-colors"
+              :class="[
+                busy ? 'opacity-40 cursor-not-allowed border-panel-border text-panel-muted' :
+                opt.key === world.pendingDeliberation.recommendation
+                  ? 'border-yellow-600 text-yellow-200 hover:bg-yellow-900/30'
+                  : 'border-panel-border text-panel-muted hover:border-panel-text hover:text-panel-text'
+              ]"
+              :disabled="busy"
+              @click="deliberationChoice(opt.key)"
+            >
+              <span v-if="opt.key === world.pendingDeliberation.recommendation" class="mr-1">★</span>
+              {{ opt.label }}
+              <span class="text-panel-muted ml-1">({{ (opt.utility * 100).toFixed(0) }})</span>
+            </button>
+          </div>
+          <div v-if="apiError" class="text-orange-400 text-[10px]">{{ apiError }}</div>
         </div>
       </div>
 

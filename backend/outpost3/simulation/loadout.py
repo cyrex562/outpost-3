@@ -14,8 +14,8 @@ from dataclasses import dataclass
 
 from ..simulation import GameEvent, GameTime, Severity
 from .components import (
-    ActiveEffects, CandidateSystem, Colony, GamePhase, Notable, Population,
-    ResourceHistory, Resources, ShipHull, Survey, Transit,
+    ActiveEffects, CandidateSystem, Colony, GamePhase, Notable, PendingDeliberation,
+    Population, ResourceHistory, Resources, ShipHull, Survey, Transit,
 )
 from .world import World
 
@@ -278,6 +278,21 @@ def world_state_dict(world: World) -> dict:
         _, col = colony_pair
         colony_data = col.to_dict()
 
+    # Pending deliberation (if awaiting player decision)
+    pending_delib_data: dict = {}
+    pending_delib_pair = world.query_one(PendingDeliberation)
+    if pending_delib_pair:
+        _, pd = pending_delib_pair
+        scenario_label = pd.trigger  # resolved in frontend via trigger field
+        from .deliberation import SCENARIOS
+        sc = SCENARIOS.get(pd.trigger)
+        pending_delib_data = {
+            "trigger": pd.trigger,
+            "trigger_label": sc.trigger_label if sc else pd.trigger,
+            "options": pd.scored_options,
+            "recommendation": pd.recommendation,
+        }
+
     return {
         "type": "world_state",
         "phase": phase,
@@ -290,4 +305,5 @@ def world_state_dict(world: World) -> dict:
         "transit": transit_data,
         "survey": survey_data,
         "colony": colony_data,
+        "pending_deliberation": pending_delib_data,
     }

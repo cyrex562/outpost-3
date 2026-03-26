@@ -10,6 +10,7 @@ from outpost3.simulation.components import (
     ActiveEffects,
     GamePhase,
     Notable,
+    PendingDeliberation,
     Population,
     ResourceHistory,
     Resources,
@@ -20,8 +21,10 @@ from outpost3.simulation.deliberation import (
     SCENARIOS,
     TRAIT_BIASES,
     apply_effect,
-    build_event,
+    build_complete_event,
+    build_pending_event,
     check_and_fire,
+    confirm_deliberation,
     deliberate,
 )
 from outpost3.simulation.loadout import run_loadout, world_state_dict
@@ -228,18 +231,47 @@ class TestApplyEffect:
         assert res.medicine == initial_medicine
 
 
-# ── TestBuildEvent ─────────────────────────────────────────────────────────────
+# ── TestBuildPendingEvent ──────────────────────────────────────────────────────
 
-class TestBuildEvent:
+class TestBuildPendingEvent:
+    def test_event_type(self):
+        chosen, scored = deliberate("food_rationing", [], rng=_rng())
+        event = build_pending_event("food_rationing", chosen, scored, _game_time())
+        assert event.event_type == "deliberation.pending"
+
+    def test_auto_pause(self):
+        chosen, scored = deliberate("food_rationing", [], rng=_rng())
+        event = build_pending_event("food_rationing", chosen, scored, _game_time())
+        assert event.auto_pause is True
+
+    def test_pending_data_fields(self):
+        chosen, scored = deliberate("food_rationing", [], rng=_rng())
+        event = build_pending_event("food_rationing", chosen, scored, _game_time())
+        assert "trigger" in event.data
+        assert "trigger_label" in event.data
+        assert "options" in event.data
+        assert "recommendation" in event.data
+        assert "recommendation_label" in event.data
+
+    def test_severity_milestone(self):
+        from outpost3.simulation import Severity
+        chosen, scored = deliberate("hull_emergency", [], rng=_rng())
+        event = build_pending_event("hull_emergency", chosen, scored, _game_time())
+        assert event.severity == Severity.MILESTONE
+
+
+# ── TestBuildCompleteEvent ─────────────────────────────────────────────────────
+
+class TestBuildCompleteEvent:
     def test_event_type(self):
         _, scored = deliberate("food_rationing", [], rng=_rng())
-        event = build_event("food_rationing", scored[0]["key"], scored, _game_time())
+        event = build_complete_event("food_rationing", scored[0]["key"], scored, _game_time())
         assert event.event_type == "deliberation.complete"
 
     def test_event_data_fields(self):
         _, scored = deliberate("food_rationing", [], rng=_rng())
         chosen = scored[0]["key"]
-        event = build_event("food_rationing", chosen, scored, _game_time())
+        event = build_complete_event("food_rationing", chosen, scored, _game_time())
         assert "trigger" in event.data
         assert "trigger_label" in event.data
         assert "chosen" in event.data
@@ -250,7 +282,7 @@ class TestBuildEvent:
     def test_severity_notable(self):
         from outpost3.simulation import Severity
         _, scored = deliberate("hull_emergency", [], rng=_rng())
-        event = build_event("hull_emergency", scored[0]["key"], scored, _game_time())
+        event = build_complete_event("hull_emergency", scored[0]["key"], scored, _game_time())
         assert event.severity == Severity.NOTABLE
 
 
@@ -266,40 +298,79 @@ class TestCheckAndFire:
         world, ship_eid = self._setup_world()
         hull = world.get(ship_eid, ShipHull)
         res = world.get(ship_eid, Resources)
-        pop_pair = world.query_one(Population)
-        _, pop = pop_pair
+        _, pop = world.query_one(Population)
 
         # Resources should be ample at loadout — no triggers should fire
         events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
         assert events == []
 
-    def test_food_trigger_fires_when_food_low(self):
+    def test_food_trigger_emits_pending(self):
         world, ship_eid = self._setup_world()
         hull = world.get(ship_eid, ShipHull)
         res = world.get(ship_eid, Resources)
         _, pop = world.query_one(Population)
 
-        # Drain food to trigger condition
         res.food = pop.count * 365 * 1  # less than 2 years
         events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
-        assert any(e.event_type == "deliberation.complete" for e in events)
+        assert any(e.event_type == "deliberation.pending" for e in events)
         assert any(e.data["trigger"] == "food_rationing" for e in events)
 
-    def test_food_trigger_fires_only_once(self):
+    def test_pending_event_has_recommendation(self):
         world, ship_eid = self._setup_world()
         hull = world.get(ship_eid, ShipHull)
         res = world.get(ship_eid, Resources)
         _, pop = world.query_one(Population)
 
-        res.food = pop.count * 100  # low food
+        res.food = pop.count * 100
+        events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
+        pending_events = [e for e in events if e.event_type == "deliberation.pending"]
+        assert len(pending_events) == 1
+        assert "recommendation" in pending_events[0].data
+        assert "options" in pending_events[0].data
 
+    def test_pending_component_stored_in_world(self):
+        world, ship_eid = self._setup_world()
+        hull = world.get(ship_eid, ShipHull)
+        res = world.get(ship_eid, Resources)
+        _, pop = world.query_one(Population)
+
+        res.food = pop.count * 100
+        check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
+        assert world.query_one(PendingDeliberation) is not None
+
+    def test_no_second_fire_while_pending(self):
+        """check_and_fire returns empty when a deliberation is already pending."""
+        world, ship_eid = self._setup_world()
+        hull = world.get(ship_eid, ShipHull)
+        res = world.get(ship_eid, Resources)
+        _, pop = world.query_one(Population)
+
+        res.food = pop.count * 100
         events1 = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
         events2 = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
 
-        food_events_1 = [e for e in events1 if e.data.get("trigger") == "food_rationing"]
-        food_events_2 = [e for e in events2 if e.data.get("trigger") == "food_rationing"]
-        assert len(food_events_1) == 1
-        assert len(food_events_2) == 0
+        assert any(e.event_type == "deliberation.pending" for e in events1)
+        assert events2 == []  # blocked by existing pending
+
+    def test_fires_again_after_confirm(self):
+        """After confirm_deliberation clears the pending, check_and_fire will not fire again
+        for the same trigger (deliberations_fired tracks it)."""
+        world, ship_eid = self._setup_world()
+        hull = world.get(ship_eid, ShipHull)
+        res = world.get(ship_eid, Resources)
+        _, pop = world.query_one(Population)
+
+        res.food = pop.count * 100
+        events1 = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
+        pending_evt = next(e for e in events1 if e.event_type == "deliberation.pending")
+        chosen = pending_evt.data["recommendation"]
+
+        # Player confirms
+        confirm_deliberation(world, ship_eid, chosen, _game_time())
+
+        # food_rationing is now in deliberations_fired — should not fire again
+        events2 = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
+        assert not any(e.data.get("trigger") == "food_rationing" for e in events2)
 
     def test_hull_trigger_fires_when_hull_low(self):
         world, ship_eid = self._setup_world()
@@ -321,7 +392,8 @@ class TestCheckAndFire:
         events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
         assert any(e.data.get("trigger") == "medical_crisis" for e in events)
 
-    def test_multiple_triggers_can_fire_simultaneously(self):
+    def test_only_one_trigger_fires_at_a_time(self):
+        """With multiple triggers met, only one deliberation.pending fires per call."""
         world, ship_eid = self._setup_world()
         hull = world.get(ship_eid, ShipHull)
         res = world.get(ship_eid, Resources)
@@ -332,10 +404,8 @@ class TestCheckAndFire:
         res.medicine = pop.count * 2
 
         events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
-        triggers_fired = {e.data["trigger"] for e in events if e.event_type == "deliberation.complete"}
-        assert "food_rationing" in triggers_fired
-        assert "hull_emergency" in triggers_fired
-        assert "medical_crisis" in triggers_fired
+        pending_events = [e for e in events if e.event_type == "deliberation.pending"]
+        assert len(pending_events) == 1
 
     def test_no_effects_component_returns_empty(self):
         world = World()
@@ -346,6 +416,87 @@ class TestCheckAndFire:
         # No ActiveEffects attached
         events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
         assert events == []
+
+
+# ── TestConfirmDeliberation ────────────────────────────────────────────────────
+
+class TestConfirmDeliberation:
+    def _setup_pending(self, trigger: str = "food_rationing"):
+        world = World()
+        result, _ = run_loadout(world, rng=_rng())
+        ship_eid = result.ship_entity
+        hull = world.get(ship_eid, ShipHull)
+        res = world.get(ship_eid, Resources)
+        _, pop = world.query_one(Population)
+
+        # Force the trigger condition
+        if trigger == "food_rationing":
+            res.food = pop.count * 100
+        elif trigger == "hull_emergency":
+            hull.integrity = 50.0
+        elif trigger == "medical_crisis":
+            res.medicine = pop.count * 2
+
+        events = check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
+        pending_evt = next(e for e in events if e.event_type == "deliberation.pending")
+        recommendation = pending_evt.data["recommendation"]
+        return world, ship_eid, recommendation
+
+    def test_returns_complete_event(self):
+        world, ship_eid, rec = self._setup_pending()
+        events = confirm_deliberation(world, ship_eid, rec, _game_time())
+        assert any(e.event_type == "deliberation.complete" for e in events)
+
+    def test_complete_event_has_correct_chosen(self):
+        world, ship_eid, rec = self._setup_pending()
+        events = confirm_deliberation(world, ship_eid, rec, _game_time())
+        complete = next(e for e in events if e.event_type == "deliberation.complete")
+        assert complete.data["chosen"] == rec
+
+    def test_override_crew_recommendation(self):
+        """Player picks a different option than the crew recommended."""
+        world, ship_eid, rec = self._setup_pending()
+        # Pick any option that isn't the recommendation
+        _, pending = world.query_one(PendingDeliberation)
+        other_key = next(o["key"] for o in pending.scored_options if o["key"] != rec)
+
+        events = confirm_deliberation(world, ship_eid, other_key, _game_time())
+        complete = next(e for e in events if e.event_type == "deliberation.complete")
+        assert complete.data["chosen"] == other_key
+
+    def test_pending_component_removed_after_confirm(self):
+        world, ship_eid, rec = self._setup_pending()
+        confirm_deliberation(world, ship_eid, rec, _game_time())
+        assert world.query_one(PendingDeliberation) is None
+
+    def test_effect_applied_after_confirm(self):
+        """Confirming strict_rations should mutate food_ration_modifier."""
+        world, ship_eid, _ = self._setup_pending("food_rationing")
+        # Force strict_rations as the chosen key (override if needed)
+        effects = world.get(ship_eid, ActiveEffects)
+        assert effects.food_ration_modifier == pytest.approx(1.0)  # not yet applied
+
+        confirm_deliberation(world, ship_eid, "strict_rations", _game_time())
+        assert effects.food_ration_modifier == pytest.approx(0.75)
+
+    def test_trigger_added_to_fired_set(self):
+        world, ship_eid, rec = self._setup_pending()
+        effects = world.get(ship_eid, ActiveEffects)
+        assert "food_rationing" not in effects.deliberations_fired
+
+        confirm_deliberation(world, ship_eid, rec, _game_time())
+        assert "food_rationing" in effects.deliberations_fired
+
+    def test_raises_when_no_pending(self):
+        world = World()
+        result, _ = run_loadout(world, rng=_rng())
+        with pytest.raises(ValueError, match="No deliberation is currently pending"):
+            confirm_deliberation(world, result.ship_entity, "strict_rations", _game_time())
+
+    def test_raises_for_invalid_option_key(self):
+        world, ship_eid, _ = self._setup_pending()
+        with pytest.raises(ValueError, match="Invalid option"):
+            confirm_deliberation(world, ship_eid, "nonexistent_key", _game_time())
 
 
 # ── TestResourceHistory ────────────────────────────────────────────────────────
@@ -387,3 +538,32 @@ class TestWorldStateDictIntegration:
         run_loadout(world, rng=_rng())
         state = world_state_dict(world)
         assert state["resource_history"] == []
+
+    def test_pending_deliberation_key_present(self):
+        world = World()
+        run_loadout(world, rng=_rng())
+        state = world_state_dict(world)
+        assert "pending_deliberation" in state
+
+    def test_pending_deliberation_empty_when_none(self):
+        world = World()
+        run_loadout(world, rng=_rng())
+        state = world_state_dict(world)
+        assert state["pending_deliberation"] == {}
+
+    def test_pending_deliberation_populated_when_pending(self):
+        world = World()
+        result, _ = run_loadout(world, rng=_rng())
+        ship_eid = result.ship_entity
+        hull = world.get(ship_eid, ShipHull)
+        res = world.get(ship_eid, Resources)
+        _, pop = world.query_one(Population)
+
+        res.food = pop.count * 100
+        check_and_fire(world, _game_time(), ship_eid, hull, res, pop, rng=_rng())
+
+        state = world_state_dict(world)
+        pd = state["pending_deliberation"]
+        assert pd["trigger"] == "food_rationing"
+        assert "options" in pd
+        assert "recommendation" in pd

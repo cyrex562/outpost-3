@@ -196,6 +196,11 @@ _TEMPLATES: dict[str, str | list[str]] = {
 
     # ── Deliberation events ───────────────────────────────────────
     # These render a short summary; the full record is in event.data for the UI.
+    "deliberation.pending": [
+        "⏸ Ship council convenes on: {trigger_label}. Crew recommendation: {recommendation_label}. Awaiting command directive.",
+        "⏸ Officers debate {trigger_label}. Consensus leans toward: {recommendation_label}. Command decision required.",
+        "⏸ Deliberation underway — {trigger_label}. Crew advises: {recommendation_label}. Override or confirm.",
+    ],
     "deliberation.complete": [
         "Crew deliberation: {trigger_label}. After debate, the committee selects: {chosen_label}. {effect_summary}",
         "Officers convene on {trigger_label}. Decision reached: {chosen_label}. {effect_summary}",

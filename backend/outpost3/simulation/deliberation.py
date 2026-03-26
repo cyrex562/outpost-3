@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..simulation import GameEvent, GameTime, Severity
-from .components import ActiveEffects, Notable, Population, Resources, ShipHull
+from .components import ActiveEffects, Notable, PendingDeliberation, Population, Resources, ShipHull
 from .world import World
 
 # ── Trait → option-key bias weights ───────────────────────────────────────────
@@ -227,9 +227,33 @@ def apply_effect(
             res.medicine += res.medicine // 5  # smaller gain from facility upgrade
 
 
-# ── Event builder ──────────────────────────────────────────────────────────────
+# ── Event builders ─────────────────────────────────────────────────────────────
 
-def build_event(
+def build_pending_event(
+    trigger: str,
+    recommendation: str,
+    scored_options: list[dict],
+    game_time: GameTime,
+) -> GameEvent:
+    """Construct a deliberation.pending GameEvent to pause and await player input."""
+    scenario = SCENARIOS[trigger]
+    rec_label = next(o["label"] for o in scored_options if o["key"] == recommendation)
+    return GameEvent(
+        event_type="deliberation.pending",
+        severity=Severity.MILESTONE,
+        game_time=game_time,
+        auto_pause=True,
+        data={
+            "trigger": trigger,
+            "trigger_label": scenario.trigger_label,
+            "options": scored_options,
+            "recommendation": recommendation,
+            "recommendation_label": rec_label,
+        },
+    )
+
+
+def build_complete_event(
     trigger: str,
     chosen_key: str,
     scored_options: list[dict],
@@ -269,10 +293,16 @@ def check_and_fire(
 ) -> list[GameEvent]:
     """Check all deliberation triggers; fire any that haven't been resolved yet.
 
+    Emits deliberation.pending (MILESTONE auto_pause) and stores a
+    PendingDeliberation component — does NOT apply effects immediately.
     Should be called once per year boundary (or batch) during transit.
     """
     effects = world.get(ship_eid, ActiveEffects)
     if effects is None:
+        return []
+
+    # Only one pending deliberation at a time
+    if world.query_one(PendingDeliberation) is not None:
         return []
 
     notables = [n for _, n in world.query(Notable) if n.alive]
@@ -291,10 +321,60 @@ def check_and_fire(
         if not check_fn(*args):
             continue
 
-        # Fire deliberation
+        # Deliberate (score options) but do NOT apply effects yet
         chosen_key, scored = deliberate(trigger, notables, rng=rng)
-        apply_effect(trigger, chosen_key, hull, res, effects)
-        effects.deliberations_fired.add(trigger)
-        events.append(build_event(trigger, chosen_key, scored, game_time))
+
+        # Store pending state so engine can pause
+        pending = PendingDeliberation(
+            trigger=trigger,
+            scored_options=scored,
+            recommendation=chosen_key,
+        )
+        world.add(ship_eid, pending)
+
+        events.append(build_pending_event(trigger, chosen_key, scored, game_time))
+        # Only fire one deliberation at a time
+        break
 
     return events
+
+
+def confirm_deliberation(
+    world: World,
+    ship_eid: int,
+    chosen_key: str,
+    game_time: GameTime,
+) -> list[GameEvent]:
+    """Apply the player's deliberation choice and emit deliberation.complete.
+
+    chosen_key must be a valid option key for the pending trigger.
+    Raises ValueError if no deliberation is pending or the key is invalid.
+    """
+    pair = world.query_one(PendingDeliberation)
+    if pair is None:
+        raise ValueError("No deliberation is currently pending")
+    _, pending = pair
+
+    trigger = pending.trigger
+    scenario = SCENARIOS[trigger]
+    valid_keys = {o["key"] for o in pending.scored_options}
+    if chosen_key not in valid_keys:
+        raise ValueError(f"Invalid option {chosen_key!r} for trigger {trigger!r}")
+
+    hull_pair = world.query_one(ShipHull)
+    if hull_pair is None:
+        raise ValueError("No ShipHull found")
+    ship_eid_actual, hull = hull_pair
+
+    res = world.get(ship_eid_actual, Resources)
+    effects = world.get(ship_eid_actual, ActiveEffects)
+    if res is None or effects is None:
+        raise ValueError("Missing Resources or ActiveEffects component")
+
+    apply_effect(trigger, chosen_key, hull, res, effects)
+    effects.deliberations_fired.add(trigger)
+
+    # Remove the pending component
+    world.remove(ship_eid_actual, PendingDeliberation)
+
+    return [build_complete_event(trigger, chosen_key, pending.scored_options, game_time)]

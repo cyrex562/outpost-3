@@ -25,5 +25,9 @@ export function useApi() {
     return post('/api/command/survey_decision', { decision })
   }
 
-  return { selectDestination, surveyDecision }
+  function deliberationDecision(chosen) {
+    return post('/api/command/deliberation_decision', { chosen })
+  }
+
+  return { selectDestination, surveyDecision, deliberationDecision }
 }

@@ -12,10 +12,12 @@ from pydantic import BaseModel
 from .simulation import GameEvent, GameTime, Severity
 from .simulation.engine import TimeEngine, VALID_SPEEDS
 from .simulation.world import World
+from .simulation.components import ShipHull
 from .simulation.loadout import run_loadout, world_state_dict
 from .simulation.search import confirm_destination, run_search
 from .simulation.transit import TransitSystem
 from .simulation.survey import SurveySystem, confirm_survey_decision
+from .simulation.deliberation import confirm_deliberation
 from .narrative import render
 
 # ── globals ───────────────────────────────────────────────────────
@@ -160,6 +162,10 @@ class SurveyDecisionRequest(BaseModel):
     decision: str   # "accept" | "reject"
 
 
+class DeliberationDecisionRequest(BaseModel):
+    chosen: str   # option key (e.g. "strict_rations", "emergency_repairs", etc.)
+
+
 async def _broadcast_events(events: list[GameEvent]) -> None:
     """Render narrative + broadcast a list of events to all clients."""
     for event in events:
@@ -197,3 +203,19 @@ async def cmd_survey_decision(req: SurveyDecisionRequest):
     await _broadcast_events(events)
     app.state.startup_events.extend(events)
     return {"ok": True, "decision": req.decision}
+
+
+@app.post("/api/command/deliberation_decision")
+async def cmd_deliberation_decision(req: DeliberationDecisionRequest):
+    """Player approves or overrides the crew's deliberation recommendation."""
+    game_time = GameTime(engine.day)
+    ship_pair = world.query_one(ShipHull)
+    ship_eid = ship_pair[0] if ship_pair else -1
+    try:
+        events = confirm_deliberation(world, ship_eid, req.chosen, game_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await _broadcast_events(events)
+    app.state.startup_events.extend(events)
+    return {"ok": True, "chosen": req.chosen}
