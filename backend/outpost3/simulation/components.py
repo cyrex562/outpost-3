@@ -178,14 +178,27 @@ class Survey:
         return min(1.0, self.days_elapsed / self.survey_duration_days)
 
     def to_dict(self) -> dict:
+        from .survey import MAX_REJECTIONS  # avoid circular import at module level
         return {
             "target_system_name": self.target_system_name,
             "survey_duration_days": self.survey_duration_days,
             "days_elapsed": self.days_elapsed,
             "rejection_count": self.rejection_count,
+            "rejections_remaining": max(0, MAX_REJECTIONS - self.rejection_count),
             "verdict": self.verdict,
             "progress": round(self.progress, 4),
         }
+
+
+# ── Pending search ────────────────────────────────────────────────
+
+@dataclass
+class PendingSearch:
+    """Temporary marker during search phase — carries rejection context.
+
+    Created by run_search(); consumed and removed by confirm_destination().
+    """
+    rejection_count: int = 0
 
 
 # ── Resource history ──────────────────────────────────────────────

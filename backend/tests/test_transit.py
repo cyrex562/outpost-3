@@ -8,10 +8,10 @@ import random
 import pytest
 
 from outpost3.simulation.components import (
-    GamePhase, Population, Resources, ShipHull, Transit,
+    CandidateSystem, GamePhase, Population, Resources, ShipHull, Transit,
 )
 from outpost3.simulation.loadout import run_loadout
-from outpost3.simulation.search import run_search
+from outpost3.simulation.search import confirm_destination, run_search
 from outpost3.simulation.transit import TransitSystem, BIRTH_RATE, DEATH_RATE
 from outpost3.simulation.world import World
 from outpost3.simulation import GameTime, Severity
@@ -25,6 +25,9 @@ def _make_world(seed: int = 42) -> tuple[World, TransitSystem]:
     rng = random.Random(seed)
     run_loadout(w, rng=rng)
     run_search(w, rng=rng)
+    # Confirm destination so Transit component exists and phase == "transit"
+    first_system = w.query(CandidateSystem)[0][1]
+    confirm_destination(w, first_system.name, rng=rng)
     system = TransitSystem(w)
     return w, system
 

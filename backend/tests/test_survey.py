@@ -12,10 +12,10 @@ from outpost3.simulation.components import (
     CandidateSystem,
 )
 from outpost3.simulation.loadout import run_loadout, world_state_dict
-from outpost3.simulation.search import run_search
+from outpost3.simulation.search import confirm_destination, run_search
 from outpost3.simulation.survey import (
     SurveySystem, SURVEY_DURATION_DAYS, VERDICT_DAY,
-    _colony_quality, _decide_verdict,
+    _colony_quality, _decide_verdict, confirm_survey_decision,
 )
 from outpost3.simulation.world import World
 from outpost3.simulation import GameTime, Severity
@@ -29,6 +29,9 @@ def _make_world(seed: int = 42) -> tuple[World, SurveySystem]:
     rng = random.Random(seed)
     run_loadout(w, rng=rng)
     run_search(w, rng=rng)
+    # Confirm destination (required by new two-step flow)
+    first_system = w.query(CandidateSystem)[0][1]
+    confirm_destination(w, first_system.name, rng=rng)
     system = SurveySystem(w)
     return w, system
 
@@ -183,17 +186,30 @@ class TestAcceptPath:
                     p.habitability = 75.0
                 sys.best_habitability = 75.0
 
+    def _run_to_verdict(self, w: World, system: SurveySystem):
+        """Tick until survey.verdict_pending fires; return (day, all_events)."""
+        all_events = []
+        for day in range(1, SURVEY_DURATION_DAYS + 10):
+            evts = run_tick(system, day)
+            all_events.extend(evts)
+            if any(e.event_type == "survey.verdict_pending" for e in evts):
+                return day, all_events
+        return SURVEY_DURATION_DAYS, all_events
+
+    def test_verdict_pending_emitted_on_accept(self):
+        w, system = _setup_survey(seed=10)
+        self._force_accept(w)
+        _, all_events = self._run_to_verdict(w, system)
+        pending = [e for e in all_events if e.event_type == "survey.verdict_pending"]
+        assert len(pending) == 1
+        assert pending[0].data["recommendation"] == "accept"
+
     def test_colony_founded_event_on_accept(self):
         w, system = _setup_survey(seed=10)
         self._force_accept(w)
-        all_events = []
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            all_events.extend(run_tick(system, day))
-            _, survey = w.query_one(Survey)
-            if survey.verdict is not None:
-                break
-
-        founded = [e for e in all_events if e.event_type == "colony.founded"]
+        day, _ = self._run_to_verdict(w, system)
+        events = confirm_survey_decision(w, "accept", GameTime(day))
+        founded = [e for e in events if e.event_type == "colony.founded"]
         assert len(founded) == 1
         assert founded[0].auto_pause is True
         assert founded[0].severity == Severity.MILESTONE
@@ -201,12 +217,8 @@ class TestAcceptPath:
     def test_colony_component_created(self):
         w, system = _setup_survey(seed=10)
         self._force_accept(w)
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            run_tick(system, day)
-            _, survey = w.query_one(Survey)
-            if survey.verdict is not None:
-                break
-
+        day, _ = self._run_to_verdict(w, system)
+        confirm_survey_decision(w, "accept", GameTime(day))
         pair = w.query_one(Colony)
         assert pair is not None
         _, colony = pair
@@ -216,26 +228,17 @@ class TestAcceptPath:
     def test_phase_advances_to_founding(self):
         w, system = _setup_survey(seed=10)
         self._force_accept(w)
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            run_tick(system, day)
-            _, survey = w.query_one(Survey)
-            if survey.verdict is not None:
-                break
-
+        day, _ = self._run_to_verdict(w, system)
+        confirm_survey_decision(w, "accept", GameTime(day))
         _, phase = w.query_one(GamePhase)
         assert phase.phase == "founding"
 
     def test_colony_founded_narrative_renders(self):
         w, system = _setup_survey(seed=10)
         self._force_accept(w)
-        all_events = []
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            all_events.extend(run_tick(system, day))
-            _, survey = w.query_one(Survey)
-            if survey.verdict is not None:
-                break
-
-        event = next(e for e in all_events if e.event_type == "colony.founded")
+        day, _ = self._run_to_verdict(w, system)
+        events = confirm_survey_decision(w, "accept", GameTime(day))
+        event = next(e for e in events if e.event_type == "colony.founded")
         text = render(event)
         assert text is not None
         assert len(text) > 20
@@ -245,7 +248,7 @@ class TestAcceptPath:
 
 class TestRejectPath:
     def _force_reject(self, w: World):
-        """Set very low habitability so crew rejects the system."""
+        """Set very low habitability so crew recommends rejection."""
         for _, sys in w.query(CandidateSystem):
             if sys.selected:
                 for p in sys.planets:
@@ -260,62 +263,54 @@ class TestRejectPath:
         _, hull = w.query_one(ShipHull)
         hull.integrity = 95.0
 
+    def _run_to_verdict(self, w: World, system: SurveySystem):
+        for day in range(1, SURVEY_DURATION_DAYS + 10):
+            evts = run_tick(system, day)
+            if any(e.event_type == "survey.verdict_pending" for e in evts):
+                return day
+        return SURVEY_DURATION_DAYS
+
     def test_survey_rejected_event(self):
         w, system = _setup_survey(seed=5)
         self._force_reject(w)
-        all_events = []
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            all_events.extend(run_tick(system, day))
-            _, survey = w.query_one(Survey) if w.query_one(Survey) else (None, None)
-            if survey is None or survey.verdict is not None:
-                break
-
-        rejected = [e for e in all_events if e.event_type == "survey.rejected"]
+        day = self._run_to_verdict(w, system)
+        events = confirm_survey_decision(w, "reject", GameTime(day))
+        rejected = [e for e in events if e.event_type == "survey.rejected"]
         assert len(rejected) == 1
-        assert rejected[0].auto_pause is True
+        # auto_pause is False — player already decided to reject
+        assert rejected[0].auto_pause is False
 
     def test_new_search_triggered_after_rejection(self):
         w, system = _setup_survey(seed=5)
         self._force_reject(w)
-        all_events = []
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            all_events.extend(run_tick(system, day))
-            phase_pair = w.query_one(GamePhase)
-            if phase_pair and phase_pair[1].phase == "transit":
-                break
-
+        day = self._run_to_verdict(w, system)
+        confirm_survey_decision(w, "reject", GameTime(day))
+        # After rejection, run_search() is called → phase = "search" waiting for player
         _, phase = w.query_one(GamePhase)
-        assert phase.phase == "transit"
+        assert phase.phase == "search"
 
-    def test_new_transit_created_after_rejection(self):
+    def test_new_candidates_generated_after_rejection(self):
         w, system = _setup_survey(seed=5)
         self._force_reject(w)
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            run_tick(system, day)
-            phase_pair = w.query_one(GamePhase)
-            if phase_pair and phase_pair[1].phase == "transit":
-                break
-
-        pair = w.query_one(Transit)
-        assert pair is not None
-        _, transit = pair
-        assert transit.days_elapsed == 0
+        day = self._run_to_verdict(w, system)
+        confirm_survey_decision(w, "reject", GameTime(day))
+        # New candidate systems exist and await player choice
+        systems = w.query(CandidateSystem)
+        assert 3 <= len(systems) <= 5
 
     def test_rejection_count_increments(self):
+        from outpost3.simulation.components import PendingSearch
         w, system = _setup_survey(seed=5)
         self._force_reject(w)
-        for day in range(1, SURVEY_DURATION_DAYS + 10):
-            run_tick(system, day)
-            phase_pair = w.query_one(GamePhase)
-            if phase_pair and phase_pair[1].phase == "transit":
-                break
+        day = self._run_to_verdict(w, system)
+        confirm_survey_decision(w, "reject", GameTime(day))
+        # rejection_count is now in PendingSearch (survey was cleared)
+        pending_pair = w.query_one(PendingSearch)
+        assert pending_pair is not None
+        _, pending = pending_pair
+        assert pending.rejection_count == 1
 
-        pair = w.query_one(Survey)
-        assert pair is not None
-        _, survey = pair
-        assert survey.rejection_count == 1
-
-    def test_forced_accept_after_max_rejections(self):
+    def test_forced_accept_recommendation_at_max_rejections(self):
         w, system = _setup_survey(seed=5)
         self._force_reject(w)
         # Manually set rejection count to 3 (max)
@@ -324,17 +319,15 @@ class TestRejectPath:
 
         all_events = []
         for day in range(1, SURVEY_DURATION_DAYS + 10):
-            all_events.extend(run_tick(system, day))
-            sv_pair = w.query_one(Survey)
-            if sv_pair and sv_pair[1].verdict is not None:
+            evts = run_tick(system, day)
+            all_events.extend(evts)
+            if any(e.event_type == "survey.verdict_pending" for e in evts):
                 break
 
-        # Should have accepted despite low habitability
-        sv_pair = w.query_one(Survey)
-        # After founding, Survey might be cleared — check Colony instead
-        colony = w.query_one(Colony)
-        founded_events = [e for e in all_events if e.event_type == "colony.founded"]
-        assert len(founded_events) == 1
+        # Recommendation should be "accept" despite low habitability
+        pending_events = [e for e in all_events if e.event_type == "survey.verdict_pending"]
+        assert len(pending_events) == 1
+        assert pending_events[0].data["recommendation"] == "accept"
 
 
 # ── Batch handler ──────────────────────────────────────────────────
@@ -363,8 +356,9 @@ class TestSurveyBatch:
         w, system = _setup_survey(seed=10)
         self._force_accept(w)
         events = run_batch(system, 0, SURVEY_DURATION_DAYS)
-        founded = [e for e in events if e.event_type == "colony.founded"]
-        assert len(founded) == 1
+        pending = [e for e in events if e.event_type == "survey.verdict_pending"]
+        assert len(pending) == 1
+        assert pending[0].data["recommendation"] == "accept"
 
     def test_batch_returns_empty_when_not_survey_phase(self):
         w, system = _make_world()
@@ -375,27 +369,27 @@ class TestSurveyBatch:
 # ── World state dict ───────────────────────────────────────────────
 
 class TestWorldStateDictSurveyFounding:
-    def test_includes_survey_key(self):
+    def _make_confirmed_world(self, seed: int = 42) -> World:
         w = World()
-        rng = random.Random(42)
+        rng = random.Random(seed)
         run_loadout(w, rng=rng)
         run_search(w, rng=rng)
+        first_system = w.query(CandidateSystem)[0][1]
+        confirm_destination(w, first_system.name, rng=rng)
+        return w
+
+    def test_includes_survey_key(self):
+        w = self._make_confirmed_world()
         state = world_state_dict(w)
         assert "survey" in state
         assert "colony" in state
 
     def test_survey_has_target_name(self):
-        w = World()
-        rng = random.Random(42)
-        run_loadout(w, rng=rng)
-        run_search(w, rng=rng)
+        w = self._make_confirmed_world()
         state = world_state_dict(w)
         assert "target_system_name" in state["survey"]
 
     def test_colony_empty_before_founding(self):
-        w = World()
-        rng = random.Random(42)
-        run_loadout(w, rng=rng)
-        run_search(w, rng=rng)
+        w = self._make_confirmed_world()
         state = world_state_dict(w)
         assert state["colony"] == {}

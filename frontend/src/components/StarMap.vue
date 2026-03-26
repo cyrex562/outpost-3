@@ -1,8 +1,36 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useWorldStore } from '../stores/world'
+import { useApi } from '../composables/useApi'
 
 const world = useWorldStore()
+const api = useApi()
+const busy = ref(false)
+const apiError = ref('')
+
+async function setDestination(systemName) {
+  busy.value = true
+  apiError.value = ''
+  try {
+    await api.selectDestination(systemName)
+  } catch (e) {
+    apiError.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
+
+async function surveyChoice(decision) {
+  busy.value = true
+  apiError.value = ''
+  try {
+    await api.surveyDecision(decision)
+  } catch (e) {
+    apiError.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
 
 // SVG viewport: 220×220, home system at center (110, 110)
 const CX = 110
@@ -172,28 +200,78 @@ const transitLabel = computed(() => {
         <div class="text-panel-muted text-[10px]">{{ world.colony.system_name }} system · Year {{ world.colony.founded_year }}</div>
       </div>
 
+      <!-- Survey verdict action buttons -->
+      <div v-if="world.phase === 'survey' && world.survey?.verdict" class="space-y-1.5">
+        <div class="text-panel-muted uppercase tracking-wider text-[10px]">Survey Decision Required</div>
+        <div class="border border-yellow-700/60 rounded px-2 py-2 bg-yellow-950/20 space-y-2">
+          <div class="text-yellow-300 text-[11px]">
+            Crew recommends:
+            <span class="font-semibold uppercase">{{ world.survey.verdict }}</span>
+          </div>
+          <div class="flex gap-2">
+            <button
+              class="flex-1 py-1 rounded border text-[11px] font-semibold transition-colors"
+              :class="busy ? 'opacity-40 cursor-not-allowed border-panel-border text-panel-muted' : 'border-teal-600 text-teal-300 hover:bg-teal-900/30'"
+              :disabled="busy"
+              @click="surveyChoice('accept')"
+            >
+              ✓ Settle Here
+            </button>
+            <button
+              class="flex-1 py-1 rounded border text-[11px] font-semibold transition-colors"
+              :class="busy ? 'opacity-40 cursor-not-allowed border-panel-border text-panel-muted' : 'border-orange-600 text-orange-300 hover:bg-orange-900/20'"
+              :disabled="busy"
+              @click="surveyChoice('reject')"
+            >
+              ✗ Keep Searching
+            </button>
+          </div>
+          <div v-if="world.survey.rejections_remaining !== undefined" class="text-[10px] text-panel-muted">
+            {{ world.survey.rejections_remaining }} rejection(s) remaining before forced settlement
+          </div>
+        </div>
+        <div v-if="apiError" class="text-orange-400 text-[10px]">{{ apiError }}</div>
+      </div>
+
       <!-- System list -->
       <div class="space-y-1">
-        <div class="text-panel-muted uppercase tracking-wider text-[10px]">Candidate Systems</div>
+        <div class="text-panel-muted uppercase tracking-wider text-[10px]">
+          {{ world.phase === 'search' ? 'Select Destination' : 'Candidate Systems' }}
+        </div>
+        <div v-if="apiError && world.phase === 'search'" class="text-orange-400 text-[10px]">{{ apiError }}</div>
         <div
           v-for="s in world.systems"
           :key="s.name"
           class="border rounded px-2 py-1 space-y-0.5 text-[10px]"
           :class="s.selected ? 'border-indigo-500 bg-indigo-950/30' : 'border-panel-border'"
         >
-          <div class="flex justify-between">
+          <div class="flex justify-between items-start gap-1">
             <span class="font-semibold" :class="s.selected ? 'text-indigo-300' : 'text-panel-text'">
               {{ s.name }}
               <span v-if="s.selected" class="text-indigo-400 ml-1">★ destination</span>
             </span>
-            <span class="text-panel-muted">{{ s.star_type }} · {{ s.distance_ly }} ly</span>
+            <span class="text-panel-muted shrink-0">{{ s.star_type }} · {{ s.distance_ly }} ly</span>
           </div>
-          <div class="text-panel-muted">
-            {{ s.planets.length }} world{{ s.planets.length !== 1 ? 's' : '' }} ·
-            best habitability
-            <span :style="{ color: habitabilityColor(s.best_habitability) }">
-              {{ s.best_habitability.toFixed(0) }}%
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-panel-muted">
+              {{ s.planets.length }} world{{ s.planets.length !== 1 ? 's' : '' }} ·
+              best habitability
+              <span :style="{ color: habitabilityColor(s.best_habitability) }">
+                {{ s.best_habitability.toFixed(0) }}%
+              </span>
             </span>
+            <!-- Set Course button — only visible in search phase -->
+            <button
+              v-if="world.phase === 'search'"
+              class="shrink-0 px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors"
+              :class="busy
+                ? 'opacity-40 cursor-not-allowed border-panel-border text-panel-muted'
+                : 'border-indigo-600 text-indigo-300 hover:bg-indigo-900/30'"
+              :disabled="busy"
+              @click="setDestination(s.name)"
+            >
+              Set Course →
+            </button>
           </div>
         </div>
       </div>

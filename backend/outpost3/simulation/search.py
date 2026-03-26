@@ -13,7 +13,7 @@ import random as _random_module
 from dataclasses import dataclass
 
 from ..simulation import GameEvent, GameTime, Severity
-from .components import CandidateSystem, GamePhase, Planet, Resources, ShipHull, Survey, Transit
+from .components import CandidateSystem, GamePhase, PendingSearch, Planet, Resources, ShipHull, Survey, Transit
 from .world import World
 
 # ── Star name pools ────────────────────────────────────────────────
@@ -175,7 +175,13 @@ def _generate_system(
 
 @dataclass
 class SearchResult:
+    """Result of run_search() — candidate systems registered, awaiting player choice."""
     system_entities: list[int]
+
+
+@dataclass
+class ConfirmResult:
+    """Result of confirm_destination() — transit and survey underway."""
     transit_entity: int
     survey_entity: int
     destination_name: str
@@ -188,9 +194,10 @@ def run_search(
     rng: _random_module.Random | None = None,
     rejection_count: int = 0,
 ) -> tuple[SearchResult, list[GameEvent]]:
-    """Generate candidate systems, select the best, create Transit + Survey.
+    """Generate 3–5 candidate star systems and pause for player destination choice.
 
-    Advances the GamePhase to "transit".
+    Advances GamePhase to "search" and emits search.candidates_ready (auto-pause).
+    The player must then call confirm_destination() to proceed.
 
     Args:
         world: populated ECS World (must already contain ShipHull + Resources)
@@ -239,14 +246,68 @@ def run_search(
             },
         ))
 
-    # ── Select best destination ────────────────────────────────────
-    best_system = max(systems, key=lambda s: s.best_habitability)
-    best_system.selected = True
+    # ── Store rejection context for when player confirms ──────────
+    pending_eid = world.new_entity()
+    world.add(pending_eid, PendingSearch(rejection_count=rejection_count))
 
-    # ── Determine transit duration (20–50 years) ───────────────────
-    # Transit years scales loosely with distance but is ultimately driven
-    # by the ship's propulsion — we use distance as a floor.
-    min_years = max(20, int(best_system.distance_ly * 1.5))
+    # ── Advance to search phase — awaiting player choice ──────────
+    phase_pair = world.query_one(GamePhase)
+    if phase_pair:
+        phase_pair[1].phase = "search"
+
+    # ── Pause for player to select destination ────────────────────
+    events.append(GameEvent(
+        event_type="search.candidates_ready",
+        severity=Severity.MILESTONE,
+        game_time=game_time,
+        auto_pause=True,
+        data={
+            "count": num_systems,
+            "rejection_count": rejection_count,
+        },
+    ))
+
+    return SearchResult(system_entities=system_eids), events
+
+
+def confirm_destination(
+    world: World,
+    system_name: str,
+    *,
+    rng: _random_module.Random | None = None,
+) -> tuple[ConfirmResult, list[GameEvent]]:
+    """Confirm the player's destination choice; create Transit + Survey and begin the journey.
+
+    Marks the named CandidateSystem as selected, consumes the PendingSearch marker,
+    creates Transit and Survey components, and advances GamePhase to "transit".
+
+    Raises:
+        ValueError: if system_name is not found among current CandidateSystem entities.
+    """
+    if rng is None:
+        rng = _random_module.Random()
+
+    game_time = GameTime(0)
+
+    # ── Validate and mark system as selected ──────────────────────
+    found_system: CandidateSystem | None = None
+    for _, sys in world.query(CandidateSystem):
+        sys.selected = False  # clear previous selection
+        if sys.name == system_name:
+            found_system = sys
+    if found_system is None:
+        raise ValueError(f"System not found: {system_name!r}")
+    found_system.selected = True
+
+    # ── Read + consume PendingSearch for rejection context ────────
+    rejection_count = 0
+    pending_pair = world.query_one(PendingSearch)
+    if pending_pair:
+        rejection_count = pending_pair[1].rejection_count
+        world.clear_type(PendingSearch)
+
+    # ── Determine transit duration (20–50 years) ──────────────────
+    min_years = max(20, int(found_system.distance_ly * 1.5))
     max_years = min(50, min_years + rng.randint(5, 20))
     transit_years = rng.randint(min_years, max_years)
     transit_days = transit_years * 365
@@ -263,7 +324,7 @@ def run_search(
     # ── Create Transit component ───────────────────────────────────
     transit_eid = world.new_entity()
     world.add(transit_eid, Transit(
-        destination_name=best_system.name,
+        destination_name=found_system.name,
         duration_days=transit_days,
         fuel_per_day=fuel_per_day,
     ))
@@ -271,37 +332,34 @@ def run_search(
     # ── Create Survey component for the upcoming survey ───────────
     survey_eid = world.new_entity()
     world.add(survey_eid, Survey(
-        target_system_name=best_system.name,
+        target_system_name=found_system.name,
         rejection_count=rejection_count,
     ))
 
-    # ── Advance game phase ─────────────────────────────────────────
+    # ── Advance game phase to transit ─────────────────────────────
     phase_pair = world.query_one(GamePhase)
     if phase_pair:
         phase_pair[1].phase = "transit"
 
-    # ── Destination selected event (auto-pause = player reads the news) ──
-    events.append(GameEvent(
+    events = [GameEvent(
         event_type="search.destination_selected",
         severity=Severity.MILESTONE,
         game_time=game_time,
         auto_pause=True,
         data={
-            "name": best_system.name,
-            "star_type": best_system.star_type,
-            "distance_ly": best_system.distance_ly,
-            "best_habitability": best_system.best_habitability,
+            "name": found_system.name,
+            "star_type": found_system.star_type,
+            "distance_ly": found_system.distance_ly,
+            "best_habitability": found_system.best_habitability,
             "transit_years": transit_years,
-            "candidates_rejected": num_systems - 1,
+            "candidates_rejected": len(world.query(CandidateSystem)) - 1,
             "rejection_count": rejection_count,
         },
-    ))
+    )]
 
-    result = SearchResult(
-        system_entities=system_eids,
+    return ConfirmResult(
         transit_entity=transit_eid,
         survey_entity=survey_eid,
-        destination_name=best_system.name,
+        destination_name=found_system.name,
         transit_years=transit_years,
-    )
-    return result, events
+    ), events

@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from .simulation import GameEvent, GameTime, Severity
 from .simulation.engine import TimeEngine, VALID_SPEEDS
 from .simulation.world import World
 from .simulation.loadout import run_loadout, world_state_dict
-from .simulation.search import run_search
+from .simulation.search import confirm_destination, run_search
 from .simulation.transit import TransitSystem
-from .simulation.survey import SurveySystem
+from .simulation.survey import SurveySystem, confirm_survey_decision
 from .narrative import render
 
 # ── globals ───────────────────────────────────────────────────────
@@ -147,3 +148,52 @@ async def get_state():
 @app.get("/api/world")
 async def get_world():
     return world_state_dict(world)
+
+
+# ── Player command endpoints ───────────────────────────────────────
+
+class SelectDestinationRequest(BaseModel):
+    name: str
+
+
+class SurveyDecisionRequest(BaseModel):
+    decision: str   # "accept" | "reject"
+
+
+async def _broadcast_events(events: list[GameEvent]) -> None:
+    """Render narrative + broadcast a list of events to all clients."""
+    for event in events:
+        event.text = render(event)
+        await on_event(event)
+    await on_state_change()
+
+
+@app.post("/api/command/select_destination")
+async def cmd_select_destination(req: SelectDestinationRequest):
+    """Player chooses a destination from the candidate systems (search phase)."""
+    try:
+        _, events = confirm_destination(world, req.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await _broadcast_events(events)
+    # Add to startup replay so late-joining clients see the decision
+    app.state.startup_events.extend(events)
+    return {"ok": True, "destination": req.name}
+
+
+@app.post("/api/command/survey_decision")
+async def cmd_survey_decision(req: SurveyDecisionRequest):
+    """Player accepts or rejects the surveyed system (survey phase)."""
+    if req.decision not in ("accept", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'accept' or 'reject'")
+
+    game_time = GameTime(engine.day)
+    try:
+        events = confirm_survey_decision(world, req.decision, game_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await _broadcast_events(events)
+    app.state.startup_events.extend(events)
+    return {"ok": True, "decision": req.decision}

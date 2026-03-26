@@ -96,6 +96,11 @@ _TEMPLATES: dict[str, str | list[str]] = {
     ],
 
     # ── Search Phase ──────────────────────────────────────────────
+    "search.candidates_ready": [
+        "⏸ Long-range survey complete. {count} candidate system(s) identified. Navigation committee awaits destination selection.",
+        "⏸ {count} star system(s) catalogued by the survey array. Command staff requests course directive.",
+        "⏸ Stellar survey concluded — {count} candidate destination(s) on record. Awaiting command decision.",
+    ],
     "search.candidate_found": [
         "Long-range survey confirms {name} ({star_type}), {distance_ly} light-years out. {planet_count} worlds detected — best candidate {best_planet} at {best_habitability:.0f}% habitability.",
         "{name}: {star_type} star, {distance_ly} ly distant. {planet_count} planetary bodies. Peak habitability {best_habitability:.0f}%.",
@@ -168,6 +173,10 @@ _TEMPLATES: dict[str, str | list[str]] = {
     ],
 
     # ── Survey Phase ──────────────────────────────────────────────
+    "survey.verdict_pending": [
+        "⏸ Survey of {system_name} concluded. Crew recommendation: {recommendation}. Habitability {habitability:.0f}%, hull at {hull_integrity:.0f}%, food reserves {food_years:.1f} yr. Awaiting command decision.",
+        "⏸ {system_name} survey complete. Assessment: {recommendation} settlement. {habitability:.0f}% habitability, hull {hull_integrity:.0f}%, {food_years:.1f} yr food supply. Decision required.",
+    ],
     "survey.started": [
         "Entering {system_name}. Survey operations begin — {planet_count} world(s) to assess.",
         "{system_name} system acquired. Sensor arrays active; {planet_count} planetary body/bodies detected.",

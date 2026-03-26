@@ -189,9 +189,9 @@ def _reject_system(
 
     events: list[GameEvent] = [GameEvent(
         event_type="survey.rejected",
-        severity=Severity.MILESTONE,
+        severity=Severity.NOTABLE,
         game_time=game_time,
-        auto_pause=True,
+        auto_pause=False,
         data={
             "system_name": target.name if target else "unknown",
             "habitability": target.best_habitability if target else 0.0,
@@ -265,23 +265,31 @@ class SurveySystem(System):
                     },
                 ))
 
-        # Verdict at VERDICT_DAY
+        # Verdict at VERDICT_DAY — pause for player decision
         if survey.days_elapsed >= VERDICT_DAY and survey.verdict is None:
             best_hab = target.best_habitability if target else 0.0
             food_years = (
                 res.food / (pop.count * 365) if (res and pop.count > 0) else 0.0
             )
-            verdict = _decide_verdict(
+            recommendation = _decide_verdict(
                 survey.rejection_count, best_hab, hull.integrity, food_years
             )
-            if verdict == "accept":
-                events.extend(_found_colony(
-                    self.world, game_time, survey, target, hull, res, pop, phase
-                ))
-            else:
-                events.extend(_reject_system(
-                    self.world, game_time, survey, target, phase
-                ))
+            survey.verdict = recommendation
+            events.append(GameEvent(
+                event_type="survey.verdict_pending",
+                severity=Severity.MILESTONE,
+                game_time=game_time,
+                auto_pause=True,
+                data={
+                    "system_name": survey.target_system_name,
+                    "recommendation": recommendation,
+                    "habitability": round(best_hab, 1),
+                    "hull_integrity": round(hull.integrity, 1),
+                    "food_years": round(food_years, 1),
+                    "rejection_count": survey.rejection_count,
+                    "rejections_remaining": max(0, MAX_REJECTIONS - survey.rejection_count),
+                },
+            ))
 
         return events
 
@@ -341,22 +349,66 @@ class SurveySystem(System):
 
         survey.days_elapsed += days_to_process
 
-        # Verdict if VERDICT_DAY crossed
+        # Verdict if VERDICT_DAY crossed — pause for player decision
         if batch_end >= VERDICT_DAY and survey.verdict is None:
             best_hab = target.best_habitability if target else 0.0
             food_years = (
                 res.food / (pop.count * 365) if (res and pop.count > 0) else 0.0
             )
-            verdict = _decide_verdict(
+            recommendation = _decide_verdict(
                 survey.rejection_count, best_hab, hull.integrity, food_years
             )
-            if verdict == "accept":
-                events.extend(_found_colony(
-                    self.world, end_time, survey, target, hull, res, pop, phase
-                ))
-            else:
-                events.extend(_reject_system(
-                    self.world, end_time, survey, target, phase
-                ))
+            survey.verdict = recommendation
+            events.append(GameEvent(
+                event_type="survey.verdict_pending",
+                severity=Severity.MILESTONE,
+                game_time=end_time,
+                auto_pause=True,
+                data={
+                    "system_name": survey.target_system_name,
+                    "recommendation": recommendation,
+                    "habitability": round(best_hab, 1),
+                    "hull_integrity": round(hull.integrity, 1),
+                    "food_years": round(food_years, 1),
+                    "rejection_count": survey.rejection_count,
+                    "rejections_remaining": max(0, MAX_REJECTIONS - survey.rejection_count),
+                },
+            ))
 
         return events
+
+
+# ── Player command ─────────────────────────────────────────────────────────────
+
+def confirm_survey_decision(
+    world: World,
+    decision: str,
+    game_time: GameTime,
+) -> list[GameEvent]:
+    """Execute the player's accept/reject decision after survey.verdict_pending.
+
+    Args:
+        world: the ECS World (must be in survey phase with verdict set)
+        decision: "accept" to found the colony, "reject" to search again
+        game_time: current engine time for event timestamps
+
+    Returns:
+        List of events to broadcast (colony.founded or survey.rejected + search events).
+
+    Raises:
+        ValueError: if world is not in a valid pending-verdict state.
+    """
+    state = _get_state(world)
+    if state is None:
+        raise ValueError("Not in survey phase — cannot confirm survey decision")
+
+    phase, survey, target, hull, res, pop = state
+    if survey.verdict is None:
+        raise ValueError("No pending verdict — survey has not reached decision day yet")
+
+    if decision == "accept":
+        return _found_colony(world, game_time, survey, target, hull, res, pop, phase)
+    elif decision == "reject":
+        return _reject_system(world, game_time, survey, target, phase)
+    else:
+        raise ValueError(f"Invalid decision {decision!r}; must be 'accept' or 'reject'")
