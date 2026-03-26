@@ -166,6 +166,31 @@ _TEMPLATES: dict[str, str | list[str]] = {
         "Navigation computer flags an unexpected gravitational perturbation — course adjusted, {parts_cost} components recalibrated.",
         "Sensor array detects uncharted debris field — trajectory modified, minor {parts_cost}-unit equipment cost.",
     ],
+
+    # ── Survey Phase ──────────────────────────────────────────────
+    "survey.started": [
+        "Entering {system_name}. Survey operations begin — {planet_count} world(s) to assess.",
+        "{system_name} system acquired. Sensor arrays active; {planet_count} planetary body/bodies detected.",
+        "Long-range transit complete. Survey teams mobilised across {planet_count} world(s) in the {system_name} system.",
+    ],
+    "survey.planet_scanned": [
+        "World {scan_number}/{total_planets}: {planet_name} — {planet_type}. Habitability {habitability:.0f}%. {notes_text}",
+        "Scan complete on {planet_name} ({planet_type}). Habitability index {habitability:.0f}%. {notes_text}",
+    ],
+    "survey.batch_scan": [
+        "Survey team completes assessment of {planets_scanned} world(s) in {system_name}. Peak habitability: {best_habitability:.0f}%.",
+    ],
+    "survey.rejected": [
+        "⏸ {system_name} assessed at {habitability:.0f}% peak habitability — below threshold. Crew votes to continue the search. ({rejections_remaining} rejection(s) remaining.)",
+        "⏸ Navigation committee rejects {system_name} ({habitability:.0f}% habitability). A new search begins. {rejections_remaining} attempt(s) remain before forced settlement.",
+    ],
+
+    # ── Founding Phase ────────────────────────────────────────────
+    "colony.founded": [
+        "⏸ Colony established on {planet_name}, {system_name} system. {population:,} colonists make landfall. Habitability: {habitability:.0f}%. Colony status: {quality}.",
+        "⏸ {population:,} colonists land on {planet_name}. Year {founded_year}. Hull integrity at touchdown: {hull_integrity:.0f}%. Colony assessment: {quality}.",
+        "⏸ After {founded_year} years, {population:,} souls found a new home on {planet_name}. The {quality} colony takes its first steps under an alien sky.",
+    ],
 }
 
 

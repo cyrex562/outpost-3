@@ -67,5 +67,9 @@ class World:
     def has(self, entity_id: int, comp_type: type) -> bool:
         return entity_id in self._components.get(comp_type, {})
 
+    def clear_type(self, comp_type: type) -> None:
+        """Remove all components of the given type (used for phase resets)."""
+        self._components.pop(comp_type, None)
+
     def entity_count(self) -> int:
         return self._next_id

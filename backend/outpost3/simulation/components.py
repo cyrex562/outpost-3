@@ -158,3 +158,56 @@ PHASES = ("loadout", "search", "transit", "survey", "founding")
 class GamePhase:
     """Current narrative phase of the mission."""
     phase: str = "loadout"   # one of PHASES
+
+
+# ── Survey ────────────────────────────────────────────────────────
+
+@dataclass
+class Survey:
+    """State of the planetary survey phase at a candidate system."""
+    target_system_name: str
+    survey_duration_days: int = 365
+    days_elapsed: int = 0
+    rejection_count: int = 0         # persists across re-searches
+    verdict: str | None = None       # "accept" | "reject" | None
+
+    @property
+    def progress(self) -> float:
+        if self.survey_duration_days == 0:
+            return 1.0
+        return min(1.0, self.days_elapsed / self.survey_duration_days)
+
+    def to_dict(self) -> dict:
+        return {
+            "target_system_name": self.target_system_name,
+            "survey_duration_days": self.survey_duration_days,
+            "days_elapsed": self.days_elapsed,
+            "rejection_count": self.rejection_count,
+            "verdict": self.verdict,
+            "progress": round(self.progress, 4),
+        }
+
+
+# ── Colony ────────────────────────────────────────────────────────
+
+@dataclass
+class Colony:
+    """Founding conditions of the established colony."""
+    system_name: str
+    planet_name: str
+    habitability: float
+    founded_year: int
+    starting_population: int
+    hull_integrity_at_landing: float
+    quality: str   # "struggling" | "standard" | "strong" | "thriving"
+
+    def to_dict(self) -> dict:
+        return {
+            "system_name": self.system_name,
+            "planet_name": self.planet_name,
+            "habitability": round(self.habitability, 1),
+            "founded_year": self.founded_year,
+            "starting_population": self.starting_population,
+            "hull_integrity_at_landing": round(self.hull_integrity_at_landing, 1),
+            "quality": self.quality,
+        }

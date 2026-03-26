@@ -132,26 +132,44 @@ const transitLabel = computed(() => {
       </div>
 
       <!-- Transit progress -->
-      <div v-if="world.transit?.duration_days" class="space-y-1">
+      <div v-if="world.transit?.duration_days && world.phase === 'transit'" class="space-y-1">
         <div class="text-panel-muted uppercase tracking-wider text-[10px]">Transit to {{ world.transit.destination_name }}</div>
-
-        <div v-if="world.transit.arrived" class="text-green-400 font-semibold">
-          Arrived — survey operations underway
+        <div class="flex items-center gap-2">
+          <div class="flex-1 h-1.5 bg-panel-border rounded-full overflow-hidden">
+            <div
+              class="h-full bg-indigo-400 rounded-full transition-all"
+              :style="{ width: (world.transit.progress * 100) + '%' }"
+            />
+          </div>
+          <span class="text-panel-text w-8 text-right">{{ (world.transit.progress * 100).toFixed(1) }}%</span>
         </div>
-        <template v-else>
-          <div class="flex items-center gap-2">
-            <div class="flex-1 h-1.5 bg-panel-border rounded-full overflow-hidden">
-              <div
-                class="h-full bg-indigo-400 rounded-full transition-all"
-                :style="{ width: (world.transit.progress * 100) + '%' }"
-              />
-            </div>
-            <span class="text-panel-text w-8 text-right">{{ (world.transit.progress * 100).toFixed(1) }}%</span>
+        <div class="text-panel-muted" v-if="transitLabel">
+          {{ transitLabel.elapsed }} yr elapsed · {{ transitLabel.remaining }} yr remaining
+        </div>
+      </div>
+
+      <!-- Survey progress -->
+      <div v-if="world.phase === 'survey' && world.survey?.target_system_name" class="space-y-1">
+        <div class="text-panel-muted uppercase tracking-wider text-[10px]">Surveying {{ world.survey.target_system_name }}</div>
+        <div class="flex items-center gap-2">
+          <div class="flex-1 h-1.5 bg-panel-border rounded-full overflow-hidden">
+            <div
+              class="h-full bg-teal-400 rounded-full transition-all"
+              :style="{ width: (world.survey.progress * 100) + '%' }"
+            />
           </div>
-          <div class="text-panel-muted" v-if="transitLabel">
-            {{ transitLabel.elapsed }} yr elapsed · {{ transitLabel.remaining }} yr remaining
-          </div>
-        </template>
+          <span class="text-panel-text w-8 text-right">{{ (world.survey.progress * 100).toFixed(0) }}%</span>
+        </div>
+        <div class="text-panel-muted text-[10px]">
+          Day {{ world.survey.days_elapsed }} of {{ world.survey.survey_duration_days }} · verdict at 90%
+        </div>
+      </div>
+
+      <!-- Founding complete -->
+      <div v-if="world.phase === 'founding' && world.colony?.planet_name" class="space-y-1">
+        <div class="text-panel-muted uppercase tracking-wider text-[10px]">Colony Established</div>
+        <div class="text-teal-300 font-semibold">{{ world.colony.planet_name }}</div>
+        <div class="text-panel-muted text-[10px]">{{ world.colony.system_name }} system · Year {{ world.colony.founded_year }}</div>
       </div>
 
       <!-- System list -->

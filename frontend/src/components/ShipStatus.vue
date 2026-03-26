@@ -130,6 +130,31 @@ const resourceRows = computed(() => {
         </table>
       </div>
 
+      <!-- Colony summary (founding phase) -->
+      <div v-if="world.phase === 'founding' && world.colony?.planet_name" class="space-y-1">
+        <div class="text-panel-muted uppercase tracking-wider text-[10px]">Colony Founded</div>
+        <div class="border border-teal-700 rounded px-2 py-1.5 space-y-1 bg-teal-950/30">
+          <div class="flex justify-between">
+            <span class="text-teal-300 font-semibold">{{ world.colony.planet_name }}</span>
+            <span class="text-panel-muted">{{ world.colony.system_name }}</span>
+          </div>
+          <div class="flex gap-3 text-[10px] text-panel-muted flex-wrap">
+            <span>Year <span class="text-panel-text">{{ world.colony.founded_year }}</span></span>
+            <span>Pop <span class="text-panel-text">{{ fmt(world.colony.starting_population) }}</span></span>
+            <span>Hab <span class="text-panel-text">{{ world.colony.habitability?.toFixed(0) }}%</span></span>
+          </div>
+          <div class="text-[10px]">
+            Status:
+            <span :class="{
+              'text-green-400':  world.colony.quality === 'thriving',
+              'text-teal-300':   world.colony.quality === 'strong',
+              'text-yellow-400': world.colony.quality === 'standard',
+              'text-orange-400': world.colony.quality === 'struggling',
+            }" class="font-semibold uppercase">{{ world.colony.quality }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Notable roster -->
       <div class="space-y-1">
         <div class="text-panel-muted uppercase tracking-wider text-[10px]">

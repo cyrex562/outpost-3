@@ -9,6 +9,8 @@ export const useWorldStore = defineStore('world', () => {
   const notables = ref([])
   const systems = ref([])   // CandidateSystem[]
   const transit = ref({})   // Transit state
+  const survey = ref({})    // Survey state
+  const colony = ref({})    // Colony state (after founding)
   const loaded = ref(false)
 
   function updateFromServer(data) {
@@ -19,8 +21,10 @@ export const useWorldStore = defineStore('world', () => {
     if (data.notables !== undefined) notables.value = data.notables
     if (data.systems !== undefined) systems.value = data.systems
     if (data.transit !== undefined) transit.value = data.transit
+    if (data.survey !== undefined) survey.value = data.survey
+    if (data.colony !== undefined) colony.value = data.colony
     loaded.value = true
   }
 
-  return { phase, ship, population, resources, notables, systems, transit, loaded, updateFromServer }
+  return { phase, ship, population, resources, notables, systems, transit, survey, colony, loaded, updateFromServer }
 })

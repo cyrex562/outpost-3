@@ -14,6 +14,7 @@ from .simulation.world import World
 from .simulation.loadout import run_loadout, world_state_dict
 from .simulation.search import run_search
 from .simulation.transit import TransitSystem
+from .simulation.survey import SurveySystem
 from .narrative import render
 
 # ── globals ───────────────────────────────────────────────────────
@@ -68,10 +69,13 @@ async def lifespan(app: FastAPI):
     startup_events = loadout_events + search_events
     app.state.startup_events = startup_events
 
-    # Register transit system tick/batch handlers
+    # Register simulation systems — order matters: transit runs before survey
     transit_system = TransitSystem(world)
+    survey_system = SurveySystem(world)
     engine.on_tick(transit_system.tick)
+    engine.on_tick(survey_system.tick)
     engine.on_batch(transit_system.batch)
+    engine.on_batch(survey_system.batch)
     engine.on_event(on_event)
     engine.on_state_change(on_state_change)
     engine.start()

@@ -14,7 +14,8 @@ from dataclasses import dataclass
 
 from ..simulation import GameEvent, GameTime, Severity
 from .components import (
-    CandidateSystem, GamePhase, Notable, Population, Resources, ShipHull, Transit,
+    CandidateSystem, Colony, GamePhase, Notable, Population,
+    Resources, ShipHull, Survey, Transit,
 )
 from .world import World
 
@@ -257,6 +258,20 @@ def world_state_dict(world: World) -> dict:
         _, tr = transit_pair
         transit_data = tr.to_dict()
 
+    # Survey progress
+    survey_data: dict = {}
+    survey_pair = world.query_one(Survey)
+    if survey_pair:
+        _, sv = survey_pair
+        survey_data = sv.to_dict()
+
+    # Colony (if founded)
+    colony_data: dict = {}
+    colony_pair = world.query_one(Colony)
+    if colony_pair:
+        _, col = colony_pair
+        colony_data = col.to_dict()
+
     return {
         "type": "world_state",
         "phase": phase,
@@ -266,4 +281,6 @@ def world_state_dict(world: World) -> dict:
         "notables": notables,
         "systems": systems,
         "transit": transit_data,
+        "survey": survey_data,
+        "colony": colony_data,
     }

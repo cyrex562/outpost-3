@@ -13,7 +13,7 @@ import random as _random_module
 from dataclasses import dataclass
 
 from ..simulation import GameEvent, GameTime, Severity
-from .components import CandidateSystem, GamePhase, Planet, Resources, ShipHull, Transit
+from .components import CandidateSystem, GamePhase, Planet, Resources, ShipHull, Survey, Transit
 from .world import World
 
 # ── Star name pools ────────────────────────────────────────────────
@@ -177,6 +177,7 @@ def _generate_system(
 class SearchResult:
     system_entities: list[int]
     transit_entity: int
+    survey_entity: int
     destination_name: str
     transit_years: int
 
@@ -185,14 +186,16 @@ def run_search(
     world: World,
     *,
     rng: _random_module.Random | None = None,
+    rejection_count: int = 0,
 ) -> tuple[SearchResult, list[GameEvent]]:
-    """Generate candidate systems, select the best, create Transit component.
+    """Generate candidate systems, select the best, create Transit + Survey.
 
-    Advances the GamePhase from "loadout" → "transit".
+    Advances the GamePhase to "transit".
 
     Args:
         world: populated ECS World (must already contain ShipHull + Resources)
         rng: optional Random instance for deterministic tests
+        rejection_count: how many times a system has already been rejected
     """
     if rng is None:
         rng = _random_module.Random()
@@ -265,6 +268,13 @@ def run_search(
         fuel_per_day=fuel_per_day,
     ))
 
+    # ── Create Survey component for the upcoming survey ───────────
+    survey_eid = world.new_entity()
+    world.add(survey_eid, Survey(
+        target_system_name=best_system.name,
+        rejection_count=rejection_count,
+    ))
+
     # ── Advance game phase ─────────────────────────────────────────
     phase_pair = world.query_one(GamePhase)
     if phase_pair:
@@ -283,12 +293,14 @@ def run_search(
             "best_habitability": best_system.best_habitability,
             "transit_years": transit_years,
             "candidates_rejected": num_systems - 1,
+            "rejection_count": rejection_count,
         },
     ))
 
     result = SearchResult(
         system_entities=system_eids,
         transit_entity=transit_eid,
+        survey_entity=survey_eid,
         destination_name=best_system.name,
         transit_years=transit_years,
     )
