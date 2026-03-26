@@ -20,10 +20,11 @@ function makePanel(id, title, component, x, y, w = 400, h = 300) {
 
 export const useLayoutStore = defineStore('layout', () => {
   const allPanels = ref([
-    makePanel('time-controls', 'Time Controls', 'TimeControls', 20, 20, 380, 160),
-    makePanel('event-log', 'Event Log', 'EventLog', 20, 200, 500, 400),
-    makePanel('ship-status', 'Ship Status', 'ShipStatus', 540, 20, 340, 580),
-    makePanel('star-map', 'Star Map', 'StarMap', 900, 20, 380, 580),
+    makePanel('time-controls',  'Time Controls',  'TimeControls',  20,  20,  380, 160),
+    makePanel('event-log',      'Event Log',      'EventLog',      20,  200, 500, 430),
+    makePanel('ship-status',    'Ship Status',    'ShipStatus',    540, 20,  340, 580),
+    makePanel('star-map',       'Star Map',       'StarMap',       900, 20,  380, 440),
+    makePanel('resource-graph', 'Resource Graph', 'ResourceGraph', 900, 480, 380, 320),
   ])
 
   const panels = computed(() =>

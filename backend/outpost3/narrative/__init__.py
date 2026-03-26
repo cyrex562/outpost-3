@@ -185,6 +185,14 @@ _TEMPLATES: dict[str, str | list[str]] = {
         "⏸ Navigation committee rejects {system_name} ({habitability:.0f}% habitability). A new search begins. {rejections_remaining} attempt(s) remain before forced settlement.",
     ],
 
+    # ── Deliberation events ───────────────────────────────────────
+    # These render a short summary; the full record is in event.data for the UI.
+    "deliberation.complete": [
+        "Crew deliberation: {trigger_label}. After debate, the committee selects: {chosen_label}. {effect_summary}",
+        "Officers convene on {trigger_label}. Decision reached: {chosen_label}. {effect_summary}",
+        "Ship council addresses {trigger_label}. Chosen course: {chosen_label}. {effect_summary}",
+    ],
+
     # ── Founding Phase ────────────────────────────────────────────
     "colony.founded": [
         "⏸ Colony established on {planet_name}, {system_name} system. {population:,} colonists make landfall. Habitability: {habitability:.0f}%. Colony status: {quality}.",

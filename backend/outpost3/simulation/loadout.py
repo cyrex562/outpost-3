@@ -14,8 +14,8 @@ from dataclasses import dataclass
 
 from ..simulation import GameEvent, GameTime, Severity
 from .components import (
-    CandidateSystem, Colony, GamePhase, Notable, Population,
-    Resources, ShipHull, Survey, Transit,
+    ActiveEffects, CandidateSystem, Colony, GamePhase, Notable, Population,
+    ResourceHistory, Resources, ShipHull, Survey, Transit,
 )
 from .world import World
 
@@ -170,6 +170,8 @@ def run_loadout(
     # ── Resources ─────────────────────────────────────────────────
     resources = _starting_resources(rng, pop_count)
     world.add(ship_eid, resources)   # resources live on the ship entity
+    world.add(ship_eid, ResourceHistory())
+    world.add(ship_eid, ActiveEffects())
 
     # ── Game phase ────────────────────────────────────────────────
     phase_eid = world.new_entity()
@@ -223,6 +225,7 @@ def world_state_dict(world: World) -> dict:
     # Ship hull
     ship_data: dict = {}
     resources_data: dict = {}
+    resource_history: list = []
     ship_pair = world.query_one(ShipHull)
     if ship_pair:
         ship_eid, hull = ship_pair
@@ -230,6 +233,9 @@ def world_state_dict(world: World) -> dict:
         res = world.get(ship_eid, Resources)
         if res:
             resources_data = res.to_dict()
+        hist = world.get(ship_eid, ResourceHistory)
+        if hist:
+            resource_history = hist.to_dict()
 
     # Population
     pop_data: dict = {}
@@ -278,6 +284,7 @@ def world_state_dict(world: World) -> dict:
         "ship": ship_data,
         "population": pop_data,
         "resources": resources_data,
+        "resource_history": resource_history,
         "notables": notables,
         "systems": systems,
         "transit": transit_data,

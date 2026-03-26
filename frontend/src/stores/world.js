@@ -7,10 +7,11 @@ export const useWorldStore = defineStore('world', () => {
   const population = ref({ count: 0, births_this_year: 0, deaths_this_year: 0 })
   const resources = ref({ food: 0, water: 0, medicine: 0, fuel: 0, spare_parts: 0 })
   const notables = ref([])
-  const systems = ref([])   // CandidateSystem[]
-  const transit = ref({})   // Transit state
-  const survey = ref({})    // Survey state
-  const colony = ref({})    // Colony state (after founding)
+  const systems = ref([])           // CandidateSystem[]
+  const transit = ref({})           // Transit state
+  const survey = ref({})            // Survey state
+  const colony = ref({})            // Colony state (after founding)
+  const resourceHistory = ref([])   // ResourceHistory snapshots
   const loaded = ref(false)
 
   function updateFromServer(data) {
@@ -23,8 +24,9 @@ export const useWorldStore = defineStore('world', () => {
     if (data.transit !== undefined) transit.value = data.transit
     if (data.survey !== undefined) survey.value = data.survey
     if (data.colony !== undefined) colony.value = data.colony
+    if (data.resource_history !== undefined) resourceHistory.value = data.resource_history
     loaded.value = true
   }
 
-  return { phase, ship, population, resources, notables, systems, transit, survey, colony, loaded, updateFromServer }
+  return { phase, ship, population, resources, resourceHistory, notables, systems, transit, survey, colony, loaded, updateFromServer }
 })

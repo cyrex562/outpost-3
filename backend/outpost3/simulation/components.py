@@ -188,6 +188,41 @@ class Survey:
         }
 
 
+# ── Resource history ──────────────────────────────────────────────
+
+@dataclass
+class ResourceHistory:
+    """Periodic resource snapshots for the graph panel (one per transit year)."""
+    max_points: int = 80
+    snapshots: list[dict] = field(default_factory=list)
+
+    def record(self, day: int, res: "Resources", pop: "Population") -> None:
+        self.snapshots.append({
+            "day": day,
+            "food": res.food,
+            "water": res.water,
+            "medicine": res.medicine,
+            "fuel": res.fuel,
+            "spare_parts": res.spare_parts,
+            "population": pop.count,
+        })
+        if len(self.snapshots) > self.max_points:
+            self.snapshots = self.snapshots[-self.max_points:]
+
+    def to_dict(self) -> list[dict]:
+        return list(self.snapshots)
+
+
+# ── Active effects ─────────────────────────────────────────────────
+
+@dataclass
+class ActiveEffects:
+    """Runtime modifiers set by deliberation outcomes."""
+    food_ration_modifier: float = 1.0    # multiplier on daily food consumption
+    repair_priority: float = 1.0         # multiplier on hull crack chance per day
+    deliberations_fired: set = field(default_factory=set)  # trigger keys that have fired
+
+
 # ── Colony ────────────────────────────────────────────────────────
 
 @dataclass

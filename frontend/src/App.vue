@@ -7,6 +7,7 @@ import TimeControls from './components/TimeControls.vue'
 import EventLog from './components/EventLog.vue'
 import ShipStatus from './components/ShipStatus.vue'
 import StarMap from './components/StarMap.vue'
+import ResourceGraph from './components/ResourceGraph.vue'
 
 const layout = useLayoutStore()
 const { connect } = useWebSocket()
@@ -20,6 +21,7 @@ const panelComponents = {
   EventLog,
   ShipStatus,
   StarMap,
+  ResourceGraph,
 }
 </script>
 

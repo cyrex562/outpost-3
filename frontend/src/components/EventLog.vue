@@ -5,6 +5,7 @@ import { useEventLogStore } from '../stores/eventLog'
 const eventLog = useEventLogStore()
 const logContainer = ref(null)
 const autoScroll = ref(true)
+const expandedDeliberations = ref(new Set())
 
 const severityColors = {
   debug: 'text-panel-muted',
@@ -41,6 +42,20 @@ function onScroll() {
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30
   autoScroll.value = atBottom
 }
+
+function toggleDelib(id) {
+  if (expandedDeliberations.value.has(id)) {
+    expandedDeliberations.value.delete(id)
+  } else {
+    expandedDeliberations.value.add(id)
+  }
+  // Trigger reactivity
+  expandedDeliberations.value = new Set(expandedDeliberations.value)
+}
+
+function utilityBar(utility) {
+  return Math.round(utility * 100) + '%'
+}
 </script>
 
 <template>
@@ -74,17 +89,77 @@ function onScroll() {
       class="flex-1 overflow-y-auto space-y-0.5 min-h-0"
       @scroll="onScroll"
     >
-      <div
-        v-for="event in eventLog.filteredEvents"
-        :key="event._id"
-        class="flex gap-2 leading-snug"
-        :class="severityColors[event.severity] || 'text-panel-text'"
-      >
-        <span class="text-panel-muted shrink-0 w-28 text-right tabular-nums">
-          Y{{ event.game_time?.year ?? '?' }}.M{{ event.game_time?.month ?? '?' }}.D{{ event.game_time?.day_of_month ?? event.game_time?.day ?? '?' }}
-        </span>
-        <span>{{ event.text || event.event_type }}</span>
-      </div>
+      <template v-for="event in eventLog.filteredEvents" :key="event._id">
+
+        <!-- Deliberation event — expandable card -->
+        <div
+          v-if="event.event_type === 'deliberation.complete'"
+          class="border border-yellow-800/60 rounded bg-yellow-950/20 overflow-hidden"
+        >
+          <!-- Collapsed header -->
+          <button
+            class="w-full flex gap-2 items-start px-2 py-1 text-left hover:bg-yellow-900/10 transition-colors"
+            @click="toggleDelib(event._id)"
+          >
+            <span class="text-panel-muted shrink-0 w-28 text-right tabular-nums text-[10px] mt-0.5">
+              Y{{ event.game_time?.year ?? '?' }}.M{{ event.game_time?.month ?? '?' }}.D{{ event.game_time?.day_of_month ?? '?' }}
+            </span>
+            <span class="flex-1 text-yellow-300 leading-snug">
+              ⚖ {{ event.data?.trigger_label }} →
+              <span class="font-semibold">{{ event.data?.chosen_label }}</span>
+            </span>
+            <span class="text-panel-muted text-[10px] shrink-0 mt-0.5">
+              {{ expandedDeliberations.has(event._id) ? '▲' : '▼' }}
+            </span>
+          </button>
+
+          <!-- Expanded detail -->
+          <div v-if="expandedDeliberations.has(event._id)" class="px-2 pb-2 space-y-1.5">
+            <!-- Options with utility bars and advocate lists -->
+            <div
+              v-for="opt in event.data?.options"
+              :key="opt.key"
+              class="space-y-0.5"
+              :class="opt.key === event.data?.chosen ? 'opacity-100' : 'opacity-60'"
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] shrink-0" :class="opt.key === event.data?.chosen ? 'text-yellow-300' : 'text-panel-muted'">
+                  {{ opt.key === event.data?.chosen ? '✓' : ' ' }} {{ opt.label }}
+                </span>
+                <div class="flex-1 h-1 bg-panel-border rounded-full overflow-hidden">
+                  <div
+                    class="h-full rounded-full"
+                    :class="opt.key === event.data?.chosen ? 'bg-yellow-400' : 'bg-panel-muted/40'"
+                    :style="{ width: utilityBar(opt.utility) }"
+                  />
+                </div>
+                <span class="text-[10px] text-panel-muted tabular-nums w-8 text-right">{{ Math.round(opt.utility * 100) }}%</span>
+              </div>
+              <div v-if="opt.advocates?.length" class="text-[10px] text-panel-muted pl-4">
+                For: {{ opt.advocates.join(', ') }}
+              </div>
+            </div>
+
+            <!-- Effect summary -->
+            <div class="text-[10px] text-yellow-200/70 border-t border-yellow-800/30 pt-1">
+              {{ event.data?.effect_summary }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Standard event row -->
+        <div
+          v-else
+          class="flex gap-2 leading-snug"
+          :class="severityColors[event.severity] || 'text-panel-text'"
+        >
+          <span class="text-panel-muted shrink-0 w-28 text-right tabular-nums">
+            Y{{ event.game_time?.year ?? '?' }}.M{{ event.game_time?.month ?? '?' }}.D{{ event.game_time?.day_of_month ?? event.game_time?.day ?? '?' }}
+          </span>
+          <span>{{ event.text || event.event_type }}</span>
+        </div>
+
+      </template>
 
       <div
         v-if="eventLog.filteredEvents.length === 0"

@@ -16,7 +16,8 @@ from __future__ import annotations
 import random
 
 from ..simulation import GameEvent, GameTime, Severity
-from .components import GamePhase, Population, Resources, ShipHull, Transit
+from . import deliberation as _delib
+from .components import ActiveEffects, GamePhase, Population, ResourceHistory, Resources, ShipHull, Transit
 from .systems import System
 from .world import World
 
@@ -98,6 +99,12 @@ def _get_state(world: World):
     return phase, transit, hull, ship_eid, res, pop
 
 
+def _record_history(world: World, ship_eid: int, day: int, res: Resources, pop: Population) -> None:
+    hist = world.get(ship_eid, ResourceHistory)
+    if hist is not None:
+        hist.record(day, res, pop)
+
+
 # ── Year-boundary logic ────────────────────────────────────────────
 
 def _process_year(
@@ -106,6 +113,8 @@ def _process_year(
     hull: ShipHull,
     res: Resources | None,
     pop: Population,
+    world: "World | None" = None,
+    ship_eid: int = -1,
 ) -> list[GameEvent]:
     """Annual population update, medicine consumption, and year summary event."""
     events: list[GameEvent] = []
@@ -158,6 +167,12 @@ def _process_year(
                 game_time=game_time,
                 data={"medicine": res.medicine, "population": pop.count},
             ))
+
+    # Resource history snapshot + deliberations (once per year if world is provided)
+    if world is not None and ship_eid >= 0 and res is not None:
+        _record_history(world, ship_eid, game_time.day_offset, res, pop)
+        delib_events = _delib.check_and_fire(world, game_time, ship_eid, hull, res, pop)
+        events.extend(delib_events)
 
     return events
 
@@ -237,18 +252,23 @@ class TransitSystem(System):
         # Advance transit clock
         transit.days_elapsed += 1
 
+        # Read active effects modifiers (food ration, repair priority)
+        effects = self.world.get(ship_eid, ActiveEffects)
+        food_mod = effects.food_ration_modifier if effects else 1.0
+        crack_mod = effects.repair_priority if effects else 1.0
+
         # Daily resource consumption
         if res:
             _apply_costs(
                 res,
-                food=pop.count * FOOD_PER_PERSON_DAY,
+                food=int(pop.count * FOOD_PER_PERSON_DAY * food_mod),
                 water=pop.count * WATER_PER_PERSON_DAY,
             )
             fuel_consumed = int(transit.fuel_per_day)
             res.fuel = max(0, res.fuel - fuel_consumed)
 
         # Hull micrometeorite degradation
-        if random.random() < HULL_CRACK_CHANCE_PER_DAY:
+        if random.random() < HULL_CRACK_CHANCE_PER_DAY * crack_mod:
             hull.integrity = max(0.0, hull.integrity - HULL_CRACK_SEVERITY)
             if hull.integrity < 70.0 and random.random() < 0.3:
                 events.append(GameEvent(
@@ -261,7 +281,10 @@ class TransitSystem(System):
 
         # Annual events (year boundary)
         if game_time.is_year_start and transit.days_elapsed > 0:
-            events.extend(_process_year(game_time, transit, hull, res, pop))
+            events.extend(_process_year(
+                game_time, transit, hull, res, pop,
+                world=self.world, ship_eid=ship_eid,
+            ))
 
         # Random transit event
         if random.random() < self.RANDOM_EVENT_CHANCE:
@@ -295,17 +318,22 @@ class TransitSystem(System):
         if days_to_process <= 0:
             return []
 
+        # Read active effects modifiers
+        effects = self.world.get(ship_eid, ActiveEffects)
+        food_mod = effects.food_ration_modifier if effects else 1.0
+        crack_mod = effects.repair_priority if effects else 1.0
+
         # ── Bulk resource consumption (snapshot at batch start) ───
         if res:
             _apply_costs(
                 res,
-                food=pop.count * FOOD_PER_PERSON_DAY * days_to_process,
+                food=int(pop.count * FOOD_PER_PERSON_DAY * days_to_process * food_mod),
                 water=pop.count * WATER_PER_PERSON_DAY * days_to_process,
             )
             res.fuel = max(0, res.fuel - int(transit.fuel_per_day * days_to_process))
 
         # ── Hull degradation (expected value over range) ───────────
-        total_hull_loss = HULL_CRACK_CHANCE_PER_DAY * HULL_CRACK_SEVERITY * days_to_process
+        total_hull_loss = HULL_CRACK_CHANCE_PER_DAY * HULL_CRACK_SEVERITY * crack_mod * days_to_process
         hull.integrity = max(0.0, hull.integrity - total_hull_loss)
 
         # ── Year-boundary events for each year crossed ────────────
@@ -319,7 +347,10 @@ class TransitSystem(System):
                 # Temporarily set for the event data
                 saved = transit.days_elapsed
                 transit.days_elapsed = snapshot_elapsed
-                events.extend(_process_year(gt, transit, hull, res, pop))
+                events.extend(_process_year(
+                    gt, transit, hull, res, pop,
+                    world=self.world, ship_eid=ship_eid,
+                ))
                 transit.days_elapsed = saved
 
         # ── Advance transit clock ──────────────────────────────────
