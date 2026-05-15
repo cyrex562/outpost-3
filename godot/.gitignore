@@ -1,0 +1,6 @@
+.godot/
+*.uid
+.mono/
+.vs/
+bin/
+obj/
