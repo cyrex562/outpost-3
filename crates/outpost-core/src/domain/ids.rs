@@ -42,6 +42,12 @@ impl Default for StarSystemId {
     }
 }
 
+impl std::fmt::Display for StarSystemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Unique identifier for a CelestialBody (planet, moon, asteroid, station).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CelestialBodyId(pub Uuid);
@@ -56,6 +62,12 @@ impl CelestialBodyId {
 impl Default for CelestialBodyId {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Display for CelestialBodyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

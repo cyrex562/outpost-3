@@ -1,0 +1,22 @@
+{# _event_badges.html — HTMX partial for alert badge counts in the top bar #}
+<div id="alert-badges"
+     hx-get="/api/events/badges"
+     hx-trigger="every 5s"
+     hx-target="#alert-badges"
+     hx-swap="outerHTML">
+    {% if critical_count > 0 %}
+    <a href="/events?severity=critical" class="btn btn-ghost btn-sm btn-square indicator" title="{{ critical_count }} critical alert(s)">
+        🚨 <span class="badge badge-xs badge-error indicator-item">{{ critical_count }}</span>
+    </a>
+    {% elif warning_count > 0 %}
+    <a href="/events?severity=warning" class="btn btn-ghost btn-sm btn-square indicator" title="{{ warning_count }} warning(s)">
+        ⚠️ <span class="badge badge-xs badge-warning indicator-item">{{ warning_count }}</span>
+    </a>
+    {% elif unresolved_choices > 0 %}
+    <a href="/events" class="btn btn-ghost btn-sm btn-square indicator" title="{{ unresolved_choices }} pending choice(s)">
+        ❓ <span class="badge badge-xs badge-info indicator-item">{{ unresolved_choices }}</span>
+    </a>
+    {% else %}
+    <button class="btn btn-ghost btn-sm btn-square" title="No alerts">⚠️</button>
+    {% endif %}
+</div>

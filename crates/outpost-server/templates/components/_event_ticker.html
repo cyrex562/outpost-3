@@ -1,0 +1,24 @@
+{# _event_ticker.html — HTMX partial for the event log ticker strip #}
+<div id="ticker-collapsed"
+     class="flex-1 min-w-0 text-xs truncate flex items-center gap-2"
+     hx-get="/api/events/ticker"
+     hx-trigger="every 5s"
+     hx-target="#ticker-collapsed"
+     hx-swap="outerHTML">
+    {% if recent_events %}
+        {% set ev = recent_events | first %}
+        <span class="font-mono text-base-content/40 shrink-0">T{{ ev.tick }}</span>
+        <span class="shrink-0">{{ ev.icon }}</span>
+        <span class="truncate
+            {% if ev.severity_key == 'critical' %}text-error font-semibold
+            {% elif ev.severity_key == 'warning' %}text-warning
+            {% else %}text-base-content/70{% endif %}">
+            {{ ev.title }}
+        </span>
+        {% if recent_events | length > 1 %}
+        <span class="text-base-content/30 shrink-0">+{{ recent_events | length - 1 }} more</span>
+        {% endif %}
+    {% else %}
+        <span class="text-base-content/30">No events yet</span>
+    {% endif %}
+</div>

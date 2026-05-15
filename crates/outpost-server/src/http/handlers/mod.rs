@@ -18,6 +18,10 @@ pub mod labor_handlers;
 pub mod resource_api_handlers;
 pub mod power_handlers;
 pub mod life_support_handlers;
+pub mod event_handlers;
+pub mod system_handlers;
+pub mod admin_handlers;
+pub mod import_export_handlers;
 
 // Helper functions for database operations
 pub(crate) fn load_resources(conn: &Connection, colony_id: u64) -> anyhow::Result<Resources> {

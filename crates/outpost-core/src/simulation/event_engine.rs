@@ -197,6 +197,17 @@ pub fn process_events_tick(state: &mut GameState) -> Vec<GameEvent> {
             let requires_choice = def.choices.len() > 1;
             let auto_resolve = def.choices.len() == 1;
 
+            // Push to the gameplay event log
+            let log_index = state.event_log.push(
+                tick,
+                *site_id,
+                def.id.clone(),
+                def.title.clone(),
+                def.category.clone(),
+                def.severity.clone(),
+                requires_choice,
+            );
+
             emitted.push(GameEvent::new(
                 1,
                 tick,
@@ -216,6 +227,7 @@ pub fn process_events_tick(state: &mut GameState) -> Vec<GameEvent> {
                 if let Some(site_mut) = state.galaxy.find_site_mut(site_id) {
                     apply_choice(site_mut, &choice);
                 }
+                state.event_log.resolve(log_index, choice.id.clone());
                 emitted.push(GameEvent::new(
                     1,
                     tick,
@@ -282,6 +294,15 @@ pub fn resolve_choice(
     // Apply outcomes
     if let Some(site) = state.galaxy.find_site_mut(&site_id) {
         apply_choice(site, &choice);
+    }
+
+    // Mark resolved in event log (find most recent matching entry)
+    let site_id_str = site_id.to_string();
+    if let Some(entry) = state.event_log.all().iter().rev()
+        .find(|e| e.site_id.to_string() == site_id_str && e.event_id == event_id)
+    {
+        let idx = entry.index;
+        state.event_log.resolve(idx, choice_id.to_string());
     }
 
     Some(GameEvent::new(

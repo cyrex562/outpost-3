@@ -1,518 +1,238 @@
 {% extends "base-v5.html" %}
-
-{% block title %}{{ site.name }} - Site Detail{% endblock %}
-
-{% block breadcrumb %}
-<nav class="breadcrumb">
-    <a href="/dashboard">Dashboard</a>
-    <span>/</span>
-    <a href="/colonies">Colonies</a>
-    <span>/</span>
-    <span>{{ site.name }}</span>
-</nav>
-{% endblock %}
+{% block title %}{{ site.name }} - Outpost 3{% endblock %}
 
 {% block content %}
-<div class="site-detail-container" x-data="siteDetail()">
-    <!-- Site Header -->
-    <div class="site-header">
-        <div class="site-header-main">
-            <h1>{{ site.name }}</h1>
-            <span class="badge badge-{{ site.site_type | lower }}">{{ site.site_type }}</span>
-        </div>
-        <div class="site-header-location">
-            <span class="text-secondary">Located on:</span>
-            <span class="text-primary">{{ body.name }}</span>
-            <span class="text-tertiary">{{ system.name }}</span>
-        </div>
-    </div>
+<div class="p-4 max-w-7xl mx-auto" x-data="{ tab: 'overview' }">
 
-    <!-- Quick Stats Grid -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-label">Population</div>
-            <div class="stat-value">{{ site.population }}</div>
-            <div class="stat-trend trend-neutral">—</div>
+  <!-- ── Header ─────────────────────────────────────────── -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-3 flex-wrap">
+      <a href="/colonies" class="btn btn-sm btn-ghost">← Colonies</a>
+      <h1 class="text-2xl font-bold">{{ site.name }}</h1>
+      <span class="badge badge-outline">{{ site.site_type }}</span>
+      <span class="text-sm text-base-content/60">{{ body.name }} · {{ system.name }}</span>
+    </div>
+  </div>
+
+  <!-- ── Quick Stats ────────────────────────────────────── -->
+  <div class="stats shadow w-full mb-4">
+    <div class="stat">
+      <div class="stat-title">Population</div>
+      <div class="stat-value font-mono text-2xl">{{ site.population }}</div>
+      <div class="stat-desc">Morale {{ site.morale }}%</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Power</div>
+      <div class="stat-value font-mono text-2xl {% if site.has_brownout %}text-error{% else %}text-success{% endif %}">
+        {{ site.power_net }} MW
+      </div>
+      <div class="stat-desc {% if site.has_brownout %}text-error{% else %}text-success{% endif %}">
+        {% if site.has_brownout %}⚠ Deficit{% else %}✓ Stable{% endif %}
+      </div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Buildings</div>
+      <div class="stat-value font-mono text-2xl">{{ site.building_count }}</div>
+      <div class="stat-desc">{{ site.construction_count }} in queue</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Life Support</div>
+      <div class="stat-value font-mono text-2xl {% if site.ls_is_critical %}text-error{% elif site.ls_status == 'Warning' %}text-warning{% else %}text-success{% endif %}">
+        {{ site.ls_overall }}%
+      </div>
+      <div class="stat-desc">{{ site.ls_status }}</div>
+    </div>
+  </div>
+
+  <!-- ── Tabs ───────────────────────────────────────────── -->
+  <div role="tablist" class="tabs tabs-boxed mb-4 gap-1 flex-wrap">
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'overview' }"
+      @click="tab = 'overview'">
+      📊 Overview
+    </button>
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'buildings' }"
+      @click="tab = 'buildings'"
+      hx-get="/site/{{ site.id }}/buildings"
+      hx-target="#tab-content"
+      hx-swap="innerHTML">
+      🏗 Buildings
+      {% if site.building_count > 0 %}<span class="badge badge-sm ml-1">{{ site.building_count }}</span>{% endif %}
+    </button>
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'construction' }"
+      @click="tab = 'construction'"
+      hx-get="/site/{{ site.id }}/construction"
+      hx-target="#tab-content"
+      hx-swap="innerHTML">
+      🔨 Construction
+      {% if site.construction_count > 0 %}<span class="badge badge-primary badge-sm ml-1">{{ site.construction_count }}</span>{% endif %}
+    </button>
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'resources' }"
+      @click="tab = 'resources'"
+      hx-get="/site/{{ site.id }}/resources"
+      hx-target="#tab-content"
+      hx-swap="innerHTML">
+      📦 Resources
+    </button>
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'labor' }"
+      @click="tab = 'labor'"
+      hx-get="/site/{{ site.id }}/labor"
+      hx-target="#tab-content"
+      hx-swap="innerHTML">
+      👷 Labor
+    </button>
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'power' }"
+      @click="tab = 'power'"
+      hx-get="/site/{{ site.id }}/power"
+      hx-target="#tab-content"
+      hx-swap="innerHTML">
+      ⚡ Power {% if site.has_brownout %}<span class="badge badge-error badge-sm ml-1">!</span>{% endif %}
+    </button>
+    <button role="tab" class="tab tab-md"
+      :class="{ 'tab-active': tab === 'life-support' }"
+      @click="tab = 'life-support'"
+      hx-get="/site/{{ site.id }}/life-support"
+      hx-target="#tab-content"
+      hx-swap="innerHTML">
+      🌬 Life Support {% if site.ls_is_critical %}<span class="badge badge-error badge-sm ml-1">!</span>{% endif %}
+    </button>
+  </div>
+
+  <!-- ── Overview Tab (always in DOM, shown/hidden) ──────── -->
+  <div x-show="tab === 'overview'" x-cloak>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+
+      <!-- General Info -->
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4">
+          <h3 class="card-title text-base">General Information</h3>
+          <table class="table table-sm">
+            <tbody>
+              <tr><td class="text-base-content/60 w-36">Type</td><td>{{ site.site_type }}</td></tr>
+              <tr><td class="text-base-content/60">Founded</td><td class="font-mono">Tick {{ site.founded_at_tick }}</td></tr>
+              <tr><td class="text-base-content/60">Location</td><td>{{ body.name }}, {{ system.name }}</td></tr>
+              <tr><td class="text-base-content/60">Population</td><td class="font-mono">{{ site.population }}</td></tr>
+              <tr><td class="text-base-content/60">Morale</td><td class="font-mono">{{ site.morale }}%</td></tr>
+              <tr><td class="text-base-content/60">Pollution</td><td class="font-mono">{{ site.pollution_level | round(precision=2) }}</td></tr>
+            </tbody>
+          </table>
         </div>
-        <div class="stat-card">
-            <div class="stat-label">Morale</div>
-            <div class="stat-value">{{ site.morale }}%</div>
-            <div
-                class="stat-trend trend-{% if site.morale >= 70 %}success{% elif site.morale >= 40 %}warning{% else %}danger{% endif %}">
-                {% if site.morale >= 70 %}▲{% elif site.morale >= 40 %}—{% else %}▼{% endif %}
+      </div>
+
+      <!-- Power Grid -->
+      <div class="card {% if site.has_brownout %}border border-error/40 bg-error/5{% else %}bg-base-200{% endif %} shadow">
+        <div class="card-body p-4">
+          <h3 class="card-title text-base">
+            ⚡ Power Grid
+            {% if site.has_brownout %}<span class="badge badge-error badge-sm">Brownout</span>{% endif %}
+          </h3>
+          <table class="table table-sm">
+            <tbody>
+              <tr><td class="text-base-content/60 w-36">Generation</td><td class="font-mono text-success">+{{ site.power_generation }} MW</td></tr>
+              <tr><td class="text-base-content/60">Consumption</td><td class="font-mono text-error">-{{ site.power_consumption }} MW</td></tr>
+              <tr><td class="text-base-content/60">Net</td>
+                <td class="font-mono {% if site.power_net >= 0 %}text-success{% else %}text-error{% endif %}">{{ site.power_net }} MW</td>
+              </tr>
+              <tr><td class="text-base-content/60">Load</td>
+                <td>
+                  <div class="flex items-center gap-2">
+                    <progress class="progress {% if site.has_brownout %}progress-error{% elif site.power_utilization_pct >= 70 %}progress-warning{% else %}progress-success{% endif %} w-20 h-2"
+                      value="{{ site.power_utilization_pct }}" max="100"></progress>
+                    <span class="font-mono text-sm">{{ site.power_utilization_pct }}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <button class="btn btn-ghost btn-xs mt-1" @click="tab='power'; htmx.trigger('[hx-target=\'#tab-content\'][role=\'tab\']:nth-child(6)', 'click')">
+            Power Detail →
+          </button>
+        </div>
+      </div>
+
+      <!-- Life Support -->
+      <div class="card {% if site.ls_is_critical %}border border-error/40 bg-error/5{% else %}bg-base-200{% endif %} shadow">
+        <div class="card-body p-4">
+          <h3 class="card-title text-base">
+            🌬 Life Support
+            {% if site.ls_is_critical %}<span class="badge badge-error badge-sm">Critical</span>
+            {% elif site.ls_status == "Warning" %}<span class="badge badge-warning badge-sm">Warning</span>
+            {% else %}<span class="badge badge-success badge-sm">Good</span>{% endif %}
+          </h3>
+          <div class="space-y-2 mt-1">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-base-content/60 w-16">💨 O₂</span>
+              <progress class="progress {% if site.ls_oxygen_pct < 25 %}progress-error{% elif site.ls_oxygen_pct < 75 %}progress-warning{% else %}progress-success{% endif %} flex-1 h-2"
+                value="{{ site.ls_oxygen_pct }}" max="100"></progress>
+              <span class="font-mono text-sm w-10">{{ site.ls_oxygen_pct }}%</span>
             </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Power</div>
-            <div class="stat-value {% if site.has_brownout %}text-danger{% else %}text-success{% endif %}">{{ site.power_net }} MW</div>
-            <div class="stat-trend trend-{% if site.has_brownout %}danger{% else %}success{% endif %}">
-                {% if site.has_brownout %}⚠ Brownout{% else %}✓ Stable{% endif %}
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-base-content/60 w-16">💧 Water</span>
+              <progress class="progress {% if site.ls_water_pct < 25 %}progress-error{% elif site.ls_water_pct < 75 %}progress-warning{% else %}progress-success{% endif %} flex-1 h-2"
+                value="{{ site.ls_water_pct }}" max="100"></progress>
+              <span class="font-mono text-sm w-10">{{ site.ls_water_pct }}%</span>
             </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Buildings</div>
-            <div class="stat-value">{{ site.building_count }}</div>
-            <div class="stat-trend trend-neutral">{{ site.construction_count }} queued</div>
-        </div>
-    </div>
-
-    <!-- Tabs -->
-    <div class="tabs">
-        <button class="tab-button" :class="{ 'active': activeTab === 'overview' }" @click="switchTab('overview')">
-            Overview
-        </button>
-        <button class="tab-button" :class="{ 'active': activeTab === 'buildings' }" @click="switchTab('buildings')"
-            hx-get="/site/{{ site.id }}/buildings" hx-trigger="click" hx-target="#tab-content" hx-swap="innerHTML">
-            Buildings
-        </button>
-        <button class="tab-button" :class="{ 'active': activeTab === 'construction' }"
-            @click="switchTab('construction')" hx-get="/site/{{ site.id }}/construction" hx-trigger="click"
-            hx-target="#tab-content" hx-swap="innerHTML">
-            Construction
-            {% if site.construction_count > 0 %}
-            <span class="badge badge-primary">{{ site.construction_count }}</span>
-            {% endif %}
-        </button>
-        <button class="tab-button" :class="{ 'active': activeTab === 'resources' }" @click="switchTab('resources')"
-            hx-get="/site/{{ site.id }}/resources" hx-trigger="click" hx-target="#tab-content" hx-swap="innerHTML">
-            Resources
-        </button>
-        <button class="tab-button" :class="{ 'active': activeTab === 'labor' }" @click="switchTab('labor')"
-            hx-get="/site/{{ site.id }}/labor" hx-trigger="click" hx-target="#tab-content" hx-swap="innerHTML">
-            Labor
-        </button>
-        <button class="tab-button" :class="{ 'active': activeTab === 'power' }" @click="switchTab('power')"
-            hx-get="/site/{{ site.id }}/power" hx-trigger="click" hx-target="#tab-content" hx-swap="innerHTML">
-            Power {% if site.has_brownout %}<span class="badge badge-danger">!</span>{% endif %}
-        </button>
-        <button class="tab-button" :class="{ 'active': activeTab === 'life-support' }" @click="switchTab('life-support')"
-            hx-get="/site/{{ site.id }}/life-support" hx-trigger="click" hx-target="#tab-content" hx-swap="innerHTML">
-            Life Support {% if site.ls_is_critical %}<span class="badge badge-danger">!</span>{% endif %}
-        </button>
-    </div>
-
-    <!-- Tab Content -->
-    <div id="tab-content" class="tab-content">
-        <!-- Overview Tab (Default) -->
-        <div x-show="activeTab === 'overview'" class="tab-pane">
-            <div class="overview-grid">
-                <!-- General Info -->
-                <div class="info-section">
-                    <h3>General Information</h3>
-                    <table class="info-table">
-                        <tr>
-                            <td class="label">Site Type:</td>
-                            <td>{{ site.site_type }}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Founded:</td>
-                            <td>Tick {{ site.founded_at_tick }}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Location:</td>
-                            <td>{{ body.name }}, {{ system.name }}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Population:</td>
-                            <td>{{ site.population }} {% if site.site_type == "Settlement" %}settlers{% else %}crew{%
-                                endif %}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Pollution:</td>
-                            <td>{{ site.pollution_level | round(precision=2) }}</td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- Power Status -->
-                <div class="info-section {% if site.has_brownout %}info-section--alert{% endif %}">
-                    <h3>⚡ Power Grid {% if site.has_brownout %}<span class="badge badge-danger">Brownout</span>{% endif %}</h3>
-                    <table class="info-table">
-                        <tr>
-                            <td class="label">Generation:</td>
-                            <td class="text-success">+{{ site.power_generation }} MW</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Consumption:</td>
-                            <td class="text-danger">-{{ site.power_consumption }} MW</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Net:</td>
-                            <td class="{% if site.power_net >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                {{ site.power_net }} MW
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="label">Load:</td>
-                            <td>
-                                <div class="mini-bar">
-                                    <div class="mini-bar__fill {% if site.has_brownout %}mini-bar--critical{% elif site.power_utilization_pct >= 70 %}mini-bar--warning{% else %}mini-bar--good{% endif %}"
-                                        style="width: {{ site.power_utilization_pct }}%"></div>
-                                </div>
-                                <span class="font-mono">{{ site.power_utilization_pct }}%</span>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="label">Status:</td>
-                            <td>
-                                {% if site.has_brownout %}
-                                <span class="badge badge-danger">Deficit</span>
-                                {% else %}
-                                <span class="badge badge-success">Stable</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    </table>
-                    <div class="section-link">
-                        <button class="btn btn-ghost btn-xs"
-                            @click="switchTab('power')"
-                            hx-get="/site/{{ site.id }}/power" hx-target="#tab-content" hx-swap="innerHTML">
-                            View Power Detail →
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Life Support Status -->
-                <div class="info-section {% if site.ls_is_critical %}info-section--alert{% endif %}">
-                    <h3>🌬 Life Support
-                        {% if site.ls_is_critical %}<span class="badge badge-danger">Critical</span>
-                        {% elif site.ls_status == "Warning" %}<span class="badge badge-warning">Warning</span>
-                        {% else %}<span class="badge badge-success">Good</span>{% endif %}
-                    </h3>
-                    <div class="ls-mini-gauges">
-                        <div class="ls-mini">
-                            <span class="ls-mini__label">💨 O₂</span>
-                            <div class="mini-bar">
-                                <div class="mini-bar__fill {% if site.ls_oxygen_pct < 25 %}mini-bar--critical{% elif site.ls_oxygen_pct < 75 %}mini-bar--warning{% else %}mini-bar--good{% endif %}"
-                                    style="width: {{ site.ls_oxygen_pct }}%"></div>
-                            </div>
-                            <span class="font-mono {% if site.ls_oxygen_pct < 25 %}text-danger{% elif site.ls_oxygen_pct < 75 %}text-warning{% else %}text-success{% endif %}">{{ site.ls_oxygen_pct }}%</span>
-                        </div>
-                        <div class="ls-mini">
-                            <span class="ls-mini__label">💧 Water</span>
-                            <div class="mini-bar">
-                                <div class="mini-bar__fill {% if site.ls_water_pct < 25 %}mini-bar--critical{% elif site.ls_water_pct < 75 %}mini-bar--warning{% else %}mini-bar--good{% endif %}"
-                                    style="width: {{ site.ls_water_pct }}%"></div>
-                            </div>
-                            <span class="font-mono {% if site.ls_water_pct < 25 %}text-danger{% elif site.ls_water_pct < 75 %}text-warning{% else %}text-success{% endif %}">{{ site.ls_water_pct }}%</span>
-                        </div>
-                        <div class="ls-mini">
-                            <span class="ls-mini__label">🌿 Food</span>
-                            <div class="mini-bar">
-                                <div class="mini-bar__fill {% if site.ls_food_pct < 25 %}mini-bar--critical{% elif site.ls_food_pct < 75 %}mini-bar--warning{% else %}mini-bar--good{% endif %}"
-                                    style="width: {{ site.ls_food_pct }}%"></div>
-                            </div>
-                            <span class="font-mono {% if site.ls_food_pct < 25 %}text-danger{% elif site.ls_food_pct < 75 %}text-warning{% else %}text-success{% endif %}">{{ site.ls_food_pct }}%</span>
-                        </div>
-                    </div>
-                    <div class="section-link">
-                        <button class="btn btn-ghost btn-xs"
-                            @click="switchTab('life-support')"
-                            hx-get="/site/{{ site.id }}/life-support" hx-target="#tab-content" hx-swap="innerHTML">
-                            View Life Support Detail →
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Storage -->
-                <div class="info-section">
-                    <h3>Storage Capacity</h3>
-                    <table class="info-table">
-                        <tr>
-                            <td class="label">Total:</td>
-                            <td>{{ site.storage_capacity }} units</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Used:</td>
-                            <td>{{ site.storage_used }} units</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Available:</td>
-                            <td>{{ site.storage_capacity - site.storage_used }} units</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Utilization:</td>
-                            <td>
-                                <div class="progress-bar">
-                                    <div class="progress-fill"
-                                        style="width: {{ (site.storage_used / site.storage_capacity * 100) | round }}%">
-                                    </div>
-                                </div>
-                                {{ (site.storage_used / site.storage_capacity * 100) | round }}%
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- Population Info -->
-                <div class="info-section">
-                    <h3>Population Details</h3>
-                    <table class="info-table">
-                        <tr>
-                            <td class="label">Total:</td>
-                            <td>{{ site.population }}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Morale:</td>
-                            <td>{{ site.morale }}%</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Available Labor:</td>
-                            <td>{{ site.available_labor }}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Assigned Workers:</td>
-                            <td>{{ site.assigned_workers }}</td>
-                        </tr>
-                    </table>
-                </div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-base-content/60 w-16">🌿 Food</span>
+              <progress class="progress {% if site.ls_food_pct < 25 %}progress-error{% elif site.ls_food_pct < 75 %}progress-warning{% else %}progress-success{% endif %} flex-1 h-2"
+                value="{{ site.ls_food_pct }}" max="100"></progress>
+              <span class="font-mono text-sm w-10">{{ site.ls_food_pct }}%</span>
             </div>
+          </div>
         </div>
+      </div>
 
-        <!-- Buildings Tab (loaded via HTMX) -->
-        <!-- Construction Tab (loaded via HTMX) -->
-        <!-- Resources Tab (loaded via HTMX) -->
+      <!-- Storage -->
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4">
+          <h3 class="card-title text-base">Storage Capacity</h3>
+          <table class="table table-sm">
+            <tbody>
+              <tr><td class="text-base-content/60 w-36">Total</td><td class="font-mono">{{ site.storage_capacity }} units</td></tr>
+              <tr><td class="text-base-content/60">Used</td><td class="font-mono">{{ site.storage_used }} units</td></tr>
+              <tr><td class="text-base-content/60">Available</td><td class="font-mono">{{ site.storage_capacity - site.storage_used }} units</td></tr>
+              <tr><td class="text-base-content/60">Utilization</td>
+                <td>
+                  <div class="flex items-center gap-2">
+                    <progress class="progress progress-info w-20 h-2"
+                      value="{{ (site.storage_used / site.storage_capacity * 100) | round }}" max="100"></progress>
+                    <span class="font-mono text-sm">{{ (site.storage_used / site.storage_capacity * 100) | round }}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-        <!-- Labor Tab (loaded via HTMX) -->
-        <!-- Placeholder shown until tab is clicked -->
-        <div id="labor-placeholder"
-            x-show="activeTab !== 'buildings' && activeTab !== 'construction' && activeTab !== 'resources' && activeTab !== 'labor'"
-            style="display:none"></div>
+      <!-- Population -->
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4">
+          <h3 class="card-title text-base">Population Details</h3>
+          <table class="table table-sm">
+            <tbody>
+              <tr><td class="text-base-content/60 w-36">Total</td><td class="font-mono">{{ site.population }}</td></tr>
+              <tr><td class="text-base-content/60">Morale</td><td class="font-mono">{{ site.morale }}%</td></tr>
+              <tr><td class="text-base-content/60">Available</td><td class="font-mono">{{ site.available_labor }}</td></tr>
+              <tr><td class="text-base-content/60">Assigned</td><td class="font-mono">{{ site.assigned_workers }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
+  </div>
+
+  <!-- ── HTMX Tab Content ───────────────────────────────── -->
+  <div id="tab-content" x-show="tab !== 'overview'" x-cloak>
+    <div class="text-center py-8 text-base-content/40">Select a tab above to load content.</div>
+  </div>
+
 </div>
-
-<style>
-    .site-detail-container {
-        max-width: 1400px;
-        margin: 0 auto;
-        padding: var(--spacing-4);
-    }
-
-    .site-header {
-        margin-bottom: var(--spacing-4);
-        padding-bottom: var(--spacing-3);
-        border-bottom: 1px solid var(--border-color);
-    }
-
-    .site-header-main {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-2);
-        margin-bottom: var(--spacing-2);
-    }
-
-    .site-header-main h1 {
-        margin: 0;
-        font-size: var(--font-xl);
-    }
-
-    .site-header-location {
-        color: var(--text-secondary);
-        font-size: var(--font-sm);
-    }
-
-    .site-header-location .text-primary {
-        color: var(--text-primary);
-        font-weight: 500;
-    }
-
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: var(--spacing-3);
-        margin-bottom: var(--spacing-4);
-    }
-
-    .stat-card {
-        background: var(--surface-1);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md);
-        padding: var(--spacing-3);
-    }
-
-    .stat-label {
-        font-size: var(--font-sm);
-        color: var(--text-secondary);
-        margin-bottom: var(--spacing-1);
-    }
-
-    .stat-value {
-        font-family: var(--font-mono);
-        font-size: var(--font-xl);
-        font-weight: 600;
-        margin-bottom: var(--spacing-1);
-    }
-
-    .stat-trend {
-        font-size: var(--font-sm);
-    }
-
-    .tabs {
-        display: flex;
-        gap: var(--spacing-2);
-        border-bottom: 2px solid var(--border-color);
-        margin-bottom: var(--spacing-4);
-    }
-
-    .tab-button {
-        background: transparent;
-        border: none;
-        padding: var(--spacing-2) var(--spacing-3);
-        font-size: var(--font-base);
-        color: var(--text-secondary);
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -2px;
-        transition: all 0.2s;
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-1);
-    }
-
-    .tab-button:hover {
-        color: var(--text-primary);
-    }
-
-    .tab-button.active {
-        color: var(--accent-primary);
-        border-bottom-color: var(--accent-primary);
-    }
-
-    .tab-content {
-        min-height: 400px;
-    }
-
-    .tab-pane {
-        animation: fadeIn 0.2s;
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-        }
-
-        to {
-            opacity: 1;
-        }
-    }
-
-    .overview-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: var(--spacing-4);
-    }
-
-    .info-section {
-        background: var(--surface-1);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md);
-        padding: var(--spacing-3);
-    }
-
-    .info-section h3 {
-        margin: 0 0 var(--spacing-3) 0;
-        font-size: var(--font-lg);
-        color: var(--text-primary);
-    }
-
-    .info-table {
-        width: 100%;
-        font-size: var(--font-sm);
-    }
-
-    .info-table tr {
-        border-bottom: 1px solid var(--border-color);
-    }
-
-    .info-table tr:last-child {
-        border-bottom: none;
-    }
-
-    .info-table td {
-        padding: var(--spacing-2) 0;
-    }
-
-    .info-table td.label {
-        color: var(--text-secondary);
-        width: 40%;
-    }
-
-    .empty-state {
-        text-align: center;
-        padding: var(--spacing-8);
-        color: var(--text-secondary);
-    }
-
-    .badge-settlement {
-        background: var(--accent-primary);
-    }
-
-    .badge-installation {
-        background: var(--accent-info);
-    }
-
-    /* ── Mini progress bar ── */
-    .mini-bar {
-        display: inline-block;
-        width: 80px;
-        height: 6px;
-        background: var(--surface-2);
-        border-radius: 3px;
-        overflow: hidden;
-        vertical-align: middle;
-        margin-right: 4px;
-    }
-    .mini-bar__fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.3s;
-    }
-    .mini-bar--good     { background: var(--success-color, #4ade80); }
-    .mini-bar--warning  { background: var(--warning-color, #fbbf24); }
-    .mini-bar--critical { background: var(--danger-color,  #f87171); }
-
-    /* ── Alert info section ── */
-    .info-section--alert {
-        border-color: rgba(248, 113, 113, 0.4);
-        background: rgba(248, 113, 113, 0.04);
-    }
-
-    /* ── Life support mini gauges ── */
-    .ls-mini-gauges {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-2);
-        margin: var(--spacing-2) 0;
-    }
-    .ls-mini {
-        display: flex;
-        align-items: center;
-        gap: var(--spacing-2);
-        font-size: var(--font-sm);
-    }
-    .ls-mini__label {
-        width: 64px;
-        color: var(--text-secondary);
-    }
-
-    /* ── Section link ── */
-    .section-link {
-        margin-top: var(--spacing-2);
-        padding-top: var(--spacing-2);
-        border-top: 1px solid var(--border-color);
-    }
-</style>
 {% endblock %}
 
-{% block extra_scripts %}
-<script>
-    function siteDetail() {
-        return {
-            activeTab: 'overview',
-            switchTab(tab) {
-                this.activeTab = tab;
-            }
-        }
-    }
-</script>
-{% endblock %}

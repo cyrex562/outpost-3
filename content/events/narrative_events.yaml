@@ -1,12 +1,20 @@
-# Example event definitions for Outpost 3
-# These are loaded at runtime and can be modded
+# Outpost 3 — Gameplay Event Definitions
+# Loaded at runtime from this file. Add new events here to mod the game.
+# Categories: disaster | discovery | social | technical | economic | general
+# Severity:   info | warning | critical
 
-# First Colony Event
+# ──────────────────────────────────────────────
+# SOCIAL EVENTS
+# ──────────────────────────────────────────────
+
 - id: first_colonists_arrive
   title: "The First Colonists"
   description: |
-    The first wave of colonists has arrived at the landing site. 
+    The first wave of colonists has arrived at the landing site.
     Supplies are limited, morale is tentatively high, and everyone is eager to begin building humanity's first extraterrestrial home.
+  category: social
+  severity: info
+  auto_pause: false
   triggers:
     - type: population_reached
       threshold: 1
@@ -35,12 +43,295 @@
   repeatable: false
   weight: 1.0
 
-# Resource Discovery
+- id: population_milestone_100
+  title: "One Hundred Colonists"
+  description: |
+    The colony has grown to 100 people! This milestone marks the transition from a small outpost to a true settlement.
+    The colonists want to celebrate this achievement.
+  category: social
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: population_reached
+      threshold: 100
+  choices:
+    - id: grand_celebration
+      text: "Throw a grand celebration"
+      description: "Use resources to organize a memorable event"
+      outcomes:
+        - type: morale_change
+          amount: 25.0
+        - type: resource_change
+          resource_id: food
+          amount: -50.0
+      cost:
+        credits: 100.0
+    - id: modest_celebration
+      text: "Hold a modest gathering"
+      description: "Acknowledge the milestone without excessive expense"
+      outcomes:
+        - type: morale_change
+          amount: 10.0
+        - type: resource_change
+          resource_id: food
+          amount: -20.0
+      cost: {}
+  repeatable: false
+  weight: 1.0
+
+- id: interpersonal_conflict
+  title: "Rising Tensions"
+  description: |
+    Confined spaces and relentless work have sparked a heated dispute between two crew members.
+    The conflict is spreading and affecting team cohesion.
+  category: social
+  severity: warning
+  auto_pause: false
+  triggers:
+    - type: morale_threshold
+      threshold: 50.0
+    - type: random
+      probability_per_tick: 0.002
+  choices:
+    - id: mediate
+      text: "Mediate the dispute"
+      description: "Assign a mediator to resolve the conflict diplomatically"
+      outcomes:
+        - type: morale_change
+          amount: 8.0
+        - type: narrative_text
+          text: "The mediation session clears the air. Both parties return to work."
+      cost: {}
+    - id: separate_duties
+      text: "Reassign duties"
+      description: "Separate the individuals by reassigning their work schedules"
+      outcomes:
+        - type: morale_change
+          amount: 3.0
+        - type: narrative_text
+          text: "The separation reduces friction but doesn't fully resolve the underlying tension."
+      cost: {}
+    - id: ignore_conflict
+      text: "Let them work it out"
+      description: "Trust the crew to resolve things on their own"
+      outcomes:
+        - type: morale_change
+          amount: -10.0
+        - type: narrative_text
+          text: "The conflict escalates briefly before dying down, leaving lasting resentment."
+      cost: {}
+  repeatable: true
+  cooldown_ticks: 300
+  weight: 3.0
+
+- id: skill_breakthrough
+  title: "Engineering Breakthrough"
+  description: |
+    One of your engineers has developed an innovative technique that could improve construction efficiency.
+    The innovation is promising but needs resources to implement.
+  category: social
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: building_constructed
+      building_id: basic_habitat
+    - type: random
+      probability_per_tick: 0.001
+  choices:
+    - id: fund_research
+      text: "Fund the development"
+      description: "Invest resources to refine and implement the new technique"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 20.0
+        - type: morale_change
+          amount: 5.0
+        - type: narrative_text
+          text: "The breakthrough is documented and shared with the whole colony."
+      cost:
+        credits: 150.0
+    - id: note_for_later
+      text: "Document it for later"
+      description: "Record the idea but focus on current priorities"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 5.0
+        - type: narrative_text
+          text: "The idea is noted. Maybe later conditions will allow it to be pursued."
+      cost: {}
+  repeatable: false
+  weight: 2.0
+
+# ──────────────────────────────────────────────
+# DISASTER EVENTS
+# ──────────────────────────────────────────────
+
+- id: equipment_failure
+  title: "Critical Equipment Failure"
+  description: |
+    A major piece of equipment has broken down unexpectedly. Production in the affected area
+    has halted and repairs are urgently needed.
+  category: disaster
+  severity: warning
+  auto_pause: true
+  triggers:
+    - type: building_constructed
+      building_id: iron_mine
+    - type: random
+      probability_per_tick: 0.0015
+  choices:
+    - id: emergency_repair
+      text: "Emergency repair team"
+      description: "Deploy a skilled repair team immediately at great cost"
+      outcomes:
+        - type: resource_change
+          resource_id: machine_parts
+          amount: -30.0
+        - type: resource_change
+          resource_id: structural_components
+          amount: -10.0
+        - type: morale_change
+          amount: 5.0
+        - type: narrative_text
+          text: "The repair team works around the clock. The equipment is back online."
+      cost:
+        credits: 200.0
+    - id: improvised_repair
+      text: "Improvised fix"
+      description: "Use whatever parts are available for a temporary repair"
+      outcomes:
+        - type: resource_change
+          resource_id: machine_parts
+          amount: -10.0
+        - type: morale_change
+          amount: -5.0
+        - type: narrative_text
+          text: "The improvised fix holds for now, but the equipment runs at reduced efficiency."
+      cost: {}
+    - id: shut_down
+      text: "Shut it down for full inspection"
+      description: "Take the system offline for a thorough inspection before repairs"
+      outcomes:
+        - type: resource_change
+          resource_id: machine_parts
+          amount: -15.0
+        - type: resource_change
+          resource_id: research_data
+          amount: 5.0
+        - type: morale_change
+          amount: -3.0
+        - type: narrative_text
+          text: "The thorough inspection reveals additional wear. Better to catch it now."
+      cost: {}
+  repeatable: true
+  cooldown_ticks: 500
+  weight: 4.0
+
+- id: pressure_leak
+  title: "Habitat Pressure Leak"
+  description: |
+    Sensors have detected a slow pressure leak in one of the habitat modules.
+    Oxygen is venting into the environment. Time is critical.
+  category: disaster
+  severity: critical
+  auto_pause: true
+  triggers:
+    - type: building_constructed
+      building_id: basic_habitat
+    - type: random
+      probability_per_tick: 0.0008
+  choices:
+    - id: emergency_seal
+      text: "Emergency seal the module"
+      description: "Evacuate and seal the module immediately"
+      outcomes:
+        - type: resource_change
+          resource_id: structural_components
+          amount: -20.0
+        - type: resource_change
+          resource_id: oxygen
+          amount: -50.0
+        - type: morale_change
+          amount: -10.0
+        - type: narrative_text
+          text: "The module is evacuated and sealed. Repairs will take time but lives are saved."
+      cost: {}
+    - id: controlled_repair
+      text: "Controlled repair in suits"
+      description: "Send suited workers in to repair while minimizing oxygen loss"
+      outcomes:
+        - type: resource_change
+          resource_id: structural_components
+          amount: -10.0
+        - type: resource_change
+          resource_id: oxygen
+          amount: -20.0
+        - type: morale_change
+          amount: 5.0
+        - type: narrative_text
+          text: "The repair crew seals the leak with minimal disruption. A close call."
+      cost:
+        credits: 100.0
+  repeatable: true
+  cooldown_ticks: 800
+  weight: 2.0
+
+- id: power_surge
+  title: "Power Surge"
+  description: |
+    A massive power surge has struck the colony's electrical grid. Multiple systems are at risk
+    of damage from the voltage spike.
+  category: disaster
+  severity: warning
+  auto_pause: true
+  triggers:
+    - type: building_constructed
+      building_id: nuclear_reactor
+    - type: random
+      probability_per_tick: 0.001
+  choices:
+    - id: surge_protectors
+      text: "Engage surge protectors"
+      description: "Activate emergency surge protection across critical systems"
+      outcomes:
+        - type: resource_change
+          resource_id: electronics
+          amount: -15.0
+        - type: morale_change
+          amount: -5.0
+        - type: narrative_text
+          text: "The surge protectors absorb the spike. Several components are burned out but major systems survive."
+      cost: {}
+    - id: emergency_shutdown
+      text: "Emergency power shutdown"
+      description: "Cut power to all non-essential systems immediately"
+      outcomes:
+        - type: resource_change
+          resource_id: electronics
+          amount: -5.0
+        - type: morale_change
+          amount: -15.0
+        - type: narrative_text
+          text: "The shutdown prevents damage but leaves the colony in darkness for several hours."
+      cost: {}
+  repeatable: true
+  cooldown_ticks: 600
+  weight: 2.5
+
+# ──────────────────────────────────────────────
+# DISCOVERY EVENTS
+# ──────────────────────────────────────────────
+
 - id: mineral_deposit_discovered
   title: "Rich Mineral Deposit"
   description: |
     Survey teams have discovered a rich iron ore deposit nearby.
     Exploiting it will require building mining infrastructure.
+  category: discovery
+  severity: info
+  auto_pause: false
   triggers:
     - type: building_constructed
       building_id: solar_array_mk1
@@ -80,46 +371,369 @@
   cooldown_ticks: 1000
   weight: 5.0
 
-# Population Milestone
-- id: population_milestone_100
-  title: "One Hundred Colonists"
+- id: unusual_formation
+  title: "Unusual Rock Formation"
   description: |
-    The colony has grown to 100 people! This milestone marks the transition from a small outpost to a true settlement.
-    The colonists want to celebrate this achievement.
+    Survey drones have identified an unusual geological formation that appears to contain
+    trace amounts of rare earth elements. Detailed analysis could yield valuable data.
+  category: discovery
+  severity: info
+  auto_pause: false
   triggers:
-    - type: population_reached
-      threshold: 100
+    - type: building_constructed
+      building_id: solar_array_mk1
+    - type: random
+      probability_per_tick: 0.0008
   choices:
-    - id: grand_celebration
-      text: "Throw a grand celebration"
-      description: "Use resources to organize a memorable event"
+    - id: detailed_analysis
+      text: "Conduct detailed analysis"
+      description: "Deploy scientists to study the formation thoroughly"
       outcomes:
-        - type: morale_change
+        - type: resource_change
+          resource_id: research_data
           amount: 25.0
         - type: resource_change
-          resource_id: food
-          amount: -50.0
-      cost:
-        credits: 100.0
-    - id: modest_celebration
-      text: "Hold a modest gathering"
-      description: "Acknowledge the milestone without excessive expense"
-      outcomes:
+          resource_id: rare_earth_ore
+          amount: 30.0
         - type: morale_change
-          amount: 10.0
+          amount: 8.0
+        - type: narrative_text
+          text: "The analysis yields valuable data and a small cache of rare earth ore."
+      cost:
+        credits: 80.0
+    - id: quick_sample
+      text: "Take a quick sample"
+      description: "Grab a sample and move on"
+      outcomes:
         - type: resource_change
-          resource_id: food
-          amount: -20.0
+          resource_id: research_data
+          amount: 8.0
+        - type: resource_change
+          resource_id: rare_earth_ore
+          amount: 10.0
+      cost: {}
+    - id: ignore
+      text: "Ignore the formation"
+      description: "Too many other priorities right now"
+      outcomes:
+        - type: narrative_text
+          text: "The formation is logged but no action is taken. Perhaps another day."
+      cost: {}
+  repeatable: true
+  cooldown_ticks: 800
+  weight: 3.0
+
+- id: underground_cavity
+  title: "Underground Cavity Discovered"
+  description: |
+    Ground-penetrating radar has revealed a large underground cavity beneath the colony site.
+    It could be used for additional protected storage or even as a habitation zone.
+  category: discovery
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: population_reached
+      threshold: 50
+    - type: random
+      probability_per_tick: 0.0005
+  choices:
+    - id: habitation_zone
+      text: "Develop as habitation zone"
+      description: "Excavate and fit out the cavity as underground living quarters"
+      outcomes:
+        - type: resource_change
+          resource_id: structural_components
+          amount: -80.0
+        - type: morale_change
+          amount: 15.0
+        - type: narrative_text
+          text: "The underground habitat provides protected, comfortable living space for the colonists."
+      cost:
+        credits: 500.0
+    - id: storage_depot
+      text: "Use as storage depot"
+      description: "Convert the cavity into a secure underground storage facility"
+      outcomes:
+        - type: resource_change
+          resource_id: structural_components
+          amount: -40.0
+        - type: morale_change
+          amount: 5.0
+        - type: narrative_text
+          text: "The underground depot greatly expands colony storage capacity."
+      cost:
+        credits: 200.0
+    - id: further_study
+      text: "Study the cavity further"
+      description: "Investigate before committing to any use"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 15.0
+        - type: narrative_text
+          text: "Detailed surveys reveal the full extent of the cavity system."
       cost: {}
   repeatable: false
-  weight: 1.0
+  weight: 2.0
 
-# Low Morale Crisis
+# ──────────────────────────────────────────────
+# TECHNICAL EVENTS
+# ──────────────────────────────────────────────
+
+- id: process_optimization
+  title: "Production Process Optimized"
+  description: |
+    Your engineers have found a more efficient way to run one of the colony's key production processes.
+    The optimization could save significant resources if properly implemented.
+  category: technical
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: building_constructed
+      building_id: smelter
+    - type: random
+      probability_per_tick: 0.0012
+  choices:
+    - id: implement_fully
+      text: "Implement across all facilities"
+      description: "Roll out the optimization to all applicable processes"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 10.0
+        - type: morale_change
+          amount: 10.0
+        - type: narrative_text
+          text: "The optimization is deployed colony-wide, boosting efficiency and morale."
+      cost:
+        credits: 120.0
+    - id: implement_test
+      text: "Run a pilot test first"
+      description: "Test the optimization on a single facility before full rollout"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 15.0
+        - type: morale_change
+          amount: 5.0
+        - type: narrative_text
+          text: "The pilot test is successful and provides valuable data for future implementation."
+      cost:
+        credits: 40.0
+  repeatable: true
+  cooldown_ticks: 700
+  weight: 3.0
+
+- id: equipment_upgrade_opportunity
+  title: "Equipment Upgrade Available"
+  description: |
+    A vendor has offered a new generation of equipment components that could substantially
+    improve the performance of existing machinery.
+  category: technical
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: building_constructed
+      building_id: fabricator
+    - type: random
+      probability_per_tick: 0.0010
+  choices:
+    - id: purchase_upgrade
+      text: "Purchase the upgrade package"
+      description: "Acquire and install the new components"
+      outcomes:
+        - type: resource_change
+          resource_id: electronics
+          amount: -25.0
+        - type: resource_change
+          resource_id: machine_parts
+          amount: -20.0
+        - type: morale_change
+          amount: 8.0
+        - type: narrative_text
+          text: "The upgraded equipment runs noticeably smoother. Maintenance intervals are extended."
+      cost:
+        credits: 300.0
+    - id: reverse_engineer
+      text: "Reverse-engineer the components"
+      description: "Study the new components to learn how to manufacture them locally"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 30.0
+        - type: resource_change
+          resource_id: electronics
+          amount: -10.0
+        - type: narrative_text
+          text: "The study yields valuable insights that could be applied to future local production."
+      cost:
+        credits: 100.0
+    - id: decline_upgrade
+      text: "Decline the offer"
+      description: "Current equipment is sufficient for now"
+      outcomes:
+        - type: narrative_text
+          text: "The offer is politely declined. The existing equipment continues to serve."
+      cost: {}
+  repeatable: true
+  cooldown_ticks: 600
+  weight: 2.5
+
+- id: system_malfunction
+  title: "Control System Malfunction"
+  description: |
+    A software glitch has caused erratic behaviour in the colony's automated control systems.
+    Production lines are producing garbage data and need manual intervention.
+  category: technical
+  severity: warning
+  auto_pause: false
+  triggers:
+    - type: building_constructed
+      building_id: fabricator
+    - type: random
+      probability_per_tick: 0.0008
+  choices:
+    - id: manual_override
+      text: "Switch to manual control"
+      description: "Bypass the automation and run everything manually until the glitch is fixed"
+      outcomes:
+        - type: morale_change
+          amount: -8.0
+        - type: narrative_text
+          text: "Manual operations are exhausting but effective. The glitch is eventually isolated."
+      cost: {}
+    - id: deep_diagnostic
+      text: "Run a deep diagnostic"
+      description: "Halt affected systems and perform a thorough diagnostic"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 8.0
+        - type: morale_change
+          amount: -3.0
+        - type: narrative_text
+          text: "The diagnostic reveals a firmware bug. A patch is applied and systems come back online."
+      cost:
+        credits: 50.0
+  repeatable: true
+  cooldown_ticks: 400
+  weight: 3.0
+
+# ──────────────────────────────────────────────
+# ECONOMIC EVENTS
+# ──────────────────────────────────────────────
+
+- id: supply_windfall
+  title: "Supply Shipment Windfall"
+  description: |
+    A supply freighter has arrived carrying more than the expected manifest — surplus goods from a cancelled
+    delivery elsewhere are being offered at a heavily discounted rate.
+  category: economic
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: population_reached
+      threshold: 20
+    - type: random
+      probability_per_tick: 0.0008
+  choices:
+    - id: buy_all
+      text: "Purchase everything available"
+      description: "Take full advantage of the discount and buy the entire surplus"
+      outcomes:
+        - type: resource_change
+          resource_id: structural_components
+          amount: 60.0
+        - type: resource_change
+          resource_id: machine_parts
+          amount: 40.0
+        - type: resource_change
+          resource_id: food
+          amount: 100.0
+        - type: morale_change
+          amount: 10.0
+      cost:
+        credits: 400.0
+    - id: buy_essentials
+      text: "Buy only what you need"
+      description: "Purchase only the most critical items from the surplus"
+      outcomes:
+        - type: resource_change
+          resource_id: food
+          amount: 80.0
+        - type: resource_change
+          resource_id: machine_parts
+          amount: 20.0
+        - type: morale_change
+          amount: 5.0
+      cost:
+        credits: 180.0
+    - id: decline
+      text: "Decline the offer"
+      description: "Storage is too full or funds are insufficient"
+      outcomes:
+        - type: narrative_text
+          text: "The offer is passed up. Another colony will benefit instead."
+      cost: {}
+  repeatable: true
+  cooldown_ticks: 800
+  weight: 4.0
+
+- id: waste_reduction_discovery
+  title: "Waste Reduction Innovation"
+  description: |
+    A colonist has identified a method to recover usable materials from the production waste stream,
+    turning what was discarded into a secondary resource supply.
+  category: economic
+  severity: info
+  auto_pause: false
+  triggers:
+    - type: building_constructed
+      building_id: smelter
+    - type: random
+      probability_per_tick: 0.0010
+  choices:
+    - id: implement_recovery
+      text: "Implement waste recovery"
+      description: "Set up the waste recovery process across production facilities"
+      outcomes:
+        - type: resource_change
+          resource_id: iron
+          amount: 40.0
+        - type: resource_change
+          resource_id: copper
+          amount: 20.0
+        - type: morale_change
+          amount: 8.0
+        - type: narrative_text
+          text: "The recovery process yields a steady stream of reclaimed materials."
+      cost:
+        credits: 100.0
+    - id: document_method
+      text: "Document the method"
+      description: "Record it for future implementation when capacity allows"
+      outcomes:
+        - type: resource_change
+          resource_id: research_data
+          amount: 12.0
+        - type: narrative_text
+          text: "The method is carefully documented. It can be implemented when resources allow."
+      cost: {}
+  repeatable: false
+  weight: 2.5
+
+# ──────────────────────────────────────────────
+# MORALE / GENERAL EVENTS
+# ──────────────────────────────────────────────
+
 - id: morale_crisis
   title: "Unrest Among Colonists"
   description: |
     Morale has fallen dangerously low. Colonists are complaining about poor living conditions,
     inadequate food, and lack of entertainment. If this continues, productivity will suffer.
+  category: social
+  severity: warning
+  auto_pause: false
   triggers:
     - type: morale_threshold
       threshold: 30.0

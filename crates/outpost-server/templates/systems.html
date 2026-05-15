@@ -1,0 +1,69 @@
+{% extends "base-v5.html" %}
+{% block title %}Star Systems - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-bold">🌌 Star Systems</h1>
+    <a href="/admin/systems" class="btn btn-sm btn-ghost">⚙ Manage Systems</a>
+  </div>
+
+  <div class="stats shadow mb-6 w-full">
+    <div class="stat">
+      <div class="stat-title">Total Systems</div>
+      <div class="stat-value">{{ total_systems }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Explored</div>
+      <div class="stat-value text-success">{{ explored_count }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Unexplored</div>
+      <div class="stat-value text-warning">{{ unexplored_count }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Total Bodies</div>
+      <div class="stat-value">{{ total_bodies }}</div>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Explored</th>
+          <th>Bodies</th>
+          <th>Sites</th>
+          <th>Population</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for system in systems %}
+        <tr class="{% if not system.explored %}opacity-50{% endif %}">
+          <td class="font-semibold">{{ system.name }}</td>
+          <td>
+            {% if system.explored %}
+            <span class="badge badge-success">Explored</span>
+            {% else %}
+            <span class="badge badge-neutral">Unknown</span>
+            {% endif %}
+          </td>
+          <td>{{ system.body_count }}</td>
+          <td>{{ system.site_count }}</td>
+          <td class="font-mono">{{ system.total_population }}</td>
+          <td class="flex gap-1 flex-wrap">
+            <a href="/systems/{{ system.id }}" class="btn btn-xs btn-primary">View</a>
+            <form method="POST" action="/admin/systems/{{ system.id }}/toggle-explored" class="inline">
+              <button class="btn btn-xs btn-ghost">Toggle Explored</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-base-content/50">No star systems found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,2 +1,19 @@
+/* ─── Tailwind v4 + DaisyUI v5 ─────────────────────────────────────── */
 @import "tailwindcss";
 @plugin "daisyui";
+
+/* ─── Design tokens (CSS custom properties) ────────────────────────── */
+@import "./variables.css";
+
+/* ─── Layout & structural CSS ──────────────────────────────────────── */
+@import "./v5-layout.css";
+@import "./v5-sidebar.css";
+@import "./topbar.css";
+@import "./ticker.css";
+
+/* ─── Component CSS ─────────────────────────────────────────────────── */
+@import "./tables.css";
+@import "./modals.css";
+@import "./forms.css";
+@import "./data-dense.css";
+@import "./colony-components.css";

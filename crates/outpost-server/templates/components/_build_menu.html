@@ -1,333 +1,98 @@
-<!-- Build Menu Modal -->
-<div 
-    class="modal" 
-    x-data="{ open: false, selectedCategory: 'all' }"
-    x-show="open"
-    @open-build-menu.window="open = true"
-    @close-modal.window="open = false"
-    @keydown.escape.window="open = false"
-    x-cloak>
-    
-    <div class="modal-backdrop" @click="open = false"></div>
-    
-    <div class="modal-dialog modal-lg">
-        <div class="modal-header">
-            <h2>Build New Structure</h2>
-            <button class="modal-close" @click="open = false">✕</button>
-        </div>
-        
-        <div class="modal-body">
-            <!-- Category Filter -->
-            <div class="category-tabs">
-                <button 
-                    class="category-tab" 
-                    :class="{ 'active': selectedCategory === 'all' }"
-                    @click="selectedCategory = 'all'">
-                    All Buildings
-                </button>
-                {% for category in categories %}
-                <button 
-                    class="category-tab" 
-                    :class="{ 'active': selectedCategory === '{{ category }}' }"
-                    @click="selectedCategory = '{{ category }}'">
-                    {{ category | title | replace(from="_", to=" ") }}
-                </button>
-                {% endfor %}
-            </div>
+<!-- Build Menu Dialog — opened via document.getElementById('build-menu-modal').showModal() -->
+<dialog id="build-menu-modal" class="modal">
+    <div class="modal-box max-w-5xl w-full max-h-[85vh] flex flex-col p-0"
+         x-data="{ cat: 'all' }">
 
-            <!-- Buildings Grid -->
-            <div class="buildings-grid">
-                {% for building_def in building_definitions %}
-                <div 
-                    class="building-card"
-                    x-show="selectedCategory === 'all' || selectedCategory === '{{ building_def.category }}'">
-                    
-                    <div class="building-card-header">
-                        <h3>{{ building_def.name }}</h3>
-                        <span class="badge badge-category">{{ building_def.category }}</span>
-                    </div>
-                    
-                    <p class="building-description">{{ building_def.description }}</p>
-                    
-                    <!-- Construction Info -->
-                    <div class="building-info">
-                        <div class="info-row">
-                            <span class="info-label">Construction Time:</span>
-                            <span class="info-value">{{ building_def.construction_time_ticks }} ticks</span>
+        <!-- Header -->
+        <div class="flex items-center justify-between p-4 border-b border-base-300 shrink-0">
+            <h3 class="font-bold text-lg">Build New Structure</h3>
+            <button class="btn btn-sm btn-circle btn-ghost"
+                    onclick="document.getElementById('build-menu-modal').close()">✕</button>
+        </div>
+
+        <!-- Category filter -->
+        <div class="flex gap-2 p-3 flex-wrap border-b border-base-300 shrink-0 bg-base-100">
+            <button class="btn btn-xs" :class="cat === 'all' ? 'btn-primary' : 'btn-ghost'"
+                    @click="cat = 'all'">All</button>
+            {% for category in categories %}
+            <button class="btn btn-xs"
+                    :class="cat === '{{ category }}' ? 'btn-primary' : 'btn-ghost'"
+                    @click="cat = '{{ category }}'">
+                {{ category | replace(from="_", to=" ") }}
+            </button>
+            {% endfor %}
+        </div>
+
+        <!-- Buildings grid (scrollable) -->
+        <div class="overflow-y-auto p-4 flex-1">
+            {% if building_definitions | length == 0 %}
+            <p class="text-base-content/50 text-sm">No building definitions loaded.</p>
+            {% else %}
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {% for def in building_definitions %}
+                <div class="card bg-base-200 border border-base-300"
+                     x-show="cat === 'all' || cat === '{{ def.category }}'">
+                    <div class="card-body p-4 gap-2">
+
+                        <div class="flex justify-between items-start gap-2">
+                            <h4 class="font-semibold text-sm">{{ def.name }}</h4>
+                            <span class="badge badge-outline badge-xs capitalize shrink-0">
+                                {{ def.category | replace(from="_", to=" ") }}
+                            </span>
                         </div>
-                        {% if building_def.power_generation > 0 %}
-                        <div class="info-row">
-                            <span class="info-label">Power Output:</span>
-                            <span class="info-value text-success">+{{ building_def.power_generation }} MW</span>
+
+                        <p class="text-xs text-base-content/60 leading-snug">{{ def.description }}</p>
+
+                        <!-- Stats row -->
+                        <div class="flex gap-x-3 gap-y-1 text-xs flex-wrap">
+                            <span class="text-base-content/60">⏱ {{ def.construction_time_ticks }}t</span>
+                            {% if def.worker_capacity > 0 %}
+                            <span class="text-base-content/60">👷 {{ def.worker_capacity }}</span>
+                            {% endif %}
+                            {% if def.power_generation > 0 %}
+                            <span class="text-success font-mono">+{{ def.power_generation }}MW</span>
+                            {% endif %}
+                            {% if def.power_consumption > 0 %}
+                            <span class="text-error font-mono">-{{ def.power_consumption }}MW</span>
+                            {% endif %}
                         </div>
-                        {% endif %}
-                        {% if building_def.power_consumption > 0 %}
-                        <div class="info-row">
-                            <span class="info-label">Power Usage:</span>
-                            <span class="info-value text-danger">-{{ building_def.power_consumption }} MW</span>
-                        </div>
-                        {% endif %}
-                        {% if building_def.workers_required > 0 %}
-                        <div class="info-row">
-                            <span class="info-label">Workers:</span>
-                            <span class="info-value">{{ building_def.workers_required }}</span>
-                        </div>
-                        {% endif %}
-                        {% if building_def.storage_capacity > 0 %}
-                        <div class="info-row">
-                            <span class="info-label">Storage:</span>
-                            <span class="info-value">{{ building_def.storage_capacity }} units</span>
-                        </div>
-                        {% endif %}
-                    </div>
-                    
-                    <!-- Construction Costs -->
-                    <div class="construction-costs">
-                        <h4>Construction Costs:</h4>
-                        <div class="cost-list">
-                            {% for resource_id, amount in building_def.construction_costs %}
-                            <div class="cost-item">
-                                <span class="cost-resource">{{ resource_id | title }}:</span>
-                                <span class="cost-amount text-mono">{{ amount }}</span>
-                                {% if available_resources[resource_id] %}
-                                <span class="cost-available {% if available_resources[resource_id] >= amount %}text-success{% else %}text-danger{% endif %}">
-                                    ({{ available_resources[resource_id] }} available)
+
+                        <!-- Cost table -->
+                        {% if def.construction_costs | length > 0 %}
+                        <div class="border-t border-base-300 pt-2 space-y-0.5">
+                            {% for cost in def.construction_costs %}
+                            <div class="flex justify-between text-xs">
+                                <span class="text-base-content/60 capitalize">
+                                    {{ cost.resource_id | replace(from="_", to=" ") }}
                                 </span>
-                                {% else %}
-                                <span class="cost-available text-danger">(0 available)</span>
-                                {% endif %}
+                                <span class="font-mono {% if cost.can_afford %}text-success{% else %}text-error{% endif %}">
+                                    {{ cost.available }}/{{ cost.amount }}
+                                </span>
                             </div>
                             {% endfor %}
                         </div>
-                    </div>
-                    
-                    <!-- Action Button -->
-                    <div class="building-card-footer">
-                        {% if can_afford[building_def.id] %}
-                        <button 
-                            class="btn btn-primary btn-block"
-                            hx-post="/site/{{ site_id }}/build"
-                            hx-vals='{"building_def_id": "{{ building_def.id }}"}'
-                            hx-target="#tab-content"
-                            hx-swap="innerHTML"
-                            @click="open = false">
-                            Build {{ building_def.name }}
-                        </button>
+                        {% endif %}
+
+                        <!-- Build action -->
+                        {% if def.can_afford %}
+                        <form action="/site/{{ site_id }}/build" method="post"
+                              @submit="document.getElementById('build-menu-modal').close()">
+                            <input type="hidden" name="building_def_id" value="{{ def.id }}">
+                            <button type="submit" class="btn btn-primary btn-xs w-full mt-1">Build</button>
+                        </form>
                         {% else %}
-                        <button class="btn btn-secondary btn-block" disabled>
+                        <button class="btn btn-xs btn-neutral w-full mt-1" disabled>
                             Insufficient Resources
                         </button>
                         {% endif %}
+
                     </div>
                 </div>
                 {% endfor %}
             </div>
+            {% endif %}
         </div>
+
     </div>
-</div>
-
-<style>
-.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-backdrop {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-}
-
-.modal-dialog {
-    position: relative;
-    background: var(--surface-0);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    max-width: 900px;
-    max-height: 90vh;
-    width: 90%;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-.modal-lg {
-    max-width: 1200px;
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--spacing-3);
-    border-bottom: 1px solid var(--border-color);
-}
-
-.modal-header h2 {
-    margin: 0;
-    font-size: var(--font-lg);
-}
-
-.modal-close {
-    background: transparent;
-    border: none;
-    font-size: var(--font-xl);
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 0;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-sm);
-}
-
-.modal-close:hover {
-    background: var(--surface-1);
-    color: var(--text-primary);
-}
-
-.modal-body {
-    padding: var(--spacing-3);
-    overflow-y: auto;
-}
-
-.category-tabs {
-    display: flex;
-    gap: var(--spacing-2);
-    margin-bottom: var(--spacing-3);
-    flex-wrap: wrap;
-}
-
-.category-tab {
-    background: var(--surface-1);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--spacing-2) var(--spacing-3);
-    font-size: var(--font-sm);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.category-tab:hover {
-    background: var(--surface-2);
-    color: var(--text-primary);
-}
-
-.category-tab.active {
-    background: var(--accent-primary);
-    color: white;
-    border-color: var(--accent-primary);
-}
-
-.buildings-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: var(--spacing-3);
-}
-
-.building-card {
-    background: var(--surface-1);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: var(--spacing-3);
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
-}
-
-.building-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.building-card-header h3 {
-    margin: 0;
-    font-size: var(--font-base);
-}
-
-.building-description {
-    font-size: var(--font-sm);
-    color: var(--text-secondary);
-    margin: 0;
-}
-
-.building-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-}
-
-.info-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: var(--font-sm);
-}
-
-.info-label {
-    color: var(--text-secondary);
-}
-
-.info-value {
-    font-family: var(--font-mono);
-    font-weight: 500;
-}
-
-.construction-costs {
-    padding-top: var(--spacing-2);
-    border-top: 1px solid var(--border-color);
-}
-
-.construction-costs h4 {
-    margin: 0 0 var(--spacing-1) 0;
-    font-size: var(--font-sm);
-    color: var(--text-secondary);
-}
-
-.cost-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-}
-
-.cost-item {
-    display: flex;
-    justify-content: space-between;
-    font-size: var(--font-xs);
-}
-
-.cost-resource {
-    color: var(--text-secondary);
-}
-
-.cost-amount {
-    font-weight: 600;
-}
-
-.cost-available {
-    font-size: var(--font-xs);
-    margin-left: var(--spacing-1);
-}
-
-.building-card-footer {
-    margin-top: auto;
-    padding-top: var(--spacing-2);
-}
-
-.btn-block {
-    width: 100%;
-}
-</style>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>

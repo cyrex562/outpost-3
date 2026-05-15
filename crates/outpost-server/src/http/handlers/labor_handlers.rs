@@ -219,3 +219,37 @@ fn parse_skill(s: &str) -> Option<SkillCategory> {
         _ => None,
     }
 }
+
+/// Form data for setting workers on a specific building directly.
+#[derive(Deserialize)]
+pub struct SetWorkersForm {
+    pub building_id: String,
+    pub workers: u32,
+}
+
+/// POST /site/{site_id}/labor/set-workers
+///
+/// Admin/debug: directly set the number of workers assigned to a building.
+/// Returns updated labor tab.
+pub async fn set_building_workers(
+    path: web::Path<String>,
+    form: web::Form<SetWorkersForm>,
+    tmpl: web::Data<tera::Tera>,
+    simulation: web::Data<SimulationService>,
+) -> Result<HttpResponse> {
+    let site_id_str = path.into_inner();
+    let site_id = SiteId(Uuid::parse_str(&site_id_str)
+        .map_err(|e| actix_web::error::ErrorBadRequest(format!("Invalid site ID: {}", e)))?);
+    let building_id = BuildingId(Uuid::parse_str(&form.building_id)
+        .map_err(|e| actix_web::error::ErrorBadRequest(format!("Invalid building ID: {}", e)))?);
+
+    simulation.with_state_mut(|state| {
+        if let Some(site) = state.galaxy.find_site_mut(&site_id) {
+            if let Some(building) = site.buildings.get_mut(&building_id) {
+                building.workers_assigned = form.workers;
+            }
+        }
+    }).await;
+
+    site_labor_tab(web::Path::from(site_id_str), tmpl, simulation).await
+}

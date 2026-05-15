@@ -15,6 +15,7 @@ pub mod resource_mapping;
 pub mod power_grid;
 pub mod life_support;
 pub mod representative_character;
+pub mod event_log;
 
 // Legacy modules (pre-V5, kept for migration)
 pub mod banking;
@@ -49,6 +50,7 @@ pub use resource_mapping::{
 pub use representative_character::{
     CharacterId, RepresentativeCharacter, generate_characters,
 };
+pub use event_log::{EventLog, FiredEvent};
 
 // Legacy exports (pre-V5)
 pub use banking::{amortized_payment, Loan, LoanId};

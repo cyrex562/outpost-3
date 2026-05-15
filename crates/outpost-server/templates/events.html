@@ -1,0 +1,153 @@
+{% extends "base-v5.html" %}
+
+{% block title %}Event Log — Outpost 3{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Event Log</h1>
+    <div class="page-header-actions">
+        {% if unresolved_choices > 0 %}
+        <span class="badge badge-warning">{{ unresolved_choices }} pending choice(s)</span>
+        {% endif %}
+        <span class="text-muted">{{ total }} event(s) total</span>
+    </div>
+</div>
+
+<!-- ── Filters ── -->
+<div class="filter-bar">
+    <form method="get" action="/events" class="filter-form">
+        <div class="filter-group">
+            <label class="filter-label">Category</label>
+            <select name="category" class="filter-select" onchange="this.form.submit()">
+                <option value="">All categories</option>
+                <option value="disaster"  {% if active_category == "disaster"  %}selected{% endif %}>Disaster</option>
+                <option value="discovery" {% if active_category == "discovery" %}selected{% endif %}>Discovery</option>
+                <option value="social"    {% if active_category == "social"    %}selected{% endif %}>Social</option>
+                <option value="technical" {% if active_category == "technical" %}selected{% endif %}>Technical</option>
+                <option value="economic"  {% if active_category == "economic"  %}selected{% endif %}>Economic</option>
+                <option value="general"   {% if active_category == "general"   %}selected{% endif %}>General</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label class="filter-label">Severity</label>
+            <select name="severity" class="filter-select" onchange="this.form.submit()">
+                <option value="">All severities</option>
+                <option value="critical" {% if active_severity == "critical" %}selected{% endif %}>🚨 Critical</option>
+                <option value="warning"  {% if active_severity == "warning"  %}selected{% endif %}>⚠️ Warning</option>
+                <option value="info"     {% if active_severity == "info"     %}selected{% endif %}>ℹ️ Info</option>
+            </select>
+        </div>
+        {% if active_category or active_severity %}
+        <a href="/events" class="btn btn-sm btn-secondary">Clear filters</a>
+        {% endif %}
+    </form>
+</div>
+
+<!-- ── Event Table ── -->
+{% if entries %}
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th class="col-tick mono">Tick</th>
+                <th class="col-severity">Severity</th>
+                <th class="col-category">Category</th>
+                <th class="col-title">Event</th>
+                <th class="col-status">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ev in entries %}
+            <tr class="event-row event-row--{{ ev.severity_key }}">
+                <td class="mono text-muted">{{ ev.tick }}</td>
+                <td>
+                    <span class="badge badge-{{ ev.severity_key }}">
+                        {% if ev.severity_key == "critical" %}🚨{% elif ev.severity_key == "warning" %}⚠️{% else %}ℹ️{% endif %}
+                        {{ ev.severity }}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge badge-category badge-{{ ev.category_key }}">{{ ev.category }}</span>
+                </td>
+                <td>
+                    <span class="event-title">{{ ev.title }}</span>
+                    <span class="event-id text-muted">{{ ev.event_id }}</span>
+                </td>
+                <td>
+                    {% if ev.required_choice %}
+                        {% if ev.resolved %}
+                        <span class="badge badge-success">Resolved: {{ ev.choice_id }}</span>
+                        {% else %}
+                        <span class="badge badge-warning">Pending choice</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="badge badge-info">Auto-resolved</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- ── Pagination ── -->
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/events?page={{ page - 1 }}{% if active_category %}&category={{ active_category }}{% endif %}{% if active_severity %}&severity={{ active_severity }}{% endif %}"
+       class="btn btn-sm btn-secondary">← Previous</a>
+    {% endif %}
+    <span class="pagination-info">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/events?page={{ page + 1 }}{% if active_category %}&category={{ active_category }}{% endif %}{% if active_severity %}&severity={{ active_severity }}{% endif %}"
+       class="btn btn-sm btn-secondary">Next →</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">📋</div>
+    <div class="empty-state-title">No events yet</div>
+    <div class="empty-state-description">
+        Events will appear here as the simulation runs.
+        {% if active_category or active_severity %}
+        Try clearing your filters.
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<style>
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+.page-header-actions { display: flex; align-items: center; gap: 1rem; }
+.filter-bar { margin-bottom: 1.5rem; padding: 1rem; background: var(--color-surface-2, #16213e); border: 1px solid var(--color-border, #333); border-radius: 6px; }
+.filter-form { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+.filter-group { display: flex; align-items: center; gap: 0.5rem; }
+.filter-label { font-size: 0.8rem; color: var(--color-text-muted, #888); white-space: nowrap; }
+.filter-select { background: var(--color-surface, #1a1a2e); border: 1px solid var(--color-border, #333); color: var(--color-text, #e2e8f0); padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.875rem; }
+.event-row--critical { border-left: 3px solid var(--color-danger, #ef4444); }
+.event-row--warning  { border-left: 3px solid var(--color-warning, #f59e0b); }
+.event-row--info     { border-left: 3px solid var(--color-info, #4a9eff); }
+.event-title { display: block; font-weight: 500; }
+.event-id { display: block; font-size: 0.75rem; font-family: monospace; }
+.col-tick { width: 6rem; }
+.col-severity { width: 8rem; }
+.col-category { width: 8rem; }
+.col-status { width: 12rem; }
+.badge-disaster  { background: rgba(239, 68, 68, 0.15);  color: #ef4444; }
+.badge-discovery { background: rgba(74, 158, 255, 0.15); color: #4a9eff; }
+.badge-social    { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+.badge-technical { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.badge-economic  { background: rgba(34, 197, 94, 0.15);  color: #22c55e; }
+.badge-general   { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
+.badge-critical  { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.badge-warning   { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.badge-success   { background: rgba(34, 197, 94, 0.15);  color: #22c55e; }
+.pagination { display: flex; align-items: center; gap: 1rem; justify-content: center; margin-top: 1.5rem; }
+.pagination-info { color: var(--color-text-muted, #888); font-size: 0.875rem; }
+.empty-state { text-align: center; padding: 4rem 2rem; color: var(--color-text-muted, #888); }
+.empty-state-icon { font-size: 3rem; margin-bottom: 1rem; }
+.empty-state-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.5rem; }
+</style>
+{% endblock %}

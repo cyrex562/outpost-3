@@ -167,6 +167,26 @@ impl ContentLoader {
         &self.events
     }
     
+    /// Get all building definitions as an iterator of values
+    pub fn all_building_defs(&self) -> impl Iterator<Item = &BuildingDefinition> {
+        self.buildings.values()
+    }
+
+    /// Get all resource definitions as an iterator of values
+    pub fn all_resource_defs(&self) -> impl Iterator<Item = &ResourceDefinition> {
+        self.resources.values()
+    }
+
+    /// Get all event definitions as an iterator of values
+    pub fn all_event_defs(&self) -> impl Iterator<Item = &EventDefinition> {
+        self.events.values()
+    }
+
+    /// Get all tech definitions as an iterator of values
+    pub fn all_tech_defs(&self) -> impl Iterator<Item = &TechDefinition> {
+        self.techs.values()
+    }
+
     /// Load a tech definition from a YAML string
     pub fn load_tech(&mut self, yaml_content: &str) -> Result<(), ContentError> {
         let tech: TechDefinition = serde_yaml::from_str(yaml_content)?;
@@ -346,5 +366,64 @@ mod tests {
         let result = loader.load_resource(&yaml);
         assert!(result.is_ok());
         assert_eq!(loader.all_resources().len(), 1);
+    }
+
+    #[test]
+    fn test_load_events_yaml() {
+        let yaml = std::fs::read_to_string("../../content/events/narrative_events.yaml")
+            .expect("Failed to read narrative_events.yaml");
+        let mut loader = ContentLoader::new();
+        let result = loader.load_events(&yaml);
+        assert!(result.is_ok(), "Failed to load events: {:?}", result.err());
+        assert!(
+            loader.all_events().len() >= 15,
+            "Expected at least 15 events, got {}",
+            loader.all_events().len()
+        );
+    }
+
+    #[test]
+    fn test_event_category_coverage() {
+        let yaml = std::fs::read_to_string("../../content/events/narrative_events.yaml")
+            .expect("Failed to read narrative_events.yaml");
+        let mut loader = ContentLoader::new();
+        loader.load_events(&yaml).unwrap();
+
+        use crate::content::EventCategory;
+        let events = loader.all_events();
+        let has_disaster  = events.values().any(|e| e.category == EventCategory::Disaster);
+        let has_discovery = events.values().any(|e| e.category == EventCategory::Discovery);
+        let has_social    = events.values().any(|e| e.category == EventCategory::Social);
+        let has_technical = events.values().any(|e| e.category == EventCategory::Technical);
+        let has_economic  = events.values().any(|e| e.category == EventCategory::Economic);
+
+        assert!(has_disaster,  "No Disaster events found");
+        assert!(has_discovery, "No Discovery events found");
+        assert!(has_social,    "No Social events found");
+        assert!(has_technical, "No Technical events found");
+        assert!(has_economic,  "No Economic events found");
+    }
+
+    #[test]
+    fn test_all_events_have_valid_choices() {
+        let yaml = std::fs::read_to_string("../../content/events/narrative_events.yaml")
+            .expect("Failed to read narrative_events.yaml");
+        let mut loader = ContentLoader::new();
+        loader.load_events(&yaml).unwrap();
+
+        for (id, event) in loader.all_events() {
+            assert!(
+                !event.choices.is_empty(),
+                "Event '{}' has no choices",
+                id
+            );
+            for choice in &event.choices {
+                assert!(
+                    !choice.id.is_empty(),
+                    "Event '{}' has a choice with empty ID",
+                    id
+                );
+            }
+        }
     }
 }

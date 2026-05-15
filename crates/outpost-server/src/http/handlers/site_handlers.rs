@@ -7,7 +7,7 @@
 
 use actix_web::{web, HttpResponse, Result};
 use outpost_core::domain::{BuildingId, SiteId, BuildingStateV5};
-use outpost_core::domain::resource_mapping::resource_type_to_string;
+use outpost_core::domain::resource_mapping::{resource_type_to_string, string_to_resource_type};
 use outpost_core::commands::{StartConstruction, CancelConstruction, PauseConstruction, ResumeConstruction};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -153,12 +153,12 @@ pub async fn site_buildings_tab(
         .filter_map(|building| {
             let def = game_state.building_definitions.get(&building.building_def_id)?;
             
-            // Calculate efficiency (placeholder - will use actual calculation later)
-            let efficiency = match building.state {
-                BuildingStateV5::Operational => 100,
-                BuildingStateV5::Paused => 0,
-                BuildingStateV5::Damaged { severity } => (100 - severity) as i64,
-                _ => 0,
+            let (efficiency, state_label, state_badge_class, is_operational, is_paused, can_toggle, can_demolish) = match building.state {
+                BuildingStateV5::Operational => (100i64, "Operational", "badge-success", true, false, true, true),
+                BuildingStateV5::Paused => (0i64, "Paused", "badge-warning", false, true, true, true),
+                BuildingStateV5::Damaged { severity } => ((100 - severity) as i64, "Damaged", "badge-error", false, false, true, true),
+                BuildingStateV5::UnderConstruction { .. } => (0i64, "Building", "badge-info", false, false, false, false),
+                BuildingStateV5::Destroyed => (0i64, "Destroyed", "badge-ghost", false, false, false, true),
             };
             
             // Calculate current output (placeholder)
@@ -169,10 +169,10 @@ pub async fn site_buildings_tab(
                         .sum();
                     format!("{} units/tick", total_output)
                 } else {
-                    "—".to_string()
+                    String::new()
                 }
             } else {
-                "—".to_string()
+                String::new()
             };
             
             // Get power stats
@@ -183,7 +183,12 @@ pub async fn site_buildings_tab(
                 "id": building.id.to_string(),
                 "name": &def.name,
                 "category": format!("{:?}", def.category),
-                "state": format!("{:?}", building.state),
+                "state_label": state_label,
+                "state_badge_class": state_badge_class,
+                "is_operational": is_operational,
+                "is_paused": is_paused,
+                "can_toggle": can_toggle,
+                "can_demolish": can_demolish,
                 "workers_assigned": building.workers_assigned,
                 "workers_capacity": def.worker_capacity,
                 "efficiency": efficiency,
@@ -195,13 +200,53 @@ pub async fn site_buildings_tab(
         .collect();
     
     let operational_count = buildings.iter()
-        .filter(|b| b["state"].as_str() == Some("Operational"))
+        .filter(|b| b["is_operational"].as_bool() == Some(true))
         .count();
-    
+
+    // Build available resources map for build menu affordability checks
+    let available_resources: HashMap<String, i64> = site.resources.iter()
+        .map(|(rt, &amount)| (resource_type_to_string(*rt).to_string(), amount))
+        .collect();
+
+    let building_defs: Vec<serde_json::Value> = game_state.building_definitions.values()
+        .map(|def| {
+            let costs: Vec<serde_json::Value> = def.construction_costs.iter()
+                .map(|c| serde_json::json!({
+                    "resource_id": &c.resource_id,
+                    "amount": c.amount,
+                    "available": available_resources.get(&c.resource_id).copied().unwrap_or(0),
+                    "can_afford": available_resources.get(&c.resource_id).copied().unwrap_or(0) >= c.amount as i64,
+                }))
+                .collect();
+            let can_afford = costs.iter().all(|c| c["can_afford"].as_bool().unwrap_or(false));
+            serde_json::json!({
+                "id": &def.id,
+                "name": &def.name,
+                "category": format!("{:?}", def.category),
+                "description": &def.description,
+                "worker_capacity": def.worker_capacity,
+                "power_consumption": def.power.as_ref().map(|p| p.base_mw).unwrap_or(0.0),
+                "power_generation": def.power_output_mw.unwrap_or(0.0),
+                "storage_capacity": def.storage_capacity.unwrap_or(0.0),
+                "construction_time_ticks": def.construction_time_ticks,
+                "construction_costs": costs,
+                "can_afford": can_afford,
+            })
+        })
+        .collect();
+    let mut categories: Vec<String> = building_defs.iter()
+        .filter_map(|d| d["category"].as_str().map(|s| s.to_string()))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    categories.sort();
+
     let mut context = tera::Context::new();
     context.insert("site_id", &site_id.to_string());
     context.insert("buildings", &buildings);
     context.insert("operational_count", &operational_count);
+    context.insert("building_definitions", &building_defs);
+    context.insert("categories", &categories);
     
     let html = tmpl.render("components/_buildings_tab.html", &context)
         .map_err(|e| actix_web::error::ErrorInternalServerError(format!("Template error: {}", e)))?;
@@ -266,12 +311,52 @@ pub async fn site_construction_tab(
             }
             acc
         });
-    
+
+    // Build available resources map for build menu affordability checks
+    let available_resources: HashMap<String, i64> = site.resources.iter()
+        .map(|(rt, &amount)| (resource_type_to_string(*rt).to_string(), amount))
+        .collect();
+
+    let building_defs: Vec<serde_json::Value> = game_state.building_definitions.values()
+        .map(|def| {
+            let costs: Vec<serde_json::Value> = def.construction_costs.iter()
+                .map(|c| serde_json::json!({
+                    "resource_id": &c.resource_id,
+                    "amount": c.amount,
+                    "available": available_resources.get(&c.resource_id).copied().unwrap_or(0),
+                    "can_afford": available_resources.get(&c.resource_id).copied().unwrap_or(0) >= c.amount as i64,
+                }))
+                .collect();
+            let can_afford = costs.iter().all(|c| c["can_afford"].as_bool().unwrap_or(false));
+            serde_json::json!({
+                "id": &def.id,
+                "name": &def.name,
+                "category": format!("{:?}", def.category),
+                "description": &def.description,
+                "worker_capacity": def.worker_capacity,
+                "power_consumption": def.power.as_ref().map(|p| p.base_mw).unwrap_or(0.0),
+                "power_generation": def.power_output_mw.unwrap_or(0.0),
+                "storage_capacity": def.storage_capacity.unwrap_or(0.0),
+                "construction_time_ticks": def.construction_time_ticks,
+                "construction_costs": costs,
+                "can_afford": can_afford,
+            })
+        })
+        .collect();
+    let mut categories: Vec<String> = building_defs.iter()
+        .filter_map(|d| d["category"].as_str().map(|s| s.to_string()))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    categories.sort();
+
     let mut context = tera::Context::new();
     context.insert("site_id", &site_id.to_string());
     context.insert("construction_jobs", &construction_jobs);
     context.insert("active_count", &active_count);
     context.insert("total_resources_committed", &total_resources_committed);
+    context.insert("building_definitions", &building_defs);
+    context.insert("categories", &categories);
     
     let html = tmpl.render("components/_construction_tab.html", &context)
         .map_err(|e| actix_web::error::ErrorInternalServerError(format!("Template error: {}", e)))?;
@@ -570,6 +655,33 @@ pub async fn site_resources_tab(
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
+/// POST /site/{site_id}/building/{bid}/demolish — remove a building instance
+pub async fn demolish_building(
+    path: web::Path<(String, String)>,
+    simulation: web::Data<SimulationService>,
+) -> Result<HttpResponse> {
+    let (site_id_str, bid_str) = path.into_inner();
+
+    let site_id = SiteId(Uuid::parse_str(&site_id_str)
+        .map_err(|e| actix_web::error::ErrorBadRequest(format!("Invalid site ID: {}", e)))?);
+    let building_id = BuildingId(Uuid::parse_str(&bid_str)
+        .map_err(|e| actix_web::error::ErrorBadRequest(format!("Invalid building ID: {}", e)))?);
+
+    simulation.with_state_mut(move |state| {
+        for system in state.galaxy.systems.values_mut() {
+            if let Some(site) = system.sites.get_mut(&site_id) {
+                site.buildings.remove(&building_id);
+                break;
+            }
+        }
+    }).await;
+
+    // Re-render buildings tab after demolish
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", format!("/site/{}/buildings", site_id_str)))
+        .finish())
+}
+
 /// Map a resource string ID to an emoji icon.
 fn resource_icon(resource_id: &str) -> &'static str {
     match resource_id {
@@ -588,4 +700,77 @@ fn resource_icon(resource_id: &str) -> &'static str {
         _             => "📦",
     }
 }
+
+/// Form data for admin set-resource debug action.
+#[derive(Deserialize)]
+pub struct SetResourceForm {
+    pub resource_id: String,
+    pub amount: f64,
+}
+
+/// POST /site/{id}/resources/set — debug: set a resource stockpile amount directly
+pub async fn admin_set_resource(
+    path: web::Path<String>,
+    form: web::Form<SetResourceForm>,
+    simulation: web::Data<SimulationService>,
+) -> Result<HttpResponse> {
+    let site_id_str = path.into_inner();
+    let site_id = SiteId(Uuid::parse_str(&site_id_str)
+        .map_err(|e| actix_web::error::ErrorBadRequest(format!("Invalid site ID: {}", e)))?);
+
+    if let Ok(resource_type) = string_to_resource_type(&form.resource_id) {
+        let amount = form.amount.max(0.0) as i64;
+        simulation.with_state_mut(move |state| {
+            for system in state.galaxy.systems.values_mut() {
+                if let Some(site) = system.sites.get_mut(&site_id) {
+                    site.resources.set(resource_type, amount);
+                    break;
+                }
+            }
+        }).await;
+    }
+
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", format!("/site/{}/resources", site_id_str)))
+        .finish())
+}
+
+/// Form data for admin set-labor debug action.
+#[derive(Deserialize)]
+pub struct SetLaborForm {
+    pub population: Option<u64>,
+    pub morale: Option<f64>,
+}
+
+/// POST /site/{id}/labor/set — debug: set population and morale directly
+pub async fn admin_set_labor(
+    path: web::Path<String>,
+    form: web::Form<SetLaborForm>,
+    simulation: web::Data<SimulationService>,
+) -> Result<HttpResponse> {
+    let site_id_str = path.into_inner();
+    let site_id = SiteId(Uuid::parse_str(&site_id_str)
+        .map_err(|e| actix_web::error::ErrorBadRequest(format!("Invalid site ID: {}", e)))?);
+
+    let new_population = form.population;
+    let new_morale = form.morale.map(|m| m.clamp(0.0, 100.0));
+    simulation.with_state_mut(move |state| {
+        for system in state.galaxy.systems.values_mut() {
+            if let Some(site) = system.sites.get_mut(&site_id) {
+                if let Some(pop) = new_population {
+                    site.population.total = pop;
+                }
+                if let Some(mor) = new_morale {
+                    site.population.morale = mor as f32;
+                }
+                break;
+            }
+        }
+    }).await;
+
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", format!("/site/{}/labor", site_id_str)))
+        .finish())
+}
+
 

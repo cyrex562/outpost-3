@@ -1,0 +1,88 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin: Events - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto">
+  <div class="flex items-center gap-3 mb-4">
+    <a href="/admin" class="btn btn-sm btn-ghost">← Admin</a>
+    <h1 class="text-2xl font-bold">Event Log (Admin)</h1>
+  </div>
+
+  <!-- Add Event Form -->
+  <div class="card bg-base-200 shadow mb-6 max-w-xl">
+    <div class="card-body p-4">
+      <h2 class="card-title text-base">Fire Event</h2>
+      <form method="POST" action="/admin/events/create" class="grid grid-cols-2 gap-2">
+        <div class="col-span-2">
+          <label class="label py-1"><span class="label-text text-xs">Site</span></label>
+          <select name="site_id" class="select select-bordered select-sm w-full" required>
+            <option value="">Select Site…</option>
+            {% for site in sites %}
+            <option value="{{ site.id }}">{{ site.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label py-1"><span class="label-text text-xs">Event ID</span></label>
+          <input type="text" name="event_id" class="input input-bordered input-sm w-full" placeholder="e.g. equipment_failure" required />
+        </div>
+        <div>
+          <label class="label py-1"><span class="label-text text-xs">Severity</span></label>
+          <select name="severity" class="select select-bordered select-sm w-full">
+            <option value="info">Info</option>
+            <option value="warning">Warning</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+        <div class="col-span-2">
+          <label class="label py-1"><span class="label-text text-xs">Title</span></label>
+          <input type="text" name="title" class="input input-bordered input-sm w-full" placeholder="Event title" required />
+        </div>
+        <button class="btn btn-sm btn-primary col-span-2">Fire Event</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Tick</th>
+          <th>Site</th>
+          <th>Event ID</th>
+          <th>Title</th>
+          <th>Severity</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        <tr>
+          <td class="font-mono text-sm">{{ event.index }}</td>
+          <td class="font-mono text-sm">{{ event.tick }}</td>
+          <td class="text-sm truncate max-w-xs" title="{{ event.site_id }}">{{ event.site_id | truncate(length=12) }}</td>
+          <td class="font-mono text-sm">{{ event.event_id }}</td>
+          <td>{{ event.title }}</td>
+          <td>
+            {% if event.severity == "Critical" %}
+            <span class="badge badge-error badge-sm">Critical</span>
+            {% elif event.severity == "Warning" %}
+            <span class="badge badge-warning badge-sm">Warning</span>
+            {% else %}
+            <span class="badge badge-info badge-sm">{{ event.severity }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <form method="POST" action="/admin/events/{{ event.index }}/delete" class="inline">
+              <button class="btn btn-xs btn-error">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-base-content/50">No events in log.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

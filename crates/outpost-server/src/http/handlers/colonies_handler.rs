@@ -84,7 +84,21 @@ pub async fn colonies_list(
         a["name"].as_str().unwrap_or("")
             .cmp(b["name"].as_str().unwrap_or(""))
     });
-    
+
+    // Collect systems for "Found Colony" modal — include bodies per system
+    let mut all_systems: Vec<_> = game_state.galaxy.systems.values()
+        .map(|s| {
+            let mut bodies: Vec<_> = s.bodies.values()
+                .map(|b| json!({"id": b.id.to_string(), "name": &b.name, "body_type": format!("{:?}", b.body_type)}))
+                .collect();
+            bodies.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+            json!({"id": s.id.to_string(), "name": &s.name, "bodies": bodies})
+        })
+        .collect();
+    all_systems.sort_by(|a, b| {
+        a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or(""))
+    });
+
     // Prepare context
     let mut context = tera::Context::new();
     context.insert("sites", &sites_data);
@@ -92,6 +106,7 @@ pub async fn colonies_list(
     context.insert("total_population", &total_population);
     context.insert("average_morale", &average_morale);
     context.insert("total_buildings", &total_buildings);
+    context.insert("all_systems", &all_systems);
     
     let html = tmpl.render("colonies.html", &context)
         .map_err(|e| actix_web::error::ErrorInternalServerError(format!("Template error: {}", e)))?;

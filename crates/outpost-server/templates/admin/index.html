@@ -1,0 +1,50 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">⚙ Admin Dashboard</h1>
+
+  <div class="stats shadow mb-6 w-full flex-wrap">
+    <div class="stat">
+      <div class="stat-title">Systems</div>
+      <div class="stat-value">{{ total_systems }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Bodies</div>
+      <div class="stat-value">{{ total_bodies }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Sites</div>
+      <div class="stat-value">{{ total_sites }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Buildings</div>
+      <div class="stat-value">{{ total_buildings }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Resource Types</div>
+      <div class="stat-value">{{ total_resource_defs }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Building Types</div>
+      <div class="stat-value">{{ total_building_defs }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Events Logged</div>
+      <div class="stat-value">{{ total_events }}</div>
+    </div>
+  </div>
+
+  <h2 class="text-lg font-semibold mb-3">Quick Links</h2>
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+    <a href="/admin/systems" class="btn btn-outline">🌟 Systems</a>
+    <a href="/admin/bodies" class="btn btn-outline">🪐 Bodies</a>
+    <a href="/admin/sites" class="btn btn-outline">🏛 Sites</a>
+    <a href="/admin/buildings" class="btn btn-outline">🏗 Buildings</a>
+    <a href="/admin/events" class="btn btn-outline">📜 Events</a>
+    <a href="/admin/content/resources" class="btn btn-outline">📦 Resources</a>
+    <a href="/admin/content/buildings" class="btn btn-outline">🏭 Building Defs</a>
+    <a href="/admin/content/recipes" class="btn btn-outline">⚗ Recipes</a>
+  </div>
+</div>
+{% endblock %}

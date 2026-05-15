@@ -1,0 +1,52 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin: Buildings - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto">
+  <div class="flex items-center gap-3 mb-4">
+    <a href="/admin" class="btn btn-sm btn-ghost">← Admin</a>
+    <h1 class="text-2xl font-bold">Constructed Buildings</h1>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>Building</th>
+          <th>State</th>
+          <th>Site</th>
+          <th>System</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for building in buildings %}
+        <tr>
+          <td>
+            <div class="font-semibold">{{ building.building_name }}</div>
+            <div class="text-xs text-base-content/50 font-mono">{{ building.building_def_id }}</div>
+          </td>
+          <td>
+            {% if building.state == "Operational" %}
+            <span class="badge badge-success badge-sm">Operational</span>
+            {% elif building.state == "UnderConstruction" %}
+            <span class="badge badge-warning badge-sm">Building</span>
+            {% elif building.state == "Paused" %}
+            <span class="badge badge-ghost badge-sm">Paused</span>
+            {% else %}
+            <span class="badge badge-error badge-sm">{{ building.state }}</span>
+            {% endif %}
+          </td>
+          <td>{{ building.site_name }}</td>
+          <td>{{ building.system_name }}</td>
+          <td>
+            <a href="/site/{{ building.site_id }}" class="btn btn-xs btn-ghost">View Site</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-base-content/50">No buildings constructed.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,75 +1,71 @@
-<div class="power-tab" id="power-tab-content">
-    <h3>Power Grid</h3>
+<div class="p-4" id="power-tab-content">
+    <h3 class="text-lg font-bold mb-4">Power Grid</h3>
 
     <!-- Power Status Banner -->
     {% if has_brownout %}
-    <div class="power-banner power-banner--brownout" role="alert">
-        <span class="power-banner__icon">⚠️</span>
-        <div class="power-banner__text">
-            <strong>BROWNOUT — Power Deficit</strong>
-            <span>{{ con_total | round(precision=1) }} MW demand / {{ gen_total | round(precision=1) }} MW generation
-                — operating at {{ power_efficiency }}% efficiency</span>
+    <div class="alert alert-error mb-4" role="alert">
+        <span class="text-xl">⚠️</span>
+        <div>
+            <div class="font-bold">BROWNOUT — Power Deficit</div>
+            <div class="text-sm opacity-80">{{ con_total | round(precision=1) }} MW demand / {{ gen_total | round(precision=1) }} MW generation — operating at {{ power_efficiency }}% efficiency</div>
         </div>
     </div>
     {% else %}
-    <div class="power-banner power-banner--good">
-        <span class="power-banner__icon">⚡</span>
-        <div class="power-banner__text">
-            <strong>Grid Stable</strong>
-            <span>{{ (gen_total - con_total) | round(precision=1) }} MW surplus · {{ utilization_pct }}% load</span>
+    <div class="alert alert-success mb-4">
+        <span class="text-xl">⚡</span>
+        <div>
+            <div class="font-bold">Grid Stable</div>
+            <div class="text-sm opacity-80">{{ (gen_total - con_total) | round(precision=1) }} MW surplus · {{ utilization_pct }}% load</div>
         </div>
     </div>
     {% endif %}
 
-    <!-- Net Power Summary Bar -->
-    <div class="power-summary-row">
-        <div class="power-stat">
-            <span class="power-stat__label">Generation</span>
-            <span class="power-stat__value text-success">{{ gen_total | round(precision=1) }} MW</span>
+    <!-- Net Power Summary Stats -->
+    <div class="stats stats-horizontal shadow w-full mb-4 bg-base-200 border border-base-300">
+        <div class="stat">
+            <div class="stat-title text-xs uppercase tracking-widest">Generation</div>
+            <div class="stat-value text-success text-2xl font-mono">{{ gen_total | round(precision=1) }} MW</div>
         </div>
-        <div class="power-stat">
-            <span class="power-stat__label">Consumption</span>
-            <span class="power-stat__value text-danger">{{ con_total | round(precision=1) }} MW</span>
+        <div class="stat">
+            <div class="stat-title text-xs uppercase tracking-widest">Consumption</div>
+            <div class="stat-value text-error text-2xl font-mono">{{ con_total | round(precision=1) }} MW</div>
         </div>
-        <div class="power-stat">
-            <span class="power-stat__label">Net</span>
-            <span class="power-stat__value {% if has_brownout %}text-danger{% else %}text-success{% endif %}">
+        <div class="stat">
+            <div class="stat-title text-xs uppercase tracking-widest">Net</div>
+            <div class="stat-value {% if has_brownout %}text-error{% else %}text-success{% endif %} text-2xl font-mono">
                 {% if not has_brownout %}+{% endif %}{{ (gen_total - con_total) | round(precision=1) }} MW
-            </span>
-        </div>
-        <div class="power-stat">
-            <span class="power-stat__label">Grid Load</span>
-            <div class="power-load-bar">
-                <div class="power-load-fill {% if has_brownout %}power-load--critical{% elif utilization_pct >= 70 %}power-load--warning{% else %}power-load--good{% endif %}"
-                    style="width: {{ utilization_pct }}%"></div>
             </div>
-            <span class="power-stat__pct">{{ utilization_pct }}%</span>
+        </div>
+        <div class="stat">
+            <div class="stat-title text-xs uppercase tracking-widest">Grid Load</div>
+            <progress class="progress {% if has_brownout %}progress-error{% elif utilization_pct >= 70 %}progress-warning{% else %}progress-success{% endif %} w-full mt-2"
+                value="{{ utilization_pct }}" max="100"></progress>
+            <div class="stat-desc font-mono">{{ utilization_pct }}%</div>
         </div>
     </div>
 
     <!-- Generators Table -->
     {% if generators | length > 0 %}
-    <div class="power-section">
-        <h4>⚡ Power Generators</h4>
-        <table class="data-table">
+    <div class="mb-6">
+        <h4 class="font-semibold mb-2">⚡ Power Generators</h4>
+        <table class="table table-sm table-zebra w-full">
             <thead>
                 <tr>
                     <th>Building</th>
-                    <th class="numeric">Output (MW)</th>
+                    <th class="text-right">Output (MW)</th>
                     <th>Status</th>
                     <th>Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for gen in generators %}
-                <tr class="{% if not gen.operational %}row-dim{% endif %}">
+                <tr class="{% if not gen.operational %}opacity-50{% endif %}">
                     <td>{{ gen.name }}</td>
-                    <td class="numeric {% if gen.operational %}text-success{% else %}text-secondary{% endif %}">
+                    <td class="text-right font-mono {% if gen.operational %}text-success{% else %}text-base-content/40{% endif %}">
                         {% if gen.operational %}+{{ gen.mw | round(precision=1) }}{% else %}—{% endif %}
                     </td>
                     <td>
-                        <span class="badge badge-{{ gen.state | lower | replace(from=' ', to='-') }}">{{ gen.state
-                            }}</span>
+                        <span class="badge badge-sm">{{ gen.state }}</span>
                     </td>
                     <td>
                         {% if not gen.state == "Under Construction" and not gen.state == "Destroyed" %}
@@ -89,34 +85,32 @@
 
     <!-- Consumers Table -->
     {% if consumers | length > 0 %}
-    <div class="power-section">
-        <h4>🔌 Power Consumers</h4>
-        <table class="data-table">
+    <div class="mb-6">
+        <h4 class="font-semibold mb-2">🔌 Power Consumers</h4>
+        <table class="table table-sm table-zebra w-full">
             <thead>
                 <tr>
                     <th>Building</th>
                     <th>Category</th>
-                    <th class="numeric">Draw (MW)</th>
+                    <th class="text-right">Draw (MW)</th>
                     <th>Status</th>
                     <th>Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for con in consumers %}
-                <tr class="{% if not con.operational %}row-dim{% endif %}">
+                <tr class="{% if not con.operational %}opacity-50{% endif %}">
                     <td>{{ con.name }}</td>
-                    <td class="text-secondary">{{ con.category }}</td>
-                    <td class="numeric {% if con.operational %}text-danger{% else %}text-secondary{% endif %}">
+                    <td class="text-base-content/60 text-sm">{{ con.category }}</td>
+                    <td class="text-right font-mono {% if con.operational %}text-error{% else %}text-base-content/40{% endif %}">
                         {% if con.operational %}-{{ con.mw | round(precision=1) }}{% else %}(paused){% endif %}
                     </td>
                     <td>
-                        <span class="badge badge-{{ con.state | lower | replace(from=' ', to='-') }}">{{ con.state
-                            }}</span>
+                        <span class="badge badge-sm">{{ con.state }}</span>
                     </td>
                     <td>
                         {% if not con.state == "Under Construction" and not con.state == "Destroyed" %}
-                        <button
-                            class="btn btn-xs {% if has_brownout and not con.is_paused %}btn-warning{% else %}btn-ghost{% endif %}"
+                        <button class="btn btn-xs {% if has_brownout and not con.is_paused %}btn-warning{% else %}btn-ghost{% endif %}"
                             hx-post="/site/{{ site_id }}/building/{{ con.building_id }}/power/toggle"
                             hx-target="#power-tab-content" hx-swap="outerHTML">
                             {% if con.is_paused %}🔋 Power On{% else %}🔌 Power Off{% endif %}
@@ -129,162 +123,15 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        <p>No power-consuming buildings. Build manufacturing or housing to begin consuming power.</p>
+    <div class="text-base-content/60 text-sm py-4">
+        No power-consuming buildings. Build manufacturing or housing to begin consuming power.
     </div>
     {% endif %}
 
-    <div class="tab-refresh-hint">
+    <div class="flex justify-end mt-4">
         <button class="btn btn-ghost btn-sm" hx-get="/site/{{ site_id }}/power" hx-target="#power-tab-content"
             hx-swap="outerHTML">
             ↻ Refresh
         </button>
     </div>
 </div>
-
-<style>
-    .power-tab {
-        padding: var(--spacing-3);
-    }
-
-    .power-tab h3 {
-        margin: 0 0 var(--spacing-3) 0;
-    }
-
-    /* ── Banner ── */
-    .power-banner {
-        display: flex;
-        align-items: flex-start;
-        gap: var(--spacing-3);
-        padding: var(--spacing-3) var(--spacing-4);
-        border-radius: var(--radius-md);
-        margin-bottom: var(--spacing-4);
-        border: 1px solid transparent;
-    }
-
-    .power-banner--good {
-        background: rgba(74, 222, 128, 0.08);
-        border-color: rgba(74, 222, 128, 0.25);
-    }
-
-    .power-banner--brownout {
-        background: rgba(248, 113, 113, 0.1);
-        border-color: rgba(248, 113, 113, 0.35);
-        animation: brownout-pulse 3s ease-in-out infinite;
-    }
-
-    @keyframes brownout-pulse {
-
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: 0.75;
-        }
-    }
-
-    .power-banner__icon {
-        font-size: 1.5rem;
-    }
-
-    .power-banner__text {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-
-    .power-banner__text strong {
-        font-weight: 700;
-    }
-
-    .power-banner__text span {
-        font-size: var(--font-sm);
-        color: var(--text-secondary);
-    }
-
-    /* ── Summary Row ── */
-    .power-summary-row {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--spacing-3);
-        margin-bottom: var(--spacing-4);
-        padding: var(--spacing-3);
-        background: var(--surface-1);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md);
-    }
-
-    .power-stat {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-
-    .power-stat__label {
-        font-size: var(--font-xs);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-
-    .power-stat__value {
-        font-size: var(--font-lg);
-        font-weight: 700;
-        font-family: var(--font-mono);
-    }
-
-    .power-stat__pct {
-        font-size: var(--font-sm);
-        font-family: var(--font-mono);
-        color: var(--text-secondary);
-    }
-
-    /* ── Grid Load Bar ── */
-    .power-load-bar {
-        height: 8px;
-        background: var(--surface-2);
-        border-radius: 4px;
-        overflow: hidden;
-        margin: 4px 0;
-    }
-
-    .power-load-fill {
-        height: 100%;
-        border-radius: 4px;
-        transition: width 0.4s;
-    }
-
-    .power-load--good {
-        background: var(--success-color, #4ade80);
-    }
-
-    .power-load--warning {
-        background: var(--warning-color, #fbbf24);
-    }
-
-    .power-load--critical {
-        background: var(--danger-color, #f87171);
-    }
-
-    /* ── Sections ── */
-    .power-section {
-        margin-bottom: var(--spacing-4);
-    }
-
-    .power-section h4 {
-        margin: 0 0 var(--spacing-2) 0;
-        font-size: var(--font-base);
-    }
-
-    .row-dim {
-        opacity: 0.55;
-    }
-
-    .tab-refresh-hint {
-        display: flex;
-        justify-content: flex-end;
-        margin-top: var(--spacing-3);
-    }
-</style>

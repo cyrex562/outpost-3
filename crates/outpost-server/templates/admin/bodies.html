@@ -1,0 +1,162 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin: Bodies - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto" x-data="{ editBody: null }">
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-3">
+      <a href="/admin" class="btn btn-sm btn-ghost">← Admin</a>
+      <h1 class="text-2xl font-bold">Celestial Bodies</h1>
+    </div>
+    <button class="btn btn-sm btn-primary" onclick="document.getElementById('modal-add-body').showModal()">+ Add Body</button>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>System</th>
+          <th>Type</th>
+          <th>Gravity</th>
+          <th>Radius (km)</th>
+          <th>Sites</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for body in bodies %}
+        <tr>
+          <td class="font-semibold">{{ body.name }}</td>
+          <td>{{ body.system_name }}</td>
+          <td><span class="badge badge-ghost badge-sm">{{ body.body_type }}</span></td>
+          <td class="font-mono">{{ body.gravity }}</td>
+          <td class="font-mono">{{ body.radius_km }}</td>
+          <td>{{ body.sites_count }}</td>
+          <td class="flex gap-1">
+            <button class="btn btn-xs btn-ghost"
+              @click="editBody = {{ body | json_encode() }}; document.getElementById('modal-details-body').showModal()">
+              Details
+            </button>
+            <button class="btn btn-xs btn-warning"
+              @click="editBody = {{ body | json_encode() }}; document.getElementById('modal-edit-body').showModal()">
+              Edit
+            </button>
+            <form method="POST" action="/admin/bodies/{{ body.id }}/delete" class="inline"
+                  onsubmit="return confirm('Delete body {{ body.name }}?')">
+              <button class="btn btn-xs btn-error">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-base-content/50">No bodies.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add Body Modal -->
+  <dialog id="modal-add-body" class="modal">
+    <div class="modal-box w-full max-w-sm">
+      <h3 class="font-bold text-lg mb-4">Add Celestial Body</h3>
+      <form method="POST" action="/admin/bodies/create" class="grid grid-cols-2 gap-3">
+        <div class="col-span-2">
+          <label class="label py-1"><span class="label-text text-xs">System</span></label>
+          <select name="system_id" class="select select-bordered select-sm w-full" required>
+            <option value="">Select System…</option>
+            {% for system in systems %}
+            <option value="{{ system.id }}">{{ system.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label py-1"><span class="label-text text-xs">Name</span></label>
+          <input type="text" name="name" class="input input-bordered input-sm w-full" placeholder="Body name" required />
+        </div>
+        <div>
+          <label class="label py-1"><span class="label-text text-xs">Type</span></label>
+          <select name="body_type" class="select select-bordered select-sm w-full">
+            <option value="TerrestrialPlanet">Terrestrial Planet</option>
+            <option value="GasGiant">Gas Giant</option>
+            <option value="IceGiant">Ice Giant</option>
+            <option value="Moon">Moon</option>
+            <option value="Asteroid">Asteroid</option>
+            <option value="Comet">Comet</option>
+            <option value="OrbitalStation">Orbital Station</option>
+            <option value="Dwarf">Dwarf</option>
+          </select>
+        </div>
+        <div class="modal-action col-span-2">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-add-body').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Add Body</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Details Modal -->
+  <dialog id="modal-details-body" class="modal">
+    <div class="modal-box w-full max-w-sm">
+      <h3 class="font-bold text-lg mb-4">Body Details</h3>
+      <template x-if="editBody">
+        <table class="table table-sm w-full">
+          <tbody>
+            <tr><td class="font-semibold w-32">ID</td><td class="font-mono text-xs break-all" x-text="editBody.id"></td></tr>
+            <tr><td class="font-semibold">Name</td><td x-text="editBody.name"></td></tr>
+            <tr><td class="font-semibold">System</td><td x-text="editBody.system_name"></td></tr>
+            <tr><td class="font-semibold">Type</td><td x-text="editBody.body_type"></td></tr>
+            <tr><td class="font-semibold">Gravity</td><td x-text="editBody.gravity"></td></tr>
+            <tr><td class="font-semibold">Radius (km)</td><td x-text="editBody.radius_km"></td></tr>
+            <tr><td class="font-semibold">Sites</td><td x-text="editBody.sites_count"></td></tr>
+          </tbody>
+        </table>
+      </template>
+      <div class="modal-action">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-details-body').close()">Close</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Edit Modal -->
+  <dialog id="modal-edit-body" class="modal">
+    <div class="modal-box w-full max-w-sm">
+      <h3 class="font-bold text-lg mb-4">Edit Body</h3>
+      <template x-if="editBody">
+        <form method="POST" :action="'/admin/bodies/' + editBody.id + '/edit'" class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label py-1"><span class="label-text text-xs">Name</span></label>
+            <input type="text" name="name" class="input input-bordered input-sm w-full" :value="editBody.name" required />
+          </div>
+          <div>
+            <label class="label py-1"><span class="label-text text-xs">Type</span></label>
+            <select name="body_type" class="select select-bordered select-sm w-full">
+              <option value="TerrestrialPlanet" :selected="editBody.body_type === 'TerrestrialPlanet'">Terrestrial Planet</option>
+              <option value="GasGiant" :selected="editBody.body_type === 'GasGiant'">Gas Giant</option>
+              <option value="IceGiant" :selected="editBody.body_type === 'IceGiant'">Ice Giant</option>
+              <option value="Moon" :selected="editBody.body_type === 'Moon'">Moon</option>
+              <option value="Asteroid" :selected="editBody.body_type === 'Asteroid'">Asteroid</option>
+              <option value="Comet" :selected="editBody.body_type === 'Comet'">Comet</option>
+              <option value="OrbitalStation" :selected="editBody.body_type === 'OrbitalStation'">Orbital Station</option>
+              <option value="Dwarf" :selected="editBody.body_type === 'Dwarf'">Dwarf</option>
+            </select>
+          </div>
+          <div>
+            <label class="label py-1"><span class="label-text text-xs">Gravity (g)</span></label>
+            <input type="number" step="0.01" name="gravity" class="input input-bordered input-sm w-full" :value="editBody.gravity" />
+          </div>
+          <div>
+            <label class="label py-1"><span class="label-text text-xs">Radius (km)</span></label>
+            <input type="number" step="1" name="radius_km" class="input input-bordered input-sm w-full" :value="editBody.radius_km" />
+          </div>
+          <div class="modal-action col-span-2">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-edit-body').close()">Cancel</button>
+            <button type="submit" class="btn btn-warning btn-sm">Save Changes</button>
+          </div>
+        </form>
+      </template>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+</div>
+{% endblock %}

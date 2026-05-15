@@ -1,78 +1,23 @@
-<div id="resource-summary-bar" class="resource-summary-bar">
-    <!-- Food -->
-    <span class="res-chip res-chip--{{ food_status }}" title="Food across all sites">
-        🌿 <span class="res-chip__value">{{ food }}</span><span class="res-chip__trend">{{ food_trend }}</span>
+{# _resource_summary.html — top nav resource chips, polled every 5s #}
+<div id="resource-summary"
+     class="hidden sm:flex items-center gap-1.5 text-xs"
+     hx-get="/api/resources/summary"
+     hx-trigger="every 5s"
+     hx-target="#resource-summary"
+     hx-swap="outerHTML">
+    <span class="font-mono {% if food_status == 'critical' %}text-error{% elif food_status == 'warning' %}text-warning{% else %}text-success{% endif %}" title="Food">
+        🌿 {{ food }}{% if food_trend == '+' %}<span class="text-success">↑</span>{% elif food_trend == '-' %}<span class="text-error">↓</span>{% else %}<span class="opacity-40">—</span>{% endif %}
     </span>
-    <!-- Water -->
-    <span class="res-chip res-chip--{{ water_status }}" title="Water across all sites">
-        💧 <span class="res-chip__value">{{ water }}</span><span class="res-chip__trend">{{ water_trend }}</span>
+    <span class="text-base-content/20">|</span>
+    <span class="font-mono {% if water_status == 'critical' %}text-error{% elif water_status == 'warning' %}text-warning{% else %}text-success{% endif %}" title="Water">
+        💧 {{ water }}{% if water_trend == '+' %}<span class="text-success">↑</span>{% elif water_trend == '-' %}<span class="text-error">↓</span>{% else %}<span class="opacity-40">—</span>{% endif %}
     </span>
-    <!-- Oxygen -->
-    <span class="res-chip res-chip--{{ oxygen_status }}" title="Oxygen across all sites">
-        💨 <span class="res-chip__value">{{ oxygen }}</span><span class="res-chip__trend">{{ oxygen_trend }}</span>
+    <span class="text-base-content/20">|</span>
+    <span class="font-mono {% if oxygen_status == 'critical' %}text-error{% elif oxygen_status == 'warning' %}text-warning{% else %}text-success{% endif %}" title="Oxygen">
+        💨 {{ oxygen }}{% if oxygen_trend == '+' %}<span class="text-success">↑</span>{% elif oxygen_trend == '-' %}<span class="text-error">↓</span>{% else %}<span class="opacity-40">—</span>{% endif %}
     </span>
-    <!-- Storage utilization -->
-    <span class="res-chip res-chip--{{ storage_status }}" title="Storage utilization ({{ storage_pct }}%)">
-        📦 <span class="res-chip__value">{{ storage_pct }}%</span>
+    <span class="text-base-content/20">|</span>
+    <span class="font-mono {% if storage_status == 'critical' %}text-error{% elif storage_status == 'warning' %}text-warning{% else %}text-base-content/60{% endif %}" title="Storage {{ storage_pct }}%">
+        📦 {{ storage_pct }}%
     </span>
 </div>
-
-<style>
-    .resource-summary-bar {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .res-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.72rem;
-        font-family: var(--font-mono, monospace);
-        border: 1px solid transparent;
-        white-space: nowrap;
-    }
-
-    .res-chip--good {
-        background: rgba(0, 200, 100, 0.12);
-        border-color: rgba(0, 200, 100, 0.3);
-        color: var(--color-success, #4ade80);
-    }
-
-    .res-chip--warning {
-        background: rgba(250, 180, 0, 0.15);
-        border-color: rgba(250, 180, 0, 0.35);
-        color: var(--color-warning, #fbbf24);
-    }
-
-    .res-chip--critical {
-        background: rgba(220, 38, 38, 0.15);
-        border-color: rgba(220, 38, 38, 0.35);
-        color: var(--color-danger, #f87171);
-        animation: pulse-critical 2s ease-in-out infinite;
-    }
-
-    @keyframes pulse-critical {
-
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: 0.65;
-        }
-    }
-
-    .res-chip__value {
-        font-weight: 600;
-    }
-
-    .res-chip__trend {
-        font-size: 0.65rem;
-        opacity: 0.8;
-    }
-</style>

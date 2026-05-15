@@ -6,230 +6,229 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Outpost 3{% endblock %}</title>
 
-    <!-- V5 Design System CSS -->
-    <link rel="stylesheet" href="/static/css/variables.css">
-    <link rel="stylesheet" href="/static/css/v5-layout.css">
-    <link rel="stylesheet" href="/static/css/v5-sidebar.css">
-    <link rel="stylesheet" href="/static/css/topbar.css">
-    <link rel="stylesheet" href="/static/css/ticker.css">
-    <link rel="stylesheet" href="/static/css/tables.css">
-    <link rel="stylesheet" href="/static/css/modals.css">
-    <link rel="stylesheet" href="/static/css/forms.css">
-
-    <!-- Compiled Tailwind and DaisyUI CSS -->
+    <!-- Compiled CSS: Tailwind v4 + DaisyUI v5 + custom layout -->
     <link rel="stylesheet" href="/static/css/main.css">
 
-    <!-- HTMX for dynamic content -->
+    <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-
-    <!-- Alpine.js for interactivity -->
+    <!-- Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>[x-cloak] { display: none !important; }</style>
 
     {% block extra_head %}{% endblock %}
 </head>
 
-<body>
-    <!-- Loading Indicator -->
-    <div class="loading-overlay hidden" id="loading-overlay">
-        <div class="loading-spinner"></div>
-        <p>Loading...</p>
-    </div>
+<body class="bg-base-100 text-base-content">
 
-    <!-- App Container -->
-    <div class="app-container" x-data="{ sidebarCollapsed: false, tickerExpanded: false }"
-        :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+    <!-- App shell — sidebar + topbar + content + ticker via CSS grid -->
+    <div class="app-container" x-data="{ sidebarOpen: true }"
+         :class="{ 'sidebar-collapsed': !sidebarOpen }">
 
         <!-- ===== TOP BAR ===== -->
-        <header class="app-topbar">
-            <!-- Left: App title -->
-            <div class="topbar-left">
-                <h1 class="app-title">
-                    <span class="app-title-logo">⚙</span>
-                    <span>Outpost 3</span>
-                </h1>
+        <header class="app-topbar navbar bg-base-200 border-b border-base-300 px-4 min-h-0 h-14 z-30">
+
+            <div class="navbar-start gap-3">
+                <button class="btn btn-ghost btn-sm btn-square"
+                        x-on:click="sidebarOpen = !sidebarOpen"
+                        title="Toggle sidebar">☰</button>
+                <span class="font-bold text-base tracking-wide">⚙ Outpost 3</span>
             </div>
 
-            <!-- Center: Time controls -->
-            <div class="topbar-center">
-                <div class="time-controls" x-data="timeControls()" x-init="init()">
-                    <!-- Game time display -->
-                    <div class="time-display">
-                        <div class="time-label">Game Time</div>
-                        <div class="time-value" x-text="gameTime">Day 0 00:00</div>
+            <div class="navbar-center">
+                <div class="time-controls flex items-center gap-3"
+                     x-data="timeControls()" x-init="init()">
+
+                    <div class="text-xs text-base-content/60 text-right leading-tight">
+                        <div>Game Time</div>
+                        <div class="font-mono font-semibold text-base-content" x-text="gameTime">Day 0 00:00</div>
                     </div>
 
-                    <!-- Control buttons -->
-                    <div class="time-buttons">
-                        <button class="btn-time-control" x-on:click="pause()" :class="{ 'active': paused }"
-                            title="Pause">
-                            ⏸
-                        </button>
-                        <button class="btn-time-control" x-on:click="resume()" :class="{ 'active': !paused }"
-                            title="Resume">
-                            ▶
-                        </button>
-                        <button class="btn-time-control" x-on:click="decreaseSpeed()" title="Decrease Speed">
-                            ◀
-                        </button>
-                        <div class="speed-indicator">
-                            <span x-text="speedMultiplier + 'x'" class="speed-value">1x</span>
-                        </div>
-                        <button class="btn-time-control" x-on:click="increaseSpeed()" title="Increase Speed">
-                            ▶
-                        </button>
+                    <div class="join">
+                        <button class="btn btn-xs join-item" x-on:click="pause()"
+                                :class="paused ? 'btn-primary' : 'btn-ghost'" title="Pause">⏸</button>
+                        <button class="btn btn-xs join-item" x-on:click="resume()"
+                                :class="!paused ? 'btn-primary' : 'btn-ghost'" title="Resume">▶</button>
+                        <button class="btn btn-xs join-item btn-ghost" x-on:click="decreaseSpeed()" title="Slower">◀</button>
+                        <span class="btn btn-xs join-item btn-ghost font-mono pointer-events-none"
+                              x-text="speedMultiplier + 'x'">1x</span>
+                        <button class="btn btn-xs join-item btn-ghost" x-on:click="increaseSpeed()" title="Faster">▶</button>
                     </div>
 
-                    <!-- Current tick display -->
-                    <div class="time-display">
-                        <div class="time-label">Tick</div>
-                        <div class="time-value mono" x-text="currentTick">0</div>
+                    <div class="text-xs text-base-content/60 text-right leading-tight">
+                        <div>Tick</div>
+                        <div class="font-mono font-semibold text-base-content" x-text="currentTick">0</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Right: Resource summary and alerts -->
-            <div class="topbar-right">
-                <div class="resource-summary" id="resource-summary" hx-get="/api/resources/summary"
-                    hx-trigger="load, every 5s" hx-swap="innerHTML">
-                    {% block resource_summary %}
-                    <!-- Resources loaded via HTMX polling -->
-                    {% endblock %}
+            <div class="navbar-end gap-2">
+                <div id="resource-summary"
+                     class="hidden sm:flex items-center gap-1.5 text-xs"
+                     hx-get="/api/resources/summary"
+                     hx-trigger="load, every 5s"
+                     hx-target="#resource-summary"
+                     hx-swap="outerHTML">
                 </div>
 
-                <div class="alert-indicators">
-                    <button class="alert-badge" title="Critical Alerts">
-                        ⚠️
-                        <span class="alert-count">0</span>
+                <div id="alert-badges"
+                     hx-get="/api/events/badges"
+                     hx-trigger="load, every 5s"
+                     hx-target="#alert-badges"
+                     hx-swap="outerHTML">
+                    <button class="btn btn-ghost btn-sm btn-square" title="Alerts">
+                        ⚠️ <span class="badge badge-xs badge-warning">0</span>
                     </button>
                 </div>
 
-                <button class="btn-settings" title="Settings">⚙️</button>
+                <button class="btn btn-ghost btn-sm btn-square" title="Settings">⚙️</button>
             </div>
         </header>
 
         <!-- ===== SIDEBAR ===== -->
-        <aside class="app-sidebar">
-            <div class="sidebar-header">
-                <button class="btn-sidebar-toggle" x-on:click="sidebarCollapsed = !sidebarCollapsed"
-                    title="Toggle Sidebar">
-                    ☰
-                </button>
-            </div>
+        <aside class="app-sidebar bg-base-200 border-r border-base-300">
 
-            <nav class="sidebar-nav">
-                <a href="/" hx-get="/" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="nav-item"
-                    :class="{ 'active': window.location.pathname === '/' }">
-                    <span class="nav-icon">📊</span>
-                    <span class="nav-label">Dashboard</span>
-                </a>
+            <ul class="menu menu-sm p-2 gap-0.5 w-full">
+                <li>
+                    <a href="/"
+                       hx-get="/" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>📊</span>
+                        <span x-show="sidebarOpen">Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/colonies"
+                       hx-get="/colonies" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>🏛️</span>
+                        <span x-show="sidebarOpen">Colonies</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/events"
+                       hx-get="/events" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>📜</span>
+                        <span x-show="sidebarOpen">Event Log</span>
+                    </a>
+                </li>
 
-                <a href="/colonies" hx-get="/colonies" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
-                    class="nav-item">
-                    <span class="nav-icon">🏛️</span>
-                    <span class="nav-label">Colonies</span>
-                </a>
+                <li class="menu-title mt-2" x-show="sidebarOpen">
+                    <span class="text-xs text-base-content/40 uppercase tracking-widest">System</span>
+                </li>
+                <li>
+                    <a href="/dashboard"
+                       hx-get="/dashboard" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>📈</span>
+                        <span x-show="sidebarOpen">Stats</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/map"
+                       hx-get="/map" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>🌌</span>
+                        <span x-show="sidebarOpen">Star Map</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/systems"
+                       hx-get="/systems" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>🌟</span>
+                        <span x-show="sidebarOpen">Systems</span>
+                    </a>
+                </li>
+                <li class="menu-title mt-2" x-show="sidebarOpen">
+                    <span class="text-xs text-base-content/40 uppercase tracking-widest">Debug</span>
+                </li>
+                <li>
+                    <a href="/admin"
+                       hx-get="/admin" hx-target="#main-content" hx-select="#main-content"
+                       hx-swap="innerHTML" hx-push-url="true"
+                       class="flex gap-2" :class="{ 'justify-center': !sidebarOpen }">
+                        <span>⚙</span>
+                        <span x-show="sidebarOpen">Admin</span>
+                    </a>
+                </li>
+            </ul>
 
-                <a href="/events" hx-get="/events" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
-                    class="nav-item">
-                    <span class="nav-icon">📜</span>
-                    <span class="nav-label">Event Log</span>
-                    <span class="nav-badge" x-show="false">5</span>
-                </a>
-
-                <div class="sidebar-divider"></div>
-
-                <a href="/settings" hx-get="/settings" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
-                    class="nav-item">
-                    <span class="nav-icon">⚙️</span>
-                    <span class="nav-label">Settings</span>
-                </a>
-            </nav>
-
-            <div class="sidebar-footer">
-                <div class="sidebar-footer-text">v{{ version | default(value="0.1.0") }}</div>
+            <div class="absolute bottom-14 left-0 right-0 px-3 py-1" x-show="sidebarOpen">
+                <div class="text-xs text-base-content/30">v{{ version | default(value="0.1.0") }}</div>
             </div>
         </aside>
 
-        <!-- ===== CONTENT AREA ===== -->
-        <main class="app-content">
-            <!-- Breadcrumbs -->
-            <div class="content-wrapper">
-                {% if breadcrumbs %}
-                <nav class="breadcrumbs" aria-label="Breadcrumb">
+        <!-- ===== MAIN CONTENT ===== -->
+        <main class="app-content overflow-y-auto bg-base-100">
+            {% if breadcrumbs %}
+            <nav class="breadcrumbs text-sm px-4 pt-3 pb-0">
+                <ul>
                     {% for crumb in breadcrumbs %}
-                    <div class="breadcrumb-item">
+                    <li>
                         {% if crumb.url %}
-                        <a href="{{ crumb.url }}" class="breadcrumb-link">{{ crumb.label }}</a>
+                        <a href="{{ crumb.url }}">{{ crumb.label }}</a>
                         {% else %}
-                        <span class="breadcrumb-current">{{ crumb.label }}</span>
+                        {{ crumb.label }}
                         {% endif %}
-                        {% if not loop.last %}
-                        <span class="breadcrumb-separator">/</span>
-                        {% endif %}
-                    </div>
+                    </li>
                     {% endfor %}
-                </nav>
-                {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
 
-                <!-- Main Content -->
-                <div id="main-content">
-                    {% block content %}
-                    <!-- Page content goes here -->
-                    {% endblock %}
-                </div>
+            <div id="main-content" class="p-4">
+                {% block content %}{% endblock %}
             </div>
         </main>
 
-        <!-- ===== EVENT LOG TICKER ===== -->
-        <div class="app-ticker" :class="{ 'expanded': tickerExpanded }">
-            <div class="ticker-header" x-on:click="tickerExpanded = !tickerExpanded">
-                <div class="ticker-title">
-                    <span>Recent Events</span>
-                    <span class="ticker-expand-icon">▲</span>
-                </div>
+        <!-- ===== EVENT TICKER ===== -->
+        <div class="app-ticker bg-base-200 border-t border-base-300 flex items-center"
+             x-data="{ expanded: false }">
 
-                <!-- Scrolling recent events (collapsed view) -->
-                <div class="ticker-recent-events" x-show="!tickerExpanded">
-                    {% block ticker_events %}
-                    <div class="ticker-event info">
-                        <span class="ticker-event-time mono">00:00</span>
-                        <span class="ticker-event-icon">ℹ️</span>
-                        <span class="ticker-event-text">Simulation started</span>
-                    </div>
-                    {% endblock %}
+            <div class="flex-1 min-w-0 px-3 cursor-pointer flex items-center gap-2"
+                 x-on:click="expanded = !expanded">
+                <span class="text-xs text-base-content/50 shrink-0">Events</span>
+                <div id="ticker-collapsed"
+                     class="flex-1 min-w-0 text-xs truncate"
+                     hx-get="/api/events/ticker"
+                     hx-trigger="load, every 5s"
+                     hx-target="#ticker-collapsed"
+                     hx-swap="outerHTML">
+                    <span class="text-base-content/40">Loading…</span>
                 </div>
+                <span class="text-base-content/40 shrink-0 text-xs" x-text="expanded ? '▼' : '▲'">▲</span>
             </div>
 
-            <!-- Expanded event log -->
-            <div class="ticker-content">
-                <div class="ticker-events-list" id="ticker-events-list">
-                    {% block ticker_content %}
-                    <div class="event-entry info">
-                        <div class="event-entry-icon">ℹ️</div>
-                        <div class="event-entry-content">
-                            <div class="event-entry-header">
-                                <span class="event-entry-time mono">Day 0 00:00</span>
-                                <span class="event-entry-title">Simulation Started</span>
-                            </div>
-                            <div class="event-entry-description">
-                                Welcome to Outpost 3. Your colony awaits.
-                            </div>
-                        </div>
-                    </div>
-                    {% endblock %}
+            <template x-if="expanded">
+                <div class="absolute bottom-10 left-0 right-0 bg-base-200 border-t border-base-300
+                            max-h-48 overflow-y-auto shadow-xl z-40 p-3"
+                     id="ticker-events-list"
+                     hx-get="/api/events/ticker"
+                     hx-trigger="load"
+                     hx-target="#ticker-events-list"
+                     hx-swap="innerHTML">
+                    <div class="text-xs text-base-content/40">Loading events…</div>
                 </div>
-            </div>
+            </template>
         </div>
     </div>
 
-    <!-- ===== MODALS ===== -->
-    <div class="modal-overlay" id="modal-container">
-        <!-- Modals will be loaded here via HTMX -->
+    <!-- Modal container (HTMX loads modals here) -->
+    <div id="modal-container"></div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+        <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <!-- ===== JAVASCRIPT ===== -->
     <script>
-        // Time controls Alpine.js component
         function timeControls() {
             return {
                 currentTick: 0,
@@ -238,82 +237,45 @@
                 speedMultiplier: 1,
 
                 init() {
-                    // Poll for time status every second
                     this.fetchTimeStatus();
-                    setInterval(() => this.fetchTimeStatus(), 1000);
+                    setInterval(() => this.fetchTimeStatus(), 2000);
                 },
-
                 async fetchTimeStatus() {
                     try {
-                        const response = await fetch('/api/time/status');
-                        const data = await response.json();
-                        this.currentTick = data.current_tick;
-                        this.gameTime = data.game_time;
-                        this.paused = data.paused;
-                        this.speedMultiplier = data.speed_multiplier;
-                    } catch (error) {
-                        console.error('Failed to fetch time status:', error);
-                    }
+                        const r = await fetch('/api/time/status');
+                        const d = await r.json();
+                        this.currentTick = d.current_tick;
+                        this.gameTime = d.game_time;
+                        this.paused = d.paused;
+                        this.speedMultiplier = d.speed_multiplier;
+                    } catch {}
                 },
-
-                async pause() {
-                    try {
-                        await fetch('/api/time/pause', { method: 'POST' });
-                        this.paused = true;
-                    } catch (error) {
-                        console.error('Failed to pause:', error);
-                    }
-                },
-
-                async resume() {
-                    try {
-                        await fetch('/api/time/resume', { method: 'POST' });
-                        this.paused = false;
-                    } catch (error) {
-                        console.error('Failed to resume:', error);
-                    }
-                },
-
-                async increaseSpeed() {
-                    const newSpeed = Math.min(this.speedMultiplier + 1, 10);
-                    await this.setSpeed(newSpeed);
-                },
-
-                async decreaseSpeed() {
-                    const newSpeed = Math.max(this.speedMultiplier - 1, 1);
-                    await this.setSpeed(newSpeed);
-                },
-
-                async setSpeed(multiplier) {
-                    try {
-                        const response = await fetch('/api/time/speed', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ multiplier })
-                        });
-                        if (response.ok) {
-                            this.speedMultiplier = multiplier;
-                        }
-                    } catch (error) {
-                        console.error('Failed to set speed:', error);
-                    }
+                async pause()  { await fetch('/api/time/pause',  { method: 'POST' }); this.paused = true; },
+                async resume() { await fetch('/api/time/resume', { method: 'POST' }); this.paused = false; },
+                async increaseSpeed() { await this.setSpeed(Math.min(this.speedMultiplier + 1, 10)); },
+                async decreaseSpeed() { await this.setSpeed(Math.max(this.speedMultiplier - 1, 1)); },
+                async setSpeed(m) {
+                    const r = await fetch('/api/time/speed', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ multiplier: m }) });
+                    if (r.ok) this.speedMultiplier = m;
                 }
             };
         }
 
-        // HTMX configuration
-        document.body.addEventListener('htmx:configRequest', (event) => {
-            // Show loading indicator on requests
-            document.getElementById('loading-overlay').classList.remove('hidden');
+        document.body.addEventListener('htmx:beforeRequest', (e) => {
+            // Don't show loading overlay for background polling requests
+            const trigger = e.detail.elt?.getAttribute?.('hx-trigger') || '';
+            if (!trigger.includes('every') && !trigger.includes('load, every')) {
+                document.getElementById('loading-overlay').classList.remove('hidden');
+            }
         });
-
-        document.body.addEventListener('htmx:afterSwap', (event) => {
-            // Hide loading indicator after swap
-            document.getElementById('loading-overlay').classList.add('hidden');
-        });
+        document.body.addEventListener('htmx:afterSwap', () =>
+            document.getElementById('loading-overlay').classList.add('hidden'));
+        document.body.addEventListener('htmx:responseError', () =>
+            document.getElementById('loading-overlay').classList.add('hidden'));
     </script>
 
     {% block extra_scripts %}{% endblock %}
 </body>
-
 </html>

@@ -1,0 +1,53 @@
+{# _event_choice_modal.html — Modal for resolving a pending event choice #}
+{# Loaded via HTMX into #modal-container by GET /site/{id}/events/{event_id}/choice #}
+
+<div class="modal" id="event-choice-modal" x-data="{ open: true }" x-show="open" x-trap="open">
+    <div class="modal-backdrop" x-on:click="open = false"></div>
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-header">
+            <h3 class="modal-title">{{ title }}</h3>
+            <button class="modal-close" x-on:click="open = false" title="Close">✕</button>
+        </div>
+
+        <div class="modal-body">
+            <p class="event-description">{{ description }}</p>
+            <p class="event-meta">
+                <span class="badge badge-info">Tick {{ fired_at_tick }}</span>
+            </p>
+
+            <div class="choice-list">
+                {% for choice in choices %}
+                <div class="choice-card">
+                    <form hx-post="/site/{{ site_id }}/events/{{ event_id }}/resolve"
+                          hx-target="#modal-container"
+                          hx-swap="innerHTML"
+                          hx-on::after-request="document.getElementById('event-choice-modal').remove()">
+                        <input type="hidden" name="choice_id" value="{{ choice.id }}">
+                        <button type="submit" class="choice-btn">
+                            <span class="choice-text">{{ choice.text }}</span>
+                            <span class="choice-description">{{ choice.description }}</span>
+                        </button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.6); }
+.modal-dialog { position: relative; background: var(--color-surface, #1a1a2e); border: 1px solid var(--color-border, #333); border-radius: 8px; padding: 0; min-width: 400px; max-width: 600px; width: 100%; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid var(--color-border, #333); }
+.modal-title { margin: 0; font-size: 1.1rem; color: var(--color-warning, #f59e0b); }
+.modal-close { background: none; border: none; color: var(--color-text-muted, #888); cursor: pointer; font-size: 1.2rem; padding: 0.25rem; }
+.modal-body { padding: 1.25rem; }
+.event-description { color: var(--color-text, #e2e8f0); line-height: 1.6; margin-bottom: 0.75rem; }
+.event-meta { margin-bottom: 1rem; }
+.choice-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.choice-btn { width: 100%; text-align: left; background: var(--color-surface-2, #16213e); border: 1px solid var(--color-border, #333); border-radius: 6px; padding: 0.75rem 1rem; cursor: pointer; transition: border-color 0.15s; }
+.choice-btn:hover { border-color: var(--color-accent, #4a9eff); }
+.choice-text { display: block; font-weight: 600; color: var(--color-text, #e2e8f0); margin-bottom: 0.25rem; }
+.choice-description { display: block; font-size: 0.875rem; color: var(--color-text-muted, #888); }
+</style>

@@ -1,228 +1,136 @@
-<div class="tab-pane">
+<div class="flex flex-col gap-4">
+
     <!-- Action Bar -->
-    <div class="action-bar">
-        <button 
-            class="btn btn-primary"
-            @click="$dispatch('open-build-menu')">
-            <span>⚙</span> Build New Structure
+    <div class="flex justify-between items-center p-3 bg-base-200 rounded-lg border border-base-300">
+        <button class="btn btn-primary btn-sm"
+                onclick="document.getElementById('build-menu-modal').showModal()">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Build New Structure
         </button>
-        <div class="action-bar-stats">
-            <span class="text-secondary">Queued:</span>
-            <span class="text-primary">{{ construction_jobs | length }}</span>
-            <span class="text-secondary">|</span>
-            <span class="text-secondary">Active:</span>
-            <span class="text-success">{{ active_count }}</span>
+        <div class="flex gap-4 text-sm">
+            <span class="text-base-content/60">Queued:
+                <span class="font-mono font-bold text-base-content">{{ construction_jobs | length }}</span>
+            </span>
+            <span class="text-base-content/60">Active:
+                <span class="font-mono font-bold text-success">{{ active_count }}</span>
+            </span>
         </div>
     </div>
 
-    <!-- Construction Queue -->
     {% if construction_jobs | length > 0 %}
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Building</th>
-                <th>Category</th>
-                <th>Progress</th>
-                <th>Workers</th>
-                <th>Started</th>
-                <th>Est. Completion</th>
-                <th>Status</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for job in construction_jobs %}
-            <tr class="{% if job.paused %}job-paused{% endif %}">
-                <td class="building-name">
-                    <strong>{{ job.building_name }}</strong>
-                    <span class="text-secondary building-id">{{ job.building_id }}</span>
-                </td>
-                <td>
-                    <span class="badge badge-category">{{ job.category }}</span>
-                </td>
-                <td>
-                    <div class="progress-container">
-                        <div class="progress-bar-large">
-                            <div 
-                                class="progress-fill {% if job.paused %}progress-paused{% endif %}" 
-                                style="width: {{ job.progress_percentage }}%">
-                            </div>
-                        </div>
-                        <span class="progress-text">{{ job.progress_percentage }}%</span>
-                    </div>
-                    <div class="progress-details">
-                        <span class="text-secondary text-xs">
-                            {{ job.progress_ticks }}/{{ job.total_ticks }} ticks
-                        </span>
-                    </div>
-                </td>
-                <td class="text-mono">
-                    {{ job.workers_assigned }}
-                </td>
-                <td class="text-mono text-secondary">
-                    Tick {{ job.started_at_tick }}
-                </td>
-                <td class="text-mono">
-                    {% if job.paused %}
-                    <span class="text-secondary">Paused</span>
-                    {% else %}
-                    Tick {{ job.estimated_completion_tick }}
-                    {% endif %}
-                </td>
-                <td>
-                    {% if job.paused %}
-                    <span class="badge badge-paused">Paused</span>
-                    {% else %}
-                    <span class="badge badge-active">Active</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <div class="btn-group">
-                        {% if job.paused %}
-                        <button 
-                            class="btn btn-sm btn-primary"
-                            hx-post="/site/{{ site_id }}/construction/{{ job.building_id }}/pause"
-                            hx-target="#tab-content"
-                            hx-swap="innerHTML"
-                            title="Resume construction">
-                            ▶
-                        </button>
-                        {% else %}
-                        <button 
-                            class="btn btn-sm btn-secondary"
-                            hx-post="/site/{{ site_id }}/construction/{{ job.building_id }}/pause"
-                            hx-target="#tab-content"
-                            hx-swap="innerHTML"
-                            title="Pause construction">
-                            ⏸
-                        </button>
-                        {% endif %}
-                        <button 
-                            class="btn btn-sm btn-danger"
-                            hx-post="/site/{{ site_id }}/construction/{{ job.building_id }}/cancel"
-                            hx-confirm="Cancel construction? You will lose {{ job.waste_percentage }}% of invested resources."
-                            hx-target="#tab-content"
-                            hx-swap="innerHTML"
-                            title="Cancel construction">
-                            ✕
-                        </button>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
 
-    <!-- Construction Summary -->
-    <div class="construction-summary">
-        <h4>Resource Commitment</h4>
-        <div class="resource-grid">
+    <!-- Construction Queue Table -->
+    <div class="overflow-x-auto">
+        <table class="table table-sm table-zebra w-full">
+            <thead>
+                <tr class="bg-base-300">
+                    <th>Building</th>
+                    <th>Category</th>
+                    <th>Progress</th>
+                    <th>Workers</th>
+                    <th>Started</th>
+                    <th>Est. Completion</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in construction_jobs %}
+                <tr class="{% if job.paused %}opacity-60{% endif %}">
+                    <td>
+                        <div class="flex flex-col gap-0.5">
+                            <span class="font-semibold">{{ job.building_name }}</span>
+                            <span class="font-mono text-xs text-base-content/40">{{ job.building_id }}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge badge-outline badge-sm capitalize">
+                            {{ job.category | replace(from="_", to=" ") }}
+                        </span>
+                    </td>
+                    <td class="min-w-[160px]">
+                        <div class="flex items-center gap-2">
+                            <progress class="progress {% if job.paused %}progress-warning{% else %}progress-info{% endif %} w-28 h-3"
+                                      value="{{ job.progress_percentage }}" max="100"></progress>
+                            <span class="font-mono text-xs font-semibold">{{ job.progress_percentage }}%</span>
+                        </div>
+                        <div class="text-xs text-base-content/50 font-mono mt-0.5">
+                            {{ job.progress_ticks }}/{{ job.total_ticks }} ticks
+                        </div>
+                    </td>
+                    <td class="font-mono text-sm">{{ job.workers_assigned }}</td>
+                    <td class="font-mono text-sm text-base-content/60">T{{ job.started_at_tick }}</td>
+                    <td class="font-mono text-sm">
+                        {% if job.paused %}
+                        <span class="text-base-content/50">—</span>
+                        {% else %}
+                        T{{ job.estimated_completion_tick }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if job.paused %}
+                        <span class="badge badge-warning badge-sm">Paused</span>
+                        {% else %}
+                        <span class="badge badge-success badge-sm">Active</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="flex gap-1">
+                            {% if job.paused %}
+                            <button class="btn btn-xs btn-success"
+                                    hx-post="/site/{{ site_id }}/construction/{{ job.building_id }}/pause"
+                                    hx-target="#tab-content" hx-swap="innerHTML"
+                                    title="Resume construction">▶</button>
+                            {% else %}
+                            <button class="btn btn-xs btn-warning"
+                                    hx-post="/site/{{ site_id }}/construction/{{ job.building_id }}/pause"
+                                    hx-target="#tab-content" hx-swap="innerHTML"
+                                    title="Pause construction">⏸</button>
+                            {% endif %}
+                            <button class="btn btn-xs btn-error"
+                                    hx-post="/site/{{ site_id }}/construction/{{ job.building_id }}/cancel"
+                                    hx-confirm="Cancel construction of {{ job.building_name }}? ~{{ job.waste_percentage }}% of resources will be lost."
+                                    hx-target="#tab-content" hx-swap="innerHTML"
+                                    title="Cancel construction">✕</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Resources committed summary -->
+    {% if total_resources_committed %}
+    <div class="p-3 bg-base-200 rounded-lg border border-base-300">
+        <h4 class="text-sm font-semibold text-base-content/70 mb-2">Resources Committed</h4>
+        <div class="flex flex-wrap gap-3">
             {% for resource_id, amount in total_resources_committed %}
-            <div class="resource-item">
-                <span class="resource-name">{{ resource_id | title }}:</span>
-                <span class="resource-amount text-mono">{{ amount }}</span>
+            <div class="flex items-center gap-1 text-sm">
+                <span class="text-base-content/60 capitalize">{{ resource_id | replace(from="_", to=" ") }}:</span>
+                <span class="font-mono font-bold">{{ amount }}</span>
             </div>
             {% endfor %}
         </div>
     </div>
+    {% endif %}
+
     {% else %}
-    <div class="empty-state">
-        <p>No construction jobs in queue.</p>
-        <button 
-            class="btn btn-primary"
-            @click="$dispatch('open-build-menu')">
+    <div class="flex flex-col items-center justify-center py-16 gap-4 text-base-content/50">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+        </svg>
+        <p>No construction in progress.</p>
+        <button class="btn btn-primary btn-sm"
+                onclick="document.getElementById('build-menu-modal').showModal()">
             Start Building
         </button>
     </div>
     {% endif %}
+
 </div>
 
-<style>
-.job-paused {
-    opacity: 0.7;
-    background: var(--surface-2);
-}
-
-.progress-container {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-2);
-}
-
-.progress-bar-large {
-    flex: 1;
-    height: 20px;
-    background: var(--surface-2);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-    min-width: 150px;
-}
-
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent-primary), var(--accent-info));
-    transition: width 0.3s ease;
-}
-
-.progress-paused {
-    background: linear-gradient(90deg, var(--accent-secondary), var(--text-tertiary)) !important;
-}
-
-.progress-text {
-    font-family: var(--font-mono);
-    font-size: var(--font-sm);
-    font-weight: 600;
-    min-width: 40px;
-}
-
-.progress-details {
-    margin-top: var(--spacing-1);
-}
-
-.badge-active {
-    background: var(--status-success);
-}
-
-.badge-paused {
-    background: var(--accent-secondary);
-}
-
-.construction-summary {
-    margin-top: var(--spacing-4);
-    padding: var(--spacing-3);
-    background: var(--surface-1);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-}
-
-.construction-summary h4 {
-    margin: 0 0 var(--spacing-2) 0;
-    font-size: var(--font-base);
-    color: var(--text-secondary);
-}
-
-.resource-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: var(--spacing-2);
-}
-
-.resource-item {
-    display: flex;
-    justify-content: space-between;
-    padding: var(--spacing-1);
-    background: var(--surface-2);
-    border-radius: var(--radius-sm);
-}
-
-.resource-name {
-    color: var(--text-secondary);
-    font-size: var(--font-sm);
-}
-
-.resource-amount {
-    color: var(--text-primary);
-    font-weight: 600;
-}
-</style>
+{% include "components/_build_menu.html" %}

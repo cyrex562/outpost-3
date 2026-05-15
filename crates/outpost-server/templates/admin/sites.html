@@ -1,0 +1,138 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin: Sites - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto" x-data="{ editSite: null }">
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-3">
+      <a href="/admin" class="btn btn-sm btn-ghost">← Admin</a>
+      <h1 class="text-2xl font-bold">Sites</h1>
+    </div>
+    <button class="btn btn-sm btn-primary" onclick="document.getElementById('modal-add-site').showModal()">+ Add Site</button>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Body</th>
+          <th>System</th>
+          <th>Population</th>
+          <th>Buildings</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for site in sites %}
+        <tr>
+          <td class="font-semibold">{{ site.name }}</td>
+          <td><span class="badge badge-outline badge-sm">{{ site.site_type }}</span></td>
+          <td>{{ site.body_name }}</td>
+          <td>{{ site.system_name }}</td>
+          <td class="font-mono">{{ site.population }}</td>
+          <td class="font-mono">{{ site.building_count }}</td>
+          <td class="flex gap-1">
+            <a href="/site/{{ site.id }}" class="btn btn-xs btn-ghost">View</a>
+            <button class="btn btn-xs btn-warning"
+              @click="editSite = {{ site | json_encode() }}; document.getElementById('modal-edit-site').showModal()">
+              Edit
+            </button>
+            <form method="POST" action="/admin/sites/{{ site.id }}/delete" class="inline"
+                  onsubmit="return confirm('Delete site {{ site.name }}?')">
+              <button class="btn btn-xs btn-error">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-base-content/50">No sites.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add Site Modal -->
+  <dialog id="modal-add-site" class="modal">
+    <div class="modal-box w-full max-w-md">
+      <h3 class="font-bold text-lg mb-4">Add Site</h3>
+      <form method="POST" action="/admin/sites/create" class="grid grid-cols-2 gap-3">
+        <div class="col-span-2">
+          <label class="label py-1"><span class="label-text text-xs">System</span></label>
+          <select id="add-site-system" name="system_id" class="select select-bordered select-sm w-full" required
+            x-data x-on:change="
+              const sys = {{ systems_with_bodies | json_encode() }}.find(s => s.id === $el.value);
+              const sel = document.getElementById('add-site-body');
+              sel.innerHTML = '<option value=\\'\\'>Select Body…</option>';
+              (sys ? sys.bodies : []).forEach(b => {
+                const o = document.createElement('option');
+                o.value = b.id; o.textContent = b.name; sel.appendChild(o);
+              });
+            ">
+            <option value="">Select System…</option>
+            {% for system in systems_with_bodies %}
+            <option value="{{ system.id }}">{{ system.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-span-2">
+          <label class="label py-1"><span class="label-text text-xs">Body</span></label>
+          <select id="add-site-body" name="body_id" class="select select-bordered select-sm w-full" required>
+            <option value="">Select Body…</option>
+          </select>
+        </div>
+        <div>
+          <label class="label py-1"><span class="label-text text-xs">Name</span></label>
+          <input type="text" name="name" class="input input-bordered input-sm w-full" placeholder="Site name" required />
+        </div>
+        <div>
+          <label class="label py-1"><span class="label-text text-xs">Type</span></label>
+          <select name="site_type" class="select select-bordered select-sm w-full">
+            <option value="settlement">Settlement</option>
+            <option value="installation">Installation</option>
+          </select>
+        </div>
+        <div class="col-span-2">
+          <label class="label py-1"><span class="label-text text-xs">Population</span></label>
+          <input type="number" name="population" class="input input-bordered input-sm w-full" value="100" min="1" max="10000" required />
+        </div>
+        <div class="modal-action col-span-2">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-add-site').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Add Site</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Edit Site Modal -->
+  <dialog id="modal-edit-site" class="modal">
+    <div class="modal-box w-full max-w-md">
+      <h3 class="font-bold text-lg mb-4">Edit Site</h3>
+      <template x-if="editSite">
+        <form method="POST" :action="'/admin/sites/' + editSite.id + '/edit'" class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label py-1"><span class="label-text text-xs">Name</span></label>
+            <input type="text" name="name" class="input input-bordered input-sm w-full" :value="editSite.name" required />
+          </div>
+          <div>
+            <label class="label py-1"><span class="label-text text-xs">Type</span></label>
+            <select name="site_type" class="select select-bordered select-sm w-full">
+              <option value="settlement" :selected="editSite.site_type === 'Settlement'">Settlement</option>
+              <option value="installation" :selected="editSite.site_type === 'Installation'">Installation</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label class="label py-1"><span class="label-text text-xs">Population</span></label>
+            <input type="number" name="population" class="input input-bordered input-sm w-full" :value="editSite.population" min="1" max="10000" required />
+          </div>
+          <div class="modal-action col-span-2">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-edit-site').close()">Cancel</button>
+            <button type="submit" class="btn btn-warning btn-sm">Save Changes</button>
+          </div>
+        </form>
+      </template>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+</div>
+{% endblock %}

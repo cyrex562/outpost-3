@@ -1,0 +1,183 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin: Building Definitions - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto" x-data="{ editItem: null }">
+  <div class="flex items-center gap-3 mb-4">
+    <a href="/admin" class="btn btn-sm btn-ghost">← Admin</a>
+    <h1 class="text-2xl font-bold">Building Definitions</h1>
+    <span class="badge badge-neutral">{{ buildings | length }} types</span>
+    <button class="btn btn-sm btn-primary ml-auto" onclick="document.getElementById('addBuildingModal').showModal()">+ Add Building</button>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Category</th>
+          <th>Power (MW)</th>
+          <th>Workers</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for building in buildings %}
+        <tr>
+          <td class="font-mono text-sm">{{ building.id }}</td>
+          <td class="font-semibold">{{ building.name }}</td>
+          <td><span class="badge badge-ghost badge-sm">{{ building.category }}</span></td>
+          <td class="font-mono">{{ building.power_base_mw }}</td>
+          <td class="font-mono">{{ building.worker_capacity }}</td>
+          <td class="flex gap-1 flex-wrap">
+            <button class="btn btn-xs btn-info"
+              @click="editItem = {{ building | json_encode() }}; document.getElementById('editBuildingModal').showModal()">Edit</button>
+            <form method="POST" action="/admin/content/buildings/{{ building.id }}/delete" class="inline"
+                  onsubmit="return confirm('Delete building definition {{ building.id }}?')">
+              <button class="btn btn-xs btn-error">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-base-content/50">No building definitions loaded.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add Building Modal -->
+  <dialog id="addBuildingModal" class="modal">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">Add Building Definition</h3>
+      <form method="POST" action="/admin/content/buildings/create">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label"><span class="label-text">ID</span></label>
+            <input type="text" name="id" class="input input-bordered input-sm" placeholder="solar_array" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Name</span></label>
+            <input type="text" name="name" class="input input-bordered input-sm" placeholder="Solar Array" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Description</span></label>
+            <input type="text" name="description" class="input input-bordered input-sm" placeholder="Generates power from sunlight" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Category</span></label>
+            <select name="category" class="select select-bordered select-sm">
+              <option value="power_generation">Power Generation</option>
+              <option value="mining">Mining</option>
+              <option value="refining">Refining</option>
+              <option value="manufacturing">Manufacturing</option>
+              <option value="farming">Farming</option>
+              <option value="storage">Storage</option>
+              <option value="housing">Housing</option>
+              <option value="services">Services</option>
+              <option value="entertainment">Entertainment</option>
+              <option value="education">Education</option>
+              <option value="healthcare">Healthcare</option>
+              <option value="infrastructure">Infrastructure</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Worker Capacity</span></label>
+            <input type="number" name="worker_capacity" class="input input-bordered input-sm" value="5" min="0" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Power Consumption (MW)</span></label>
+            <input type="number" step="0.1" name="power_base_mw" class="input input-bordered input-sm" placeholder="0" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Power Output (MW)</span></label>
+            <input type="number" step="0.1" name="power_output_mw" class="input input-bordered input-sm" placeholder="0" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Morale Bonus</span></label>
+            <input type="number" step="0.1" name="morale_bonus" class="input input-bordered input-sm" value="0" />
+          </div>
+          <div class="form-control">
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text">Upgradeable</span>
+              <input type="checkbox" name="upgradeable" value="on" class="checkbox checkbox-sm" />
+            </label>
+          </div>
+        </div>
+        <div class="modal-action">
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('addBuildingModal').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Edit Building Modal -->
+  <dialog id="editBuildingModal" class="modal">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">Edit Building Definition</h3>
+      <form method="POST" :action="'/admin/content/buildings/' + editItem?.id + '/edit'">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label"><span class="label-text">ID (readonly)</span></label>
+            <input type="text" name="id" class="input input-bordered input-sm bg-base-300" :value="editItem?.id" readonly />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Name</span></label>
+            <input type="text" name="name" class="input input-bordered input-sm" :value="editItem?.name" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Description</span></label>
+            <input type="text" name="description" class="input input-bordered input-sm" :value="editItem?.description" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Category</span></label>
+            <select name="category" class="select select-bordered select-sm">
+              <option value="power_generation" :selected="editItem?.category === 'PowerGeneration'">Power Generation</option>
+              <option value="mining" :selected="editItem?.category === 'Mining'">Mining</option>
+              <option value="refining" :selected="editItem?.category === 'Refining'">Refining</option>
+              <option value="manufacturing" :selected="editItem?.category === 'Manufacturing'">Manufacturing</option>
+              <option value="farming" :selected="editItem?.category === 'Farming'">Farming</option>
+              <option value="storage" :selected="editItem?.category === 'Storage'">Storage</option>
+              <option value="housing" :selected="editItem?.category === 'Housing'">Housing</option>
+              <option value="services" :selected="editItem?.category === 'Services'">Services</option>
+              <option value="entertainment" :selected="editItem?.category === 'Entertainment'">Entertainment</option>
+              <option value="education" :selected="editItem?.category === 'Education'">Education</option>
+              <option value="healthcare" :selected="editItem?.category === 'Healthcare'">Healthcare</option>
+              <option value="infrastructure" :selected="editItem?.category === 'Infrastructure'">Infrastructure</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Worker Capacity</span></label>
+            <input type="number" name="worker_capacity" class="input input-bordered input-sm" :value="editItem?.worker_capacity" min="0" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Power Consumption (MW)</span></label>
+            <input type="number" step="0.1" name="power_base_mw" class="input input-bordered input-sm" :value="editItem?.power_base_mw" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Power Output (MW)</span></label>
+            <input type="number" step="0.1" name="power_output_mw" class="input input-bordered input-sm" :value="editItem?.power_output_mw" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Morale Bonus</span></label>
+            <input type="number" step="0.1" name="morale_bonus" class="input input-bordered input-sm" :value="editItem?.morale_bonus" />
+          </div>
+          <div class="form-control">
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text">Upgradeable</span>
+              <input type="checkbox" name="upgradeable" value="on" class="checkbox checkbox-sm" :checked="editItem?.upgradeable" />
+            </label>
+          </div>
+        </div>
+        <div class="modal-action">
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('editBuildingModal').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+</div>
+{% endblock %}

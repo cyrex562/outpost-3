@@ -4,7 +4,7 @@
 //! All state changes are applied via events, never direct mutation.
 
 use crate::content::{BuildingDefinition, ResourceDefinition, EventDefinition, TechDefinition};
-use crate::domain::Galaxy;
+use crate::domain::{Galaxy, EventLog};
 use crate::simulation::GameClock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -54,6 +54,8 @@ pub struct GameState {
     pub tech_definitions: HashMap<String, TechDefinition>,
     /// Event engine runtime state (cooldowns, fired set, pending choices).
     pub event_engine: EventEngineState,
+    /// Ordered log of gameplay events that have fired (for UI ticker and /events page).
+    pub event_log: EventLog,
 }
 
 impl GameState {
@@ -67,6 +69,7 @@ impl GameState {
             event_definitions: HashMap::new(),
             tech_definitions: HashMap::new(),
             event_engine: EventEngineState::default(),
+            event_log: EventLog::new(),
         }
     }
 
@@ -80,6 +83,7 @@ impl GameState {
             event_definitions: HashMap::new(),
             tech_definitions: HashMap::new(),
             event_engine: EventEngineState::default(),
+            event_log: EventLog::new(),
         }
     }
 

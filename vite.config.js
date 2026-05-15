@@ -9,31 +9,22 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
-    // Output built CSS/JS into the static directory that Actix serves
     outDir: 'static',
-    emptyOutDir: false, // Don't wipe source CSS files in static/css/
-    sourcemap: true,
+    emptyOutDir: false,
+    sourcemap: false,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'crates/outpost-server/static/js/main.js'),
+        main: path.resolve(__dirname, 'crates/outpost-server/frontend/main.js'),
       },
       output: {
+        // JS entry goes to static/js/main.js (not needed but harmless)
         entryFileNames: 'js/[name].js',
         chunkFileNames: 'js/[name].js',
-        assetFileNames: 'css/[name].[ext]',
-      },
-    },
-  },
-  server: {
-    port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/colony': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
+        // CSS extracted from the JS entry: rename input.css → main.css
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name === 'input.css') return 'css/main.css';
+          return 'css/[name].[ext]';
+        },
       },
     },
   },

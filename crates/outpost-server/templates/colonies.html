@@ -2,356 +2,205 @@
 
 {% block title %}Colonies - Outpost 3{% endblock %}
 
-{% block breadcrumb %}
-<nav class="breadcrumb">
-    <a href="/dashboard">Dashboard</a>
-    <span>/</span>
-    <span>Colonies</span>
-</nav>
-{% endblock %}
-
 {% block content %}
-<div class="colonies-container">
-    <!-- Page Header -->
-    <div class="page-header">
-        <h1>Colonies & Installations</h1>
-        <p class="page-subtitle">Manage all your settlements across the galaxy</p>
-    </div>
+<div class="p-4 max-w-7xl mx-auto">
 
-    <!-- Summary Stats -->
-    <div class="stats-grid stats-grid-4">
-        <div class="stat-card">
-            <div class="stat-label">Total Sites</div>
-            <div class="stat-value">{{ total_sites }}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Total Population</div>
-            <div class="stat-value">{{ total_population }}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Average Morale</div>
-            <div class="stat-value">{{ average_morale }}%</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Total Buildings</div>
-            <div class="stat-value">{{ total_buildings }}</div>
-        </div>
+  <!-- Header + action -->
+  <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold">Colonies &amp; Installations</h1>
+      <p class="text-sm text-base-content/60">Manage all your settlements across the galaxy</p>
     </div>
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('found-colony-modal').showModal()">
+      + Found New Colony
+    </button>
+  </div>
 
-    <!-- Filters and Search -->
-    <div class="toolbar" x-data="{ filterType: 'all' }">
-        <div class="toolbar-left">
-            <input type="text" 
-                   class="search-input" 
-                   placeholder="Search colonies..." 
-                   id="colony-search"
-                   hx-get="/colonies/search" 
-                   hx-trigger="keyup changed delay:300ms" 
-                   hx-target="#colonies-table-body"
-                   hx-include="[name='filter_type']">
-            
-            <select name="filter_type" 
-                    class="filter-select"
-                    x-model="filterType"
-                    hx-get="/colonies" 
-                    hx-trigger="change" 
-                    hx-target="#colonies-table-body">
-                <option value="all">All Sites</option>
-                <option value="settlement">Settlements Only</option>
-                <option value="installation">Installations Only</option>
-            </select>
-        </div>
-        
-        <div class="toolbar-right">
-            <button class="btn btn-primary" onclick="alert('Found new colony feature coming soon!')">
-                <span>+ Found New Colony</span>
-            </button>
-        </div>
+  <!-- Summary stats -->
+  <div class="stats shadow w-full mb-4">
+    <div class="stat">
+      <div class="stat-title">Total Sites</div>
+      <div class="stat-value font-mono text-2xl">{{ total_sites }}</div>
     </div>
+    <div class="stat">
+      <div class="stat-title">Total Population</div>
+      <div class="stat-value font-mono text-2xl">{{ total_population }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Average Morale</div>
+      <div class="stat-value font-mono text-2xl">{{ average_morale | round }}%</div>
+    </div>
+    <div class="stat">
+      <div class="stat-title">Total Buildings</div>
+      <div class="stat-value font-mono text-2xl">{{ total_buildings }}</div>
+    </div>
+  </div>
 
-    <!-- Colonies Table -->
-    <div class="table-container">
-        <table class="data-table data-table-hover">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Location</th>
-                    <th class="text-right">Population</th>
-                    <th class="text-right">Morale</th>
-                    <th class="text-right">Power</th>
-                    <th class="text-right">Buildings</th>
-                    <th class="text-center">Status</th>
-                    <th class="text-center">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="colonies-table-body">
-                {% if sites %}
-                    {% for site in sites %}
-                    <tr class="clickable-row" 
-                        onclick="window.location.href='/site/{{ site.id }}'"
-                        style="cursor: pointer;">
-                        <td>
-                            <div class="site-name">
-                                <strong>{{ site.name }}</strong>
-                            </div>
-                        </td>
-                        <td>
-                            <span class="badge badge-{{ site.site_type | lower }}">
-                                {{ site.site_type }}
-                            </span>
-                        </td>
-                        <td>
-                            <div class="location-info">
-                                <div class="location-body">{{ site.body_name }}</div>
-                                <div class="location-system text-secondary">{{ site.system_name }}</div>
-                            </div>
-                        </td>
-                        <td class="text-right">
-                            <span class="mono">{{ site.population }}</span>
-                        </td>
-                        <td class="text-right">
-                            <div class="morale-cell">
-                                <span class="mono morale-{% if site.morale >= 70 %}high{% elif site.morale >= 40 %}medium{% else %}low{% endif %}">
-                                    {{ site.morale }}%
-                                </span>
-                                <div class="morale-bar-mini">
-                                    <div class="morale-bar-fill morale-{% if site.morale >= 70 %}high{% elif site.morale >= 40 %}medium{% else %}low{% endif %}" 
-                                         style="width: {{ site.morale }}%">
-                                    </div>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="text-right">
-                            <span class="mono power-{% if site.power_net >= 0 %}positive{% else %}negative{% endif %}">
-                                {{ site.power_net }} MW
-                            </span>
-                        </td>
-                        <td class="text-right">
-                            <span class="mono">{{ site.building_count }}</span>
-                            {% if site.construction_count > 0 %}
-                            <span class="text-secondary"> (+{{ site.construction_count }})</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-center">
-                            {% if site.power_net < 0 %}
-                            <span class="status-indicator status-warning" title="Power deficit">⚠</span>
-                            {% elif site.morale < 40 %}
-                            <span class="status-indicator status-danger" title="Low morale">!</span>
-                            {% else %}
-                            <span class="status-indicator status-success" title="Operational">✓</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-center" onclick="event.stopPropagation()">
-                            <div class="action-buttons">
-                                <a href="/site/{{ site.id }}" 
-                                   class="btn btn-sm btn-secondary"
-                                   title="View Details">
-                                    View
-                                </a>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                {% else %}
-                    <tr>
-                        <td colspan="9" class="text-center text-secondary">
-                            <div style="padding: 2rem;">
-                                <p>No colonies founded yet.</p>
-                                <p>Start your empire by founding your first colony!</p>
-                            </div>
-                        </td>
-                    </tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </div>
+  <!-- Toolbar: search + filter -->
+  <div class="flex items-center gap-2 mb-3 flex-wrap">
+    <input type="text"
+           class="input input-bordered input-sm flex-1 min-w-48"
+           placeholder="Search colonies…"
+           id="colony-search"
+           x-data
+           @input.debounce.300ms="
+             const q = $el.value.toLowerCase();
+             document.querySelectorAll('#colonies-tbody tr[data-name]').forEach(r => {
+               r.style.display = r.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+             });
+           ">
+    <select class="select select-bordered select-sm"
+            x-data="{ v: 'all' }" x-model="v"
+            @change="
+              document.querySelectorAll('#colonies-tbody tr[data-type]').forEach(r => {
+                r.style.display = (v === 'all' || r.dataset.type === v) ? '' : 'none';
+              });
+            ">
+      <option value="all">All Sites</option>
+      <option value="Settlement">Settlements</option>
+      <option value="Installation">Installations</option>
+    </select>
+  </div>
 
-    <!-- Pagination (if needed in future) -->
-    {% if total_sites > 50 %}
-    <div class="pagination">
-        <button class="btn btn-sm" disabled>Previous</button>
-        <span class="pagination-info">Page 1 of 1</span>
-        <button class="btn btn-sm" disabled>Next</button>
+  <!-- Colonies table -->
+  <div class="overflow-x-auto">
+    <table class="table table-sm table-zebra table-pin-rows w-full">
+      <thead>
+        <tr class="bg-base-300">
+          <th>Name</th>
+          <th>Type</th>
+          <th>Location</th>
+          <th class="text-right">Population</th>
+          <th class="text-right">Morale</th>
+          <th class="text-right">Power</th>
+          <th class="text-right">Buildings</th>
+          <th class="text-center">Status</th>
+          <th class="text-center">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="colonies-tbody">
+        {% if sites %}
+          {% for site in sites %}
+          <tr class="hover cursor-pointer"
+              data-name="{{ site.name }}"
+              data-type="{{ site.site_type }}"
+              onclick="window.location.href='/site/{{ site.id }}'">
+            <td class="font-semibold">{{ site.name }}</td>
+            <td>
+              <span class="badge badge-outline badge-sm capitalize">{{ site.site_type }}</span>
+            </td>
+            <td>
+              <div class="flex flex-col gap-0">
+                <span>{{ site.body_name }}</span>
+                <span class="text-xs text-base-content/50">{{ site.system_name }}</span>
+              </div>
+            </td>
+            <td class="text-right font-mono">{{ site.population }}</td>
+            <td class="text-right">
+              <div class="flex items-center justify-end gap-2">
+                <progress class="progress w-12 h-1.5 {% if site.morale >= 70 %}progress-success{% elif site.morale >= 40 %}progress-warning{% else %}progress-error{% endif %}"
+                          value="{{ site.morale }}" max="100"></progress>
+                <span class="font-mono text-xs {% if site.morale >= 70 %}text-success{% elif site.morale >= 40 %}text-warning{% else %}text-error{% endif %}">
+                  {{ site.morale | round }}%
+                </span>
+              </div>
+            </td>
+            <td class="text-right font-mono text-sm {% if site.power_net >= 0 %}text-success{% else %}text-error{% endif %}">
+              {{ site.power_net }} MW
+            </td>
+            <td class="text-right font-mono text-sm">
+              {{ site.building_count }}
+              {% if site.construction_count > 0 %}
+              <span class="text-base-content/50 text-xs"> +{{ site.construction_count }}</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if site.power_net < 0 %}
+              <span class="badge badge-warning badge-sm" title="Power deficit">⚠</span>
+              {% elif site.morale < 40 %}
+              <span class="badge badge-error badge-sm" title="Low morale">!</span>
+              {% else %}
+              <span class="badge badge-success badge-sm" title="Operational">✓</span>
+              {% endif %}
+            </td>
+            <td class="text-center" onclick="event.stopPropagation()">
+              <a href="/site/{{ site.id }}" class="btn btn-xs btn-ghost">View</a>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="9">
+              <div class="flex flex-col items-center justify-center py-16 gap-3 text-base-content/40">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/>
+                </svg>
+                <p>No colonies founded yet.</p>
+                <button class="btn btn-primary btn-sm" onclick="document.getElementById('found-colony-modal').showModal()">
+                  Found Your First Colony
+                </button>
+              </div>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Found Colony Modal -->
+  <dialog id="found-colony-modal" class="modal">
+    <div class="modal-box w-full max-w-md"
+         x-data="{
+           systemId: '',
+           get bodies() {
+             const systems = {{ all_systems | json_encode() }};
+             const sys = systems.find(s => s.id === this.systemId);
+             return sys ? sys.bodies : [];
+           }
+         }">
+      <h3 class="font-bold text-lg mb-4">Found New Colony</h3>
+      <form method="POST" action="/sites/create">
+        <div class="form-control mb-3">
+          <label class="label"><span class="label-text">System</span></label>
+          <select name="system_id" class="select select-bordered select-sm" required x-model="systemId">
+            <option value="">Select system…</option>
+            {% for system in all_systems %}
+            <option value="{{ system.id }}">{{ system.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-control mb-3">
+          <label class="label"><span class="label-text">Celestial Body</span></label>
+          <select name="body_id" class="select select-bordered select-sm" required :disabled="!systemId">
+            <option value="">Select body…</option>
+            <template x-for="body in bodies" :key="body.id">
+              <option :value="body.id" x-text="body.name + ' (' + body.body_type + ')'"></option>
+            </template>
+          </select>
+        </div>
+        <div class="form-control mb-3">
+          <label class="label"><span class="label-text">Colony Name</span></label>
+          <input type="text" name="name" class="input input-bordered input-sm" placeholder="Colony Alpha" required />
+        </div>
+        <div class="form-control mb-3">
+          <label class="label"><span class="label-text">Type</span></label>
+          <select name="site_type" class="select select-bordered select-sm">
+            <option value="settlement">Settlement</option>
+            <option value="installation">Installation</option>
+          </select>
+        </div>
+        <div class="form-control mb-4">
+          <label class="label"><span class="label-text">Initial Population</span></label>
+          <input type="number" name="population" class="input input-bordered input-sm" value="100" min="1" max="10000" required />
+        </div>
+        <div class="modal-action mt-2">
+          <button type="submit" class="btn btn-primary btn-sm">Found Colony</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+        </div>
+      </form>
     </div>
-    {% endif %}
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
 </div>
-
-<style>
-/* Colony-specific styles */
-.colonies-container {
-    padding: 1rem;
-    max-width: 1600px;
-    margin: 0 auto;
-}
-
-.page-header {
-    margin-bottom: 1.5rem;
-}
-
-.page-header h1 {
-    margin: 0 0 0.5rem 0;
-    font-size: 2rem;
-}
-
-.page-subtitle {
-    margin: 0;
-    color: var(--color-text-secondary);
-}
-
-.stats-grid-4 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-}
-
-.toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-    gap: 1rem;
-}
-
-.toolbar-left {
-    display: flex;
-    gap: 0.5rem;
-    flex: 1;
-}
-
-.toolbar-right {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.search-input {
-    min-width: 300px;
-    padding: 0.5rem 1rem;
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-primary);
-}
-
-.filter-select {
-    padding: 0.5rem 1rem;
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-primary);
-}
-
-.location-info {
-    display: flex;
-    flex-direction: column;
-}
-
-.location-body {
-    font-weight: 500;
-}
-
-.location-system {
-    font-size: 0.875rem;
-}
-
-.morale-cell {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.25rem;
-}
-
-.morale-bar-mini {
-    width: 60px;
-    height: 4px;
-    background: var(--color-bg-tertiary);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.morale-bar-fill {
-    height: 100%;
-    transition: width 0.3s ease;
-}
-
-.morale-high {
-    color: var(--color-success);
-}
-
-.morale-medium {
-    color: var(--color-warning);
-}
-
-.morale-low {
-    color: var(--color-danger);
-}
-
-.morale-bar-fill.morale-high {
-    background: var(--color-success);
-}
-
-.morale-bar-fill.morale-medium {
-    background: var(--color-warning);
-}
-
-.morale-bar-fill.morale-low {
-    background: var(--color-danger);
-}
-
-.power-positive {
-    color: var(--color-success);
-}
-
-.power-negative {
-    color: var(--color-danger);
-}
-
-.status-indicator {
-    display: inline-block;
-    width: 24px;
-    height: 24px;
-    line-height: 24px;
-    text-align: center;
-    border-radius: 50%;
-    font-weight: bold;
-}
-
-.status-success {
-    background: var(--color-success-bg);
-    color: var(--color-success);
-}
-
-.status-warning {
-    background: var(--color-warning-bg);
-    color: var(--color-warning);
-}
-
-.status-danger {
-    background: var(--color-danger-bg);
-    color: var(--color-danger);
-}
-
-.action-buttons {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: center;
-}
-
-.clickable-row:hover {
-    background: var(--color-bg-hover);
-}
-
-.pagination {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 1rem;
-    margin-top: 1.5rem;
-}
-
-.pagination-info {
-    color: var(--color-text-secondary);
-}
-</style>
 {% endblock %}

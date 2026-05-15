@@ -5,6 +5,7 @@
 //! - Runs a background tokio task that processes ticks at regular intervals
 //! - Provides methods for controlling simulation (pause/resume/set_speed)
 //! - Stores events generated during ticks
+//! - Persists game state to the database after each mutation
 
 use outpost_core::domain::GameState;
 use outpost_core::content::ContentLoader;
@@ -15,6 +16,8 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, info, warn};
 
+use crate::db::SharedRepository;
+
 /// Shared state for the simulation.
 #[derive(Clone)]
 pub struct SimulationService {
@@ -24,6 +27,8 @@ pub struct SimulationService {
     content: Arc<ContentLoader>,
     /// Event log (append-only during ticks)
     events: Arc<RwLock<Vec<GameEvent>>>,
+    /// Persistence repository (optional: None disables auto-save)
+    repo: Option<SharedRepository>,
 }
 
 impl SimulationService {
@@ -33,6 +38,28 @@ impl SimulationService {
             state: Arc::new(Mutex::new(initial_state)),
             content: Arc::new(content),
             events: Arc::new(RwLock::new(Vec::new())),
+            repo: None,
+        }
+    }
+
+    /// Create a simulation service with persistence.
+    pub fn with_repo(initial_state: GameState, content: ContentLoader, repo: SharedRepository) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(initial_state)),
+            content: Arc::new(content),
+            events: Arc::new(RwLock::new(Vec::new())),
+            repo: Some(repo),
+        }
+    }
+
+    /// Persist the current game state to the database (fire-and-forget).
+    /// Errors are logged but not propagated to avoid blocking the caller.
+    async fn persist_state(&self) {
+        if let Some(repo) = &self.repo {
+            let state = self.state.lock().await;
+            if let Err(e) = repo.save_game_state(&state) {
+                warn!("Failed to persist game state: {}", e);
+            }
         }
     }
 
@@ -57,19 +84,26 @@ impl SimulationService {
         building_id: outpost_core::domain::BuildingId,
         new_state: outpost_core::domain::BuildingStateV5,
     ) -> Result<(), String> {
-        let mut state = self.state.lock().await;
-        let site = state.galaxy.find_site_mut(&site_id)
-            .ok_or_else(|| format!("Site {:?} not found", site_id))?;
-        let building = site.buildings.get_mut(&building_id)
-            .ok_or_else(|| format!("Building {:?} not found", building_id))?;
-        building.state = new_state;
+        {
+            let mut state = self.state.lock().await;
+            let site = state.galaxy.find_site_mut(&site_id)
+                .ok_or_else(|| format!("Site {:?} not found", site_id))?;
+            let building = site.buildings.get_mut(&building_id)
+                .ok_or_else(|| format!("Building {:?} not found", building_id))?;
+            building.state = new_state;
+        }
+        self.persist_state().await;
         Ok(())
     }
 
     /// Execute a time command (pause, resume, set speed, etc.)
     pub async fn execute_time_command(&self, command: TimeCommand) -> Result<(), String> {
-        let mut state = self.state.lock().await;
-        command.execute(&mut state.clock)
+        {
+            let mut state = self.state.lock().await;
+            command.execute(&mut state.clock)?;
+        }
+        self.persist_state().await;
+        Ok(())
     }
 
     /// Get the current tick count.
@@ -106,6 +140,20 @@ impl SimulationService {
     pub async fn event_count(&self) -> usize {
         let events = self.events.read().await;
         events.len()
+    }
+
+    /// Mutate game state with a closure, returning the closure's result.
+    /// Automatically persists state after the mutation.
+    pub async fn with_state_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut GameState) -> R,
+    {
+        let result = {
+            let mut state = self.state.lock().await;
+            f(&mut state)
+        };
+        self.persist_state().await;
+        result
     }
 
     /// Start the simulation tick loop.
@@ -146,6 +194,12 @@ impl SimulationService {
                     // Store events
                     let mut events = self.events.write().await;
                     events.extend(tick_events);
+                }
+
+                // Persist state every 10 ticks to avoid excessive DB writes.
+                let tick = self.current_tick().await;
+                if tick % 10 == 0 {
+                    self.persist_state().await;
                 }
 
                 // Idle safety check: auto-pause if critical resources depleted

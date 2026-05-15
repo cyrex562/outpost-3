@@ -1,0 +1,143 @@
+{% extends "base-v5.html" %}
+{% block title %}Admin: Recipes - Outpost 3{% endblock %}
+{% block content %}
+<div class="p-4 max-w-7xl mx-auto" x-data="{ editItem: null }">
+  <div class="flex items-center gap-3 mb-4">
+    <a href="/admin" class="btn btn-sm btn-ghost">← Admin</a>
+    <h1 class="text-2xl font-bold">Production Recipes</h1>
+    <span class="badge badge-neutral">{{ recipes | length }} recipes</span>
+    <button class="btn btn-sm btn-primary ml-auto" onclick="document.getElementById('addRecipeModal').showModal()">+ Add Recipe</button>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Buildings</th>
+          <th>Inputs</th>
+          <th>Outputs</th>
+          <th>Duration (ticks)</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for recipe in recipes %}
+        <tr>
+          <td class="font-mono text-sm">{{ recipe.id }}</td>
+          <td class="font-semibold">{{ recipe.name }}</td>
+          <td class="text-sm">
+            {% for bt in recipe.building_types %}
+            <span class="badge badge-ghost badge-sm mr-1">{{ bt }}</span>
+            {% endfor %}
+          </td>
+          <td class="font-mono text-xs">{{ recipe.inputs }}</td>
+          <td class="font-mono text-xs">{{ recipe.outputs }}</td>
+          <td class="font-mono">{{ recipe.duration_ticks }}</td>
+          <td class="flex gap-1 flex-wrap">
+            <button class="btn btn-xs btn-info"
+              @click="editItem = {{ recipe | json_encode() }}; document.getElementById('editRecipeModal').showModal()">Edit</button>
+            <form method="POST" action="/admin/content/recipes/{{ recipe.id }}/delete" class="inline"
+                  onsubmit="return confirm('Delete recipe {{ recipe.id }}?')">
+              <button class="btn btn-xs btn-error">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-base-content/50">No recipes loaded.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add Recipe Modal -->
+  <dialog id="addRecipeModal" class="modal">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">Add Recipe</h3>
+      <form method="POST" action="/admin/content/recipes/create">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label"><span class="label-text">ID</span></label>
+            <input type="text" name="id" class="input input-bordered input-sm" placeholder="smelt_iron" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Name</span></label>
+            <input type="text" name="name" class="input input-bordered input-sm" placeholder="Smelt Iron" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Building Types (comma-separated)</span></label>
+            <input type="text" name="building_types" class="input input-bordered input-sm" placeholder="smelter, forge" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Inputs JSON</span></label>
+            <input type="text" name="inputs_json" class="input input-bordered input-sm font-mono" placeholder='{"iron_ore": 10.0}' required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Outputs JSON</span></label>
+            <input type="text" name="outputs_json" class="input input-bordered input-sm font-mono" placeholder='{"iron_ingot": 5.0}' required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Processing Time (ticks)</span></label>
+            <input type="number" name="processing_time_ticks" class="input input-bordered input-sm" value="10" min="1" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Required Deposit (optional)</span></label>
+            <input type="text" name="required_deposit" class="input input-bordered input-sm" placeholder="iron_ore" />
+          </div>
+        </div>
+        <div class="modal-action">
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('addRecipeModal').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Edit Recipe Modal -->
+  <dialog id="editRecipeModal" class="modal">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">Edit Recipe</h3>
+      <form method="POST" :action="'/admin/content/recipes/' + editItem?.id + '/edit'">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="form-control">
+            <label class="label"><span class="label-text">ID (readonly)</span></label>
+            <input type="text" name="id" class="input input-bordered input-sm bg-base-300" :value="editItem?.id" readonly />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Name</span></label>
+            <input type="text" name="name" class="input input-bordered input-sm" :value="editItem?.name" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Building Types (comma-separated)</span></label>
+            <input type="text" name="building_types" class="input input-bordered input-sm" :value="editItem?.building_types_str" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Inputs JSON</span></label>
+            <input type="text" name="inputs_json" class="input input-bordered input-sm font-mono" :value="editItem?.inputs_json" required />
+          </div>
+          <div class="form-control col-span-2">
+            <label class="label"><span class="label-text">Outputs JSON</span></label>
+            <input type="text" name="outputs_json" class="input input-bordered input-sm font-mono" :value="editItem?.outputs_json" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Processing Time (ticks)</span></label>
+            <input type="number" name="processing_time_ticks" class="input input-bordered input-sm" :value="editItem?.duration_ticks" min="1" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Required Deposit (optional)</span></label>
+            <input type="text" name="required_deposit" class="input input-bordered input-sm" :value="editItem?.required_deposit" />
+          </div>
+        </div>
+        <div class="modal-action">
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('editRecipeModal').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+</div>
+{% endblock %}
