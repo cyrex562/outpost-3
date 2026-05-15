@@ -1,37 +1,38 @@
 using Godot;
 using OutpostGame.Core.Colony;
+using OutpostGame.Core.Simulation;
 using OutpostGame.Core.World;
 
 namespace OutpostGame.Rendering;
 
 /// <summary>
-/// Mouse-driven placement of placeholder buildings.
+/// Mouse-driven placement of real (registry-backed) buildings. Phase 2 routes the
+/// commit through <see cref="ColonySession.QueueConstruction"/>: the placer no longer
+/// touches the grid directly, and the placed slot enters the <c>UnderConstruction</c>
+/// lifecycle so it must tick to completion before becoming operational.
 ///
-/// Phase 1 has no build menu — switch sizes with 1 / 2 / 3:
-///   1 → 1x1 "ph_1x1"
-///   2 → 2x2 "ph_2x2"
-///   3 → 2x3 "ph_2x3"
-///
-/// Left-click commits a Place() through ColonyGrid; right-click clears the
-/// active size (exits placement mode). The ghost footprint rotates with view
-/// facing — the model footprint is constant but the *displayed* rectangle is
-/// derived from the four iso-projected corners of the rotated cells.
+/// Hotkeys (also exposed via the HUD selector):
+///   1 → Solar Array Mk1   (2x2 power producer)
+///   2 → Basic Habitat     (3x3 essential housing)
+///   3 → Iron Mine         (3x3 ore extractor)
+///   ESC / right-click     → exit placement mode
 /// </summary>
 public partial class BuildingPlacer : Node2D
 {
-    private readonly record struct Placeholder(string Id, GridSize Size);
-
-    private static readonly Placeholder[] Placeholders = new[]
-    {
-        new Placeholder("ph_1x1", new GridSize(1, 1)),
-        new Placeholder("ph_2x2", new GridSize(2, 2)),
-        new Placeholder("ph_2x3", new GridSize(2, 3)),
-    };
-
     public ColonyGridView? GridView { get; set; }
     public IsometricCamera? Camera { get; set; }
+    public ColonySession? Session { get; set; }
 
-    private int _placeholderIndex; // 0 = inactive, 1..3 = Placeholders[idx-1]
+    /// <summary>Fires when the active building changes (incl. cleared). HUD listens
+    /// to keep its selector in sync with hotkey changes.</summary>
+    public event Action<string?>? ActiveBuildingChanged;
+
+    /// <summary>Fires when a placement is rejected (resources, bounds, occupancy).
+    /// HUD listens so it can flash a brief banner.</summary>
+    public event Action<string>? PlacementRejected;
+
+    private string? _activeBuildingId;
+    private GridSize _activeSize;
     private GridPosition? _hoverCell;
     private bool _validHover;
 
@@ -39,14 +40,33 @@ public partial class BuildingPlacer : Node2D
 
     public override void _Ready()
     {
-        ZIndex = 100; // draw on top
+        ZIndex = 100;
         _font = ThemeDB.FallbackFont;
         SetProcess(true);
     }
 
-    public bool IsActive => _placeholderIndex > 0;
-    private Placeholder? ActivePlaceholder =>
-        IsActive ? Placeholders[_placeholderIndex - 1] : null;
+    public bool IsActive => _activeBuildingId != null;
+    public string? ActiveBuildingId => _activeBuildingId;
+
+    public void SetActiveBuilding(string? buildingId)
+    {
+        if (buildingId == null)
+        {
+            if (_activeBuildingId != null)
+            {
+                _activeBuildingId = null;
+                ActiveBuildingChanged?.Invoke(null);
+                QueueRedraw();
+            }
+            return;
+        }
+
+        if (!BuildingRegistry.TryGet(buildingId, out var def) || def is null) return;
+        _activeBuildingId = buildingId;
+        _activeSize = def.Size;
+        ActiveBuildingChanged?.Invoke(buildingId);
+        QueueRedraw();
+    }
 
     public override void _UnhandledInput(InputEvent @event)
     {
@@ -63,48 +83,33 @@ public partial class BuildingPlacer : Node2D
 
     private void HandleKey(InputEventKey k)
     {
+        if (Session == null) return;
+        var list = Session.BuildableBuildings;
         switch (k.Keycode)
         {
-            case Key.Key1: _placeholderIndex = 1; QueueRedraw(); break;
-            case Key.Key2: _placeholderIndex = 2; QueueRedraw(); break;
-            case Key.Key3: _placeholderIndex = 3; QueueRedraw(); break;
-            case Key.R: CyclePlaceholder(); break;
-            case Key.Escape: _placeholderIndex = 0; QueueRedraw(); break;
+            case Key.Key1: if (list.Count > 0) SetActiveBuilding(list[0].Id); break;
+            case Key.Key2: if (list.Count > 1) SetActiveBuilding(list[1].Id); break;
+            case Key.Key3: if (list.Count > 2) SetActiveBuilding(list[2].Id); break;
+            case Key.Escape: SetActiveBuilding(null); break;
         }
-    }
-
-    private void CyclePlaceholder()
-    {
-        if (!IsActive) { _placeholderIndex = 1; }
-        else { _placeholderIndex = (_placeholderIndex % Placeholders.Length) + 1; }
-        QueueRedraw();
     }
 
     private void HandleMouseButton(InputEventMouseButton mb)
     {
-        if (!IsActive || GridView == null) return;
+        if (!IsActive || GridView == null || Session == null) return;
 
         if (mb.ButtonIndex == MouseButton.Right)
         {
-            _placeholderIndex = 0;
-            QueueRedraw();
+            SetActiveBuilding(null);
             return;
         }
 
         if (mb.ButtonIndex == MouseButton.Left && _hoverCell.HasValue && _validHover)
         {
-            var ph = ActivePlaceholder!.Value;
-            var slot = new BuildingSlot
+            var result = Session.QueueConstruction(_activeBuildingId!, _hoverCell.Value);
+            if (!result.Success)
             {
-                Origin = _hoverCell.Value,
-                Size = ph.Size,
-                BuildingDefinitionId = ph.Id,
-                State = BuildingState.Planned,
-            };
-            var result = GridView.Grid.Place(slot);
-            if (result.Success)
-            {
-                GridView.QueueRedraw();
+                PlacementRejected?.Invoke(result.FailureReason ?? "Placement failed");
             }
             QueueRedraw();
         }
@@ -114,14 +119,10 @@ public partial class BuildingPlacer : Node2D
     {
         if (!IsActive || GridView == null) return;
 
-        // Translate the mouse from screen → world → GridView local space.
         Vector2 mouseWorld = GetGlobalMousePosition();
         Vector2 local = GridView.ToLocal(mouseWorld);
-        var gp = GridView.ScreenToGrid(local);
-
-        var ph = ActivePlaceholder!.Value;
-        _hoverCell = gp;
-        _validHover = IsFootprintValid(gp, ph.Size);
+        _hoverCell = GridView.ScreenToGrid(local);
+        _validHover = IsFootprintValid(_hoverCell.Value, _activeSize);
         QueueRedraw();
     }
 
@@ -129,11 +130,9 @@ public partial class BuildingPlacer : Node2D
     {
         if (GridView == null) return false;
 
-        // Bounds + occupancy via ColonyGrid.Validate.
         var validation = GridView.Grid.Validate(origin, size);
         if (!validation.Success) return false;
 
-        // Also forbid impassable terrain underneath any footprint cell.
         for (int dx = 0; dx < size.Width; dx++)
         for (int dy = 0; dy < size.Height; dy++)
         {
@@ -148,16 +147,10 @@ public partial class BuildingPlacer : Node2D
     {
         if (!IsActive || GridView == null || !_hoverCell.HasValue) return;
 
-        var ph = ActivePlaceholder!.Value;
         var origin = _hoverCell.Value;
-
-        // Collect the four screen corners of the rotated bounding box.
-        Vector2[]? corners = ComputeFootprintCorners(origin, ph.Size);
+        Vector2[]? corners = ComputeFootprintCorners(origin, _activeSize);
         if (corners == null) return;
 
-        // BuildingPlacer is a sibling of GridView under the same parent — both share
-        // the same parent transform. So we draw in the parent's local space using the
-        // *GridView-local* coords directly (BuildingPlacer's own transform is identity).
         Color fill = _validHover
             ? new Color(0.3f, 0.9f, 0.3f, 0.45f)
             : new Color(0.9f, 0.25f, 0.25f, 0.45f);
@@ -171,7 +164,10 @@ public partial class BuildingPlacer : Node2D
         if (_font != null)
         {
             Vector2 center = (corners[0] + corners[2]) * 0.5f;
-            string text = $"{ph.Size.Width}x{ph.Size.Height} {ph.Id}";
+            string name = BuildingRegistry.TryGet(_activeBuildingId!, out var def) && def is not null
+                ? def.DisplayName
+                : _activeBuildingId!;
+            string text = $"{_activeSize.Width}x{_activeSize.Height} {name}";
             var size = _font.GetStringSize(text);
             DrawString(_font, center - size * 0.5f + new Vector2(0, size.Y * 0.25f),
                 text, HorizontalAlignment.Left, -1, 12, new Color(1, 1, 1));

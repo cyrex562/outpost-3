@@ -6,13 +6,18 @@ public sealed class ColonyState
 {
     public Guid Id { get; } = Guid.NewGuid();
     public string Name { get; set; } = "New Colony";
-    public ColonyGrid Grid { get; } = new(64, 64);
+    public ColonyGrid Grid { get; }
     public ResourceStore Resources { get; } = new();
     public PopulationGroup Population { get; } = new();
     public LaborPool Labor { get; } = new();
     public PowerGrid Power { get; } = new();
     public ColonyEventLog EventLog { get; } = new();
     public TurnManager TurnManager { get; } = new();
+
+    public ColonyState(int gridWidth = 64, int gridHeight = 64)
+    {
+        Grid = new ColonyGrid(gridWidth, gridHeight);
+    }
 }
 
 public enum ColonyEventSeverity { Info, Warning, Critical }

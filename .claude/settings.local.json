@@ -15,7 +15,13 @@
       "Bash(npm install)",
       "Bash(npm run build:*)",
       "Bash(find:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(git -C C:/Users/cyrex/Projects/outpost-3 log --oneline -10)",
+      "Bash(git -C C:/Users/cyrex/Projects/outpost-3 log -1 --stat 4129781)",
+      "Bash(git *)",
+      "Bash(dotnet test *)",
+      "Bash(/c/Program Files/dotnet/dotnet.exe *)",
+      "Bash(\"/c/Program Files/dotnet/dotnet.exe\" --info)"
     ]
   }
 }
