@@ -1,0 +1,11 @@
+; Engine configuration file.
+[configuration]
+entry_scene="res://scenes/colony/ColonyScene.tscn"
+
+[application]
+config/name="Outpost 3"
+config/version="0.1.0"
+config/features=PackedStringArray("4.3", "C#", "Forward Plus")
+
+[dotnet]
+project/assembly_name="OutpostGame"
