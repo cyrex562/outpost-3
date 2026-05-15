@@ -1,0 +1,18 @@
+[gd_scene load_steps=5 format=3 uid="uid://c1outpost3colony"]
+
+[ext_resource type="Script" path="res://src/Game/ColonyScene.cs" id="1_main"]
+[ext_resource type="Script" path="res://src/Rendering/ColonyGridView.cs" id="2_gridview"]
+[ext_resource type="Script" path="res://src/Rendering/IsometricCamera.cs" id="3_camera"]
+[ext_resource type="Script" path="res://src/Rendering/BuildingPlacer.cs" id="4_placer"]
+
+[node name="ColonyScene" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="GridView" type="Node2D" parent="."]
+script = ExtResource("2_gridview")
+
+[node name="Placer" type="Node2D" parent="."]
+script = ExtResource("4_placer")
+
+[node name="Camera" type="Camera2D" parent="."]
+script = ExtResource("3_camera")

@@ -1,6 +1,6 @@
 ; Engine configuration file.
 [configuration]
-entry_scene="res://scenes/ui/MainMenu.tscn"
+entry_scene="res://scenes/colony/ColonyScene.tscn"
 
 [application]
 config/name="Outpost 3"
