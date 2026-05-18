@@ -38,4 +38,7 @@ public sealed class TurnManager
 
     public bool ShouldContinueWait() =>
         ActiveWait != null && CurrentSol < ActiveWait.WaitUntilSol;
+
+    /// <summary>Sets the sol counter without firing any events — for save/load restore.</summary>
+    public void RestoreSol(int sol) => CurrentSol = sol;
 }

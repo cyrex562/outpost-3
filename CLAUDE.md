@@ -1,15 +1,16 @@
-# CLAUDE_RUST.md — Rust Web Dev Guide for Outpost 3
+# CLAUDE.md — Outpost 3 AI Assistant Guide
 
 **For:** AI coding assistants (Claude, Copilot, Gemini, Cursor, etc.)
-**Project:** Outpost 3 — colony-building simulation game
-**Design:** `docs/Outpost3_Design_V5.md` (V5, the single source of truth for game design)
-**Checklist:** `docs/MVP_TRANSFORMATION_CHECKLIST.md` (tracks every task to reach MVP)
+**Project:** Outpost 3 — turn-based isometric colony survival and grand strategy game
+**Engine:** Godot 4 + C#
+**Design doc:** `docs/Outpost3_Design_V5.md` — authoritative game design
+**Task list:** `docs/TODO.md` — master task list, current priorities
 
 ---
 
-## You Are a Rust Web Developer
+## You Are a Godot 4 / C# Game Developer
 
-You are working on a **Rust web application**. Your role is that of a **senior Rust web developer** building a data-driven simulation game served as a server-rendered web app. You write idiomatic, well-tested Rust. You iterate until **all unit, property, and integration tests pass**.
+You write idiomatic C# targeting .NET 8. You keep simulation logic in pure C# classes with zero Godot dependencies. You iterate until **all NUnit tests pass** before considering any task complete.
 
 ---
 
@@ -17,481 +18,191 @@ You are working on a **Rust web application**. Your role is that of a **senior R
 
 | Layer | Technology | Notes |
 |---|---|---|
-| **Core Logic** | Rust (pure, no I/O) | `outpost-core` crate — all simulation, domain, events, commands |
-| **Web Server** | Actix-Web 4.x | `outpost-server` crate — HTTP, templates, DB, static files |
-| **Database** | SQLite + rusqlite + r2d2 | Connection pooling, prepared statements, parameterized queries |
-| **Templates** | Tera | Server-side HTML rendering |
-| **Frontend** | HTMX + Alpine.js | Partial page updates, lightweight client-side interactivity |
-| **Content** | YAML data files | Buildings, resources, recipes, events, tech tree loaded at startup |
-| **Testing** | `#[test]` + `proptest` | Unit tests, property-based tests, integration tests |
-| **Error Handling** | `thiserror` (domain) + `anyhow` (application) | Never `unwrap()` or `expect()` in production code |
-| **Logging** | `tracing` + `tracing-subscriber` | Structured logging in server code only (not in core) |
+| **Engine** | Godot 4.3 + C# | `.NET 8`, `Nullable enable` |
+| **Core Logic** | Pure C# (`godot/src/Core/`) | No Godot namespace — plain classes, no nodes |
+| **Rendering** | Godot nodes (`godot/src/Rendering/`) | `Node2D`, `_Draw()`, signals |
+| **UI** | Godot nodes (`godot/src/UI/`) | Control nodes, panels, labels |
+| **Content** | YAML / JSON / CSV files (`content/`) | Loaded at runtime; buildings, resources, events, tech |
+| **Testing** | NUnit 4 (`tests/OutpostCore.Tests/`) | Pure C# tests, no Godot runtime needed |
+| **Serialization** | `System.Text.Json` | Save/load, content loading |
 
 ---
 
-## Project Structure (Target — V5 Architecture)
+## Project Structure
 
 ```
 outpost-3/
-├── Cargo.toml                  # Workspace root
-├── crates/
-│   ├── outpost-core/           # Pure game logic (NO I/O, NO web deps)
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── domain/         # Entity structs, game state, business logic
-│   │       ├── events/         # Event types (immutable, past-tense)
-│   │       ├── commands/       # Command structs (validate → produce events)
-│   │       ├── simulation/     # Tick processing, game clock
-│   │       ├── content/        # YAML content loader and definitions
-│   │       └── errors.rs       # Domain error types (thiserror)
-│   └── outpost-server/         # Web server (Actix, DB, templates)
-│       ├── Cargo.toml
-│       └── src/
-│           ├── main.rs         # Entry point, server startup
-│           ├── config.rs       # AppConfig loading
-│           ├── routes.rs       # Route definitions
-│           ├── handlers/       # HTTP handler functions
-│           ├── db/             # SQLite schema, migrations, queries
-│           └── services/       # Orchestration between core and DB
-├── content/                    # YAML data files (buildings, resources, recipes, events)
-├── templates/                  # Tera HTML templates
-│   ├── base.html              # Master layout (sidebar + topbar + content + ticker)
-│   ├── dashboard.html
-│   ├── site_detail.html
-│   ├── colonies.html
-│   ├── events.html
-│   ├── settings.html
-│   └── components/            # Partial templates for HTMX swaps
-├── static/
-│   ├── css/                   # Stylesheets (dark theme, data-dense tables)
-│   └── js/                    # Alpine.js components, HTMX config
-├── tests/                     # Integration tests
-└── docs/
-    ├── Outpost3_Design_V5.md  # Game design document (source of truth)
-    └── MVP_TRANSFORMATION_CHECKLIST.md
-```
-
-### Critical Rule: `outpost-core` Has Zero I/O
-
-The `outpost-core` crate must **never** depend on:
-- `actix-web`, `tokio`, or any async runtime
-- `rusqlite`, `r2d2`, or any database crate
-- `tracing` (use return values, not logging, to communicate state)
-- File system access, network calls, or any side effects
-
-All I/O happens in `outpost-server`. Core is pure functions: `(State, Command) → (State', Events[])`.
-
----
-
-## Architecture: Event Sourcing + CQRS
-
-### The Pattern
-
-1. **Player action** → HTTP handler receives request
-2. **Handler** creates a **Command** and passes it to a service
-3. **Service** calls `command.execute(&current_state)` in `outpost-core`
-4. **Command** validates against state, returns `Vec<Event>` or error
-5. **Service** applies events to state, persists events to DB
-6. **UI** reads projected state (query side) and renders templates
-
-### Events (Past-Tense, Immutable)
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum GameEvent {
-    SiteFounded { site_id: SiteId, body_id: BodyId, name: String },
-    BuildingQueued { site_id: SiteId, building_def_id: String, job_id: JobId },
-    BuildingCompleted { site_id: SiteId, building_id: BuildingId },
-    ResourcesExtracted { site_id: SiteId, resource: String, amount: f64 },
-    ResourcesConsumed { site_id: SiteId, resource: String, amount: f64 },
-    PopulationChanged { site_id: SiteId, delta: i64, reason: String },
-    MoraleChanged { site_id: SiteId, new_value: f64, factors: Vec<String> },
-    TickProcessed { tick: u64 },
-}
-```
-
-### Commands (Present-Tense, Validate → Execute)
-
-```rust
-pub trait Command {
-    fn execute(&self, state: &GameState) -> Result<Vec<GameEvent>, DomainError>;
-}
-
-pub struct ConstructBuilding {
-    pub site_id: SiteId,
-    pub building_def_id: String,  // references YAML content
-}
-
-impl Command for ConstructBuilding {
-    fn execute(&self, state: &GameState) -> Result<Vec<GameEvent>, DomainError> {
-        let site = state.get_site(self.site_id)?;
-        let def = state.content.get_building(&self.building_def_id)?;
-
-        // Validate: resources available, labor available, prerequisites met
-        site.validate_resources(&def.construction_cost)?;
-        site.validate_labor(def.construction_labor)?;
-
-        Ok(vec![
-            GameEvent::BuildingQueued {
-                site_id: self.site_id,
-                building_def_id: self.building_def_id.clone(),
-                job_id: JobId::new(),
-            },
-            GameEvent::ResourcesConsumed {
-                site_id: self.site_id,
-                resource: "construction_materials".into(),
-                amount: def.construction_cost.total(),
-            },
-        ])
-    }
-}
+├── CLAUDE.md                       # This file
+├── docs/
+│   ├── Outpost3_Design_V5.md       # Game design — source of truth
+│   └── TODO.md                     # Master task list
+├── content/                        # Data files loaded at runtime
+│   ├── buildings/                  # Building definitions (YAML)
+│   ├── resources/                  # Resource definitions (YAML)
+│   ├── events/                     # Event definitions (YAML)
+│   └── tech/                       # Tech tree (YAML)
+├── data/                           # Reference data (solar system, etc.)
+├── godot/                          # Godot 4 project root
+│   ├── project.godot
+│   ├── OutpostGame.csproj
+│   ├── src/
+│   │   ├── Core/                   # Pure C# — ZERO Godot dependencies
+│   │   │   ├── Colony/             # Building, resource, population, power, labor
+│   │   │   ├── Simulation/         # Turn processor, session, save/load, difficulty
+│   │   │   └── World/              # Terrain generation, site definitions, biomes
+│   │   ├── Rendering/              # Godot rendering layer (ColonyGridView, etc.)
+│   │   ├── UI/                     # Godot UI nodes
+│   │   └── Game/                   # Scene controllers, autoloads
+│   ├── scenes/                     # Godot .tscn scene files
+│   └── tests/                      # Godot-side tests (GDUnit4 — TBD)
+└── tests/
+    └── OutpostCore.Tests/          # NUnit tests for Core logic (163 tests, all passing)
+        ├── OutpostCore.Tests.csproj
+        ├── Phase0Tests.cs
+        ├── Phase1Tests.cs
+        ...
+        └── Phase8Tests.cs
 ```
 
 ---
 
-## Data-Driven Content (YAML)
+## Critical Rule: `godot/src/Core/` Has Zero Godot Dependencies
 
-Buildings, resources, recipes, and events are defined in YAML files under `content/`. The game loads these at startup via a `ContentLoader` in `outpost-core`.
+Files under `godot/src/Core/` must **never** reference:
+- `Godot` namespace (`using Godot;`)
+- `Node`, `Resource`, `GodotObject`, or any Godot type
+- `GD.Print`, `GD.Randomize`, or any Godot global
+- `Vector2`, `Vector2I`, `Color` — use `GridPosition`, `GridSize` plain structs instead
 
-```yaml
-# content/buildings.yaml
-- id: mine
-  name: "Surface Mine"
-  category: industrial
-  construction_cost:
-    structural_components: 50
-    machine_parts: 20
-  construction_time_ticks: 24
-  labor_slots: 5
-  power_consumption: 10
-  recipes:
-    - id: mine_iron
-      inputs: { labor: 3, power: 10 }
-      outputs: { iron_ore: 15 }
-      ticks: 1
-```
-
-```yaml
-# content/resources.yaml
-- id: iron_ore
-  name: "Iron Ore"
-  category: raw
-  tier: 1
-  storage_type: bulk
-  unit: "tonnes"
-```
+All Godot-specific code belongs in `Rendering/`, `UI/`, or `Game/`. Core ↔ Godot boundary is crossed only at the rendering/UI layer.
 
 ---
 
-## Entity Hierarchy
+## Running Tests
 
+```powershell
+# Run all NUnit tests (the primary test suite)
+dotnet test tests/OutpostCore.Tests/OutpostCore.Tests.csproj
+
+# Run with verbose output
+dotnet test tests/OutpostCore.Tests/OutpostCore.Tests.csproj --logger "console;verbosity=normal"
 ```
-GameState
-├── GameClock (tick, speed, paused)
-├── Content (loaded YAML definitions)
-├── Galaxy
-│   └── StarSystem
-│       └── CelestialBody (planet, moon, asteroid)
-│           ├── ResourceDeposit[]
-│           └── Site (settlement or installation)
-│               ├── BuildingList[]
-│               ├── ConstructionQueue[]
-│               ├── ResourceStockpile (HashMap<String, f64>)
-│               ├── Population (aggregate + representative characters)
-│               ├── PowerGrid (generation, consumption, net)
-│               ├── LifeSupport (oxygen, water, temperature)
-│               ├── LaborPool (available workers by skill)
-│               └── Morale (composite score 0-100)
-└── EventLog (fired gameplay events)
-```
+
+All 163 tests must stay green. Never submit work with failing tests.
 
 ---
 
-## Type Safety
+## What Is Currently Implemented
 
-**Use newtype wrappers for all IDs:**
+### Core simulation (all tested, headless)
+- `ColonyState` — grid, resources, population, labor, power, event log
+- `ColonyGrid` — multi-size building placement, occupancy validation
+- `ResourceStore` — add/consume/cap, snapshot/restore
+- `LaborPool` — allocation, skill-based efficiency (1.0 / 0.8 / 0.65 modifiers)
+- `PowerGrid` — producers/consumers, brownout, essential priority
+- `PopulationGroup` — needs satisfaction, health/morale deltas, deaths, growth
+- `ColonyTurnProcessor` — construction, production, consumption, population needs, events, power
+- `ColonySession` — high-level API (QueueConstruction, EndTurn, AutoAssignLabor, CreateSave, ApplySave)
+- `DifficultySettings` — 5 presets (Sandbox→Brutal): resource multipliers, consumption multipliers, event intervals
+- `DifficultyPreset` — wired into session init, turn processor, random events
+- `SkillType` — 6 skills (Laborer, Engineer, Scientist, Farmer, Medic, Operator)
+- `TerrainGenerator` — biome-aware two-pass terrain generation
+- `RandomEventProcessor` — strategic events (dust storms, equipment failure, supply drops, arrivals)
+- Save/load — full JSON round-trip via `ColonySaveData`
 
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SiteId(pub Uuid);
+### Registries (JSON-driven via ContentLoader)
+- `BuildingRegistry` — 13 buildings with PrimarySkill, recipes, power, labor
+  loaded from `EmbeddedContent.BuildingsJson` (mirror at `content/buildings.json`)
+- `ResourceRegistry` — 26 resources across Raw/Refined/Advanced/Virtual tiers
+  loaded from `EmbeddedContent.ResourcesJson` (mirror at `content/resources.json`)
+- Phase 3.2 task: swap embedded JSON for runtime file loading.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BuildingId(pub Uuid);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BodyId(pub Uuid);
-```
-
-**Use enums for finite sets:**
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BuildingState {
-    UnderConstruction,
-    Operational,
-    Paused,
-    Damaged,
-    Destroyed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SiteType {
-    Settlement,
-    Installation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Skill {
-    Laborer, Engineer, Scientist, Farmer, Medic, Operator,
-}
-```
+### Godot rendering (Phase 1)
+- `ColonyGridView` — isometric grid rendering, terrain colors per biome, building overlays
+- Camera system, building placement ghost, basic UI stubs
 
 ---
 
-## Error Handling
+## Content Data Files
 
-```rust
-// Domain errors in outpost-core (thiserror)
-#[derive(Error, Debug)]
-pub enum DomainError {
-    #[error("Site {0} not found")]
-    SiteNotFound(SiteId),
+Buildings and resources flow through `ContentLoader` in `godot/src/Core/Content/`.
+There are two sources, in priority order at game runtime:
 
-    #[error("Insufficient {resource}: need {needed}, have {available}")]
-    InsufficientResource { resource: String, needed: f64, available: f64 },
+1. **`user://content/<name>.json`** — per-user mod overrides (Godot writes user-data
+   here; modders drop files in to replace any individual file).
+2. **`res://content/<name>.json`** — bundled with the game (the canonical
+   shipping files at `godot/content/buildings.json` + `godot/content/resources.json`).
+3. **`EmbeddedContent.cs` constants** — compiled-in fallback that keeps tests and
+   any environment without file access working.
 
-    #[error("Content definition '{0}' not found")]
-    ContentNotFound(String),
+`ContentBootstrap.EnsureLoaded()` is called from every scene's `_Ready`; it reads the
+files via `Godot.FileAccess` and hands the strings to `BuildingRegistry.LoadFrom` /
+`ResourceRegistry.LoadFrom`. If the file is missing or malformed the embedded defaults
+remain in effect (validation runs before the registry is mutated).
 
-    #[error("Building {0} is not operational")]
-    BuildingNotOperational(BuildingId),
-}
+To add or modify a building/resource:
 
-// Application errors in outpost-server (anyhow)
-pub async fn handle_build(/* ... */) -> Result<HttpResponse> {
-    let events = command.execute(&state)
-        .context("Failed to execute build command")?;
-    // ...
-}
-```
+1. Edit `godot/content/<file>.json` for the runtime change.
+2. Mirror the change in `godot/src/Core/Content/EmbeddedContent.cs` so tests and the
+   embedded fallback stay in sync.
+3. Add a test in `ContentLoaderTests.cs` if it's a new ID.
+4. Run `dotnet test` — registries reload the JSON on every static init.
 
-**Rules:**
-- `unwrap()` and `expect()` are forbidden in non-test code
-- Use `?` for propagation
-- Add `.context()` at application boundaries
-- Log errors with `tracing::error!` in the server crate
-
----
-
-## Testing Strategy — Iterate Until All Tests Pass
-
-Every change you make must be followed by running tests. **Do not consider a task done until all tests pass.**
-
-### Unit Tests (in `outpost-core`)
-
-Test pure domain logic, commands, and simulation:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn construct_building_rejects_insufficient_resources() {
-        let state = GameState::new_test();  // helper with minimal valid state
-        let cmd = ConstructBuilding { site_id: state.first_site(), building_def_id: "mine".into() };
-        // Site has no resources
-        assert!(matches!(cmd.execute(&state), Err(DomainError::InsufficientResource { .. })));
-    }
-
-    #[test]
-    fn tick_advances_construction_progress() {
-        let mut state = GameState::new_test_with_construction();
-        let events = state.process_tick();
-        // Construction should have progressed
-        let job = state.first_site_state().construction_queue.first().unwrap();
-        assert!(job.progress > 0);
-    }
-}
-```
-
-### Property Tests (in `outpost-core`, using `proptest`)
-
-Test invariants that must hold for all inputs:
-
-```rust
-use proptest::prelude::*;
-
-proptest! {
-    #[test]
-    fn morale_always_in_bounds(
-        food in 0.0f64..=1.0,
-        water in 0.0f64..=1.0,
-        housing in 0.0f64..=1.0,
-    ) {
-        let morale = calculate_morale(food, water, housing);
-        prop_assert!(morale >= 0.0 && morale <= 100.0);
-    }
-
-    #[test]
-    fn resource_conservation_in_recipes(
-        input_amount in 1.0f64..1000.0,
-    ) {
-        // Total mass/value in = total mass/value out (within recipe ratio)
-        let recipe = get_test_recipe();
-        let output = execute_recipe(&recipe, input_amount);
-        prop_assert!((output.total_value() - input_amount * recipe.ratio()).abs() < 0.001);
-    }
-
-    #[test]
-    fn save_load_roundtrip(state in arb_game_state()) {
-        let json = serde_json::to_string(&state).unwrap();
-        let restored: GameState = serde_json::from_str(&json).unwrap();
-        prop_assert_eq!(state, restored);
-    }
-}
-```
-
-### Integration Tests (in `tests/` or `outpost-server`)
-
-Test HTTP endpoints end-to-end:
-
-```rust
-#[actix_web::test]
-async fn test_build_endpoint_creates_construction_job() {
-    let app = test::init_service(create_test_app()).await;
-
-    let req = test::TestRequest::post()
-        .uri("/site/test-site-id/build")
-        .set_form(&BuildForm { building_def_id: "mine".into() })
-        .to_request();
-
-    let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 200);
-    // Verify construction queue contains the new job
-}
-```
-
-### Workflow: Iterate Until Green
-
-1. Write or modify code
-2. Run `cargo test --workspace`
-3. If tests fail, read the failure output, fix the issue, go to step 2
-4. Run `cargo clippy --workspace -- -D warnings`
-5. If clippy warns, fix, go to step 2
-6. Only then consider the task complete
+JSON schema rules:
+- String IDs (snake_case), unique within their file.
+- Enum fields (`category`, `tier`, `primarySkill`) take the C# enum name as a string.
+- Optional fields can be omitted — `ContentLoader` applies sensible defaults.
+- Duplicate IDs, invalid enums, and missing required fields throw
+  `ContentLoader.ContentValidationException` at load.
 
 ---
 
-## HTMX Integration
+## Coding Rules
 
-### Full Page vs. Partial Responses
-
-```rust
-// Full page: renders within base.html layout
-pub async fn site_detail(/* ... */) -> Result<HttpResponse> {
-    let html = tmpl.render("site_detail.html", &context)?;
-    Ok(HttpResponse::Ok().content_type("text/html").body(html))
-}
-
-// Partial: returns just the component HTML (for HTMX swaps)
-pub async fn site_buildings_tab(/* ... */) -> Result<HttpResponse> {
-    let html = tmpl.render("components/buildings_table.html", &context)?;
-    Ok(HttpResponse::Ok().content_type("text/html").body(html))
-}
-```
-
-### HTMX Patterns in Templates
-
-```html
-<!-- Tab navigation with HTMX -->
-<div class="tabs">
-  <button hx-get="/site/{{ site.id }}/buildings" hx-target="#tab-content">Buildings</button>
-  <button hx-get="/site/{{ site.id }}/resources" hx-target="#tab-content">Resources</button>
-  <button hx-get="/site/{{ site.id }}/labor" hx-target="#tab-content">Labor</button>
-</div>
-<div id="tab-content">
-  {% include "components/buildings_table.html" %}
-</div>
-
-<!-- Auto-refresh stats via polling -->
-<div id="resource-summary" hx-get="/site/{{ site.id }}/resources/summary" hx-trigger="every 2s">
-  {% include "components/resource_summary.html" %}
-</div>
-
-<!-- Action form -->
-<form hx-post="/site/{{ site.id }}/build" hx-target="#construction-queue" hx-swap="innerHTML">
-  <select name="building_def_id">
-    {% for b in available_buildings %}
-    <option value="{{ b.id }}">{{ b.name }} ({{ b.cost_summary }})</option>
-    {% endfor %}
-  </select>
-  <button type="submit">Build</button>
-</form>
-```
-
-### UI Design Principles (V5)
-
-- **Text-and-tables first** — no canvas, no maps, no sprites
-- **Dark mode** default, high contrast, monospace numbers
-- **Information density** — pack data into tables and lists
-- **Sidebar + top bar + content + event ticker** layout on every page
-- **HTMX for interactivity** — partial page updates, no full reloads
-- **Alpine.js for client-side** — dropdowns, toggles, modals, collapsible sections
-- **Tooltips** on hover for detailed breakdowns
-- **Color coding** — consistent palette for resources, severity, status
+1. **Read `docs/Outpost3_Design_V5.md`** before starting new features
+2. **Check `docs/TODO.md`** to pick up the right next task
+3. **No Godot namespaces in `Core/`** — enforce this strictly
+4. **No `null!` or `!` null-forgiving** without a comment explaining why it's safe
+5. **Write tests alongside code** — every new Core class gets NUnit coverage
+6. **Iterate until tests pass** — `dotnet test` must be green before stopping
+7. **No premature abstraction** — implement what the current task needs, nothing more
+8. **No comments that describe what the code does** — only comments explaining non-obvious *why*
+9. **Content comes from data files, not hardcoded values** — new buildings/resources go in `content/`
+10. **Keep changes minimal and focused** — one feature at a time
 
 ---
 
 ## Common Tasks
 
-### Adding a New Domain Entity
+### Adding a new building
+1. Add YAML entry to `content/buildings/` (or temporarily to `BuildingRegistry.cs` while loader is not yet built)
+2. Assign `PrimarySkill`, power values, labor, recipe, construction cost and turns
+3. Add NUnit test asserting the definition loads and key fields are correct
 
-1. Define struct in `outpost-core/src/domain/` with newtype ID
-2. Add serde derives (`Serialize`, `Deserialize`, `Debug`, `Clone`)
-3. Implement business logic as methods (pure, no I/O)
-4. Export from `domain/mod.rs`
-5. Define related events (past-tense) in `events/`
-6. Define related commands (validate + execute) in `commands/`
-7. Write unit tests for all logic paths
-8. Write property tests for invariants
-9. Run `cargo test --workspace` — iterate until green
+### Adding a new resource
+1. Add YAML entry to `content/resources/` (or `ResourceRegistry.cs`)
+2. Specify tier, category, base weight
+3. Update any buildings that produce or consume it
 
-### Adding a New Page/Route
+### Adding a Core system
+1. Create class in appropriate `Core/` subdirectory
+2. No Godot references — pure C#
+3. Expose via `ColonyState` if needed
+4. Wire into `ColonyTurnProcessor.ProcessTurn()` if turn-driven
+5. Add to `ColonySaveData` if state must persist
+6. Write NUnit tests
 
-1. Create handler in `outpost-server/src/handlers/`
-2. Add route in `outpost-server/src/routes.rs`
-3. Create Tera template in `templates/` (extend `base.html`)
-4. Create partial templates in `templates/components/` for HTMX
-5. Add CSS in `static/css/` if needed
-6. Write integration test for the endpoint
-7. Run `cargo test --workspace` — iterate until green
-
-### Adding a New Building/Resource/Event (Content)
-
-1. Add definition to appropriate YAML file in `content/`
-2. Ensure `ContentLoader` validates the new entry (run tests)
-3. If new fields are needed, update the content structs in `outpost-core/src/content/`
-4. Update any templates that display this content type
-5. Run `cargo test --workspace` — iterate until green
+### Adding a Godot scene/UI
+1. Create scene in `godot/scenes/`
+2. Create C# script in `godot/src/UI/` or `godot/src/Rendering/`
+3. Access Core state only through `ColonySession` — never reach into Core internals from UI
+4. Emit/handle Godot signals at the scene boundary
 
 ---
 
-## Key Rules for AI Assistants
+## Git Workflow
 
-1. **Read `docs/Outpost3_Design_V5.md` before starting work** — it is the authoritative design
-2. **Read `docs/MVP_TRANSFORMATION_CHECKLIST.md`** — it tracks what needs to be done
-3. **Keep `outpost-core` pure** — zero I/O, zero side effects
-4. **All state changes go through commands and events** — never mutate state directly
-5. **All entity IDs use newtype wrappers** — never raw `u64` or `String` for IDs
-6. **No `unwrap()` or `expect()` in production code**
-7. **Write tests first or alongside code** — unit, property, and integration
-8. **Iterate until all tests pass** — `cargo test --workspace` must be green before you stop
-9. **Run `cargo clippy --workspace -- -D warnings`** — fix all warnings
-10. **Data-driven content** — buildings, resources, recipes, events come from YAML, not hardcoded enums
-11. **Text-and-tables UI** — no canvas, no maps, no sprites, no Pixi.js
-12. **HTMX for dynamic updates** — return HTML fragments, use `hx-` attributes
-13. **Log with `tracing`** in server code — structured, leveled, with context spans
-14. **Keep changes minimal and focused** — one feature at a time, matching the checklist
+- Branch from `main` for each feature
+- Commit message style: `Phase N: brief description` or `Fix: brief description`
+- Tests must pass before merging
+- The worktree at `.claude/worktrees/` is used by Claude Code for isolated work

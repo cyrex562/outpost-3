@@ -35,4 +35,16 @@ public sealed class ResourceStore
     public void SetCap(string resourceId, float cap) => _caps[resourceId] = cap;
 
     public IReadOnlyDictionary<string, float> Snapshot() => new Dictionary<string, float>(_amounts);
+    public IReadOnlyDictionary<string, float> CapSnapshot() => new Dictionary<string, float>(_caps);
+
+    public void RestoreFromSnapshot(
+        IReadOnlyDictionary<string, float> amounts,
+        IReadOnlyDictionary<string, float> caps)
+    {
+        _amounts.Clear(); _caps.Clear();
+        foreach (var kv in caps)    _caps[kv.Key]    = kv.Value;
+        // Restore amounts verbatim — the saved values are authoritative and may
+        // legitimately exceed the cap (e.g. when no warehouse is built yet).
+        foreach (var kv in amounts) _amounts[kv.Key] = kv.Value;
+    }
 }

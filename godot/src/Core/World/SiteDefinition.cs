@@ -11,6 +11,7 @@ public sealed record SiteDefinition(
     int Seed,
     BiomeType Biome,
     GridSize Size,
+    DifficultyPreset Difficulty = DifficultyPreset.Normal,
     IReadOnlyDictionary<string, int>? StartingDeposits = null)
 {
     public static SiteDefinition Default(int seed = 12345) =>

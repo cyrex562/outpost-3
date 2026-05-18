@@ -1,0 +1,97 @@
+{
+  "tech": [
+    {
+      "id": "basic_construction",
+      "displayName": "Basic Construction",
+      "category": "Engineering",
+      "tier": 1,
+      "researchCost": 100.0,
+      "researchTurns": 50,
+      "prerequisites": [],
+      "unlocks": {
+        "buildings": ["basic_habitat", "warehouse"],
+        "bonuses": ["construction_speed_10_percent"]
+      },
+      "description": "Foundational construction techniques for simple buildings."
+    },
+    {
+      "id": "metallurgy",
+      "displayName": "Metallurgy",
+      "category": "Engineering",
+      "tier": 1,
+      "researchCost": 150.0,
+      "researchTurns": 60,
+      "prerequisites": [],
+      "unlocks": {
+        "buildings": ["iron_mine", "smelter"]
+      },
+      "description": "Ore extraction and refining processes."
+    },
+    {
+      "id": "improved_solar",
+      "displayName": "Improved Solar",
+      "category": "Engineering",
+      "tier": 2,
+      "researchCost": 400.0,
+      "researchTurns": 100,
+      "prerequisites": ["basic_construction"],
+      "unlocks": {
+        "buildings": ["solar_array_mk2"]
+      },
+      "description": "Higher-efficiency photovoltaics that double Mk1 output."
+    },
+    {
+      "id": "expanded_logistics",
+      "displayName": "Expanded Logistics",
+      "category": "Engineering",
+      "tier": 2,
+      "researchCost": 450.0,
+      "researchTurns": 110,
+      "prerequisites": ["basic_construction"],
+      "unlocks": {
+        "bonuses": ["fleet_cap_plus_5"]
+      },
+      "description": "Streamlined dispatch and depots raise the colony's construction fleet capacity by 5."
+    },
+    {
+      "id": "habitat_engineering",
+      "displayName": "Habitat Engineering",
+      "category": "Engineering",
+      "tier": 2,
+      "researchCost": 500.0,
+      "researchTurns": 120,
+      "prerequisites": ["basic_construction"],
+      "unlocks": {
+        "buildings": ["basic_habitat_mk2"],
+        "bonuses": ["housing_capacity_plus_50_percent"]
+      },
+      "description": "Pressurised modular construction for larger, more comfortable habitats."
+    },
+    {
+      "id": "advanced_materials",
+      "displayName": "Advanced Materials",
+      "category": "Physics",
+      "tier": 2,
+      "researchCost": 600.0,
+      "researchTurns": 140,
+      "prerequisites": ["metallurgy"],
+      "unlocks": {
+        "resources": ["carbon_fiber", "rare_earth_metals"]
+      },
+      "description": "Carbon composites and rare-earth alloys for high-end manufacturing."
+    },
+    {
+      "id": "fusion_basics",
+      "displayName": "Fusion Fundamentals",
+      "category": "Physics",
+      "tier": 3,
+      "researchCost": 2000.0,
+      "researchTurns": 300,
+      "prerequisites": ["improved_solar", "advanced_materials"],
+      "unlocks": {
+        "bonuses": ["fusion_research_unlocked"]
+      },
+      "description": "Theoretical foundation for fusion power generation."
+    }
+  ]
+}

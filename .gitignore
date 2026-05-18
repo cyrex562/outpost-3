@@ -1,14 +1,14 @@
 # Godot 4+ specific ignores
 .godot/**
+godot/.godot/**
 .nomedia
-godot-project/.mono/**
-godot-project/.godot/**
 
 # Godot-specific ignores
 .import/
 export.cfg
 export_credentials.cfg
 *.tmp
+*.uid
 
 # Imported translations (automatically generated from CSV files)
 *.translation
@@ -18,14 +18,22 @@ export_credentials.cfg
 data_*/
 mono_crash.*.json
 
-Tests/bin/**
-Tests/obj/**
+# .NET build output
+**/bin/
+**/obj/
 
-# Rust/Cargo
+# Rust/Cargo (kept in old/ — don't rebuild)
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
+
+# Node / frontend (old web stack, kept in node_modules for reference but not needed)
+node_modules/
+dist/
+package-lock.json
+
+# Coverage reports (generated, not committed)
+coverage/
 
 # Database files
 *.db
@@ -49,8 +57,3 @@ Thumbs.db
 # Environment
 .env
 .env.local
-# Built CSS/JS from Vite (Tailwind + D3)
-crates/outpost-server/static/css/main.css
-crates/outpost-server/static/js/main.js
-crates/outpost-server/static/js/main.js.map
-dist/

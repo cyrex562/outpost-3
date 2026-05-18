@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites id="2026-05-17" name="report_1" tests="20" failures="0" skipped="0" flaky="0" time="0.000">
+	<testsuite id="0" name="ColonyGridViewTest" package="tests/scenes" timestamp="2026-05-17T21:55:01" hostname="localhost" tests="10" failures="0" errors="0" skipped="0" flaky="0" time="0.848">
+		<testcase name="GridView_IsPresentInScene" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.275">
+		</testcase>
+		<testcase name="GridView_AfterBind_RendersWithoutException" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.080">
+		</testcase>
+		<testcase name="GridView_GridToScreen_ScreenToGrid_RoundTrips" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.041">
+		</testcase>
+		<testcase name="BuildingPlacer_InitialState_NoBuildingSelected" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.040">
+		</testcase>
+		<testcase name="BuildingPlacer_SetActiveBuilding_SelectsBuilding" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.129">
+		</testcase>
+		<testcase name="BuildingPlacer_SetActiveBuilding_Null_ClearsSelection" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.061">
+		</testcase>
+		<testcase name="BuildingPlacer_ActiveBuildingChanged_Fires" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.061">
+		</testcase>
+		<testcase name="Camera_IsPresentInScene" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.042">
+		</testcase>
+		<testcase name="Camera_InitialZoom_IsOne" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.040">
+		</testcase>
+		<testcase name="Camera_Zoom_IsWithinConfiguredBounds" classname="OutpostGame.Tests.Scenes.ColonyGridViewTest" time="0.040">
+		</testcase>
+	</testsuite>
+	<testsuite id="1" name="ColonySceneTest" package="tests/scenes" timestamp="2026-05-17T21:55:02" hostname="localhost" tests="10" failures="0" errors="0" skipped="0" flaky="0" time="0.662">
+		<testcase name="ColonyScene_Loads_AllNodesPresent" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.040">
+		</testcase>
+		<testcase name="ColonyScene_InitialState_MatchesSeedDefaults" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.051">
+		</testcase>
+		<testcase name="EndTurn_AdvancesSolCounter" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.076">
+		</testcase>
+		<testcase name="EndTurn_FiresStateChanged_HudRefreshes" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.061">
+		</testcase>
+		<testcase name="QueueConstruction_PlacesSlot_UnderConstruction" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.051">
+		</testcase>
+		<testcase name="QueueConstruction_OccupiedCell_Fails" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.037">
+		</testcase>
+		<testcase name="Construction_CompletesAfterCorrectTurns" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.123">
+		</testcase>
+		<testcase name="SolarArray_WhenOperational_RegistersPowerProduction" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.081">
+		</testcase>
+		<testcase name="WithoutGenerator_NonEssentialBuildings_AreUnpowered" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.089">
+		</testcase>
+		<testcase name="QueueConstruction_AddsEventLogEntry" classname="OutpostGame.Tests.Scenes.ColonySceneTest" time="0.043">
+		</testcase>
+	</testsuite>
+</testsuites>

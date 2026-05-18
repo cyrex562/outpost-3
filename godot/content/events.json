@@ -1,0 +1,67 @@
+{
+  "events": [
+    {
+      "id": "dust_storm",
+      "title": "Dust Storm",
+      "description": "Atmospheric dust reduces solar output to a fraction of normal for several sols.",
+      "severity": "Warning",
+      "trigger": { "type": "Strategic", "probability": 0.25, "minSol": 0 },
+      "outcomes": [
+        { "kind": "dust_storm", "duration": 10 },
+        { "kind": "log", "message": "Dust storm! Solar output at 20% for 10 sols." }
+      ]
+    },
+    {
+      "id": "equipment_failure",
+      "title": "Equipment Failure",
+      "description": "A random operational building suffers catastrophic damage.",
+      "severity": "Warning",
+      "trigger": { "type": "Strategic", "probability": 0.18, "minSol": 0 },
+      "outcomes": [
+        { "kind": "damage_random" },
+        { "kind": "log", "message": "Equipment failure — production halted on a building." }
+      ]
+    },
+    {
+      "id": "supply_drop",
+      "title": "Supply Drop",
+      "description": "An automated supply mission arrives at the colony.",
+      "severity": "Info",
+      "trigger": { "type": "Strategic", "probability": 0.06, "minSol": 0 },
+      "outcomes": [
+        { "kind": "resource_change", "resource": "steel",       "amount": 200.0 },
+        { "kind": "resource_change", "resource": "electronics", "amount": 100.0 },
+        { "kind": "resource_change", "resource": "nutrients",   "amount":  50.0 },
+        { "kind": "log", "message": "Supply drop! +200 steel, +100 electronics, +50 nutrients." }
+      ]
+    },
+    {
+      "id": "mysterious_signal",
+      "title": "Mysterious Signal",
+      "description": "Long-range sensors detect an encoded transmission of unknown origin drifting from beyond the colony perimeter.",
+      "severity": "Warning",
+      "trigger": {
+        "type": "Strategic", "probability": 0.12, "minSol": 0,
+        "requiredResources": { "electronics": 50.0 }
+      },
+      "choices": [
+        {
+          "label": "Investigate the signal",
+          "consequenceSummary": "−50 electronics, possible components recovered",
+          "outcomes": [
+            { "kind": "resource_change", "resource": "electronics", "amount": -50.0 },
+            { "kind": "resource_change", "resource": "components",  "amount": 120.0 },
+            { "kind": "log", "message": "Signal decoded — recovered 120 components from a derelict module." }
+          ]
+        },
+        {
+          "label": "Ignore — focus on colony work",
+          "consequenceSummary": "no effect",
+          "outcomes": [
+            { "kind": "log", "message": "Mysterious signal faded into static. Crew refocused on routine tasks." }
+          ]
+        }
+      ]
+    }
+  ]
+}

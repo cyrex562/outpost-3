@@ -1,0 +1,35 @@
+{
+  "resources": [
+    { "id": "iron_ore",            "displayName": "Iron Ore",            "tier": "Raw",      "category": "Mineral",      "baseWeight":   10.0, "description": "Raw iron ore extracted from deposits." },
+    { "id": "copper_ore",          "displayName": "Copper Ore",          "tier": "Raw",      "category": "Mineral",      "baseWeight":   12.0, "description": "Chalcopyrite and other copper-bearing minerals." },
+    { "id": "silicon_ore",         "displayName": "Silicon Ore",         "tier": "Raw",      "category": "Mineral",      "baseWeight":    8.0, "description": "Silicate minerals processed into pure silicon." },
+    { "id": "ice",                 "displayName": "Ice",                 "tier": "Raw",      "category": "Chemical",     "baseWeight":    2.0, "description": "Frozen water from polar regions and shadowed craters." },
+    { "id": "regolith",            "displayName": "Regolith",            "tier": "Raw",      "category": "Mineral",      "baseWeight":    1.0, "description": "Loose surface material covering bedrock." },
+    { "id": "uranium_ore",         "displayName": "Uranium Ore",         "tier": "Raw",      "category": "Energy",       "baseWeight":  150.0, "description": "Radioactive uranium-bearing ore." },
+    { "id": "carbon_compounds",    "displayName": "Carbon Compounds",    "tier": "Raw",      "category": "Chemical",     "baseWeight":   15.0, "description": "Organic carbon deposits including hydrocarbons." },
+    { "id": "rare_earth_ore",      "displayName": "Rare Earth Ore",      "tier": "Raw",      "category": "Mineral",      "baseWeight":   80.0, "description": "Ore containing lanthanides and other rare earth elements." },
+
+    { "id": "iron",                "displayName": "Iron",                "tier": "Refined",  "category": "Manufactured", "baseWeight":   30.0, "description": "Refined iron metal." },
+    { "id": "steel",               "displayName": "Steel",               "tier": "Refined",  "category": "Manufactured", "baseWeight":   50.0, "description": "Iron-carbon alloy for structural use." },
+    { "id": "copper",              "displayName": "Copper",              "tier": "Refined",  "category": "Manufactured", "baseWeight":   40.0, "description": "Refined copper metal." },
+    { "id": "silicon_wafer",       "displayName": "Silicon Wafer",       "tier": "Refined",  "category": "Manufactured", "baseWeight":  120.0, "description": "High-purity silicon processed into wafers." },
+    { "id": "water",               "displayName": "Water",               "tier": "Refined",  "category": "Chemical",     "baseWeight":    1.0, "description": "H2O - essential for life support and agriculture." },
+    { "id": "uranium_fuel_rod",    "displayName": "Uranium Fuel Rod",    "tier": "Refined",  "category": "Energy",       "baseWeight": 5000.0, "description": "Enriched uranium fuel rod for nuclear reactors." },
+    { "id": "carbon_fiber",        "displayName": "Carbon Fiber",        "tier": "Refined",  "category": "Manufactured", "baseWeight":  180.0, "description": "High-strength carbon composite material." },
+    { "id": "rare_earth_metals",   "displayName": "Rare Earth Metals",   "tier": "Refined",  "category": "Manufactured", "baseWeight":  500.0, "description": "Refined lanthanides for advanced electronics." },
+    { "id": "prefab_components",   "displayName": "Prefab Components",   "tier": "Refined",  "category": "Manufactured", "baseWeight":   80.0, "description": "Modular structural kits used in nearly every constructible building." },
+
+    { "id": "structural_components","displayName": "Structural Components","tier": "Advanced","category": "Manufactured", "baseWeight":  150.0, "description": "Prefabricated beams, panels, and supports." },
+    { "id": "electronics",         "displayName": "Electronics",         "tier": "Advanced", "category": "Manufactured", "baseWeight":  200.0, "description": "Electronic components, circuits, and control systems." },
+    { "id": "machine_parts",       "displayName": "Machine Parts",       "tier": "Advanced", "category": "Manufactured", "baseWeight":  120.0, "description": "Mechanical components including motors, pumps, and valves." },
+    { "id": "construction_materials","displayName": "Construction Materials","tier": "Advanced","category": "Manufactured","baseWeight":   80.0, "description": "Mixed building materials including fasteners and sealants." },
+
+    { "id": "oxygen",              "displayName": "Oxygen",              "tier": "Refined",  "category": "Chemical",     "baseWeight":    5.0, "description": "O2 gas essential for life support." },
+    { "id": "food",                "displayName": "Food",                "tier": "Refined",  "category": "Biological",   "baseWeight":   20.0, "description": "Processed food for human consumption." },
+    { "id": "medical_supplies",    "displayName": "Medical Supplies",    "tier": "Refined",  "category": "Biological",   "baseWeight":  300.0, "description": "Pharmaceuticals, bandages, and diagnostic equipment." },
+    { "id": "nutrients",           "displayName": "Nutrients",           "tier": "Refined",  "category": "Biological",   "baseWeight":   15.0, "description": "Mineral nutrients for hydroponic farming." },
+
+    { "id": "credits",             "displayName": "Credits",             "tier": "Virtual",  "category": "Virtual",      "baseWeight":    1.0, "description": "Universal currency." },
+    { "id": "research_data",       "displayName": "Research Data",       "tier": "Virtual",  "category": "Virtual",      "baseWeight":  100.0, "description": "Scientific data used for technological advancement." }
+  ]
+}

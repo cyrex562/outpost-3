@@ -21,7 +21,14 @@
       "Bash(git *)",
       "Bash(dotnet test *)",
       "Bash(/c/Program Files/dotnet/dotnet.exe *)",
-      "Bash(\"/c/Program Files/dotnet/dotnet.exe\" --info)"
+      "Bash(\"/c/Program Files/dotnet/dotnet.exe\" --info)",
+      "Read(//c/Program Files/dotnet//**)",
+      "Read(//c/Users/cyrex/**)",
+      "Bash(\"/c/Program Files/dotnet/dotnet.exe\" --version)",
+      "Bash(\"/c/Program Files/dotnet/dotnet.exe\" test C:/Users/cyrex/Projects/outpost-3/tests/OutpostCore.Tests/OutpostCore.Tests.csproj --nologo)",
+      "Bash(where dotnet *)",
+      "Read(//c/Program Files \\(x86\\)/dotnet/**)",
+      "Bash(dotnet build *)"
     ]
   }
 }

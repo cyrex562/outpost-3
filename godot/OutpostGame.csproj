@@ -1,9 +1,16 @@
-<Project Sdk="Godot.NET.Sdk/4.3.0">
+<Project Sdk="Godot.NET.Sdk/4.6.2">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>OutpostGame</RootNamespace>
+    <!-- Copy NuGet package DLLs next to OutpostGame.dll so Godot's runtime can find them -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- GdUnit4: scene-level visual testing framework for Godot 4 C# -->
+    <PackageReference Include="gdUnit4.api" Version="5.1.0-rc4" />
+  </ItemGroup>
 </Project>

@@ -31,6 +31,11 @@ public partial class BuildingPlacer : Node2D
     /// HUD listens so it can flash a brief banner.</summary>
     public event Action<string>? PlacementRejected;
 
+    /// <summary>Fires when the player left-clicks a placed building while not in
+    /// placement mode. Passes the clicked slot id, or null when the click missed
+    /// every footprint. HUD listens to open / close its details panel.</summary>
+    public event Action<Guid?>? BuildingSelected;
+
     private string? _activeBuildingId;
     private GridSize _activeSize;
     private GridPosition? _hoverCell;
@@ -96,23 +101,40 @@ public partial class BuildingPlacer : Node2D
 
     private void HandleMouseButton(InputEventMouseButton mb)
     {
-        if (!IsActive || GridView == null || Session == null) return;
+        if (GridView == null || Session == null) return;
 
         if (mb.ButtonIndex == MouseButton.Right)
         {
-            SetActiveBuilding(null);
+            if (IsActive) SetActiveBuilding(null);
             return;
         }
 
-        if (mb.ButtonIndex == MouseButton.Left && _hoverCell.HasValue && _validHover)
+        if (mb.ButtonIndex != MouseButton.Left) return;
+
+        if (IsActive)
         {
-            var result = Session.QueueConstruction(_activeBuildingId!, _hoverCell.Value);
-            if (!result.Success)
+            // Placement mode — try to queue construction at the hovered cell.
+            if (_hoverCell.HasValue && _validHover)
             {
-                PlacementRejected?.Invoke(result.FailureReason ?? "Placement failed");
+                var result = Session.QueueConstruction(_activeBuildingId!, _hoverCell.Value);
+                if (!result.Success)
+                    PlacementRejected?.Invoke(result.FailureReason ?? "Placement failed");
+                QueueRedraw();
             }
-            QueueRedraw();
+            return;
         }
+
+        // Selection mode — identify the slot under the cursor, if any.
+        Vector2 mouseWorld = GetGlobalMousePosition();
+        Vector2 local = GridView.ToLocal(mouseWorld);
+        var cell = GridView.ScreenToGrid(local);
+        if (!GridView.InBounds(cell))
+        {
+            BuildingSelected?.Invoke(null);
+            return;
+        }
+        var slot = Session.State.Grid.GetSlotAtCell(cell);
+        BuildingSelected?.Invoke(slot?.Id);
     }
 
     public override void _Process(double delta)

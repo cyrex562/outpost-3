@@ -22,6 +22,7 @@ public partial class ColonyGridView : Node2D
     private TerrainType[,] _terrain = new TerrainType[0, 0];
     private ColonyGrid _grid = new(0, 0);
     private ColonySession? _session;
+    private BiomeType _biome = BiomeType.Barren;
 
     private Font? _font;
 
@@ -45,7 +46,8 @@ public partial class ColonyGridView : Node2D
     {
         Width = site.Size.Width;
         Height = site.Size.Height;
-        _terrain = TerrainGenerator.Generate(site.Seed, Width, Height);
+        _biome = site.Biome;
+        _terrain = TerrainGenerator.Generate(site.Seed, Width, Height, site.Biome);
         _grid = new ColonyGrid(Width, Height);
         _session = null;
         QueueRedraw();
@@ -62,7 +64,8 @@ public partial class ColonyGridView : Node2D
         _session = session;
         Width = session.Site.Size.Width;
         Height = session.Site.Size.Height;
-        _terrain = TerrainGenerator.Generate(session.Site.Seed, Width, Height);
+        _biome = session.Site.Biome;
+        _terrain = TerrainGenerator.Generate(session.Site.Seed, Width, Height, session.Site.Biome);
         _grid = session.State.Grid;
         session.StateChanged += OnSessionStateChanged;
         QueueRedraw();
@@ -125,7 +128,7 @@ public partial class ColonyGridView : Node2D
                 if (gx < 0 || gx >= Width || gy < 0 || gy >= Height) continue;
 
                 var terrain = _terrain[gx, gy];
-                Color color = ColorForTerrain(terrain);
+                Color color = ColorForTerrain(terrain, _biome);
 
                 if (_grid.IsCellOccupied(new GridPosition(gx, gy)))
                 {
@@ -221,13 +224,21 @@ public partial class ColonyGridView : Node2D
 
     private void DrawProgressBar(Vector2 top, Vector2 right, Vector2 bottom, Vector2 left, float pct)
     {
-        // Build a thin diamond ring at the lower edge of the footprint diamond.
-        Vector2 mid = (left + bottom) * 0.5f;
-        Vector2 midR = (right + bottom) * 0.5f;
-        Vector2 fillEnd = mid.Lerp(midR, pct);
+        // Horizontal bar centred under the building footprint. Using the diamond's
+        // edge midpoints (the old approach) slopes for non-square footprints like
+        // the Ice Drill (2×3) — driving a horizontal line off the centre X keeps
+        // the bar level regardless of footprint shape.
+        float centerX = (left.X + right.X) * 0.5f;
+        float barY    = bottom.Y - IsoProjection.TileHeight * 0.30f;
+        float halfLen = Math.Max(IsoProjection.TileWidth * 0.6f,
+                                  (right.X - left.X) * 0.35f);
 
-        DrawLine(mid, midR, new Color(0, 0, 0, 0.65f), 4f);
-        DrawLine(mid, fillEnd, new Color(0.4f, 1f, 0.4f, 0.95f), 4f);
+        Vector2 start   = new Vector2(centerX - halfLen, barY);
+        Vector2 end     = new Vector2(centerX + halfLen, barY);
+        Vector2 fillEnd = start.Lerp(end, pct);
+
+        DrawLine(start, end,    new Color(0, 0, 0, 0.75f), 9f);
+        DrawLine(start, fillEnd, new Color(0.4f, 1f, 0.4f, 0.95f), 9f);
     }
 
     private static string LabelFor(BuildingSlot slot)
@@ -249,14 +260,62 @@ public partial class ColonyGridView : Node2D
         };
     }
 
-    public static Color ColorForTerrain(TerrainType t) => t switch
+    public static Color ColorForTerrain(TerrainType t, BiomeType biome = BiomeType.Barren) => biome switch
     {
-        TerrainType.Flat => new Color(0.55f, 0.55f, 0.55f),
-        TerrainType.Rough => new Color(0.35f, 0.35f, 0.35f),
-        TerrainType.Slope => new Color(0.45f, 0.45f, 0.40f),
-        TerrainType.Crater => new Color(0.25f, 0.20f, 0.20f),
-        TerrainType.Impassable => new Color(0.05f, 0.05f, 0.05f),
-        _ => new Color(0.5f, 0.5f, 0.5f),
+        BiomeType.Rocky            => t switch
+        {
+            TerrainType.Flat      => new Color(0.42f, 0.37f, 0.32f),
+            TerrainType.Rough     => new Color(0.27f, 0.22f, 0.17f),
+            TerrainType.Slope     => new Color(0.35f, 0.30f, 0.25f),
+            TerrainType.Crater    => new Color(0.18f, 0.14f, 0.11f),
+            TerrainType.Impassable=> new Color(0.07f, 0.05f, 0.04f),
+            _                     => new Color(0.40f, 0.35f, 0.30f),
+        },
+        BiomeType.Polar            => t switch
+        {
+            TerrainType.Flat      => new Color(0.82f, 0.88f, 0.95f),
+            TerrainType.Rough     => new Color(0.60f, 0.68f, 0.80f),
+            TerrainType.Slope     => new Color(0.50f, 0.62f, 0.82f),
+            TerrainType.Crater    => new Color(0.65f, 0.72f, 0.85f),
+            TerrainType.Impassable=> new Color(0.18f, 0.22f, 0.32f),
+            _                     => new Color(0.70f, 0.78f, 0.90f),
+        },
+        BiomeType.Desert           => t switch
+        {
+            TerrainType.Flat      => new Color(0.80f, 0.65f, 0.38f),
+            TerrainType.Rough     => new Color(0.58f, 0.44f, 0.24f),
+            TerrainType.Slope     => new Color(0.65f, 0.50f, 0.30f),
+            TerrainType.Crater    => new Color(0.44f, 0.30f, 0.18f),
+            TerrainType.Impassable=> new Color(0.18f, 0.12f, 0.07f),
+            _                     => new Color(0.70f, 0.56f, 0.35f),
+        },
+        BiomeType.Volcanic         => t switch
+        {
+            TerrainType.Flat      => new Color(0.25f, 0.20f, 0.20f),
+            TerrainType.Rough     => new Color(0.18f, 0.13f, 0.13f),
+            TerrainType.Slope     => new Color(0.22f, 0.16f, 0.14f),
+            TerrainType.Crater    => new Color(0.35f, 0.10f, 0.05f),
+            TerrainType.Impassable=> new Color(0.08f, 0.03f, 0.03f),
+            _                     => new Color(0.20f, 0.15f, 0.15f),
+        },
+        BiomeType.MarginalHabitable=> t switch
+        {
+            TerrainType.Flat      => new Color(0.42f, 0.52f, 0.38f),
+            TerrainType.Rough     => new Color(0.28f, 0.34f, 0.23f),
+            TerrainType.Slope     => new Color(0.35f, 0.42f, 0.30f),
+            TerrainType.Crater    => new Color(0.22f, 0.26f, 0.18f),
+            TerrainType.Impassable=> new Color(0.06f, 0.08f, 0.05f),
+            _                     => new Color(0.38f, 0.46f, 0.33f),
+        },
+        _ /* Barren */             => t switch
+        {
+            TerrainType.Flat      => new Color(0.55f, 0.55f, 0.55f),
+            TerrainType.Rough     => new Color(0.35f, 0.35f, 0.35f),
+            TerrainType.Slope     => new Color(0.45f, 0.45f, 0.40f),
+            TerrainType.Crater    => new Color(0.25f, 0.20f, 0.20f),
+            TerrainType.Impassable=> new Color(0.05f, 0.05f, 0.05f),
+            _                     => new Color(0.50f, 0.50f, 0.50f),
+        },
     };
 
     private static Color ColorForBuilding(string id)
