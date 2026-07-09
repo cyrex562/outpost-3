@@ -1,0 +1,66 @@
+# TODO: Expand from source material
+id: npcs_names_surnames
+category: name
+name: "Surnames"
+tags: [npc, name, surname]
+entries:
+  - weight: 1
+    result: "Ironhand"
+  - weight: 1
+    result: "Coldwater"
+  - weight: 1
+    result: "Ashmore"
+  - weight: 1
+    result: "Vane"
+  - weight: 1
+    result: "Dusk"
+  - weight: 1
+    result: "Greyford"
+  - weight: 1
+    result: "Stonebridge"
+  - weight: 1
+    result: "Blackthorn"
+  - weight: 1
+    result: "Farrow"
+  - weight: 1
+    result: "Holt"
+  - weight: 1
+    result: "Marsh"
+  - weight: 1
+    result: "Croft"
+  - weight: 1
+    result: "Riven"
+  - weight: 1
+    result: "Weld"
+  - weight: 1
+    result: "Crane"
+  - weight: 1
+    result: "Moss"
+  - weight: 1
+    result: "Thorn"
+  - weight: 1
+    result: "Burn"
+  - weight: 1
+    result: "Vale"
+  - weight: 1
+    result: "Cain"
+  - weight: 1
+    result: "Sward"
+  - weight: 1
+    result: "Kell"
+  - weight: 1
+    result: "Drale"
+  - weight: 1
+    result: "Stern"
+  - weight: 1
+    result: "Prior"
+  - weight: 1
+    result: "Wick"
+  - weight: 1
+    result: "Brace"
+  - weight: 1
+    result: "Ford"
+  - weight: 1
+    result: "Mast"
+  - weight: 1
+    result: "Wraith"

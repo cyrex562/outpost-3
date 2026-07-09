@@ -1,0 +1,80 @@
+# Blacksmith shop inventory by building tier.
+# Tier maps to settlement size: hamlet→small, village→medium, town→large.
+
+small:
+  name: "Smithy"
+  items:
+    - item_id: weapon.knife
+      quantity: 3
+    - item_id: weapon.spear
+      quantity: 2
+    - item_id: weapon.short_sword
+      quantity: 1
+    - item_id: armor.leather
+      quantity: 1
+    - item_id: armor.shield
+      quantity: 1
+
+medium:
+  name: "Forge"
+  items:
+    - item_id: weapon.knife
+      quantity: 5
+    - item_id: weapon.spear
+      quantity: 3
+    - item_id: weapon.short_sword
+      quantity: 2
+    - item_id: weapon.longsword
+      quantity: 1
+    - item_id: weapon.axe
+      quantity: 2
+    - item_id: weapon.mace
+      quantity: 1
+    - item_id: armor.leather
+      quantity: 2
+    - item_id: armor.chain_mail
+      quantity: 1
+    - item_id: armor.shield
+      quantity: 2
+    - item_id: ammo.arrow
+      quantity: 3
+    - item_id: ammo.bolt
+      quantity: 2
+
+large:
+  name: "Master Forge"
+  items:
+    - item_id: weapon.knife
+      quantity: 5
+    - item_id: weapon.spear
+      quantity: 5
+    - item_id: weapon.short_sword
+      quantity: 3
+    - item_id: weapon.longsword
+      quantity: 2
+    - item_id: weapon.axe
+      quantity: 3
+    - item_id: weapon.mace
+      quantity: 2
+    - item_id: weapon.great_axe
+      quantity: 1
+    - item_id: weapon.short_bow
+      quantity: 2
+    - item_id: weapon.long_bow
+      quantity: 1
+    - item_id: weapon.hand_crossbow
+      quantity: 1
+    - item_id: weapon.heavy_crossbow
+      quantity: 1
+    - item_id: armor.leather
+      quantity: 3
+    - item_id: armor.chain_mail
+      quantity: 2
+    - item_id: armor.plate_armor
+      quantity: 1
+    - item_id: armor.shield
+      quantity: 3
+    - item_id: ammo.arrow
+      quantity: 5
+    - item_id: ammo.bolt
+      quantity: 5

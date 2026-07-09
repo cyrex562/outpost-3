@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_ruins
+category: encounter
+name: "Ruins Encounters"
+tags: [ruins]
+entries:
+  - weight: 3
+    result:
+      type: hostile
+      name: "Scavenger Gang"
+      description: "A group of armed scavengers has claimed this ruin. They don't take kindly to competition. 'This is our patch.'"
+  - weight: 3
+    result:
+      type: hostile
+      name: "Engineered Predator"
+      description: "Something moves in the dark corridors — fast, silent, and built to kill. Not natural. Pretech-era bioweapon, maybe."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Ruin Scholar"
+      description: "A scholar in worn robes picks through the debris with careful hands, cataloguing fragments. They look up, startled, then cautiously curious."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Faction Scout"
+      description: "A lone scout in a faction's colours freezes when they see you, then relaxes slightly. They're here for the same reason you are."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Structural Collapse"
+      description: "A deep groan from above — a floor gives way somewhere in the upper levels. Dust cascades down. The ruin is unstable."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Active Pretech System"
+      description: "Something hums in the walls. A panel flickers with intermittent light — still powered, somehow. The system's purpose is unclear."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Scavenger Signs"
+      description: "Markings on the walls in fresh paint — territorial signs of recent occupation. Whoever made them was here within the week."
+  - weight: 2
+    result:
+      type: discovery
+      name: "Sealed Chamber"
+      description: "A heavy door, still intact, set into a wall. The locking mechanism is pretech — it would take skill or tools to open."

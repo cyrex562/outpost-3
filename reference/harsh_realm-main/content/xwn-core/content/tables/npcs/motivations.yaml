@@ -1,0 +1,26 @@
+# TODO: Expand from source material
+id: npcs_motivations
+category: npc_motivation
+name: "NPC Motivations"
+tags: [npc, motivation]
+entries:
+  - weight: 1
+    result: "survival"
+  - weight: 1
+    result: "wealth"
+  - weight: 1
+    result: "safety"
+  - weight: 1
+    result: "revenge"
+  - weight: 1
+    result: "loyalty"
+  - weight: 1
+    result: "knowledge"
+  - weight: 1
+    result: "freedom"
+  - weight: 1
+    result: "power"
+  - weight: 1
+    result: "redemption"
+  - weight: 1
+    result: "family"

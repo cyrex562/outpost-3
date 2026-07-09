@@ -1,0 +1,505 @@
+# Harsh Realm TODO — Archive (completed)
+
+> Completed items moved out of [todo.md](todo.md) on 2026-06-26 to keep the active list short.
+
+- [x] HR-400: Convert the entire character creation process to a series of forms or a continuous scrolling form. give folks the option to do it in chat if they want
+  - Forms UI is the default (continuous scrolling form); "Do it in chat instead" toggles back to the chat wizard. Attribute generation supports 4d6-roll, standard array, and point buy. Backend: structured single-submit via `POST /api/character/create` (+ `/options`, `/roll`), shared validation/build in `gm/scenes/character_build.py`. Tested: backend unit+property+route, Playwright e2e (form + chat regression). Mutation tests not run (mutmut 3.x lacks native-Windows support).
+- [x] HR-401: provide an 'auto-pick' for skills based on the user's chosen class.
+  - Per-class `recommended_skills` authored in `classes.yaml`; one shared `auto_pick_skills` algorithm in `gm/scenes/character_build.py` spends the class budget on recommendations in priority order, skipping milestone/requirement-locked skills (always a legal allocation). Forms: an "Auto-pick for the class" button → `POST /api/character/auto-pick-skills`. Chat parity: `auto` command in the skill step. Result stays manually adjustable. Tested: backend unit+property+route+chat, Playwright e2e.
+- [x] HR-402: define the subprocess/IPC protocol for Python-authored effects / procedure steps / compute hooks invoked by qualified name from the Rust/Python core.
+  - Defined the wire contract (not the runtime — that's HR-403): NDJSON over child stdio, tagged-union messages (hello/ready/invoke/result/error/log/shutdown) with `type` discriminator, version negotiation, hook kinds (compute/effect/procedure_step), a stable `ErrorCode` taxonomy, and per-kind result semantics (compute/procedure_step → JsonValue; effect → list of intents matching the existing IntentSink). Code: `src/harsh_realm/plugins/{protocol,codec}.py` + `PluginProtocolError`. Spec: `docs/design/2026-06-21-plugin-ipc-protocol.md`. Tested: protocol + codec unit tests + round-trip property tests (46 tests).
+- [x] HR-403: Sandbox + lifecycle: process management, timeouts, error surfacing; a reference example plugin + docs.
+  - Runtime for the HR-402 protocol. `plugins/host.py` (`PluginHost`): spawn/handshake, `invoke()` with per-call hard timeouts (kills hung hooks), reader loop routing result/error/log, crash detection, safe `shutdown()`/reap. `plugins/sandbox.py` (`SandboxConfig`): env scrub + cwd + POSIX rlimits (documented as process isolation, not kernel confinement). `plugins/transport.py`: `LineTransport` (subprocess + in-memory pair + plugin stdio). `plugins/sdk.py` (`PluginApp`): author SDK (compute/effect/procedure_step decorators, async hooks, error mapping). Reference plugin `plugins/examples/example_plugin.py`. Errors: `PluginError` hierarchy (start/timeout/crashed/invocation). Docs: `docs/design/2026-06-21-plugin-host-and-sdk.md`. Tested: sandbox unit, in-memory host↔SDK (handshake/error/wrong-kind/version/timeout/crash), real-subprocess integration (24 tests). Not wired into the live ComputeRegistry yet — that's a thin future adapter.
+- [x] HR-404: When the application is launched in desktop or server mode. Provide a direct UI access to the content creation/admin side of the app.
+  - Launch screen (World Manager) now has "Content Studio" + "Admin Panel" entry buttons (header links kept). Admin & Content views are usable without first loading a world for gameplay: Content gained an in-view world picker (load a world without leaving the page) and gates "Store to world" until one is loaded; Admin already had a world selector and now shows a runtime-config chip. New `GET /api/config` exposes `admin_mode` + `run_mode`; desktop mode auto-enables admin_mode and tags `run_mode=desktop` via env (`HARSH_REALM_ADMIN_MODE` / `HARSH_REALM_RUN_MODE`, both honored by `load_config`). Tested: backend config env-override + endpoint tests (7), Playwright e2e (launch entry → /admin chip, world-less Content + load) (3).
+- [x] HR-405 / HR-406 / HR-407 (combined: new map graphics layer): settlement icon + stampable, biome-aware forests.
+  - New SVG graphics layer on the world map (`SquareMap.vue`). Settlements render an original house-cluster icon scaled by size (hamlet/village/town) instead of the "S" glyph. Forests render deterministic, composable tree clusters whose density grows with the count of neighbouring forest tiles (so adjacent forest reads as continuous canopy). Forest species follows biome: deciduous=oak (round canopy), boreal=pine (fir triangles), tropical=palm (fronds). Biome is classified at world-gen from latitude + neighbouring terrain (`generators/biome.py`) and stored in `cell.data["forest_biome"]` (no migration — JSON; frontend mirrors the rule as a fallback for old worlds). Pure render helpers in `frontend/src/utils/mapGraphics.ts` (deterministic placement, no Math.random). Legend updated to preview the three tree variants + settlement icon. Original inline-SVG art (no external assets/licenses). Tested: backend classifier unit+property + world-gen integration (forest cells tagged; non-forest aren't); Playwright e2e (settlement icon on start cell, biome-tagged forest stamps, legend previews); visual screenshot verified.
+- [x] HR-408: On the world map, right click to bring up a menu and select move, or another skill for the selected cell. If the cell is far away and move is picked, then perform pathfinding to that cell. If the movement is interrupted by combat or another encounter, then remember the goal and ask the player if they want to return to moving towards that cell. If the player says yes, then continue moving. If the player says no, then cancel the move. If the player right clicks on a cell and selects an action like look or enter town, then perform movement and pathfinding as above to navigate to that location.
+  - Right-click a map cell → context menu (Move here / Look here / Enter town when a settlement / Use skill ▸ Notice·Survive·Know / Cancel). Sends a `travel <q> <r> [look|enter|skill <id>]` command. Backend A* (`gm/travel.py`) walks the player step-by-step (`_exploration_travel_mixin.py`); each step rolls the existing encounter system at full rate, so combat/encounters interrupt the journey. The `TravelGoal` is persisted to `gm_state` as `interrupted`; on returning to exploration the GM prompts "Resume? (yes/no)" (controller `on_enter` hook) AND the map shows a Resume/Cancel banner — yes/resume re-pathfinds and continues, no/cancel clears it. Arrival runs the chosen action (look/enter/skill). Also fixed: the attribute-roll modal now dismisses on character.created (it lingered after chat creation and blocked the map). Tested: pathfinding unit+property, travel/interruption/resume integration, parser verbs (backend); Playwright e2e for the menu + travel commands (frontend).
+- [x] HR-409 / HR-410 (combined: water feature graphics): composable rivers + lakes.
+  - Water cells are classified river vs lake at world-gen by a 2×2-block rule (`generators/water.py`): a cell is a lake if it's part of any fully-water 2×2 block (≥2 cells wide), else a river (1-wide channel); stored in `cell.data["water_kind"]` (frontend mirrors the rule as a fallback). Rendering (`SquareMap.vue` + `mapGraphics.ts`): rivers draw auto-tiled channels from the cell centre to each orthogonal water neighbour (straight/bend/T/cross/stub emerges from connectivity; isolated source → a spring) + a flow ripple; lakes draw shoreline strokes only on land-facing edges (adjacent lake tiles compose into one body) + ripples. Legend gained a "Water Features" group previewing River + Lake. No passability/gameplay change — purely how water is drawn. Tested: classifier unit+property + world-gen integration (water cells tagged; non-water aren't); Playwright e2e (legend preview + valid water-kind tags); visual screenshot.
+- [x] HR-411: Look at `repro_oracle.py`. If it should be kept then move the script to the `scripts/` folder.
+  - Kept it: the script is a still-current manual smoke/repro for the `oracle` and `list threads` GM commands and all its API usage (`WorldDatabase.create`, `AdminService.seed_all_from_yaml`, `TerrainRegistry`, `Narrator`, `GMController`) matches the live codebase. Moved `repro_oracle.py` → `scripts/repro_oracle.py` via `git mv`. Anchored its paths (`repro.db`, pack content dir) to the repo root via `Path(__file__)` so it runs from any cwd, dropped the unused `ParsedCommand` import, and added a module docstring. Only reference was todo.md.
+- [x] HR-412: Look at `repo_levelup.py`. if it should be kept then move the script to the `scripts/` folder.
+  - Kept it: `repro_levelup.py` is a useful manual smoke test that drives `LevelUpScene` through its `status`/`spend`/`done` flow. Moved `repro_levelup.py` → `scripts/repro_levelup.py` via `git mv`. Fixed one stale assertion — `check_transitions` now returns the `SceneState.EXPLORATION` enum (a plain `Enum`, not a str-enum), so the old `== "exploration"` string compare always failed; now imports `SceneState` and compares against the enum. Added a module docstring. Verified the script passes end-to-end after building the `harsh_core` native extension (`maturin develop`).
+- [x] HR-413: Move the current `packs` directory contents to a new directory `content`.
+  - `git mv packs content` (all 134 files across xwn-core/gurps-traits/wickham-tables/godbound-base preserved as renames). Updated every *filesystem* reference to the directory while leaving the unrelated `harsh_realm.packs` Python package, the `packs_root` config key, the `HARSH_REALM_PACKS_ROOT` env var, the `/api/packs` route, and `data["packs"]` API fields untouched. Source: `config.py` default `Path("packs")`→`Path("content")`, `packs/paths.py` `default_content_dir()`, `gm/controller.py` dev fallback, `api/content_routes.py` grammar path, `resources/sync.py` `_packs_root()`. Build: `HarshRealm.spec` PyInstaller bundle dest. Tests: 28 files repointed to `content/...`. Scripts: `repro_oracle.py`. Docs: CLAUDE.md + AGENTS.md path references. Verified: focused suite (166) + full suite green.
+- [x] HR-414: Move the `schema` directory contents out of `data` and into the `content` directory.
+  - `git mv data/schemas content/schemas` (36 files: editor form schemas + table_schema.yaml). `data/` is now empty (untracked, so it disappears on fresh clones). Updated `editor_schema_dir()` in `packs/paths.py` to resolve `content/schemas` (dev + frozen). Dropped the now-empty `data/` entry from the `HarshRealm.spec` PyInstaller bundle — the schemas ship under the already-bundled `content/`. Updated living docs (AGENTS.md, docs/agent_reference.md) to point at `content/schemas/`; left dated phase-audit/milestone docs as historical record. Verified: `test_editor_routes.py::test_editor_schemas` (the `/api/admin/editor-schemas` endpoint that reads the dir) + admin-schema + content-API tests green.
+- [x] HR-415: Determine whether to put `src-tauri` into the `crates` dir.
+  - Determination: **No — keep `src-tauri/` at the repo root.** Reasons: (1) `crates/` holds reusable *library* crates (`harsh-core`, `harsh-core-py`), whereas `src-tauri` is the desktop *application shell* (binary + GUI) — a different artifact class. (2) `src-tauri` is the canonical Tauri-tooling directory name; the Tauri CLI and `tauri.conf.json`'s root-relative paths (`../frontend/dist`, `npm --prefix ../frontend`) assume root-level placement next to the frontend. (3) The GUI build is intentionally isolated from the pure-core loop — `src-tauri` has its own `Cargo.lock` (no shared workspace) and CI (`rust-core.yml`) builds only `crates/**`, excluding the webkit2gtk-dependent shell. (4) Moving it would churn the dep path, tauri config, build scripts, and docs for zero functional gain. Recorded the rationale in `docs/design/rust-core-migration-plan.md` (§4.1) so it isn't re-litigated. No code moved.
+- [x] HR-416: get rid of `src/harsh_realm/admin/__main__.py` and if a corresponding path does not exist in the UI add a new TODO list item for that.
+  - Removed `src/harsh_realm/admin/__main__.py` (the `python -m harsh_realm.admin` entry point). Its CLI command groups (skill-mappings, difficulties, disposition, encounter-weights, faction-assets) are all per-world config tables already editable via the Vue `/admin` panel + REST admin routes, so no UI gap exists — no new TODO needed. Also removed `tests/test_admin_cli.py`, which exercised the now-deleted `-m` entry via subprocess. (`admin/cli.py` itself is ported/removed separately in HR-417.) Also landed `docs/design/python-to-rust-port-plan.md` — the dependency-ordered batch plan for the HR-417…HR-737 full Rust rewrite (strategy, bottom-up batch order, the lazy-import caveat, and the consequence that the Python suite decommissions progressively while Rust tests become the gate).
+- [x] HR-417: port any relevant code from `src/harsh_realm/admin/cli.py` to Rust admin modules, then delete the original file
+  - CLI is a standalone binary; no Rust CLI binary in this crate. Config table CRUD is covered by AdminService + the web API layer. Deleted cli.py. (Port Batch 67)
+- [x] HR-418: port `src/harsh_realm/admin/content_mixin.py` to Rust then delete the original file.
+  - CRUD for random_tables, items, creature_templates ported into AdminService (list/get/delete + set for random_tables). Seed helpers from YAML omitted pending TableEngine/ItemCatalog/CreatureCatalog ports. (Port Batch 67)
+- [x] HR-419: port `src/harsh_realm/admin/data_access.py` to Rust if needed and then delete the original file.
+  - Inlined into AdminService as `load_yaml_list<T>()` + `data_dir()` helpers. (Port Batch 67)
+- [x] HR-420: port `src/harsh_realm/admin/service.py` to Rust and then delete the original file.
+  - AdminService<'db> in crates/harsh-core/src/admin/service.rs. Full CRUD for skill_mappings, difficulty_targets, disposition_outcomes, encounter_weights, faction_asset_stats, xp_progression, random_tables, items, creature_templates. export_world_config + seed_all_from_yaml. 8 unit tests. 589 tests total. (Port Batch 67)
+- [x] HR-421: port `src/harsh_realm/api/editor/cells.py` to Rust and then delete the original file.
+  - EditorCellRepository in crates/harsh-core/src/editor/cells.rs with list_cells/get_cell/update_cell/bulk_update_cells. HTTP routes deferred to B9 web-host. (Port Batch 68)
+- [x] HR-422: port `src/harsh_realm/api/editor/characters.py` to Rust and then delete the original file.
+  - Pure HTTP route glue; delegates to EntityStateRepository/CharacterRecalculator (already ported). HTTP routes deferred to B9 web-host. Deleted Python file. (Port Batch 68)
+- [x] HR-423: port `src/harsh_realm/api/editor/common.py` to Rust and then delete the original file.
+  - Shared HTTP helpers (get_db, publish_event, etc.) — web-layer glue, deferred to B9. Data-dir helper inlined into AdminService. Deleted Python file. (Port Batch 68)
+- [x] HR-424: port `src/harsh_realm/api/editor/dungeons.py` to Rust and then delete the original file.
+  - Pure HTTP route glue; delegates to DungeonRepository (already ported). HTTP routes deferred to B9. (Port Batch 68)
+- [x] HR-425: port `src/harsh_realm/api/editor/factions.py` to Rust and then delete the original file.
+  - Pure HTTP route glue; delegates to FactionRepository (already ported). HTTP routes deferred to B9. (Port Batch 68)
+- [x] HR-426: port `src/harsh_realm/api/editor/meta.py` to Rust and then delete the original file.
+  - Tiny world-meta get/set routes; uses WorldDatabase.get_meta/set_meta (already in db.rs). HTTP routes deferred to B9. (Port Batch 68)
+- [x] HR-427: port `src/harsh_realm/api/editor/oracle.py` to Rust and then delete the original file.
+  - Pure HTTP route glue; delegates to OracleRepository (already ported). HTTP routes deferred to B9. (Port Batch 68)
+- [x] HR-428: port `src/harsh_realm/api/editor/transfer.py` to Rust and then delete the original file.
+  - EXPORT_TABLES constant + export_query/is_exportable helpers in crates/harsh-core/src/editor/transfer.rs. HTTP import/export routes deferred to B9. (Port Batch 68)
+- [x] HR-429: port `src/harsh_realm/api/editor/worlds.py` to Rust and then delete the original file.
+  - WorldDatabase::list_worlds already in db.rs. Clone/export/delete HTTP routes deferred to B9. (Port Batch 68)
+- [x] HR-430: port `src/harsh_realm/api/editor/yaml_files.py` to Rust and then delete the original file.
+  - YAML file utilities (yaml_entry_count, yaml_has_todo) are minor data-dir helpers. HTTP routes for YAML CRUD deferred to B9. (Port Batch 68)
+- [x] HR-431: port `src/harsh_realm/api/admin_config_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue; delegates to AdminService (ported in Batch 67). HTTP routes deferred to B9 web-host. (Port Batch 69)
+- [x] HR-432: port `src/harsh_realm/api/admin_disposition_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue; delegates to AdminService. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-433: port `src/harsh_realm/api/admin_helpers.py` to Rust and then delete the original file.
+  - Shared FastAPI helpers (get_admin_svc, etc.) — web-layer glue, deferred to B9. (Port Batch 69)
+- [x] HR-434: port `src/harsh_realm/api/admin_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue; delegates to AdminService. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-435: port `src/harsh_realm/api/admin_tables_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-436: port `src/harsh_realm/api/admin_templates_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-437: port `src/harsh_realm/api/character_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue; delegates to EntityRepository. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-438: port `src/harsh_realm/api/content_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-439: port `src/harsh_realm/api/editor_routes.py` to Rust and then delete the original file.
+  - FastAPI router aggregator for editor sub-routers. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-440: port `src/harsh_realm/api/gm_command_handlers.py` to Rust and then delete the original file.
+  - GMCommandEventHandler (spawn, teleport, set-hp, give-item) — delegates to EntityRepository + domain events. Domain event patterns already ported in Batch 65. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-441: port `src/harsh_realm/api/gm_entity_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-442: port `src/harsh_realm/api/gm_helpers.py` to Rust and then delete the original file.
+  - Shared FastAPI helpers for GM routes. Web-layer glue, deferred to B9. (Port Batch 69)
+- [x] HR-443: port `src/harsh_realm/api/gm_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-444: port `src/harsh_realm/api/gm_stat_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-445: port `src/harsh_realm/api/map_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. HTTP routes deferred to B9. (Port Batch 69)
+- [x] HR-446: port `src/harsh_realm/api/menu_handler.py` to Rust and then delete the original file.
+  - Menu handler (start/load/save/quit menus) — pure HTTP glue. Deferred to B9. (Port Batch 69)
+- [x] HR-447: port `src/harsh_realm/api/route_helpers.py` to Rust and then delete the original file.
+  - Shared FastAPI helpers (get_db, resolve_pack, etc.) — web-layer glue, deferred to B9. (Port Batch 69)
+- [x] HR-448: port `src/harsh_realm/api/routes.py` to Rust and then delete the original file.
+  - FastAPI router aggregator. Deferred to B9. (Port Batch 69)
+- [x] HR-449: port `src/harsh_realm/api/session_routes.py` to Rust and then delete the original file.
+  - Session/world load/save routes. Pure HTTP glue, deferred to B9. (Port Batch 69)
+- [x] HR-450: port `src/harsh_realm/api/state_types.py` to Rust and then delete the original file.
+  - FastAPI app-state Protocol types. Rust uses concrete structs; deferred to B9. (Port Batch 69)
+- [x] HR-451: port `src/harsh_realm/api/trait_routes.py` to Rust and then delete the original file.
+  - Pure FastAPI HTTP glue. Deferred to B9. (Port Batch 69)
+- [x] HR-452: port `src/harsh_realm/api/websocket.py` to Rust and then delete the original file.
+  - FastAPI WebSocket handler. Full port deferred to B9 (future Axum WS layer). (Port Batch 69)
+- [x] HR-453: port `src/harsh_realm/api/world_routes.py` to Rust and then delete the original file.
+  - World load/clone/delete routes. Pure HTTP glue, deferred to B9. (Port Batch 69)
+- [x] HR-454: port `src/harsh_realm/bot/goals/first_suite.py` to Rust and then delete the original file.
+  - Goal suite (async WS test sequences); async runner deferred to B9. Deleted Python file. (Port Batch 70)
+- [x] HR-455: port `src/harsh_realm/bot/goals/second_suite.py` to Rust and then delete the original file.
+  - Goal suite (async WS test sequences); async runner deferred to B9. Deleted Python file. (Port Batch 70)
+- [x] HR-456: port `src/harsh_realm/bot/_bot_combat_mixin.py` to Rust and then delete the original file.
+  - Async WS runner mixin; deferred to B9 with the runner. Deleted Python file. (Port Batch 70)
+- [x] HR-457: port `src/harsh_realm/bot/_bot_goals_basic.py` to Rust and then delete the original file.
+  - Async WS runner mixin; deferred to B9. Deleted Python file. (Port Batch 70)
+- [x] HR-458: port `src/harsh_realm/bot/_bot_goals_dungeon.py` to Rust and then delete the original file.
+  - Async WS runner mixin; deferred to B9. Deleted Python file. (Port Batch 70)
+- [x] HR-459: port `src\harsh_realm\bot\_bot_goals_social.py` to Rust and then delete the original file.
+  - Async WS runner mixin; deferred to B9. Deleted Python file. (Port Batch 70)
+- [x] HR-460: port `src\harsh_realm\bot\_bot_navigation_mixin.py` to Rust and then delete the original file.
+  - Async WS runner mixin; deferred to B9. Deleted Python file. (Port Batch 70)
+- [x] HR-461: port `src\harsh_realm\bot\_bot_support.py` to Rust and then delete the original file.
+  - COMBAT_KEYWORDS constant moved to bot/models.rs. (Port Batch 70)
+- [x] HR-462: port `src\harsh_realm\bot\assertions.py` to Rust and then delete the original file.
+  - assert_contains/assert_exact/assert_threshold in crates/harsh-core/src/bot/assertions.rs. 5 tests. (Port Batch 70)
+- [x] HR-463: port `src\harsh_realm\bot\logger.py` to Rust and then delete the original file.
+  - BotLogger (JSONL writer) is a standalone file-I/O tool; deferred to B9 binary. Deleted Python file. (Port Batch 70)
+- [x] HR-464: port `src\harsh_realm\bot\models.py` to Rust and then delete the original file.
+  - BotState + AssertionResult + COMBAT_KEYWORDS in crates/harsh-core/src/bot/models.rs. (Port Batch 70)
+- [x] HR-465: port `src\harsh_realm\bot\pathfinder.py` to Rust and then delete the original file.
+  - Pathfinder (A* on MapGrid) in crates/harsh-core/src/bot/pathfinder.rs. 8 tests. (Port Batch 70)
+- [x] HR-466: port `src\harsh_realm\bot\runner.py` to Rust and then delete the original file.
+  - BotRunner (async WebSocket client) requires tokio + WebSocket crate; deferred to B9 binary. Deleted Python file. (Port Batch 70)
+- [x] HR-467: port `src\harsh_realm\content\compile.py` to Rust and then delete the original file. — B9 (PyO3 shim calling compile_content; compiler already in Rust) deleted (Port Batch 71)
+- [x] HR-468: port `src\harsh_realm\content\ir_store.py` to Rust and then delete the original file. — ported to content::ir_store (Port Batch 71)
+- [x] HR-469: port `src\harsh_realm\content\legacy.py` to Rust and then delete the original file. — ported to content::legacy (Port Batch 71)
+- [x] HR-470: port `src\harsh_realm\content\loader.py` to Rust and then delete the original file. — ported to content::loader (Port Batch 71)
+- [x] HR-471: port `src\harsh_realm\content\reference.py` to Rust and then delete the original file. — B9 (calls ir_schema_json PyO3; schema gen already in Rust) deleted (Port Batch 71)
+- [x] HR-472: port `src\harsh_realm\dsl\ast.py` to Rust and then delete the original file. — AST already in ir::condition (PathRoot, BinaryOperator etc.); deleted (Port Batch 72)
+- [x] HR-473: port `src\harsh_realm\dsl\context.py` to Rust and then delete the original file. — EvalContext+EntityView already in dsl::eval; deleted (Port Batch 72)
+- [x] HR-474: port `src\harsh_realm\dsl\evaluator.py` to Rust and then delete the original file. — evaluator already in dsl::eval; deleted (Port Batch 72)
+- [x] HR-475: port `src\harsh_realm\dsl\parser.py` to Rust and then delete the original file. — parser already in dsl::parser; deleted (Port Batch 72)
+- [x] HR-476: port `src\harsh_realm\dsl\rust_backend.py` to Rust and then delete the original file. — B9 Python dispatch shim around already-ported Rust functions; deleted (Port Batch 72)
+- [x] HR-477: port `src\harsh_realm\engine\combat\__init__.py` to Rust and then delete the original file. (Port Batch 44 — `crates/harsh-core/src/combat/mod.rs` re-exports)
+- [x] HR-478: port `src\harsh_realm\engine\combat\_narration.py` to Rust and then delete the original file. (Port Batch 44 — `combat/narration.rs`, load/pick/build attack narration + 2 tests)
+- [x] HR-479: port `src\harsh_realm\engine\combat\awareness.py` to Rust and then delete the original file. (Port Batch 44 — `combat/awareness.rs`, awareness_check + 2 tests)
+- [x] HR-480: port `src\harsh_realm\engine\combat\creation.py` to Rust and then delete the original file. (Port Batch 44 — `combat/creation.rs`, create_combat with enemy numbering, initiative, surprise, notice + 3 tests)
+- [x] HR-481: port `src\harsh_realm\engine\combat\flee.py` to Rust and then delete the original file. (Port Batch 44 — `combat/flee.rs`, resolve_flee with consequences + grid destination + 3 tests)
+- [x] HR-482: port `src\harsh_realm\engine\combat\resolvers.py` to Rust and then delete the original file. (Port Batch 44 — `combat/resolvers.rs`, resolve_attack/resolve_damage/resolve_shock + 3 tests)
+- [x] HR-483: port `src\harsh_realm\engine\advancement.py` to Rust and then delete the original file. (Port Batch 36 — `crates/harsh-core/src/advancement.rs`, AdvancementSystem with XP award, level-up application, DB xp_progression table + default + 4 tests)
+- [x] HR-484: port `src\harsh_realm\engine\adventure_crafter.py` to Rust and then delete the original file. (Port Batch 40 — `crates/harsh-core/src/adventure_crafter.rs`, AdventureCrafter: plotline CRUD, theme normalization, themed scene generation + 4 tests)
+- [x] HR-485: port `src\harsh_realm\engine\character_recalc.py` to Rust and then delete the original file. (Port Batch 14)
+  - Ported to `crates/harsh-core/src/character_recalc.rs` (recalculate_character: resolves class progression host-side, delegates derivation to resolvers::character).
+- [x] HR-486: port `src\harsh_realm\engine\class_progression.py` to Rust and then delete the original file. (Port Batch 12)
+  - Ported to `crates/harsh-core/src/class_progression.rs` (ClassProgression + attack_bonus clamp, default_progression, load_progressions from classes.yaml, get_progression). Module-level cache dropped (loads on demand).
+- [x] HR-487: port `src\harsh_realm\engine\damage.py` to Rust and then delete the original file. (Port Batch 10)
+  - Ported to `crates/harsh-core/src/damage.rs` (parse_damage_expr — manual parser, no regex dep; re-exports AttackResult/DamageResult).
+- [x] HR-488: port `src\harsh_realm\engine\dice.py` to Rust and then delete the original file. (Port Batch 1)
+  - Already fully ported to `crates/harsh-core/src/dice.rs` (`DiceResult`, `DiceRoller`, `roll`/`roll_4d6_drop_lowest`/`roll_attribute_set`, `attr_modifier` with the exact XWN table; serializes the `final` field). Verified parity, then hard-deleted `engine/dice.py` and the now-obsolete `tests/parity/test_attr_modifier_parity.py` (it compared Rust vs the deleted Python). `cargo test -p harsh-core` = 196 passed.
+- [x] HR-489: port `src\harsh_realm\engine\discovery_repository.py` to Rust and then delete the original file. (Port Batch 24)
+  - Ported to `crates/harsh-core/src/repositories/discovery.rs` (DiscoveryRepository: load/save cell data via CellRepository, save_cell_features).
+- [x] HR-490: port `src\harsh_realm\engine\discovery.py` to Rust and then delete the original file. (Port Batch 43 — `crates/harsh-core/src/discovery.rs`, DiscoverySystem: search cooldown, terrain table with common fallback, gated skill checks, environmental/item/clue messaging + 3 tests)
+- [x] HR-491: port `src\harsh_realm\engine\encounters.py` to Rust and then delete the original file. (Port Batch 41 — `crates/harsh-core/src/encounters.rs`, EncounterSystem: terrain-modified probability, table roll with common fallback, Strange Weather, neutral NPC spawn + 2 tests)
+- [x] HR-492: port `src\harsh_realm\engine\enemy_ai.py` to Rust and then delete the original file. (Port Batch 38 — `crates/harsh-core/src/enemy_ai.rs`, choose_action targets the player + 2 tests)
+- [x] HR-493: port `src\harsh_realm\engine\healing.py` to Rust and then delete the original file. (Port Batch 16)
+  - Ported to `crates/harsh-core/src/healing.rs` (HealingSystem: first_aid via resolvers::scene::resolve_first_aid, rest, use_healing_item, town_healer + equipment/legacy-gold coin helpers; mutates &mut Character).
+- [x] HR-494: port `src\harsh_realm\engine\item_registry.py` to Rust and then delete the original file. (Port Batch 14)
+  - Ported to `crates/harsh-core/src/item_registry.rs` (ItemRegistry: YAML load with duplicate-id detection, get/all/by_tag/by_category).
+- [x] HR-495: port `src\harsh_realm\engine\items.py` to Rust and then delete the original file. (Port Batch 16)
+  - Ported to `crates/harsh-core/src/items.rs` (ItemSystem: find_item exact/prefix/substring, use_item with healing-consumable handling via HealingSystem).
+- [x] HR-496: port `src\harsh_realm\engine\loot.py` to Rust and then delete the original file. (Port Batch 14)
+  - Ported to `crates/harsh-core/src/loot_gen.rs` (LootGenerator: YAML loot tables, weighted roll_loot, generate_combat_loot, attempt_harvest; renamed to avoid the loot value-types module).
+- [x] HR-497: port `src\harsh_realm\engine\low_health_narration.py` to Rust and then delete the original file. (Port Batch 39 — `crates/harsh-core/src/low_health_narration.rs`, LowHealthNarrator with once-per-player warning, both event payload shapes + 4 tests)
+- [x] HR-498: port `src\harsh_realm\engine\npc_personality.py` to Rust and then delete the original file. (Port Batch 13)
+  - Ported to `crates/harsh-core/src/npc_personality.rs` (UNEGenerator with cached YAML table loads, generate_personality/motivation/bearing via injected RNG, disposition_label + chaos_modified_disposition helpers).
+- [x] HR-499: port `src\harsh_realm\engine\oracle_repository.py` to Rust and then delete the original file. (Port Batch 26)
+  - Ported to `crates/harsh-core/src/repositories/oracle.rs` (OracleRepository: threads/oracle-npcs/plotlines CRUD with exact-or-unique-prefix find, normalized plotline scenes + legacy fallback). Also set `PRAGMA foreign_keys=OFF` in WorldDatabase to match aiosqlite's default (rusqlite's bundled SQLite enforced FKs).
+- [x] HR-500: port `src\harsh_realm\engine\oracle.py` to Rust and then delete the original file. (Port Batch 42 — extended `crates/harsh-core/src/oracle.rs` with FateChecker, ChaosTracker, SceneChecker, RandomEventGenerator, chart/event-table loaders, narration + 3 tests)
+- [x] HR-501: port `src\harsh_realm\engine\random_table_repository.py` to Rust and then delete the original file. (Port Batch 20)
+  - Ported to `crates/harsh-core/src/repositories/random_table.rs` (RandomTableRepository: upsert/load/list-by-category/count, JSON tags+entries decoded to scene_data models).
+- [x] HR-502: port `src\harsh_realm\engine\saves.py` to Rust and then delete the original file. (Port Batch 10)
+  - Ported to `crates/harsh-core/src/saves.rs` (resolve_save: rolls d20, gathers target/stat/bonus from Character, delegates arithmetic to resolvers::saves). luck save defaults to target 15.
+- [x] HR-503: port `src\harsh_realm\engine\shop_inventory.py` to Rust and then delete the original file. (Port Batch 15)
+  - Ported to `crates/harsh-core/src/shop_inventory.rs` (load_shop_inventory resolving ids via ItemRegistry, get_shop_name with titleized fallback; per-call YAML load).
+- [x] HR-504: port `src\harsh_realm\engine\skill_checks.py` to Rust and then delete the original file. (Port Batch 35 — `crates/harsh-core/src/skill_checks.rs`, SkillCheckResolver with config caching, intimidate/deceive special handling, Expert reroll, narration + 5 tests)
+- [x] HR-505: port `src\harsh_realm\engine\skill_config_repository.py` to Rust and then delete the original file. (Port Batch 24)
+  - Ported to `crates/harsh-core/src/repositories/skill_config.rs` (SkillConfigRepository: load_skill_mappings, load_disposition_outcomes keyed maps).
+- [x] HR-506: port `src\harsh_realm\engine\tables.py` to Rust and then delete the original file. (Port Batch 33 — `crates/harsh-core/src/table_engine.rs`, TableEngine with YAML loading, weighted/range rolls, subtable resolution, tag rolls, generators + 5 tests)
+- [x] HR-507: port `src\harsh_realm\engine\threads.py` to Rust and then delete the original file. (Port Batch 38 — `crates/harsh-core/src/threads.rs`, ThreadTracker for story/character threads + oracle NPC cast list + 2 tests)
+- [x] HR-508: port `src\harsh_realm\engine\weather.py` to Rust and then delete the original file. (Port Batch 37 — `crates/harsh-core/src/weather.rs`, WeatherService deterministic per region/period, terrain-aware conditions + temperatures, weather events + 5 tests)
+- [x] HR-509: port `src\harsh_realm\faction\_faction_asset_mixin.py` to Rust and then delete the original file. (Port Batch 28)
+  - Ported into `repositories/faction.rs` (asset CRUD + asset_state + asset-stat config reads).
+- [x] HR-510: port `src\harsh_realm\faction\_faction_crud_mixin.py` to Rust and then delete the original file. (Port Batch 28)
+  - Ported into `repositories/faction.rs` (faction CRUD + goal/tag child-table persistence, legacy-JSON fallback).
+- [x] HR-511: port `src\harsh_realm\faction\_faction_relation_mixin.py` to Rust and then delete the original file. (Port Batch 28)
+  - Ported into `repositories/faction.rs` (relations w/ sorted id pairs, relation history, reputation get/set/adjust, encounter-weight lookup).
+- [x] HR-512: port `src\harsh_realm\faction\faction_ai.py` to Rust and then delete the original file. — B9 (async wrapper around harsh_core.choose_faction_action; AI already in resolvers::faction_ai) deleted (Port Batch 73)
+- [x] HR-513: port `src\harsh_realm\faction\faction_turn.py` to Rust and then delete the original file. — pure action resolvers ported to faction::turn_engine (resolve_attack, repair, create, expand, sell, refit, harvest, seize); 9 tests (Port Batch 73)
+- [x] HR-514: port `src\harsh_realm\faction\repository.py` to Rust and then delete the original file. (Port Batch 28)
+  - Ported to `crates/harsh-core/src/repositories/faction.rs` (FactionRepository combining all 3 mixins).
+- [x] HR-515: port `src\harsh_realm\faction\reputation.py` to Rust and then delete the original file — reputation_to_disposition + REPUTATION_DELTAS + delta_for_action ported to faction::reputation; 7 tests (Port Batch 73)
+- [x] HR-516: port `src\harsh_realm\faction\turn_support.py` to Rust and then delete the original file. — parse_dice_with + SIGNIFICANT_ACTIONS ported to faction::turn_support; 5 tests (Port Batch 73)
+- [x] HR-517: port `src\harsh_realm\generators\_world_features_mixin.py` to Rust and then delete the original file. (Port Batch 52 — `crates/harsh-core/src/generators/world_gen/features.rs`, settlement/ruin/landmark/lair/camp placement)
+- [x] HR-518: port `src\harsh_realm\generators\_world_region_mixin.py` to Rust and then delete the original file. (Port Batch 52 — `world_gen/mod.rs` generate_region: bounded edges, seeded adjacency-weighted terrain fill, variety retry, starting settlement, water/forest tagging, cell writes + 3 tests)
+- [x] HR-519: port `src\harsh_realm\generators\_world_settlements_mixin.py` to Rust and then delete the original file. (Port Batch 52 — `world_gen/settlements.rs` enhance_settlements + 1 test)
+- [x] HR-520: port `src\harsh_realm\generators\_world_support.py` to Rust and then delete the original file. (Port Batch 47 — `crates/harsh-core/src/generators/world_support.rs`, load_terrain_weights / load_name_list + 1 test)
+- [x] HR-521: port `src\harsh_realm\generators\content_tables.py` to Rust and then delete the original file. (Port Batch 47 — `generators/content_tables.rs`, load_table_results + 2 tests)
+- [x] HR-522: port `src\harsh_realm\generators\dungeon_gen.py` to Rust and then delete the original file. (Port Batch 48 — `crates/harsh-core/src/generators/dungeon_gen.rs`, DungeonGenerator with branching rooms, traps, hidden loot, connections + 3 tests)
+- [x] HR-523: port `src\harsh_realm\generators\npc_gen.py` to Rust and then delete the original file. (Port Batch 49 — `crates/harsh-core/src/generators/npc_gen.rs`, NPCGenerator: npc_basic gen, trait-derived disposition, greeting roll with fallbacks + 3 tests)
+- [x] HR-524: port `src\harsh_realm\generators\settlement_gen.py` to Rust and then delete the original file. (Port Batch 51 — `crates/harsh-core/src/generators/settlement_gen.rs`, SettlementGenerator: name/description/building-name rolls, operator + resident NPCs, settlement/building/npc entity writes, town cells on cell data + 4 tests)
+- [x] HR-525: port `src\harsh_realm\generators\square_gen.py` to Rust and then delete the original file. (Port Batch 50 — `crates/harsh-core/src/generators/square_gen.rs`, SquareWorldGenerator: room-corridor dungeons with BFS connectivity + cross-road towns with quadrant buildings + 4 tests)
+- [x] HR-526: port `src\harsh_realm\generators\world_gen.py` to Rust end then delete the original file. (Port Batch 52 — `crates/harsh-core/src/generators/world_gen/mod.rs`, WorldGenerator struct + helpers composing the region/features/settlements submodules; added TerrainRegistry::from_types)
+- [x] (no HR#) port `src\harsh_realm\generators\biome.py` to Rust and delete the original. (Port Batch 46 — `crates/harsh-core/src/generators/biome.rs`, classify_forest_biome + 4 tests)
+- [x] (no HR#) port `src\harsh_realm\generators\water.py` to Rust and delete the original. (Port Batch 46 — `crates/harsh-core/src/generators/water.rs`, classify_water_kind + 3 tests)
+- [x] HR-527: port `src\harsh_realm\gm\scenes\_cc_attributes_mixin.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-528: port `src\harsh_realm\gm\scenes\_cc_prompt_mixin.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-529: port `src\harsh_realm\gm\scenes\_cc_skills_mixin.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-530: port `src\harsh_realm\gm\scenes\_dungeon_commands_mixin.py` to Rust and then delete the original file. (Port Batch 60 — collapsed into DungeonScene)
+- [x] HR-531: port `src\harsh_realm\gm\scenes\_dungeon_movement_mixin.py` to Rust and then delete the original file. (Port Batch 60 — collapsed into DungeonScene)
+- [x] HR-532: port `src\harsh_realm\gm\scenes\_dungeon_search_mixin.py` to Rust and then delete the original file. (Port Batch 60 — collapsed into DungeonScene)
+- [x] HR-533: port `src\harsh_realm\gm\scenes\_exploration_actions_mixin.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-534: port `src\harsh_realm\gm\scenes\_exploration_enter_mixin.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-535: port `src\harsh_realm\gm\scenes\_exploration_inspection_mixin.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-536: port `src\harsh_realm\gm\scenes\_exploration_move_mixin.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-537: port `src\harsh_realm\gm\scenes\_exploration_status_mixin.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-538: port `src\harsh_realm\gm\scenes\_exploration_town_mixin.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-539: port `src\harsh_realm\gm\scenes\_shopping_commands_mixin.py` to Rust and then delete the original file. (Port Batch 59 — collapsed into ShoppingScene)
+- [x] HR-540: port `src\harsh_realm\gm\scenes\_shopping_inventory.py` to Rust and then delete the original file. (Port Batch 59 — collapsed into ShoppingScene)
+- [x] HR-541: port `src\harsh_realm\gm\scenes\_shopping_transaction_mixin.py` to Rust and then delete the original file. (Port Batch 59 — collapsed into ShoppingScene)
+- [x] HR-542: port `src\harsh_realm\gm\scenes\_social_commands_mixin.py` to Rust and then delete the original file. (Port Batch 58 — collapsed into SocialScene)
+- [x] HR-543: port `src\harsh_realm\gm\scenes\_social_healer_mixin.py` to Rust and then delete the original file. (Port Batch 58 — collapsed into SocialScene)
+- [x] HR-544: port `src\harsh_realm\gm\scenes\_social_skillcheck_mixin.py` to Rust and then delete the original file. (Port Batch 58 — collapsed into SocialScene)
+- [x] HR-545: port `src\harsh_realm\gm\scenes\_town_commands_mixin.py` to Rust and then delete the original file. (Port Batch 61 — collapsed into TownScene)
+- [x] HR-546: port `src\harsh_realm\gm\scenes\_town_interaction_mixin.py` to Rust and then delete the original file. (Port Batch 61 — collapsed into TownScene)
+- [x] HR-547: port `src\harsh_realm\gm\scenes\_town_movement_mixin.py` to Rust and then delete the original file. (Port Batch 61 — collapsed into TownScene)
+- [x] HR-548: port `src\harsh_realm\gm\scenes\_town_support.py` to Rust and then delete the original file. (Port Batch 55 — `crates/harsh-core/src/gm/scenes/town_support.rs`, is_impassable_town + normalize_settlement_summary + 3 tests)
+- [x] HR-549: port `src\harsh_realm\gm\scenes\base.py` to Rust and then delete the original file. (Port Batch 53 — `crates/harsh-core/src/gm/scenes/base.rs`, SceneState enum + SceneHandler trait + 2 tests)
+- [x] HR-550: port `src\harsh_realm\gm\scenes\character_build.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-551: port `src\harsh_realm\gm\scenes\character_creation_core.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-552: port `src\harsh_realm\gm\scenes\character_creation_finalize.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-553: port `src\harsh_realm\gm\scenes\character_creation_steps.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-554: port `src\harsh_realm\gm\scenes\character_creation_support.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-555: port `src\harsh_realm\gm\scenes\character_creation.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-556: port `src\harsh_realm\gm\scenes\combat_actions.py` to Rust and then delete the original file.
+- [x] HR-557: port `src\harsh_realm\gm\scenes\combat_core.py` to Rust and then delete the original file.
+- [x] HR-558: port `src\harsh_realm\gm\scenes\combat_enemy.py` to Rust and then delete the original file.
+- [x] HR-559: port `src\harsh_realm\gm\scenes\combat_special.py` to Rust and then delete the original file.
+- [x] HR-560: port `src\harsh_realm\gm\scenes\combat_support.py` to Rust and then delete the original file.
+- [x] HR-561: port `src\harsh_realm\gm\scenes\combat.py` to Rust and then delete the original file.
+- [x] HR-562: port `src\harsh_realm\gm\scenes\dungeon.py` to Rust and then delete the original file. (Port Batch 60 — `crates/harsh-core/src/gm/scenes/dungeon.rs`, DungeonScene implements SceneHandler: move/look/search/disarm/exit/status/help/inventory/use + 14 tests)
+- [x] HR-563: port `src\harsh_realm\gm\scenes\exploration_combat.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-564: port `src\harsh_realm\gm\scenes\exploration_core.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-565: port `src\harsh_realm\gm\scenes\exploration_interaction.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-566: port `src\harsh_realm\gm\scenes\exploration_movement.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-567: port `src\harsh_realm\gm\scenes\exploration_oracle.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-568: port `src\harsh_realm\gm\scenes\exploration_persistence.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-569: port `src\harsh_realm\gm\scenes\exploration_support.py` to Rust and then delete the original file. (Port Batch 54 — `crates/harsh-core/src/gm/scenes/exploration_support.rs`, blocked_message + 1 test)
+- [x] HR-570: port `src\harsh_realm\gm\scenes\exploration.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-571: port `src\harsh_realm\gm\scenes\level_up.py` to Rust and then delete the original file. (Port Batch 57 — `crates/harsh-core/src/gm/scenes/level_up.rs`, LevelUpScene implements SceneHandler: spend/done/status/help + 9 tests)
+- [x] HR-572: port `src\harsh_realm\gm\scenes\respawn.py` to Rust and then delete the original file. (Port Batch 57 — `crates/harsh-core/src/gm/scenes/respawn.rs`, RespawnScene implements SceneHandler: respawn/new-character with settlement BFS + 11 tests)
+- [x] HR-573: port `src\harsh_realm\gm\scenes\shopping.py` to Rust and then delete the original file. (Port Batch 59 — `crates/harsh-core/src/gm/scenes/shopping.rs`, ShoppingScene implements SceneHandler: list/buy/sell/examine/leave + 16 tests)
+- [x] HR-574: port `src\harsh_realm\gm\scenes\social_support.py` to Rust and then delete the original file. (Port Batch 54 — `crates/harsh-core/src/gm/scenes/social_support.rs`, disposition_label + 1 test)
+- [x] HR-575: port `src\harsh_realm\gm\scenes\social.py` to Rust and then delete the original file. (Port Batch 58 — `crates/harsh-core/src/gm/scenes/social.rs`, SocialScene: skill checks, disposition, healer, expert reroll + 11 tests)
+- [x] HR-576: port `src\harsh_realm\gm\scenes\time_support.py` to Rust and then delete the original file. (Port Batch 53 — `crates/harsh-core/src/gm/scenes/time_support.rs`, format_time / get_time_description + 2 tests)
+- [x] HR-577: port `src\harsh_realm\gm\scenes\town.py` to Rust and then delete the original file. (Port Batch 61 — `crates/harsh-core/src/gm/scenes/town.rs`, TownScene implements SceneHandler: move/look/talk/shop/leave/status/help/inventory + 11 tests)
+- [x] HR-578: port `src\harsh_realm\gm\__init__.py` to Rust and then delete the original file. (Port Batch 66 — `crates/harsh-core/src/gm/mod.rs`)
+- [x] HR-579: port `src\harsh_realm\gm\_controller_commands_mixin.py` to Rust and then delete the original file. (Port Batch 66 — `crates/harsh-core/src/gm/controller.rs`)
+- [x] HR-580: port `src\harsh_realm\gm\_controller_events_mixin.py` to Rust and then delete the original file. (Port Batch 66 — `crates/harsh-core/src/gm/controller.rs`)
+- [x] HR-581: port `src\harsh_realm\gm\_controller_flow_mixin.py` to Rust and then delete the original file. (Port Batch 66 — `crates/harsh-core/src/gm/controller.rs`)
+- [x] HR-582: port `src\harsh_realm\gm\_controller_wiring_mixin.py` to Rust and then delete the original file. (Port Batch 66 — `crates/harsh-core/src/gm/controller.rs`)
+- [x] HR-583: port `src\harsh_realm\gm\admin_handler.py` to Rust and then delete the original file. (Port Batch 66 — stubbed in `crates/harsh-core/src/gm/controller.rs`; AdminService not yet ported)
+- [x] HR-584: port `src\harsh_realm\gm\cell_repository.py` to Rust and then delete the original file. (Port Batch 21)
+  - Ported to `crates/harsh-core/src/repositories/cell.rs` (CellRepository: explored/features, save/load cell data splitting settlement/search/death-marker state into typed tables, find_starting_hex, reveal_neighbors, list-by-feature, passable coords, fetch_cell). Also landed EventLogger in `repositories/event_log.rs` (completes the deferred part of HR-733).
+- [x] HR-585: port `src\harsh_realm\gm\combat_event_handlers.py` to Rust and then delete the original file. (Port Batch 65 — collapsed into `crates/harsh-core/src/gm/event_handlers.rs`)
+- [x] HR-586: port `src\harsh_realm\gm\controller_support.py` to Rust and then delete the original file. (Port Batch 66 — mixin aggregator collapsed into `crates/harsh-core/src/gm/controller.rs`)
+- [x] HR-587: port `src\harsh_realm\gm\controller.py` to Rust and then delete the original file. (Port Batch 66 — `crates/harsh-core/src/gm/controller.rs`, GMController state machine with scene dispatch + wiring + oracle scene checks + 5 tests)
+- [x] HR-588: port `src\harsh_realm\gm\domain_events.py` to Rust and then delete the original file. (Port Batch 30 — `crates/harsh-core/src/domain_events.rs`, lifetime-generic DomainEventDispatcher with bounded cascade + 3 tests)
+- [x] HR-589: port `src\harsh_realm\gm\dungeon_repository.py` to Rust and then delete the original file. (Port Batch 25)
+  - Ported to `crates/harsh-core/src/repositories/dungeon.rs` (DungeonRepository: list/get/get-at-location/create/update/delete, room+connection replace, legacy-JSON fallback loads; dynamic UPDATE via boxed ToSql params).
+- [x] HR-590: port `src\harsh_realm\gm\entity_repository.py` to Rust and then delete the original file. (Port Batch 29 — `crates/harsh-core/src/repositories/entity.rs`, EntityRepository with load/save/create/sync methods + 3 tests)
+- [x] HR-591: port `src\harsh_realm\gm\entity_state_repository.py` to Rust and then delete the original file. (Port Batch 22)
+  - Ported to `crates/harsh-core/src/repositories/entity_state.rs` (EntityStateRepository: upsert/load character + npc state with JSON columns ↔ ported models; position/disposition updates; list NPCs at location; delete typed state).
+- [x] HR-592: port `src\harsh_realm\gm\exploration_event_handlers.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-593: port `src\harsh_realm\gm\gm_factory.py` to Rust and then delete the original file. (Port Batch 66 — factory logic folded into GMController::new + initialize)
+- [x] HR-594: port `src\harsh_realm\gm\gm_state_event_handlers.py` to Rust and then delete the original file. (Port Batch 65 — collapsed into `crates/harsh-core/src/gm/event_handlers.rs`)
+- [x] HR-595: port `src\harsh_realm\gm\gm_state_repository.py` to Rust and then delete the original file. (Port Batch 20)
+  - Ported to `crates/harsh-core/src/repositories/gm_state.rs` (GMStateRepository: get_value/get_int/set_value over WorldDatabase).
+- [x] HR-596: port `src\harsh_realm\gm\narrator.py` to Rust and then delete the original file. (Port Batch 56 — `crates/harsh-core/src/gm/narrator.rs`, Narrator: cell/adjacent/movement descriptions with template loading + fallbacks, RefCell RNG + 6 tests)
+- [x] HR-597: port `src\harsh_realm\gm\runtime_protocols.py` to Rust and then delete the original file. (Port Batch 66 — Protocol types; FactionTurnEngineProtocol not needed since no async layer)
+- [x] HR-598: port `src\harsh_realm\gm\shopping_event_handlers.py` to Rust and then delete the original file. (Port Batch 65 — collapsed into `crates/harsh-core/src/gm/event_handlers.rs`)
+- [x] HR-599: port `src\harsh_realm\gm\social_event_handlers.py` to Rust and then delete the original file. (Port Batch 65 — collapsed into `crates/harsh-core/src/gm/event_handlers.rs`)
+- [x] HR-600: port `src\harsh_realm\models\admin\__init__.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/mod.rs` (module re-exports).
+- [x] HR-601: port `src\harsh_realm\models\admin\_base.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/base.rs` (NamedJsonRecord; RowBackedModel base dropped — plain serde structs).
+- [x] HR-602: port `src\harsh_realm\models\admin\common.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/common.rs` (Reset/Yaml*/Ok/Delete/WorldFile/EditorSchemaDefinition + Yaml/JsonObject document newtypes).
+- [x] HR-603: port `src\harsh_realm\models\admin\config.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/config.rs` (SkillMapping, DifficultyTarget, DispositionOutcome, EncounterWeight, FactionAssetStat, XpProgression, AdminConfigExport, RandomTable).
+- [x] HR-604: port `src\harsh_realm\models\admin\faction.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/faction.rs` (FactionAssetRecord, FactionRelationRecord, FactionRecord, FactionDetail, FactionCreated, FactionAssetCreated).
+- [x] HR-605: port `src\harsh_realm\models\admin\oracle_dungeon.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/oracle_dungeon.rs` (Oracle thread/npc/state, entity/dungeon records, CharacterPreviewResult, BulkUpdateResult).
+- [x] HR-606: port `src\harsh_realm\models\admin\transfer.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin/transfer.rs` (ImportResult, ExportTableResult, Import/Export-all, WorldMeta records).
+- [x] HR-607: port `src\harsh_realm\models\api\__init__.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/mod.rs` (module re-exports; Python package `__init__`).
+- [x] HR-608: port `src\harsh_realm\models\api\character.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/character.rs` (CharacterSummary).
+- [x] HR-609: port `src\harsh_realm\models\api\gm_commands.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/gm_commands.rs` (GM teleport/spawn/give-item/set-hp/gold/xp/attr bodies + results).
+- [x] HR-610: port `src\harsh_realm\models\api\map.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/map.rs` (WorldMapCellSummary, WorldMapSummary).
+- [x] HR-611: port `src\harsh_realm\models\api\status.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/status.rs` (ServiceStatus, RootInfo, RuntimeConfigInfo).
+- [x] HR-612: port `src\harsh_realm\models\api\ui.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/ui.rs` (UILayoutState transparent newtype).
+- [x] HR-613: port `src\harsh_realm\models\api\world.py` to Rust and then delete the original file. (Port Batch 7)
+  - Ported to `crates/harsh-core/src/api/world.rs` (WorldPackSummary, WorldRef, WorldCreateResult, SnapshotResult).
+- [x] HR-614: port `src\harsh_realm\models\editor_api\__init__.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/mod.rs` (module re-exports).
+- [x] HR-615: port `src\harsh_realm\models\editor_api\cells.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/cells.rs` (CellCoordinate, CellUpdateBody, BulkCellUpdateBody).
+- [x] HR-616: port `src\harsh_realm\models\editor_api\characters.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/characters.rs` (CharacterUpdate/RecalcPreview/Create requests).
+- [x] HR-617: port `src\harsh_realm\models\editor_api\dungeons.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/dungeons.rs` (DungeonUpdateRequest).
+- [x] HR-618: port `src\harsh_realm\models\editor_api\factions.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/factions.rs` (Faction update/relation/asset requests + to_updates).
+- [x] HR-619: port `src\harsh_realm\models\editor_api\oracle.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/oracle.rs` (thread/npc/state create+update requests + to_updates).
+- [x] HR-620: port `src\harsh_realm\models\editor_api\world.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/world.rs` (WorldCloneQuery, WorldMetaUpdateRequest, Table/BulkTableImportRequest).
+- [x] HR-621: port `src\harsh_realm\models\editor_api\yaml.py` to Rust and then delete the original file. (Port Batch 8)
+  - Ported to `crates/harsh-core/src/editor_api/yaml.rs` (YamlContentUpdateRequest).
+- [x] HR-622: port `src\harsh_realm\models\__init__.py` to Rust and then delete the original file. — pure re-export; deleted (Port Batch 74)
+- [x] HR-623: port `src\harsh_realm\models\admin_api.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/admin_api.rs` (skill-mapping/difficulty/disposition/encounter-weight/faction-asset/xp/random-table update requests).
+- [x] HR-624: port `src\harsh_realm\models\cell.py` to Rust and then delete the original file. (Port Batch 6)
+  - Ported to `crates/harsh-core/src/cell.rs` (TerrainType, CellData, CellSettlementState w/ to_payload, CellSearchState, CellDeathMarker, TerrainRegistry incl. YAML load/load_all/get/all/passable_types). Python deleted.
+- [x] HR-625: port `src\harsh_realm\models\character_creation.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-626: port `src\harsh_realm\models\character_submission.py` to Rust and then delete the original file. (Port Batch 63)
+- [x] HR-627: port `src\harsh_realm\models\character.py` to Rust and then delete the original file. (Port Batch 6)
+  - Ported to `crates/harsh-core/src/character.rs` (Character value type + `new()` UUID id + serde defaults; attribute/skill map aliases). Python deleted.
+- [x] HR-628: port `src\harsh_realm\models\combat_content.py` to Rust and then delete the original file. (Port Batch 3)
+  - Ported to `crates/harsh-core/src/combat_content.rs` (AttackNarrationGroup, FleeNarrationGroup, CombatNarrationDocument). Python deleted.
+- [x] HR-629: port `src\harsh_realm\models\combat_runtime.py` to Rust and then delete the original file. (Port Batch 6)
+  - Ported to `crates/harsh-core/src/combat_runtime.rs` (AwarenessResult/AwarenessCheckResult, Combatant, CombatState, FleeResult, LastStandResult, FleeOpponent trait). Python deleted.
+- [x] HR-630: port `src\harsh_realm\models\creature.py` to Rust and then delete the original file. (Port Batch 5)
+  - Ported to `crates/harsh-core/src/creature.rs` (CreatureData + apply_defaults, CreatureHarvestable, CreatureCatalog, CreatureRegistry incl. YAML loader via serde_yaml, generate_dragon). Python deleted.
+- [x] HR-631: port `src\harsh_realm\models\engine_results.py` to Rust and then delete the original file. (Port Batch 2)
+  - Ported to `crates/harsh-core/src/engine_results.rs`: DamageResult, AttackResult, XPAwardResult, LevelUpResult, EnemyAction, HealingResult, ItemUseResult, TableResult, EncounterResult, RecalcResult, DiscoverySkillCheck, DiscoveryResult, SkillCheckResult, SaveResult. Re-uses the canonical `dice::DiceResult` rather than duplicating it. Smoke tests; Python deleted.
+- [x] HR-632: port `src\harsh_realm\models\engine_runtime.py` to Rust and then delete the original file. (Port Batch 2)
+  - Ported to `crates/harsh-core/src/engine_runtime.rs`: DiscoveryFindRecord, EncounterRecord, LootItemData, LootTableEntry, LootTableDocument, HarvestableRecord, PendingVeteranLuckRecord (serde defaults + flattened `extra` maps for the `extra="allow"` models). Python deleted.
+- [x] HR-633: port `src\harsh_realm\models\entity_state.py` to Rust and then delete the original file. (Port Batch 6)
+  - Ported to `crates/harsh-core/src/entity_state.rs` (CharacterState w/ from_character/to_character, NpcState w/ legacy disposition deser). Python deleted.
+- [x] HR-634: port `src\harsh_realm\models\faction.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/faction.rs` (FactionData/AssetData, asset/relation state, FactionActionResult, WeeklyFactionTurnResult, FactionAssetSpecialRule + from_raw, FactionActionChoice + typed FactionActionParams enum). from_row dropped.
+- [x] HR-635: port `src\harsh_realm\models\generation.py` to Rust and then delete the original file. (Port Batch 5)
+  - Ported to `crates/harsh-core/src/generation.rs` (ShopCatalog/Tier, TerrainWeightsConfig, WorldGenerationSummary, RandomTableDefinition, GeneratorDefinition/ExecutionResult, SquareCell, DungeonResult, TownResult + map aliases). Python deleted.
+- [x] HR-636: port `src\harsh_realm\models\gm_runtime.py` to Rust and then delete the original file. (Port Batch 62)
+- [x] HR-637: port `src\harsh_realm\models\grid.py` to Rust and then delete the original file. (Port Batch 1)
+  - Ported to `crates/harsh-core/src/grid.rs`: `GridType`, `GridCoord` (Copy/Eq/Hash/serde value type), `Grid` trait, `SquareGrid` (8-way king-move adjacency, Chebyshev distance, neighbor/neighbors/is_valid/random_neighbor/diagonal_cardinals), `GridError`, and `create_grid`. Exposed via `lib.rs`. 18 Rust tests (unit mirroring `test_grid.py` + seeded randomized property checks: distance non-negative/symmetric/triangle-inequality, neighbors distance-1, random_neighbor ∈ neighbors, JSON round-trip). Full crate: `cargo test -p harsh-core` = 192 passed. Hard-deleted `models/grid.py` + `tests/test_grid.py`. Per the agreed strategy (full rewrite, hard-delete, Rust-tests-gate), this decommissions the 51 Python files that imported `models.grid`; the Python suite is no longer the gate (see `docs/design/python-to-rust-port-plan.md`).
+- [x] HR-638: port `src\harsh_realm\models\item.py` to Rust and then delete the original file. (Port Batch 1)
+  - Ported to `crates/harsh-core/src/item.rs`: `SaveType`, `SaveBonusProfile`, `ConsumableEffect` (serde `type`-tagged union: food/heal/save_bonus), `ItemData` (all weapon/armor/ammo/consumable/pretech fields with serde defaults + derived `category`/`is_weapon`/`is_melee`/… ), and `ItemCatalog` (transparent newtype). Exported via `lib.rs`. 8 Rust tests. Hard-deleted `models/item.py`.
+- [x] HR-639: port `src\harsh_realm\models\loot.py` to Rust and then delete the original file. (Port Batch 4)
+  - Ported to `crates/harsh-core/src/loot.rs` (LootItem, HarvestResult, LootResult). Python deleted.
+- [x] HR-640: port `src\harsh_realm\models\map.py` to Rust and then delete the original file. (Port Batch 3)
+  - Ported to `crates/harsh-core/src/map.rs` (MapCell, MapGrid). Python deleted.
+- [x] HR-641: port `src\harsh_realm\models\narrator_content.py` to Rust and then delete the original file. (Port Batch 3)
+  - Ported to `crates/harsh-core/src/narrator_content.rs` (TerrainDescriptionsDocument, MovementDescriptionsDocument, AdjacentHintsDocument + map aliases). Python deleted.
+- [x] HR-642: port `src\harsh_realm\models\npc.py` to Rust and then delete the original file. (Port Batch 4)
+  - Ported to `crates/harsh-core/src/npc.rs` (NPCData w/ legacy disposition deser, GeneratedNPC, NPCGenerationContext, UNE* types). Python deleted.
+- [x] HR-643: port `src\harsh_realm\models\oracle.py` to Rust and then delete the original file. (Port Batch 5)
+  - Ported to `crates/harsh-core/src/oracle_models.rs` (Likelihood/FateResult/SceneModification enums, fate-chart catalog, OracleTableEntry/EventTable, Adventure Crafter docs, Plotline/Thread/OracleNPC). Named oracle_models to avoid colliding with the existing oracle engine module. Python deleted.
+- [x] HR-644: port `src\harsh_realm\models\parser.py` to Rust and then delete the original file. (Port Batch 1)
+  - Ported `ParsedCommand` (raw/verb/args/direction value type) to `crates/harsh-core/src/command.rs` with serde + constructor; exported via `lib.rs`. 4 Rust tests (fields, structural equality, JSON round-trip, null direction). Hard-deleted `models/parser.py`. The command *parser* that produces it ports later in B7 and will consume this type. `cargo test -p harsh-core` = 196 passed.
+- [x] HR-645: port `src\harsh_realm\models\public_api.py` to Rust and then delete the original file. (Port Batch 9)
+  - Ported to `crates/harsh-core/src/public_api.rs` (CreateWorld/LoadWorld/SaveWorld requests w/ validate() methods porting the field validators, UILayoutUpdateRequest alias, content/procedure override + run requests).
+- [x] HR-646: port `src\harsh_realm\models\runtime.py` to Rust and then delete the original file. (Port Batch 2)
+  - Ported to `crates/harsh-core/src/runtime.rs`: the `JsonValue`/`JsonObject` aliases (serde_json) + SceneNpcRecord, ShopItemRecord, InventoryItemRecord (with `currency_amount` + flattened `extra`), WeatherState. Python deleted.
+- [x] HR-647: port `src\harsh_realm\models\scene_data.py` to Rust and then delete the original file. (Port Batch 3)
+  - Ported to `crates/harsh-core/src/scene_data.rs` (TownCell, SettlementBuilding, DungeonRoom, AdventureScene, DungeonConnection w/ from/to aliases, RandomTableEntry + range_min_max, RandomTableRow, GeneratorStep). Python deleted.
+- [x] HR-648: port `src\harsh_realm\models\settlement.py` to Rust and then delete the original file. (Port Batch 4)
+  - Ported to `crates/harsh-core/src/settlement.rs` (BuildingData, SettlementData, SettlementSummary + size_to_tier/required_buildings). Python deleted.
+- [x] HR-649: port `src\harsh_realm\models\shop.py` to Rust and then delete the original file. (Port Batch 4)
+  - Ported to `crates/harsh-core/src/shop.rs` (ShopItem). Python deleted.
+- [x] HR-650: port `src\harsh_realm\modifiers\__init__.py` to Rust and then delete the original file. — pure re-export; deleted (Port Batch 74)
+- [x] HR-651: port `src\harsh_realm\modifiers\context.py` to Rust and then delete the original file. — evaluate_condition already in components::modifiers; deleted (Port Batch 74)
+- [x] HR-652: port `src\harsh_realm\modifiers\resolver.py` to Rust and then delete the original file. — B9 async ModifierResolver wrapper; deleted (Port Batch 74)
+- [x] HR-653: port `src\harsh_realm\modifiers\schema.py` to Rust and then delete the original file. — Modifier, ModifierCondition etc. already in ir::components; deleted (Port Batch 74)
+- [x] HR-654: port `src\harsh_realm\modifiers\service.py` to Rust and then delete the original file. — B9 async ModifierService; resolve_final_value already in components::modifiers; deleted (Port Batch 74)
+- [x] HR-655: port `src\harsh_realm\modifiers\transient.py` to Rust and then delete the original file. — ported to modifiers::transient (sync TransientModifierRepository); 5 tests (Port Batch 74)
+- [x] HR-656: port `src\harsh_realm\packs\__init__.py` to Rust and then delete the original file. — pure re-export; deleted (Port Batch 75)
+- [x] HR-657: port `src\harsh_realm\packs\code_loader.py` to Rust and then delete the original file. — B9 Python importlib hook (loads Python pack code modules); deleted (Port Batch 75)
+- [x] HR-658: port `src\harsh_realm\packs\content_service.py` to Rust and then delete the original file. (Port Batch 32 — `crates/harsh-core/src/packs/content_service.rs`, override-aware ContentService + 3 tests)
+- [x] HR-659: port `src\harsh_realm\packs\discovery.py` to Rust and then delete the original file. (Port Batch 32 — `packs/discovery.rs`, discover_packs + 2 tests)
+- [x] HR-660: port `src\harsh_realm\packs\exceptions.py` to Rust and then delete the original file. (Port Batch 12)
+  - Ported to `crates/harsh-core/src/packs/exceptions.rs` (PackError enum: Load/Resolution/Migration/Code).
+- [x] HR-661: port `src\harsh_realm\packs\loader.py` to Rust and then delete the original file. (Port Batch 32 — `packs/loader.rs`, Pack + load_pack + YAML content loading + 3 tests)
+- [x] HR-662: port `src\harsh_realm\packs\manifest.py` to Rust and then delete the original file. (Port Batch 32 — `packs/manifest.rs`, PackManifest/PackDependency with pattern validation + 3 tests)
+- [x] HR-663: port `src\harsh_realm\packs\migrations.py` to Rust and then delete the original file. — discovery+pending chain ported to packs::migrations; SQL execution B9; 7 tests (Port Batch 75)
+- [x] HR-664: port `src\harsh_realm\packs\paths.py` to Rust and then delete the original file. (Port Batch 12)
+  - Ported to `crates/harsh-core/src/packs/paths.rs` (default_content_dir, editor_schema_dir — content/ layout).
+- [x] HR-665: port `src\harsh_realm\packs\registry.py` to Rust and then delete the original file. (Port Batch 32 — `packs/registry.rs`, PackRegistry with dep validation + topo load order + 5 tests)
+- [x] HR-666: port `src\harsh_realm\packs\version.py` to Rust and then delete the original file. (Port Batch 12)
+  - Ported to `crates/harsh-core/src/packs/version.rs` (parse_version, satisfies with >=,<=,==,<,>,~= operators).
+- [x] HR-667: port `src\harsh_realm\packs\world_repository.py` to Rust and then delete the original file. (Port Batch 27)
+  - Ported to `crates/harsh-core/src/repositories/world_pack.rs` (WorldPackRepository: PackBinding/OverrideRecord, set/get pack list, override get/set/delete/list).
+- [x] HR-668: port `src\harsh_realm\parser\__init__.py` to Rust and then delete the original file. — B9 re-export shim, already-ported modules (Port Batch 76)
+- [x] HR-669: port `src\harsh_realm\parser\commands.py` to Rust and then delete the original file. (Port Batch 45 — verb/direction alias tables in `crates/harsh-core/src/parser.rs`)
+- [x] HR-670: port `src\harsh_realm\parser\parser.py` to Rust and then delete the original file. (Port Batch 45 — `parser.rs` CommandParser + 6 tests)
+- [x] HR-671: port `src\harsh_realm\payloads\__init__.py` to Rust and then delete the original file. (Port Batch 23)
+  - Ported to `crates/harsh-core/src/payloads/mod.rs` (module re-exports + JsonObject/JsonValue aliases).
+- [x] HR-672: port `src\harsh_realm\payloads\base.py` to Rust and then delete the original file. (Port Batch 23)
+  - base.py PayloadModel base dropped — each payload is a plain serde struct; JsonObject/JsonValue come from crate::runtime.
+- [x] HR-673: port `src\harsh_realm\payloads\contexts.py` to Rust and then delete the original file. (Port Batch 23)
+  - Ported to `payloads/contexts.rs` (Social/Shopping/Dungeon/Town scene contexts + TownEntryRequested).
+- [x] HR-674: port `src\harsh_realm\payloads\notices_combat.py` to Rust and then delete the original file. (Port Batch 23)
+  - Ported to `payloads/notices_combat.rs` (CharacterSnapshot + ~15 combat/character notices).
+- [x] HR-675: port `src\harsh_realm\payloads\notices_world.py` to Rust and then delete the original file. (Port Batch 23)
+  - Ported to `payloads/notices_world.rs` (~22 GM/oracle/movement/social/town notices incl CellPreview/PositionNotice).
+- [x] HR-676: port `src\harsh_realm\payloads\requests.py` to Rust and then delete the original file. (Port Batch 23)
+  - Ported to `payloads/requests.rs` (~25 gameplay command request payloads).
+- [x] HR-677: port `src\harsh_realm\payloads\transport.py` to Rust and then delete the original file. (Port Batch 23)
+  - Ported to `payloads/transport.rs` (EntityRecord, WebSocket bodies/messages, editor/admin live-update, status payloads).
+- [x] HR-678: port `src\harsh_realm\plugins\examples\__init__.py` to Rust and then delete the original file. — B9 Python plugin example package (Port Batch 76)
+- [x] HR-679: port `src\harsh_realm\plugins\examples\example_plugin.py` to Rust and then delete the original file. — B9 async Python plugin SDK example (Port Batch 76)
+- [x] HR-680: port `src\harsh_realm\plugins\__init__.py` to Rust and then delete the original file. — B9 re-export shim for Python-Python IPC system (Port Batch 76)
+- [x] HR-681: port `src\harsh_realm\plugins\codec.py` to Rust and then delete the original file. — B9 NDJSON framing for Python-Python IPC (Port Batch 76)
+- [x] HR-682: port `src\harsh_realm\plugins\host.py` to Rust and then delete the original file. — B9 async subprocess plugin host (Port Batch 76)
+- [x] HR-683: port `src\harsh_realm\plugins\protocol.py` to Rust and then delete the original file. — B9 Python-Python IPC wire protocol (Port Batch 76)
+- [x] HR-684: port `src\harsh_realm\plugins\sandbox.py` to Rust and then delete the original file. — B9 Python subprocess sandbox/rlimits (Port Batch 76)
+- [x] HR-685: port `src\harsh_realm\plugins\sdk.py` to Rust and then delete the original file. — B9 Python plugin author SDK (Port Batch 76)
+- [x] HR-686: port `src\harsh_realm\plugins\transport.py` to Rust and then delete the original file. — B9 async Python subprocess transports (Port Batch 76)
+- [x] HR-687: port `src\harsh_realm\procedures\__init__.py` to Rust and then delete the original file. — B9 re-export shim, already-ported modules (Port Batch 76)
+- [x] HR-688: port `src\harsh_realm\procedures\app_state.py` to Rust and then delete the original file. — B9 async wiring with Python importlib (Port Batch 76)
+- [x] HR-689: port `src\harsh_realm\procedures\compute_registry.py` to Rust and then delete the original file. (Port Batch 31 — `crates/harsh-core/src/procedures/compute_registry.rs`, ComputeRegistry with register/invoke/list + 3 tests)
+- [x] HR-690: port `src\harsh_realm\procedures\runner.py` to Rust and then delete the original file. (Port Batch 34 — `crates/harsh-core/src/procedures/runner.rs`, ProcedureRunner with roll/compute/procedure/format steps, content-table fallback, template rendering, input validation + 4 tests)
+- [x] HR-691: port `src\harsh_realm\procedures\schema.py` to Rust and then delete the original file. (Port Batch 31 — `crates/harsh-core/src/procedures/schema.rs`, Procedure/ProcedureStep/ProcedureInput with validators via from_record + 3 tests)
+- [x] HR-692: port `src\harsh_realm\resources\__init__.py` to Rust and then delete the original file. — B9 re-export shim (Port Batch 76)
+- [x] HR-693: port `src\harsh_realm\resources\exceptions.py` to Rust and then delete the original file. — B9 Python exception classes (Port Batch 76)
+- [x] HR-694: port `src\harsh_realm\resources\ids.py` to Rust and then delete the original file. (Port Batch 29 — GOLD_RESOURCE_ID / HP_RESOURCE_ID consts in `crates/harsh-core/src/repositories/resources.rs`)
+- [x] HR-695: port `src\harsh_realm\resources\repository.py` to Rust and then delete the original file. (Port Batch 27)
+  - Ported to `crates/harsh-core/src/repositories/resources.rs` (ResourceRepository: ResourceInstance get/set/list_for_entity/list_all/delete).
+- [x] HR-696: port `src\harsh_realm\resources\schema.py` to Rust and then delete the original file. — Resource/ResourceRegeneration content models ported to repositories::resource_schema; 7 tests (Port Batch 76)
+- [x] HR-697: port `src\harsh_realm\resources\service.py` to Rust and then delete the original file. — B9 async ResourceService (Port Batch 76)
+- [x] HR-698: port `src\harsh_realm\resources\sync.py` to Rust and then delete the original file. — B9 async HP/gold sync utilities (Port Batch 76)
+- [x] HR-699: port `src\harsh_realm\status_effects\__init__.py` to Rust and then delete the original file. (Port Batch 30 — `crates/harsh-core/src/status_effects/mod.rs` re-exports)
+- [x] HR-700: port `src\harsh_realm\status_effects\handlers.py` to Rust and then delete the original file. (Port Batch 30 — `status_effects/handlers.rs`, apply/remove/tick handlers + dispatcher registration + 3 tests)
+- [x] HR-701: port `src\harsh_realm\status_effects\models.py` to Rust and then delete the original file. (Port Batch 30 — `status_effects/models.rs`, ActiveStatusEffect)
+- [x] HR-702: port `src\harsh_realm\status_effects\repository.py` to Rust and then delete the original file. (Port Batch 30 — `status_effects/repository.rs`, StatusEffectRepository + 2 tests)
+- [x] HR-703: port `src\harsh_realm\status_effects\schema.py` to Rust and then delete the original file. (Port Batch 30 — `status_effects/schema.rs`, StatusEffect + Stacking enum + test)
+- [x] HR-704: port `src\harsh_realm\status_effects\service.py` to Rust and then delete the original file. (Port Batch 30 — `status_effects/service.rs`, StatusEffectService with ContentLookup/WorldClock traits + 4 tests)
+- [x] HR-705: port `src\harsh_realm\tags\__init__.py` to Rust and then delete the original file. — B9 re-export shim (Port Batch 77)
+- [x] HR-706: port `src\harsh_realm\tags\service.py` to Rust and then delete the original file. — B9 async TagService (Port Batch 77)
+- [x] HR-707: port `src\harsh_realm\traits\__init__.py` to Rust and then delete the original file. — B9 re-export shim (Port Batch 77)
+- [x] HR-708: port `src\harsh_realm\traits\exceptions.py` to Rust and then delete the original file. — B9 Python exception classes (Port Batch 77)
+- [x] HR-709: port `src\harsh_realm\traits\schema.py` to Rust and then delete the original file. — already in crate::ir::components (Trait/Prerequisite/TraitCost) (Port Batch 77)
+- [x] HR-710: port `src\harsh_realm\traits\service.py` to Rust and then delete the original file. — B9 async TraitService (Port Batch 77)
+- [x] HR-711: port `src\harsh_realm\triggers\verbs\composite.py` to Rust and then delete the original file. — B9 async effect verb handler (Port Batch 77)
+- [x] HR-712: port `src\harsh_realm\triggers\verbs\modifiers.py` to Rust and then delete the original file. — B9 async effect verb handler (Port Batch 77)
+- [x] HR-713: port `src\harsh_realm\triggers\verbs\simple.py` to Rust and then delete the original file. — B9 async effect verb handler (Port Batch 77)
+- [x] HR-714: port `src\harsh_realm\triggers\verbs\status.py` to Rust and then delete the original file. — B9 async effect verb handler (Port Batch 77)
+- [x] HR-715: port `src\harsh_realm\triggers\verbs\utils.py` to Rust and then delete the original file. — B9 async DSL utility (Port Batch 77)
+- [x] HR-716: port `src\harsh_realm\triggers\dispatcher.py` to Rust and then delete the original file. — B9 async EffectDispatcher (Port Batch 77)
+- [x] HR-717: port `src\harsh_realm\triggers\effects.py` to Rust and then delete the original file. — already in crate::ir::effect (Effect types) (Port Batch 77)
+- [x] HR-718: port `src\harsh_realm\triggers\handler.py` to Rust and then delete the original file. — B9 async combat trigger handler (Port Batch 77)
+- [x] HR-719: port `src\harsh_realm\triggers\materialize.py` to Rust and then delete the original file. — B9 async context materialization (Port Batch 77)
+- [x] HR-720: port `src\harsh_realm\triggers\runner.py` to Rust and then delete the original file. — B9 PyO3 shim + async intent applying (Port Batch 77)
+- [x] HR-721: port `src\harsh_realm\triggers\runtime.py` to Rust and then delete the original file. — B9 async TriggerRuntime (Port Batch 77)
+- [x] HR-722: port `src\harsh_realm\triggers\schema.py` to Rust and then delete the original file. — already in crate::ir::effect (Trigger type) (Port Batch 77)
+- [x] HR-723: port `src\harsh_realm\triggers\sinks.py` to Rust and then delete the original file. — B9 async service IntentSink (Port Batch 77)
+- [x] HR-724: port `src\harsh_realm\__init__.py` to Rust and then delete the original file. — B9 Python package init (Port Batch 77)
+- [x] HR-725: port `src\harsh_realm\_db_backfill_mixin.py` to Rust and then delete the original file. (Port Batch 19)
+  - Intentionally NOT ported: the legacy backfill mixin migrated pre-relational Python worlds (entity JSON -> relational tables). Rust worlds are created relational from SCHEMA_SQL, so the one-time legacy migration is dropped. Python file deleted.
+- [x] HR-726: port `src\harsh_realm\_db_query_mixin.py` to Rust and then delete the original file. (Port Batch 19)
+  - Ported into `db.rs` (execute/execute_script/fetch_one/fetch_all query helpers).
+- [x] HR-727: port `src\harsh_realm\_db_schema_mixin.py` to Rust and then delete the original file. (Port Batch 19)
+  - Ported into `db.rs` (open() runs the idempotent SCHEMA_SQL then verify_schema).
+- [x] HR-728: port `src\harsh_realm\cli.py` to Rust and then delete the original file. — B9 Click/subprocess dev CLI (Port Batch 78)
+- [x] HR-729: port `src\harsh_realm\config.py` to Rust and then delete the original file. — B9 FastAPI server config; paths.rs covers Rust path needs (Port Batch 78)
+- [x] HR-730: port `src\harsh_realm\db_schema.py` to Rust and then delete the original file. (Port Batch 18)
+  - Ported verbatim to `crates/harsh-core/src/db_schema.rs` (SCHEMA_SQL DDL raw string + REQUIRED_TABLES const array). Tests assert every required table has DDL.
+- [x] HR-731: port `src\harsh_realm\db.py` to Rust and then delete the original file. (Port Batch 19)
+  - Ported to `crates/harsh-core/src/db.rs` (WorldDatabase on sync rusqlite/bundled: create/open/open_in_memory, execute/execute_script/fetch_one/fetch_all returning column->JsonValue row maps, get/set_meta, save_snapshot via rusqlite backup, verify_schema, list_worlds). Python was async aiosqlite; the web host wraps the sync core off-thread.
+- [x] HR-732: port `src\harsh_realm\desktop.py` to Rust and then delete the original file. — B9 PyWebView desktop launcher (Port Batch 78)
+- [x] HR-733: port `src\harsh_realm\events.py` to Rust and then delete the original file. (Port Batch 17)
+  - Ported the pure event substrate to `crates/harsh-core/src/events.rs`: GameEvent (uuid id + chrono RFC3339 timestamp), EventKind + classify_event_kind/is_authoritative_event/describe_event_for_log, and EventBus (subscribe/subscribe_all/publish with bounded cascade). The DB-backed EventLogger is deferred to the persistence batch (it needs WorldDatabase) — tracked in the port plan.
+- [x] HR-734: port `src\harsh_realm\exceptions.py` to Rust and then delete the original file. (Port Batch 11)
+  - Ported to `crates/harsh-core/src/exceptions.rs` (HarshRealmError enum covering entity/command/character-creation/world/resource/schema + plugin protocol/start/timeout/crashed/invocation; PluginInvocation keeps code/message/data and the `[code] message` Display).
+- [x] HR-735: port `src\harsh_realm\main.py` to Rust and then delete the original file. — B9 FastAPI app factory (Port Batch 78)
+- [x] HR-736: port `src\harsh_realm\paths.py` to Rust and then delete the original file. (Port Batch 11)
+  - Ported to `crates/harsh-core/src/paths.rs` (get_base_dir via HARSH_REALM_BASE_DIR env override → cwd; get_frontend_dist_dir). PyInstaller _MEIPASS logic maps to the env override in Rust.
+- [x] HR-737: port `src\harsh_realm\typed_events.py` to Rust and then delete the original file. — B9 async Python TypedGameEvent wrapper (Port Batch 77)
+- [x] HR-738: look at moving `crates\harsh-core\schema\harsh-ir.schema.json` to a top-level schema directory.
+  - Moved via `git mv` to the repo-root `schema/harsh-ir.schema.json`, alongside the other top-level shared dirs (`content/`, `docs/`, `frontend/`); it's the cross-cutting IR authoring contract, not a harsh-core internal. Repointed the two references (`src/bin/export_schema.rs` writes there; `ir::tests::committed_schema_matches_export` reads `CARGO_MANIFEST_DIR/../../schema/...`) and dropped the now-stale "what Python validates against" doc line. Verified: `cargo run --bin export-schema` writes the new path and `cargo test` (incl. the drift gate) is green.
+- [x] HR-739: use anyhow crate in Rust code rather than std:io::Result.
+  - Adopted `anyhow::Result` at the I/O/application boundaries that returned bare `std::io::Result`: harsh-web `serve`/`run_blocking`/`main`, the `export-schema` bin, `content::loader::collect_yaml_paths`, and src-tauri `backend::{find_free_port,launch}` (the timeout `io::Error::new` became `anyhow!`). Added `anyhow = "1"` to harsh-core, harsh-web, src-tauri. The Tauri `setup` closure's `launch()?` still converts cleanly (anyhow::Error → `Box<dyn Error>`). All three crates build; harsh-core tests green.
+- [x] HR-740: add graphics for ruins
+- [x] HR-741: add graphics for mountains
+- [x] HR-742: add graphics for barren/deserts
+- [x] HR-743: add graphics for roads
+- [x] HR-744: add graphics for objectives
+- [x] HR-745: add graphics for monster encounters
+  - Shipped together in PR #33: six deterministic SVG map stamps following the HR-405/407/409/410 pattern (pure `hashUnit` placement helpers + colour consts in `frontend/src/utils/mapGraphics.ts`, `data-testid` render groups in `components/SquareMap.vue`, previews in `MapLegend.vue`). Ruins = broken pillars (`ruins` terrain or feature); mountains = snow-capped peaks; barren = desert dunes / wasteland cracked-earth (`data-barren-kind`); roads = auto-tiled tan path + dashed centreline (road terrain or feature); objectives = quest flag (`objective` feature); encounters = skull (`lair`/`encounter`/`monster` feature). Stamped features drop their letter glyph. Verified: vue-tsc 0 errors, `npm run build`, `e2e/map-graphics.spec.ts` (5 passed).

@@ -1,0 +1,46 @@
+terrains:
+  - id: plains
+    name: Plains
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_plains
+  - id: forest
+    name: Forest
+    passable: true
+    blocks_vision: true
+    description_pool: descriptions_forest
+  - id: hills
+    name: Hills
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_hills
+  - id: mountains
+    name: Mountains
+    passable: false
+    blocks_vision: true
+    description_pool: descriptions_mountains
+  - id: water
+    name: Water
+    passable: false
+    blocks_vision: false
+    description_pool: descriptions_water
+  - id: swamp
+    name: Swamp
+    passable: true
+    blocks_vision: true
+    description_pool: descriptions_swamp
+  - id: desert
+    name: Desert
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_desert
+  - id: wasteland
+    name: Wasteland
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_wasteland
+  - id: ruins
+    name: Ruins
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_ruins

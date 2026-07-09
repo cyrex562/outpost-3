@@ -1,0 +1,25 @@
+# Named difficulty levels for the XWN rules engine
+
+- name: trivial
+  target: 4
+  description: "Anyone could do this under normal circumstances."
+
+- name: routine
+  target: 8
+  description: "Standard difficulty. A competent person succeeds more often than not."
+
+- name: challenging
+  target: 10
+  description: "Requires real skill or good luck."
+
+- name: hard
+  target: 12
+  description: "Even skilled characters will fail sometimes."
+
+- name: formidable
+  target: 14
+  description: "Near the edge of human capability."
+
+- name: heroic
+  target: 16
+  description: "Only the best have a realistic chance."

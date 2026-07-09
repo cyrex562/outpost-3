@@ -1,0 +1,34 @@
+pattern: "creatures/"
+label: "Creatures"
+widget: RegistryEditor
+accessor: { kind: key, key: creatures }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: md }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: hd, type: number, label: HD, width: sm }
+  - { key: hp_per_hd, type: number, label: HP/HD, width: sm }
+  - { key: ac, type: number, label: AC, width: sm }
+  - { key: attack_bonus, type: number, label: Atk Bonus, width: sm }
+  - { key: damage, type: text, label: Damage, width: sm }
+  - { key: damage_type, type: select, label: Dmg Type, options: [melee, ranged], width: sm }
+  - { key: attack_skill, type: text, label: Atk Skill, width: sm }
+  - { key: attack_description, type: text, label: Atk Desc, width: md }
+  - { key: num_attacks, type: number, label: "# Atks", width: sm }
+  - { key: behavior, type: select, label: Behavior, options: [aggressive, defensive, territorial, passive, ambush], width: sm }
+  - { key: awareness_difficulty, type: number, label: Awareness DC, width: sm }
+  - { key: flee_difficulty, type: number, label: Flee DC, width: sm }
+  - { key: unavoidable, type: boolean, label: Unavoidable }
+  - { key: morale, type: number, label: Morale, width: sm }
+  - { key: loot_table, type: select, label: Loot Table, width: md, options: ["", "beast", "construct", "humanoid_common", "humanoid_military", "mythical", "pocket_litter", "undead"] }
+  - { key: harvestable, type: textarea, label: Harvestable, width: full }
+  - { key: description_unseen, type: textarea, label: "Desc (unseen)", width: full }
+  - { key: description_seen, type: textarea, label: "Desc (seen)", width: full }
+  - { key: description_short, type: text, label: "Desc (short)", width: md }
+  - { key: xp_value, type: number, label: XP, width: sm }
+  - { key: tags, type: tags, label: Tags, width: full }
+  - { key: special_abilities, type: tags, label: Special Abilities, width: full }
+  - { key: encounter_frequency, type: select, label: Frequency, options: [rare, uncommon, common, very_common], width: sm }
+  - { key: terrain_preference, type: tags, label: Terrain Preference, width: full }
+allow_add: true
+allow_delete: true

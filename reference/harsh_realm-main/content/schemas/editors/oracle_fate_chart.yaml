@@ -1,0 +1,5 @@
+pattern: "tables/oracle/fate_chart"
+label: "Fate Chart (Matrix)"
+widget: MatrixEditor
+accessor: { kind: key, key: likelihoods }
+fields: []

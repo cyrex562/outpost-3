@@ -1,0 +1,223 @@
+creatures:
+  - id: wolf
+    name: Wolf
+    hd: 1
+    hp_per_hd: 4
+    ac: 13
+    attack_bonus: 1
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "lunges and bites at"
+    innate_attacks: [bite]
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 8
+    flee_difficulty: 6
+    unavoidable: false
+    morale: 8
+    loot_table: null
+    harvestable:
+      material: "wolf pelt"
+      skill: "survive"
+      difficulty: 8
+    description_unseen: "You hear howling in the distance, growing closer."
+    description_seen: "A gaunt wolf emerges from the shadows, eyes gleaming."
+    description_short: "wolf"
+    xp_value: 15
+    tags: [beast, pack, wilderness, forest, hills, plains]
+    special_abilities: []
+
+  - id: wild_buffalo
+    name: Wild Buffalo
+    hd: 3
+    hp_per_hd: 5
+    ac: 12
+    attack_bonus: 3
+    damage: "1d10"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "charges and gores at"
+    innate_attacks: [gore]
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 6
+    flee_difficulty: 10
+    unavoidable: false
+    morale: 10
+    loot_table: beast
+    harvestable:
+      material: "buffalo hide"
+      skill: "survive"
+      difficulty: 9
+    description_unseen: "You hear heavy hooves and snorting nearby."
+    description_seen: "A massive buffalo lowers its horns and paws the earth."
+    description_short: "wild buffalo"
+    xp_value: 45
+    tags: [beast, plains, wilderness]
+    special_abilities: []
+
+  - id: giant_crab
+    name: Giant Crab
+    hd: 2
+    hp_per_hd: 5
+    ac: 15
+    attack_bonus: 2
+    damage: "1d8"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "snaps its massive claws at"
+    innate_attacks: [claws]
+    num_attacks: 2
+    behavior: territorial
+    awareness_difficulty: 10
+    flee_difficulty: 8
+    unavoidable: false
+    morale: 9
+    loot_table: beast
+    harvestable:
+      material: "crab shell fragment"
+      skill: "survive"
+      difficulty: 7
+    description_unseen: "You hear clicking and scraping from the rocks ahead."
+    description_seen: "A crab the size of a cart horse raises its claws in threat."
+    description_short: "giant crab"
+    xp_value: 30
+    tags: [beast, coastal, wilderness, swamp]
+    special_abilities: []
+
+  - id: giant_scorpion
+    name: Giant Scorpion
+    hd: 2
+    hp_per_hd: 4
+    ac: 14
+    attack_bonus: 2
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "strikes with its venomous stinger at"
+    innate_attacks: [sting]
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 9
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 10
+    loot_table: beast
+    harvestable:
+      material: "scorpion venom sac"
+      skill: "survive"
+      difficulty: 10
+    description_unseen: "You sense movement in the sand — something large and low."
+    description_seen: "A scorpion the size of a hound raises its stinger, ready to strike."
+    description_short: "giant scorpion"
+    xp_value: 30
+    tags: [beast, desert, wilderness, wasteland]
+    special_abilities: []
+
+  - id: giant_insect
+    name: Giant Insect
+    hd: 1
+    hp_per_hd: 3
+    ac: 12
+    attack_bonus: 1
+    damage: "1d4"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "bites and tears at"
+    innate_attacks: [swarm_bite]
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 10
+    flee_difficulty: 6
+    unavoidable: false
+    morale: 7
+    loot_table: null
+    harvestable: null
+    description_unseen: "A chittering sound rises from the undergrowth."
+    description_seen: "A cluster of giant insects swarms toward you, mandibles snapping."
+    description_short: "giant insect"
+    xp_value: 15
+    tags: [beast, pack, wilderness, forest, swamp]
+    special_abilities: []
+
+  - id: razor_hound
+    name: Razor Hound
+    hd: 2
+    hp_per_hd: 5
+    ac: 13
+    attack_bonus: 2
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "lunges with chrome-tipped teeth at"
+    num_attacks: 2
+    behavior: aggressive
+    awareness_difficulty: 7
+    flee_difficulty: 8
+    unavoidable: false
+    morale: 11
+    loot_table: beast
+    harvestable: null
+    description_unseen: "You hear a low mechanical whine, then rapid claws on stone."
+    description_seen: "A genetically engineered hound — too symmetric, too fast — bares chrome-tipped teeth."
+    description_short: "razor hound"
+    xp_value: 30
+    tags: [beast, engineered, ruins, wilderness, dungeon]
+    special_abilities: []
+
+  - id: acid_spitter
+    name: Acid Spitter
+    hd: 2
+    hp_per_hd: 4
+    ac: 12
+    attack_bonus: 2
+    damage: "1d6"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "expels a corrosive stream at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 9
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 9
+    loot_table: beast
+    harvestable:
+      material: "acid gland"
+      skill: "survive"
+      difficulty: 11
+    description_unseen: "A hissing sound and the acrid smell of dissolving metal."
+    description_seen: "A pale lizard-thing the size of a dog rears up, throat pulsing green."
+    description_short: "acid spitter"
+    xp_value: 30
+    tags: [beast, engineered, ruins, dungeon]
+    special_abilities: []
+
+  - id: gene_wyrm
+    name: Gene-Wyrm
+    hd: 4
+    hp_per_hd: 5
+    ac: 14
+    attack_bonus: 4
+    damage: "1d8"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "constricts and bites at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 8
+    flee_difficulty: 9
+    unavoidable: false
+    morale: 10
+    loot_table: beast
+    harvestable:
+      material: "engineered venom sac"
+      skill: "survive"
+      difficulty: 12
+    description_unseen: "A heavy body drags across the floor. Something enormous is moving."
+    description_seen: "An enormous pale serpent — scales too regular, eyes too intelligent — rears before you."
+    description_short: "gene-wyrm"
+    xp_value: 60
+    tags: [beast, engineered, wasteland, ruins, dungeon]
+    special_abilities: []

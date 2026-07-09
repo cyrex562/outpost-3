@@ -1,0 +1,37 @@
+# UNE NPC Descriptors table (adjectives)
+# TODO: Populate from UNE rulebook — full table has 100 entries
+id: une_descriptors
+category: une
+name: "UNE NPC Descriptors"
+tags: [une, npc, descriptor]
+entries:
+  - weight: 1
+    result: "scheming"
+  - weight: 1
+    result: "insane"
+  - weight: 1
+    result: "friendly"
+  - weight: 1
+    result: "hostile"
+  - weight: 1
+    result: "inquisitive"
+  - weight: 1
+    result: "knowing"
+  - weight: 1
+    result: "mysterious"
+  - weight: 1
+    result: "prejudiced"
+  - weight: 1
+    result: "cruel"
+  - weight: 1
+    result: "conniving"
+  - weight: 1
+    result: "fierce"
+  - weight: 1
+    result: "defiant"
+  - weight: 1
+    result: "commanding"
+  - weight: 1
+    result: "cautious"
+  - weight: 1
+    result: "devoted"

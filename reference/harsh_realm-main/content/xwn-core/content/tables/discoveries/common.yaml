@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: discoveries_common
+category: discovery
+name: "Common Discoveries"
+tags: [common]
+entries:
+  - weight: 4
+    result:
+      type: item
+      name: "Length of Rope"
+      description: "A coil of rope, worn but functional. Always useful."
+      enc: 1
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Scrap Cloth"
+      description: "A bundle of rough cloth. Useful for bandages, padding, or trade."
+      enc: 0
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Basic Hand Tool"
+      description: "A hammer, pry bar, or similar — the exact type varies. Solid construction."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Small Provisions"
+      description: "A day's worth of hard tack or dried food, wrapped in oilskin."
+      enc: 0
+      min_difficulty: 0
+  - weight: 2
+    result:
+      type: environmental
+      description: "A concealed hollow in the ground — someone used this as a hide or cache point."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Tin of Lamp Oil"
+      description: "A sealed tin with enough oil for several hours of light."
+      enc: 1
+      min_difficulty: 8

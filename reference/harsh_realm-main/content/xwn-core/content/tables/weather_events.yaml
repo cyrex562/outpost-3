@@ -1,0 +1,26 @@
+id: weather_events
+category: weather
+name: "Weather Events"
+entries:
+  - weight: 10
+    result: "A sudden gust of wind whistles through the area."
+  - weight: 10
+    result: "The clouds momentarily part, revealing a sliver of blue."
+  - weight: 10
+    result: "A faint rumble of distant thunder can be heard."
+  - weight: 10
+    result: "A light drizzle begins to fall, then stops just as quickly."
+  - weight: 10
+    result: "A warm breeze carries the scent of distant wildflowers."
+  - weight: 10
+    result: "The air feels unusually heavy and humid."
+  - weight: 10
+    result: "A brief flurry of snow dusts your shoulders."
+  - weight: 10
+    result: "A sudden bank of mist rolls in, then dissipates."
+  - weight: 5
+    result: "A double rainbow arches across the sky."
+  - weight: 5
+    result: "The temperature drops sharply for a few moments."
+  - weight: 5
+    result: "The sky turns an eerie shade of green before returning to normal."

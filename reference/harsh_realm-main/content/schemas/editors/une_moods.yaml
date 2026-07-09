@@ -1,0 +1,16 @@
+pattern: "tables/npc/une_moods"
+label: "UNE Moods"
+meta_fields:
+  - { key: id, type: text, label: ID }
+  - { key: name, type: text, label: Name }
+  - { key: category, type: text, label: Category }
+  - { key: tags, type: tags, label: Tags }
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: score, type: number, label: Disposition, width: sm }
+  - { key: label, type: text, label: Mood, width: md }
+sortable: true
+allow_add: true
+allow_delete: true

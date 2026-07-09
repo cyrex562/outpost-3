@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_swamp
+category: encounter
+name: "Swamp Encounters"
+tags: [swamp, wilderness]
+entries:
+  - weight: 3
+    result:
+      type: hostile
+      name: "Bog Predator"
+      description: "Something slides from the murky water ahead — scaled, fast, and bigger than expected."
+  - weight: 2
+    result:
+      type: hostile
+      name: "Desperate Outcasts"
+      description: "A group of gaunt figures, living rough in the swamp, blocks your path. Exiles from somewhere. Dangerous now."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Swamp Hermit"
+      description: "A solitary figure poles a flat-bottomed boat through the reeds. They've been out here a long time — you can tell by their eyes."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Trappers"
+      description: "Two trappers are running their lines through the bog. They know this area better than anyone."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Sinking Ground"
+      description: "The path ahead looks solid but gives beneath your weight — bog beneath the surface vegetation. Careful navigation needed."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Toxic Gas Pocket"
+      description: "A foul-smelling cloud drifts from a disturbance in the mud. Natural rot gas — unpleasant and potentially dangerous in concentration."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Biting Insects"
+      description: "A dense cloud of insects descends — biting, crawling, relentless. A miserable hour until you clear the area."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Sunken Structure"
+      description: "The top of a building protrudes from the bog — barely visible, mostly submerged. Whatever it was, it sank long ago."

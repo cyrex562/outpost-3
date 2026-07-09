@@ -1,0 +1,27 @@
+id: fantasy_prompt
+name: Grammar Fuel Fantasy Prompt
+description: Generates a compact fantasy prompt from noun, verb, adjective, and adverb rolls.
+steps:
+  - kind: roll
+    assign: noun
+    table: wickham-tables:tables.grammar_fuel.fantasy_nouns
+  - kind: roll
+    assign: verb
+    table: wickham-tables:tables.grammar_fuel.fantasy_verbs
+  - kind: roll
+    assign: adjective
+    table: wickham-tables:tables.grammar_fuel.fantasy_adjectives
+  - kind: roll
+    assign: adverb
+    table: wickham-tables:tables.grammar_fuel.fantasy_adverbs
+  - kind: format
+    assign: prompt
+    template: "The {adjective} {noun} will {verb} {adverb}."
+output:
+  fields:
+    noun: noun
+    verb: verb
+    adjective: adjective
+    adverb: adverb
+    prompt: prompt
+tags: [wickham, grammar-fuel, fantasy]

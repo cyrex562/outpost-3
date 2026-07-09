@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_swamp
+category: discovery
+name: "Swamp Discoveries"
+tags: [swamp, wilderness]
+entries:
+  - weight: 5
+    result:
+      type: environmental
+      description: "A patch of firmer ground — moss-covered but solid — in the middle of the bog. A natural rest point."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Waterlogged Pack"
+      description: "A pack half-sunk in the mud. The contents are mostly ruined, but a sealed tin has survived."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Medicinal Roots"
+      description: "A tangle of roots with a sharp smell — a herbalist would know their use."
+      enc: 0
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "A submerged stone platform just below the waterline — deliberate construction, old."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Preserved Cache"
+      description: "A sealed clay pot wedged in a tree root. Inside: preserved meat and a small knife."
+      enc: 1
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: clue
+      description: "An old rope tied between two trees just below eye level — a path marker, nearly invisible."
+      min_difficulty: 8
+  - weight: 1
+    result:
+      type: item
+      name: "Pretech Sensor Node"
+      description: "A corroded sphere of advanced manufacture sunk in the mud. Once part of a monitoring network."
+      enc: 1
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: environmental
+      description: "The bog opens into a small island with the remains of a stone building. The walls still stand to waist height."
+      min_difficulty: 10

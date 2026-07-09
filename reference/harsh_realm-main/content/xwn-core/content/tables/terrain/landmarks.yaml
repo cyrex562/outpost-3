@@ -1,0 +1,41 @@
+# Specific landmark types for world generation
+
+id: landmarks
+category: terrain
+name: Landmarks
+tags: [wilderness, landmark]
+entries:
+  - weight: 1
+    result:
+      type: "obelisk"
+      name: "Shattered Obelisk"
+      description: "A towering spire of black stone, cracked and weathered by ages."
+      interaction: "Lore of the Spire"
+
+  - weight: 1
+    result:
+      type: "shrine"
+      name: "Ancient Shrine"
+      description: "A small, vine-covered altar dedicated to a forgotten deity."
+      interaction: "Blessing of the Ancients"
+
+  - weight: 1
+    result:
+      type: "statue"
+      name: "Weathered Statue"
+      description: "A colossal stone head half-buried in the earth, its features worn smooth."
+      interaction: "Faded Inscription"
+
+  - weight: 1
+    result:
+      type: "monolith"
+      name: "Glowing Monolith"
+      description: "A smooth slab of strange, translucent material that pulses with a faint blue light."
+      interaction: "Arcane Resonance"
+
+  - weight: 1
+    result:
+      type: "well"
+      name: "Star-Well"
+      description: "A circular stone well filled with water that reflects a sky different from the one above."
+      interaction: "Starlit Vision"

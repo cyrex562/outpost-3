@@ -1,0 +1,32 @@
+movement:
+  plains:
+    - "You move {direction} across the open ground."
+    - "The {direction} route is clear. You make good time."
+  forest:
+    - "You push through the undergrowth heading {direction}."
+    - "You follow a rough trail {direction} through the trees."
+  hills:
+    - "You pick your way {direction} through the rocky terrain."
+    - "The climb is hard going, but you make it through heading {direction}."
+  mountains:
+    - "You labor {direction} through the mountain passes."
+    - "Progress is slow heading {direction} through the high terrain."
+  swamp:
+    - "You slog {direction} through the mud and reeds."
+    - "Each step {direction} is a fight against the sucking ground."
+  desert:
+    - "You trudge {direction} through the heat and dust."
+    - "The {direction} track is merciless but passable."
+  ruins:
+    - "You pick your way {direction} through the rubble."
+    - "Moving {direction} through the ruins, you watch your step."
+  water:
+    - "You follow the water's edge {direction}."
+  settlement:
+    - "You make your way {direction} toward the settlement."
+  wasteland:
+    - "You trudge {direction} across the desolate wasteland."
+    - "Moving {direction} through the wasteland, you keep your head down."
+  default:
+    - "You head {direction}."
+    - "You move {direction}."

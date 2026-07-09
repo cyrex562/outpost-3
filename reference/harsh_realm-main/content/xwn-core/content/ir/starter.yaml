@@ -1,0 +1,182 @@
+# Starter IR content for xwn-core — the canonical example of IR-driven content.
+#
+# Demonstrates the full IR chain end to end via two paths:
+#   1. An `item` grants a `trait` whose on-hit `trigger` applies a `status_effect`
+#      that then drains the wielder's target each time the afflicted creature acts
+#      (the shard lance → laceration → bleed loop).
+#   2. A `creature` carries an INTRINSIC `trait` (no item needed) whose on-hit
+#      trigger afflicts its target — the engineered ash crawler's caustic bite.
+# Authored in the `ir/` tree (NOT the legacy creatures/items files), so the
+# compiler ingests it; everything under `ir/` is compiled into a world's
+# `ir_records` at world creation (see `runtime_content::compile_pack_ir`) and so
+# drives that world.
+#
+# Use this file as the template for your own content: copy it, change the ids,
+# and either drop it in a pack's `ir/` dir (loads at world creation) or paste it
+# into the Content Studio and click "Run demo" to watch it fight.
+#
+# Random encounters and kit weapons are now wired into live combat, and intrinsic
+# creature/character traits are sourced into the eval context — so this fires in a
+# real exploration encounter as well as the Content Studio combat demo.
+
+item:
+  id: weapon.shard_lance
+  name: Shard Lance
+  enc: 1
+  cost: 50
+  tags: [weapon, melee, pretech]
+  damage: 1d6
+  attribute: dex
+  weapon_tags: [pretech]
+  grants_traits: [shard_laceration]
+---
+trait:
+  id: shard_laceration
+  name: Shard Laceration
+  description: A pretech shard-lance leaves microfilament wounds that keep bleeding.
+  category: weapon_quality
+  triggers:
+    - id: shard_on_hit
+      on: combat.attack
+      when: "event.hit == true"
+      do:
+        - kind: apply_status
+          params: { entity_id: target, status_id: lacerated, duration_ticks: 4 }
+        - kind: log
+          params: { message: "Shard filaments lodge in the wound — lacerated." }
+---
+status_effect:
+  id: lacerated
+  name: Lacerated
+  description: Bleeding microfilament wounds that worsen with movement.
+  default_duration_ticks: 4
+  provides_tags: [lacerated, bleeding]
+  stacking: replace
+  triggers:
+    - id: lacerated_tick
+      on: combat.attack
+      when: "has_tag(self, 'lacerated')"
+      do:
+        - kind: change_resource
+          params: { resource: hp, delta: -1 }
+        - kind: log
+          params: { message: "The laceration weeps as they move." }
+---
+trait:
+  id: caustic_bite
+  name: Caustic Bite
+  description: An engineered scavenger's mandibles secrete a corrosive enzyme.
+  category: creature_quality
+  triggers:
+    - id: caustic_on_hit
+      on: combat.attack
+      when: "event.hit == true"
+      do:
+        - kind: apply_status
+          params: { entity_id: target, status_id: corroded, duration_ticks: 3 }
+        - kind: log
+          params: { message: "Corrosive enzyme eats into the wound — corroded." }
+---
+status_effect:
+  id: corroded
+  name: Corroded
+  description: Acid-etched flesh that smarts with every exertion.
+  default_duration_ticks: 3
+  provides_tags: [corroded]
+  stacking: replace
+  triggers:
+    - id: corroded_tick
+      on: combat.attack
+      when: "has_tag(self, 'corroded')"
+      do:
+        - kind: change_resource
+          params: { resource: hp, delta: -1 }
+        - kind: log
+          params: { message: "The corrosion bites as they move." }
+---
+creature:
+  id: ash_crawler
+  name: Ash Crawler
+  hd: 2
+  hp_per_hd: 4
+  ac: 12
+  attack_bonus: 2
+  damage: 1d6
+  behavior: aggressive
+  awareness_difficulty: 8
+  flee_difficulty: 7
+  xp_value: 20
+  tags: [engineered, beast, ruins]
+  # Intrinsic trait: the crawler's bite afflicts on hit with no item involved.
+  traits: [caustic_bite]
+  # IR damage-model fields (HR-761), carried into combat: a named `dr` defense
+  # mitigates incoming IR damage, and an extra `carapace` SD pool absorbs hits
+  # before hp (the `hp` pool is derived from hd × hp_per_hd). `ac`/`evasion` are
+  # avoidance defenses (HR-766): melee attacks contest `ac`, ranged contest
+  # `evasion` — the skittering crawler is harder to shoot than to stab.
+  defenses: { ac: 12, evasion: 14, dr: 1 }
+  pools:
+    - { id: carapace, tags: [sd], current: 3, max: 3 }
+  description_unseen: Something skitters across the rubble, raising a haze of grey ash.
+  description_seen: A chitinous engineered scavenger, its plates dusted with ash.
+  description_short: ash crawler
+---
+# Non-combat example: an intrinsic character trait that reacts to EXPLORATION,
+# not combat. The IR interpreter now fires triggers in every scene (HR-757), so a
+# trait on the player whose trigger is `on: exploration.enter_hex` applies a
+# status when they step into a ruins hex. Source it by giving a character the
+# `ruin_dread` trait (creature/character intrinsic traits are sourced in play);
+# world/room-owned triggers that fire without being carried are HR-760.
+trait:
+  id: ruin_dread
+  name: Dread of the Ruins
+  description: Pretech ruins prickle the nerves of those attuned to their wrongness.
+  category: regional
+  triggers:
+    - id: dread_on_enter_ruins
+      on: exploration.enter_hex
+      when: "event.terrain == 'ruins'"
+      do:
+        - kind: apply_status
+          params: { status_id: dread, duration_ticks: 6 }
+        - kind: log
+          params: { message: "A cold dread settles as the ruins close in." }
+---
+status_effect:
+  id: dread
+  name: Dread
+  description: A gnawing unease that saps the will.
+  default_duration_ticks: 6
+  provides_tags: [dread, shaken]
+  stacking: replace
+  # Over-time effect on the WORLD CLOCK (HR-758): while dread persists it gnaws
+  # each tick, independent of combat. The heartbeat fires this for any entity
+  # carrying the status, and the status expires after default_duration_ticks.
+  triggers:
+    - id: dread_gnaws
+      on: time.tick
+      when: "has_tag(self, 'dread')"
+      do:
+        # Compute effect (HR-759): roll variable gnaw damage, bind it, then spend
+        # it. `{ expr }` evaluates a DSL expression with the bound value in scope;
+        # `{ ref: gnaw }` would read it verbatim.
+        - kind: roll_dice
+          params: { dice: "1d2", bind: gnaw }
+        - kind: change_resource
+          params: { resource: hp, delta: { expr: "0 - local.gnaw" } }
+        - kind: log
+          params: { message: "The dread gnaws — your nerve frays." }
+---
+# Standalone / global trigger (HR-760): a `trigger` record that is NOT carried by
+# any entity. It fires by event type alone — here, whenever ANY entity enters a
+# ruins hex — so the world itself can react. Global triggers are sourced after an
+# entity's own (status/item/trait) triggers and evaluate in the event's context
+# (`self` is the acting entity). This is the "rooms/objects/world react" path that
+# `ruin_dread` (a carried trait) can't express on its own.
+trigger:
+  id: ruins_watch
+  on: exploration.enter_hex
+  when: "event.terrain == 'ruins'"
+  do:
+    - kind: log
+      params: { message: "The ruins seem aware of your presence." }

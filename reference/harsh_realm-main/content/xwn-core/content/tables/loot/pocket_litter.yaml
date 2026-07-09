@@ -1,0 +1,33 @@
+table_id: pocket_litter
+type: loot
+entries:
+  - weight: 5
+    result: "A worn button"
+    data: {type: junk, name: "worn button", value: 0}
+  - weight: 4
+    result: "A length of twine"
+    data: {type: junk, name: "twine", value: 1}
+  - weight: 4
+    result: "A bent nail"
+    data: {type: junk, name: "bent nail", value: 0}
+  - weight: 3
+    result: "A scrap of cloth"
+    data: {type: junk, name: "cloth scrap", value: 0}
+  - weight: 3
+    result: "A smooth stone"
+    data: {type: junk, name: "smooth stone", value: 0}
+  - weight: 2
+    result: "A crude wooden carving"
+    data: {type: junk, name: "wooden carving", value: 2}
+  - weight: 2
+    result: "A handful of dried berries"
+    data: {type: consumable, name: "dried berries", value: 1}
+  - weight: 2
+    result: "A stub of tallow candle"
+    data: {type: misc, name: "tallow candle", value: 1}
+  - weight: 1
+    result: "A coin of unfamiliar mint"
+    data: {type: misc, name: "strange coin", value: 5}
+  - weight: 1
+    result: "A folded scrap of paper with writing"
+    data: {type: misc, name: "paper scrap", value: 3}

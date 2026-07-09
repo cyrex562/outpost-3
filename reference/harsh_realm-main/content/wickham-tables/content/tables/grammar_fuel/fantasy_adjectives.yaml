@@ -1,0 +1,11 @@
+# Source sample: Ken Wickham, Grammar Fuel: Genres, Fantasy table.
+# TODO: Populate from licensed source material. Minimal excerpt below.
+id: fantasy_adjectives
+name: Grammar Fuel Fantasy Adjectives
+entries:
+  - weight: 1
+    result: adventurous
+  - weight: 1
+    result: aggressive
+  - weight: 1
+    result: agile

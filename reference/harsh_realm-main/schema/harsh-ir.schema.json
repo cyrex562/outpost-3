@@ -1,0 +1,1661 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ComponentRecord",
+  "description": "A single authorable content record, tagged by `component_type`.\n\nInternally tagged: e.g. a trait serializes as `{\"component_type\": \"trait\", \"id\": \"...\", \"name\": \"...\", ...}`.",
+  "oneOf": [
+    {
+      "description": "A trait, feature, edge, advantage, gift, feat, talent, or ability record.",
+      "type": "object",
+      "required": [
+        "category",
+        "component_type",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "category": {
+          "description": "advantage, disadvantage, edge, hindrance, gift, feat, talent, etc.",
+          "type": "string"
+        },
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "trait"
+          ]
+        },
+        "conflicts": {
+          "description": "Qualified trait IDs that cannot coexist with this trait.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TraitCost"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modifiers": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Modifier"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "prerequisites": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Prerequisite"
+          }
+        },
+        "provides_tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "triggers": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Trigger"
+          }
+        }
+      }
+    },
+    {
+      "description": "A tag definition. Tags are lightweight markers; `implies` lets one tag pull in others for query purposes.",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id"
+      ],
+      "properties": {
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "tag"
+          ]
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "implies": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "description": "A status effect content record.",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "status_effect"
+          ]
+        },
+        "default_duration_ticks": {
+          "description": "0 means permanent until explicitly removed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "modifiers": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Modifier"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "provides_tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stacking": {
+          "default": "replace",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StatusStacking"
+            }
+          ]
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "triggers": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Trigger"
+          }
+        }
+      }
+    },
+    {
+      "description": "A declarative trigger: an event subscription with a condition and effects.\n\nMirrors `triggers/schema.py`. `when` is the *string* form of a condition expression (the R1 parser turns it into a [`super::condition::Expr`]); it defaults to `\"true\"` (always fires).",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id",
+        "on"
+      ],
+      "properties": {
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "trigger"
+          ]
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "do": {
+          "description": "Effects to run when the trigger fires, in order.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Effect"
+          }
+        },
+        "id": {
+          "description": "Unique within the owning record (trait/status/etc).",
+          "type": "string"
+        },
+        "on": {
+          "description": "Event type to subscribe to.",
+          "type": "string"
+        },
+        "when": {
+          "description": "Condition expression in string form. Default: `\"true\"`.",
+          "default": "true",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "A declarative, multi-step generator.",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id"
+      ],
+      "properties": {
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "procedure"
+          ]
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputs": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProcedureInput"
+          }
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProcedureOutput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steps": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProcedureStep"
+          }
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "description": "A random table content record. Entries stay open (`serde_json::Value`) until the table engine is ported in R4 and can formalize entry shapes.",
+      "type": "object",
+      "required": [
+        "category",
+        "component_type",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "table"
+          ]
+        },
+        "entries": {
+          "default": [],
+          "type": "array",
+          "items": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "description": "An action record (L1 archetype or L2 concrete via `base`).",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id"
+      ],
+      "properties": {
+        "activation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Activation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "base": {
+          "description": "The archetype this action specializes (L2); `None` for an L1 archetype.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "action"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "default": "contest",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActionKind"
+            }
+          ]
+        },
+        "modifiers": {
+          "description": "Inline modifiers on the action itself (e.g. aimed shot +1, snap shot −2).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Modifier"
+          }
+        },
+        "outcome": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OutcomeBranch"
+          }
+        },
+        "prerequisites": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionPrerequisite"
+          }
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActionResolution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "targeting": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Targeting"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A skill record (L3 overlay): governs/modifies actions and grants actions.",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "skill"
+          ]
+        },
+        "governs": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SkillGoverns"
+          }
+        },
+        "grants": {
+          "description": "Actions/reactions this skill makes available.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "triggers": {
+          "description": "Special reactions/triggers the skill adds.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Trigger"
+          }
+        }
+      }
+    },
+    {
+      "description": "A creature/monster record. Mirrors `CreatureData` + the action-model fields.",
+      "type": "object",
+      "required": [
+        "ac",
+        "attack_bonus",
+        "component_type",
+        "damage",
+        "hd",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "ac": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "actions": {
+          "description": "Action ids the creature can perform (subsumes the former `innate_attacks`).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "attack_bonus": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "attack_description": {
+          "default": "attacks",
+          "type": "string"
+        },
+        "awareness_difficulty": {
+          "default": 8,
+          "type": "integer",
+          "format": "int64"
+        },
+        "behavior": {
+          "default": "aggressive",
+          "type": "string"
+        },
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "creature"
+          ]
+        },
+        "damage": {
+          "type": "string"
+        },
+        "damage_type": {
+          "default": "melee",
+          "type": "string"
+        },
+        "defenses": {
+          "description": "Named defenses. Empty → the host derives `{ac}` from the `ac` field.",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "description_seen": {
+          "default": "",
+          "type": "string"
+        },
+        "description_short": {
+          "default": "",
+          "type": "string"
+        },
+        "description_unseen": {
+          "default": "",
+          "type": "string"
+        },
+        "flee_difficulty": {
+          "default": 8,
+          "type": "integer",
+          "format": "int64"
+        },
+        "harvestable": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Harvestable"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hd": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "hp_per_hd": {
+          "default": 4,
+          "type": "integer",
+          "format": "int64"
+        },
+        "id": {
+          "type": "string"
+        },
+        "loot_table": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "morale": {
+          "default": 8,
+          "type": "integer",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "num_attacks": {
+          "default": 1,
+          "type": "integer",
+          "format": "int64"
+        },
+        "pools": {
+          "description": "Typed health pools. Empty → the host derives an `hp` pool from `hd * hp_per_hd`.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Pool"
+          }
+        },
+        "special_abilities": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "traits": {
+          "description": "Intrinsic trait ids the creature carries (e.g. an engineered beast's venomous bite). These source `has_trait(self, …)` and their modifiers in combat without needing an equipped item to grant them.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unavoidable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "xp_value": {
+          "default": 15,
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    {
+      "description": "An item record. Mirrors `ItemData` + `grants_traits`.",
+      "type": "object",
+      "required": [
+        "component_type",
+        "id",
+        "name"
+      ],
+      "properties": {
+        "ac": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "ac_bonus": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "ammo_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attribute": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "item"
+          ]
+        },
+        "cost": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "damage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "damage_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ItemEffect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enc": {
+          "description": "Encumbrance (may be fractional).",
+          "default": 0.0,
+          "type": "number",
+          "format": "double"
+        },
+        "grants_traits": {
+          "description": "Traits this item grants while equipped (carries the item's modifiers — C2).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "power_charges": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "range_band": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "save_bonuses": {
+          "default": {
+            "evasion": 0,
+            "luck": 0,
+            "mental": 0,
+            "physical": 0
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/SaveBonusProfile"
+            }
+          ]
+        },
+        "shock_ac_threshold": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "shock_damage": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "weapon_tags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "ActionKind": {
+      "description": "The resolution structure of an action. `reaction` is modelled as a trigger on the reaction window, not an action kind.",
+      "type": "string",
+      "enum": [
+        "contest",
+        "apply"
+      ]
+    },
+    "ActionPrerequisite": {
+      "description": "An action prerequisite: a structured requirement or a raw condition string.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Prerequisite"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "ActionResolution": {
+      "description": "A contest's resolution config.",
+      "type": "object",
+      "required": [
+        "roll_spec",
+        "tn_source"
+      ],
+      "properties": {
+        "roll_spec": {
+          "$ref": "#/definitions/RollSpec"
+        },
+        "roller": {
+          "default": "actor",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Roller"
+            }
+          ]
+        },
+        "tn_source": {
+          "$ref": "#/definitions/TnSource"
+        }
+      }
+    },
+    "Activation": {
+      "description": "An action's activation spec.",
+      "type": "object",
+      "properties": {
+        "cooldown": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "costs": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cost"
+          }
+        },
+        "economy": {
+          "default": "action",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Economy"
+            }
+          ]
+        },
+        "uses": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Uses"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Cost": {
+      "description": "A resource cost (PP, strain, slots, ammo, charges — all resources).",
+      "type": "object",
+      "required": [
+        "amount",
+        "resource"
+      ],
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "resource": {
+          "type": "string"
+        }
+      }
+    },
+    "DifficultyRef": {
+      "description": "A difficulty reference: an inline value or a key into the difficulty table.",
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "Economy": {
+      "description": "How an action fits the action economy.",
+      "oneOf": [
+        {
+          "description": "No action-budget cost.",
+          "type": "string",
+          "enum": [
+            "free"
+          ]
+        },
+        {
+          "description": "The entity's main action for the round.",
+          "type": "string",
+          "enum": [
+            "action"
+          ]
+        },
+        {
+          "description": "Spent from the reaction budget (default 1/round, overridable).",
+          "type": "string",
+          "enum": [
+            "reaction"
+          ]
+        }
+      ]
+    },
+    "Effect": {
+      "description": "A declarative effect: a verb (`kind`) plus an open map of parameters.\n\nThe set is intentionally open (a plain string) so packs can introduce new verbs; [`EffectKind`] documents the verbs the core engine lowers to intents.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "params": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Harvestable": {
+      "description": "A material harvestable from a creature's corpse.",
+      "type": "object",
+      "required": [
+        "material"
+      ],
+      "properties": {
+        "difficulty": {
+          "default": 8,
+          "type": "integer",
+          "format": "int64"
+        },
+        "material": {
+          "type": "string"
+        },
+        "skill": {
+          "default": "survive",
+          "type": "string"
+        }
+      }
+    },
+    "ItemEffect": {
+      "description": "A consumable's effect (discriminated on `type`, mirroring the Python union).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "days",
+            "type"
+          ],
+          "properties": {
+            "days": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "food"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "dice",
+            "type"
+          ],
+          "properties": {
+            "dice": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "heal"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "bonus",
+            "duration",
+            "save_type",
+            "type"
+          ],
+          "properties": {
+            "bonus": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "duration": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "save_type": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "save_bonus"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Modifier": {
+      "description": "A single modifier contribution from some source.",
+      "type": "object",
+      "required": [
+        "target",
+        "value"
+      ],
+      "properties": {
+        "condition": {
+          "default": {
+            "predicate": "always"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModifierCondition"
+            }
+          ]
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "priority": {
+          "description": "For replace mode; higher priority wins.",
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "stacking": {
+          "default": "additive",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModifierStacking"
+            }
+          ]
+        },
+        "target": {
+          "description": "Namespaced target, e.g. `attribute.str`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "Magnitude; sign indicates bonus or penalty.",
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "ModifierCondition": {
+      "description": "A modifier condition: a predicate plus an optional argument.",
+      "type": "object",
+      "required": [
+        "predicate"
+      ],
+      "properties": {
+        "arg": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "predicate": {
+          "$ref": "#/definitions/ModifierPredicate"
+        }
+      }
+    },
+    "ModifierPredicate": {
+      "description": "A flat condition predicate gating a modifier (Phase 2 vocabulary).",
+      "type": "string",
+      "enum": [
+        "always",
+        "entity_has_tag",
+        "target_has_tag",
+        "entity_has_trait"
+      ]
+    },
+    "ModifierStacking": {
+      "description": "How a modifier stacks with others targeting the same value.",
+      "type": "string",
+      "enum": [
+        "additive",
+        "multiplicative",
+        "replace",
+        "max",
+        "min"
+      ]
+    },
+    "OutcomeBranch": {
+      "description": "One outcome branch: a `when` predicate over the result (`crit`/`success`/ `miss`/`fumble`, or a `degree`/`raw_margin` expression) and the effects to run.",
+      "type": "object",
+      "required": [
+        "when"
+      ],
+      "properties": {
+        "do": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Effect"
+          }
+        },
+        "when": {
+          "type": "string"
+        }
+      }
+    },
+    "Pool": {
+      "description": "A typed health pool on an entity.",
+      "type": "object",
+      "required": [
+        "current",
+        "id",
+        "max"
+      ],
+      "properties": {
+        "can_go_negative": {
+          "default": false,
+          "type": "boolean"
+        },
+        "current": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "id": {
+          "type": "string"
+        },
+        "max": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "tags": {
+          "description": "Routing tags, e.g. `[\"sd\"]`, `[\"md\"]`, `[\"hp\"]`. A pool tagged `md` only takes `Md` packets; others take `Sd`.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Prerequisite": {
+      "description": "A trait prerequisite.",
+      "type": "object",
+      "required": [
+        "arg",
+        "kind"
+      ],
+      "properties": {
+        "arg": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/PrerequisiteKind"
+        },
+        "value": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "PrerequisiteKind": {
+      "description": "A requirement that must be met before an entity can gain a trait.",
+      "type": "string",
+      "enum": [
+        "trait",
+        "attribute_min",
+        "level_min",
+        "skill_min"
+      ]
+    },
+    "ProcedureInput": {
+      "description": "A named input parameter accepted by a procedure.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "default": true,
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "type": "boolean"
+        },
+        "type": {
+          "default": "any",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProcedureInputType"
+            }
+          ]
+        }
+      }
+    },
+    "ProcedureInputType": {
+      "description": "The static type of a procedure input parameter.",
+      "type": "string",
+      "enum": [
+        "string",
+        "integer",
+        "boolean",
+        "any"
+      ]
+    },
+    "ProcedureOutput": {
+      "description": "An explicit output field mapping for a procedure (`var.path` per output key).",
+      "type": "object",
+      "required": [
+        "fields"
+      ],
+      "properties": {
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ProcedureStep": {
+      "description": "One executable step in a declarative procedure.",
+      "type": "object",
+      "required": [
+        "assign",
+        "kind"
+      ],
+      "properties": {
+        "assign": {
+          "description": "Output variable name.",
+          "type": "string"
+        },
+        "count": {
+          "default": 1,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/ProcedureStepKind"
+        },
+        "params": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "procedure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "table": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "template": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ProcedureStepKind": {
+      "description": "The kind of a procedure step (selects which target field is required).",
+      "type": "string",
+      "enum": [
+        "roll",
+        "compute",
+        "procedure",
+        "format"
+      ]
+    },
+    "RollMechanic": {
+      "description": "The registered roll mechanics. New systems (GURPS roll-under, Savage exploding trait dice) are added here when their packs become real.",
+      "oneOf": [
+        {
+          "description": "`2d6 + modifier ≥ tn`; XWN skill checks. No crit/fumble.",
+          "type": "string",
+          "enum": [
+            "xwn2d6"
+          ]
+        },
+        {
+          "description": "`d20 + modifier ≥ tn`; nat 1 = fumble (always miss), nat 20 = crit (always hit).",
+          "type": "string",
+          "enum": [
+            "xwn_d20_attack"
+          ]
+        },
+        {
+          "description": "`d20 + modifier ≥ tn`; XWN saving throws. No crit/fumble.",
+          "type": "string",
+          "enum": [
+            "xwn_d20_save"
+          ]
+        }
+      ]
+    },
+    "RollSpec": {
+      "description": "What the roll draws on. `mechanic` defaults to the world's mechanic; `skill`/ `attribute` may be null (e.g. a save the defender rolls).",
+      "type": "object",
+      "properties": {
+        "attribute": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mechanic": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RollMechanic"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skill": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Roller": {
+      "description": "Who rolls in a contest (documentation + host targeting; the math is the same).",
+      "type": "string",
+      "enum": [
+        "actor",
+        "defender"
+      ]
+    },
+    "SaveBonusProfile": {
+      "description": "Save bonuses an item confers (mirrors `SaveBonusProfile`).",
+      "type": "object",
+      "properties": {
+        "evasion": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "luck": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "mental": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "physical": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "SkillGoverns": {
+      "description": "One action a skill governs: per-level modifiers, optionally gated by a tag.",
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "per_level": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Modifier"
+          }
+        },
+        "requires_tag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "StatusStacking": {
+      "description": "How a re-application interacts with an existing status instance.",
+      "type": "string",
+      "enum": [
+        "replace",
+        "extend",
+        "stack"
+      ]
+    },
+    "TargetShape": {
+      "description": "What an action targets.",
+      "oneOf": [
+        {
+          "description": "The acting entity itself.",
+          "type": "string",
+          "enum": [
+            "self"
+          ]
+        },
+        {
+          "description": "One other entity.",
+          "type": "string",
+          "enum": [
+            "single"
+          ]
+        },
+        {
+          "description": "All entities within range of a point.",
+          "type": "string",
+          "enum": [
+            "area"
+          ]
+        },
+        {
+          "description": "Entities along a line.",
+          "type": "string",
+          "enum": [
+            "line"
+          ]
+        }
+      ]
+    },
+    "Targeting": {
+      "description": "An action's targeting spec.",
+      "type": "object",
+      "required": [
+        "shape"
+      ],
+      "properties": {
+        "range_band": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reach": {
+          "description": "Extra cells of reach beyond the band's base (e.g. a polearm). Default 0.",
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "requires_los": {
+          "default": false,
+          "type": "boolean"
+        },
+        "shape": {
+          "$ref": "#/definitions/TargetShape"
+        }
+      }
+    },
+    "TnSource": {
+      "description": "Where a contest's target number comes from. Externally tagged, matching the authoring surface (`{ defense: ac }`, `{ difficulty: 8 }`, …).",
+      "oneOf": [
+        {
+          "description": "A fixed target number.",
+          "type": "object",
+          "required": [
+            "static"
+          ],
+          "properties": {
+            "static": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Resolved from a difficulty value/key.",
+          "type": "object",
+          "required": [
+            "difficulty"
+          ],
+          "properties": {
+            "difficulty": {
+              "$ref": "#/definitions/DifficultyRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "The target's named defense value (e.g. `ac`).",
+          "type": "object",
+          "required": [
+            "defense"
+          ],
+          "properties": {
+            "defense": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "An opposed roll (a skill/expression the target rolls).",
+          "type": "object",
+          "required": [
+            "opposed"
+          ],
+          "properties": {
+            "opposed": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "A save DC the defender rolls against.",
+          "type": "object",
+          "required": [
+            "effect_dc"
+          ],
+          "properties": {
+            "effect_dc": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "TraitCost": {
+      "description": "How acquiring a trait costs a character in a source system.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "points": {
+          "default": 0,
+          "type": "integer",
+          "format": "int64"
+        },
+        "slot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Trigger": {
+      "description": "A declarative trigger: an event subscription with a condition and effects.\n\nMirrors `triggers/schema.py`. `when` is the *string* form of a condition expression (the R1 parser turns it into a [`super::condition::Expr`]); it defaults to `\"true\"` (always fires).",
+      "type": "object",
+      "required": [
+        "id",
+        "on"
+      ],
+      "properties": {
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "do": {
+          "description": "Effects to run when the trigger fires, in order.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Effect"
+          }
+        },
+        "id": {
+          "description": "Unique within the owning record (trait/status/etc).",
+          "type": "string"
+        },
+        "on": {
+          "description": "Event type to subscribe to.",
+          "type": "string"
+        },
+        "when": {
+          "description": "Condition expression in string form. Default: `\"true\"`.",
+          "default": "true",
+          "type": "string"
+        }
+      }
+    },
+    "UseScope": {
+      "description": "The scope over which a `uses` cap resets.",
+      "type": "string",
+      "enum": [
+        "round",
+        "scene",
+        "day"
+      ]
+    },
+    "Uses": {
+      "description": "A cap on how many times an action may be used within a scope.",
+      "type": "object",
+      "required": [
+        "n",
+        "scope"
+      ],
+      "properties": {
+        "n": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "scope": {
+          "$ref": "#/definitions/UseScope"
+        }
+      }
+    }
+  }
+}

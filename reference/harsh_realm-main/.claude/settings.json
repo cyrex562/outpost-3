@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(uv --version)",
+      "Bash(docker --version)",
+      "Bash(c:/Users/cyrex/files/projects/harsh_realm/pyproject.toml:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)",
+      "Bash(c:/Users/cyrex/files/projects/harsh_realm/.gitignore:*)",
+      "Bash(python -c \":*)",
+      "Bash(sed -i 's/def test_examine\\(parser: CommandParser\\) -> None:\\\\n    cmd = parser.parse\\(\"\"examine\"\"\\)\\\\n    assert cmd.verb == \"\"look\"\"//' tests/test_parser.py)",
+      "Bash(grep -r \"playwright\\\\|e2e\\\\|E2E\" /c/Users/cyrex/files/projects/harsh_realm --include=*.json --include=*.ts --include=*.js --include=*.toml)",
+      "Bash(npx playwright:*)",
+      "Bash(npx tsc:*)",
+      "Bash(sed -i 's/# Drain initial narration \\(exploration emits 2 narrations + 1 enter_hex game_event\\)/# Drain initial narration \\(2 narrations + enter_hex game_event + gm.suggestions = 4\\)/g' tests/test_integration_m1.py)",
+      "Bash(sed -i 's/# Drain initial messages \\(2 narrations + enter_hex game_event = 3\\)/# Drain initial messages \\(2 narrations + enter_hex game_event + gm.suggestions = 4\\)/g' tests/test_integration_m2.py)"
+    ]
+  }
+}

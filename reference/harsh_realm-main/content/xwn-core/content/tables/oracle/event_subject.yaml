@@ -1,0 +1,23 @@
+# Mythic GME Random Event Subject Table (d100)
+# NOTE: Populate with full 100 entries from source material
+entries:
+  - {min: 1, max: 5, subject: "Goals"}
+  - {min: 6, max: 10, subject: "Dreams"}
+  - {min: 11, max: 15, subject: "Environment"}
+  - {min: 16, max: 20, subject: "Outside"}
+  - {min: 21, max: 25, subject: "Inside"}
+  - {min: 26, max: 30, subject: "Reality"}
+  - {min: 31, max: 35, subject: "Allies"}
+  - {min: 36, max: 40, subject: "Enemies"}
+  - {min: 41, max: 45, subject: "Evil"}
+  - {min: 46, max: 50, subject: "Good"}
+  - {min: 51, max: 55, subject: "Emotions"}
+  - {min: 56, max: 60, subject: "Opposition"}
+  - {min: 61, max: 65, subject: "War"}
+  - {min: 66, max: 70, subject: "Peace"}
+  - {min: 71, max: 75, subject: "The innocent"}
+  - {min: 76, max: 80, subject: "Love"}
+  - {min: 81, max: 85, subject: "The spiritual"}
+  - {min: 86, max: 90, subject: "The intellectual"}
+  - {min: 91, max: 95, subject: "New ideas"}
+  - {min: 96, max: 100, subject: "Joy"}

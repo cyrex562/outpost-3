@@ -1,0 +1,7 @@
+id: illuminated
+name: Illuminated
+description: |
+  A light source (torch or lantern) is active, allowing you to see clearly in the darkness.
+default_duration_ticks: 60
+tags: [buff, environment]
+stacking: extend

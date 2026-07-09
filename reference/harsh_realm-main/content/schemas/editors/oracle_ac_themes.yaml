@@ -1,0 +1,9 @@
+pattern: "tables/oracle/ac_themes"
+label: "AC Themes (Grouped)"
+widget: GroupedListEditor
+accessor: { kind: key, key: themes }
+fields:
+  - { key: element, type: text, label: Element, width: md }
+sortable: true
+allow_add: true
+allow_delete: true

@@ -1,0 +1,13 @@
+id: disadvantages.hard_of_hearing
+name: Hard of Hearing
+category: disadvantage
+description: Poor hearing penalizes sound-based Notice checks.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.notice.hearing
+    value: -2
+    stacking: additive
+    description: Penalty to hearing-based Notice checks.
+provides_tags: [impaired_hearing]
+tags: [gurps, sensory]
+

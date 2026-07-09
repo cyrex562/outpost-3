@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_forest
+category: discovery
+name: "Forest Discoveries"
+tags: [forest, wilderness]
+entries:
+  - weight: 5
+    result:
+      type: environmental
+      description: "A clump of edible mushrooms clings to a rotting log."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Dried Herbs"
+      description: "Bundles of medicinal herbs, still viable."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Frayed Rope"
+      description: "A length of rope, worn but usable."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "A hidden game trail cuts through the underbrush, heading roughly east."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Survivalist Cache"
+      description: "A waterproofed bundle hidden in a hollow tree: rations and a fire-starter."
+      enc: 1
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: environmental
+      description: "A crumbling stone marker, half-buried. Old territorial boundary? The markings are unfamiliar."
+      min_difficulty: 8
+  - weight: 1
+    result:
+      type: item
+      name: "Pretech Canister"
+      description: "A sealed cylindrical container of advanced manufacture. Something valuable inside."
+      enc: 1
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: clue
+      description: "Faction markings are scored into the bark of several trees — a patrol route."
+      min_difficulty: 10

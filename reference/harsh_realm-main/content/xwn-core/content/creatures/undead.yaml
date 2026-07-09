@@ -1,0 +1,125 @@
+creatures:
+  - id: zombie
+    name: Zombie
+    hd: 2
+    hp_per_hd: 4
+    ac: 11
+    attack_bonus: 2
+    damage: "1d8"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "claws and grasps at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 6
+    flee_difficulty: 6
+    unavoidable: false
+    morale: 12
+    loot_table: undead
+    harvestable: null
+    description_unseen: "You smell rot on the wind. Something shambles in the dark."
+    description_seen: "A shambling corpse turns toward you, mouth agape."
+    description_short: "zombie"
+    xp_value: 30
+    tags: [undead, ruins, dungeon, wasteland]
+    special_abilities: []
+
+  - id: shade
+    name: Shade
+    hd: 3
+    hp_per_hd: 4
+    ac: 13
+    attack_bonus: 3
+    damage: "1d6"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "reaches with chilling hands at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 10
+    flee_difficulty: 8
+    unavoidable: false
+    morale: 12
+    loot_table: undead
+    harvestable: null
+    description_unseen: "The temperature drops. You hear distant weeping."
+    description_seen: "A translucent figure coalesces, its face a mask of ancient rage."
+    description_short: "shade"
+    xp_value: 45
+    tags: [undead, ruins, dungeon]
+    special_abilities: []
+
+  - id: skeleton
+    name: Skeleton
+    hd: 1
+    hp_per_hd: 4
+    ac: 13
+    attack_bonus: 1
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "hacks with a corroded blade at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 7
+    flee_difficulty: 6
+    unavoidable: false
+    morale: 12
+    loot_table: undead
+    harvestable: null
+    description_unseen: "Dry bones rattle in the dark. Something dead walks."
+    description_seen: "An armored skeleton lurches forward, a corroded sword in its grip."
+    description_short: "skeleton"
+    xp_value: 15
+    tags: [undead, ruins, dungeon]
+    special_abilities: []
+
+  - id: ghoul
+    name: Ghoul
+    hd: 3
+    hp_per_hd: 4
+    ac: 12
+    attack_bonus: 3
+    damage: "1d6"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "rakes with paralytic claws at"
+    num_attacks: 2
+    behavior: aggressive
+    awareness_difficulty: 8
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 12
+    loot_table: undead
+    harvestable: null
+    description_unseen: "The smell hits first — wrong, carrion-sweet. Then a low crawling sound."
+    description_seen: "A grey-skinned thing that was once human drops from a ledge, claws outstretched."
+    description_short: "ghoul"
+    xp_value: 45
+    tags: [undead, ruins, dungeon, wasteland]
+    special_abilities: []
+
+  - id: wraith
+    name: Wraith
+    hd: 4
+    hp_per_hd: 3
+    ac: 15
+    attack_bonus: 4
+    damage: "1d6"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "reaches with life-draining hands at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 11
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 12
+    loot_table: undead
+    harvestable: null
+    description_unseen: "Cold seeps into your bones. A sound like wind through an empty skull."
+    description_seen: "A formless black shape coalesces into a vaguely human silhouette. Its eyes are holes."
+    description_short: "wraith"
+    xp_value: 60
+    tags: [undead, ruins, dungeon]
+    special_abilities: []

@@ -1,0 +1,66 @@
+# General store inventory by building tier.
+# Sells supplies: food, rope, torches, basic gear.
+
+small:
+  name: "Trading Post"
+  items:
+    - item_id: consumable.rations
+      quantity: 5
+    - item_id: gear.rope_50ft
+      quantity: 1
+    - item_id: gear.torch
+      quantity: 3
+    - item_id: gear.waterskin
+      quantity: 2
+
+medium:
+  name: "General Store"
+  items:
+    - item_id: consumable.rations
+      quantity: 10
+    - item_id: consumable.rations_week
+      quantity: 3
+    - item_id: gear.rope_50ft
+      quantity: 2
+    - item_id: gear.torch
+      quantity: 5
+    - item_id: gear.tinderbox
+      quantity: 2
+    - item_id: gear.waterskin
+      quantity: 3
+    - item_id: gear.backpack
+      quantity: 2
+    - item_id: gear.bedroll
+      quantity: 2
+    - item_id: gear.crowbar
+      quantity: 1
+
+large:
+  name: "Emporium"
+  items:
+    - item_id: consumable.rations
+      quantity: 20
+    - item_id: consumable.rations_week
+      quantity: 5
+    - item_id: gear.rope_50ft
+      quantity: 3
+    - item_id: gear.torch
+      quantity: 10
+    - item_id: gear.tinderbox
+      quantity: 3
+    - item_id: gear.waterskin
+      quantity: 5
+    - item_id: gear.backpack
+      quantity: 3
+    - item_id: gear.bedroll
+      quantity: 3
+    - item_id: gear.crowbar
+      quantity: 2
+    - item_id: gear.grappling_hook
+      quantity: 2
+    - item_id: gear.lantern
+      quantity: 2
+    - item_id: gear.tools_basic
+      quantity: 2
+    - item_id: consumable.lazarus_patch
+      quantity: 2

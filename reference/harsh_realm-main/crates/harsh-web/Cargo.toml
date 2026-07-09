@@ -1,0 +1,47 @@
+[package]
+name = "harsh-web"
+version = "0.50.0"
+edition = "2021"
+description = "Axum web host for Harsh Realm — serves the Vue frontend and exposes the Rust engine over HTTP + WebSocket."
+license = "MIT"
+
+# The web host is the B9 layer that the Python FastAPI app used to provide. It
+# wraps `harsh-core` (pure, sync game logic) behind an async Axum server: REST
+# endpoints + a stateful `/ws` game loop, plus static serving of the built
+# frontend. `harsh-core` stays web-free; all async/HTTP lives here.
+
+[lib]
+name = "harsh_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "harsh-web"
+path = "src/main.rs"
+
+[dependencies]
+harsh-core = { path = "../harsh-core" }
+# Attribute/HP rolls for the character endpoints use harsh-core's DiceRoller,
+# which is generic over an `rand::Rng`.
+rand = "0.8"
+# Context-carrying error type for the server entry points (serve/run_blocking/
+# main), replacing bare `std::io::Result`.
+anyhow = "1"
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Content records are surfaced to the YAML editor as YAML text.
+serde_yaml = "0.9"
+# Generated ids for editor-created entities, factions, assets, threads, etc.
+uuid = { version = "1", features = ["v4"] }
+# Editor handlers issue parameterised SQL via `WorldDatabase`, whose `execute`/
+# `fetch_*` take `&[&dyn rusqlite::ToSql]`. Feature-matched to harsh-core so the
+# bundled sqlite native lib unifies to a single build.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# World export and table-bundle download/upload are ZIP archives.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }

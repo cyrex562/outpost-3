@@ -1,0 +1,66 @@
+# TODO: Expand from source material
+id: npcs_names_male
+category: name
+name: "Male First Names"
+tags: [npc, name, male]
+entries:
+  - weight: 1
+    result: "Gareth"
+  - weight: 1
+    result: "Aldric"
+  - weight: 1
+    result: "Torven"
+  - weight: 1
+    result: "Mace"
+  - weight: 1
+    result: "Renn"
+  - weight: 1
+    result: "Cael"
+  - weight: 1
+    result: "Bram"
+  - weight: 1
+    result: "Dirk"
+  - weight: 1
+    result: "Oswin"
+  - weight: 1
+    result: "Harlan"
+  - weight: 1
+    result: "Voss"
+  - weight: 1
+    result: "Kade"
+  - weight: 1
+    result: "Theron"
+  - weight: 1
+    result: "Morden"
+  - weight: 1
+    result: "Sven"
+  - weight: 1
+    result: "Idris"
+  - weight: 1
+    result: "Corvin"
+  - weight: 1
+    result: "Davan"
+  - weight: 1
+    result: "Rutger"
+  - weight: 1
+    result: "Ash"
+  - weight: 1
+    result: "Leif"
+  - weight: 1
+    result: "Cort"
+  - weight: 1
+    result: "Eryn"
+  - weight: 1
+    result: "Wulf"
+  - weight: 1
+    result: "Sten"
+  - weight: 1
+    result: "Dex"
+  - weight: 1
+    result: "Pryor"
+  - weight: 1
+    result: "Kelan"
+  - weight: 1
+    result: "Tomas"
+  - weight: 1
+    result: "Jorn"

@@ -1,0 +1,315 @@
+# Starting equipment kits.
+# enc = encumbrance slots (WWN rules: most items 1, heavy armor 2, worn/trivial 0)
+kits:
+  # Warrior kits (3)
+  - id: heavy_fighter
+    name: "Heavy Fighter"
+    class: warrior
+    description: "Well-armored melee combatant who wins by outlasting the enemy."
+    items:
+      - id: chain_mail
+        name: "Chain Mail"
+        type: armor
+        ac: 14
+        enc: 2
+      - id: longsword
+        name: "Longsword"
+        type: melee_weapon
+        damage: "1d8"
+        enc: 1
+      - id: shield
+        name: "Shield"
+        type: shield
+        ac_bonus: 1
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  - id: light_fighter
+    name: "Light Fighter"
+    class: warrior
+    description: "Fast, lightly armored warrior who picks the moment to strike."
+    items:
+      - id: leather_armor
+        name: "Leather Armor"
+        type: armor
+        ac: 13
+        enc: 1
+      - id: short_sword
+        name: "Short Sword"
+        type: melee_weapon
+        damage: "1d6"
+        enc: 1
+      - id: hand_crossbow
+        name: "Hand Crossbow"
+        type: ranged_weapon
+        damage: "1d4"
+        enc: 1
+      - id: bolts_20
+        name: "Bolts (20)"
+        type: ammo
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  - id: axeman
+    name: "Axeman"
+    class: warrior
+    description: "Aggressive skirmisher who keeps two weapons and closes fast."
+    items:
+      - id: chain_mail
+        name: "Chain Mail"
+        type: armor
+        ac: 14
+        enc: 2
+      - id: axe
+        name: "Axe"
+        type: melee_weapon
+        damage: "1d8"
+        enc: 1
+      - id: spear
+        name: "Spear"
+        type: melee_weapon
+        damage: "1d6"
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  # Expert kits (3)
+  - id: scout
+    name: "Scout"
+    class: expert
+    description: "Wilderness traveler and survivalist."
+    items:
+      - id: leather_armor
+        name: "Leather Armor"
+        type: armor
+        ac: 13
+        enc: 1
+      - id: short_sword
+        name: "Short Sword"
+        type: melee_weapon
+        damage: "1d6"
+        enc: 1
+      - id: short_bow
+        name: "Short Bow"
+        type: ranged_weapon
+        damage: "1d6"
+        enc: 1
+      - id: arrows_20
+        name: "Arrows (20)"
+        type: ammo
+        enc: 1
+      - id: rope_50ft
+        name: "Rope (50 ft)"
+        type: gear
+        enc: 1
+      - id: tinderbox
+        name: "Tinderbox"
+        type: gear
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  - id: tinker
+    name: "Tinker"
+    class: expert
+    description: "Technical specialist and gadgeteer."
+    items:
+      - id: no_armor
+        name: "Rough Clothing"
+        type: armor
+        ac: 10
+        enc: 0
+      - id: tools
+        name: "Tools (basic set)"
+        type: gear
+        enc: 1
+      - id: knife
+        name: "Knife"
+        type: melee_weapon
+        damage: "1d4"
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  - id: physician
+    name: "Physician"
+    class: expert
+    description: "Field medic who keeps people alive and knows how to get out fast."
+    items:
+      - id: no_armor
+        name: "Rough Clothing"
+        type: armor
+        ac: 10
+        enc: 0
+      - id: knife
+        name: "Knife"
+        type: melee_weapon
+        damage: "1d4"
+        enc: 1
+      - id: lazarus_patch
+        name: "Lazarus Patch"
+        type: consumable
+        enc: 1
+      - id: lazarus_patch_2
+        name: "Lazarus Patch"
+        type: consumable
+        enc: 1
+      - id: antitoxin
+        name: "Antitoxin"
+        type: consumable
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  # Adventurer kits (3)
+  - id: versatile
+    name: "Versatile"
+    class: adventurer
+    description: "All-purpose loadout for the adaptable adventurer."
+    items:
+      - id: leather_armor
+        name: "Leather Armor"
+        type: armor
+        ac: 13
+        enc: 1
+      - id: short_sword
+        name: "Short Sword"
+        type: melee_weapon
+        damage: "1d6"
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+      - id: tinderbox
+        name: "Tinderbox"
+        type: gear
+        enc: 1
+
+  - id: pathfinder
+    name: "Pathfinder"
+    class: adventurer
+    description: "Long-range wilderness explorer with bow and blade."
+    items:
+      - id: leather_armor
+        name: "Leather Armor"
+        type: armor
+        ac: 13
+        enc: 1
+      - id: axe
+        name: "Axe"
+        type: melee_weapon
+        damage: "1d8"
+        enc: 1
+      - id: long_bow
+        name: "Long Bow"
+        type: ranged_weapon
+        damage: "1d8"
+        enc: 1
+      - id: arrows_20
+        name: "Arrows (20)"
+        type: ammo
+        enc: 1
+      - id: rope_50ft
+        name: "Rope (50 ft)"
+        type: gear
+        enc: 1
+      - id: tinderbox
+        name: "Tinderbox"
+        type: gear
+        enc: 1
+      - id: bedroll
+        name: "Bedroll"
+        type: gear
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1
+
+  - id: city_rat
+    name: "City Rat"
+    class: adventurer
+    description: "Urban operative: light, fast, and good at disappearing."
+    items:
+      - id: no_armor
+        name: "Rough Clothing"
+        type: armor
+        ac: 10
+        enc: 0
+      - id: knife
+        name: "Knife"
+        type: melee_weapon
+        damage: "1d4"
+        enc: 1
+      - id: hand_crossbow
+        name: "Hand Crossbow"
+        type: ranged_weapon
+        damage: "1d4"
+        enc: 1
+      - id: bolts_20
+        name: "Bolts (20)"
+        type: ammo
+        enc: 1
+      - id: crowbar
+        name: "Crowbar"
+        type: gear
+        enc: 1
+      - id: tinderbox
+        name: "Tinderbox"
+        type: gear
+        enc: 1
+      - id: backpack
+        name: "Backpack"
+        type: gear
+        enc: 0
+      - id: rations_3
+        name: "Rations (3 days)"
+        type: consumable
+        enc: 1

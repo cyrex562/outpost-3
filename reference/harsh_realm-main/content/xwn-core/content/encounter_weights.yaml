@@ -1,0 +1,37 @@
+# Encounter weight modifiers by faction disposition
+
+- faction_disposition: allied
+  encounter_tag: patrol_friendly
+  weight_modifier: 3
+
+- faction_disposition: allied
+  encounter_tag: patrol_hostile
+  weight_modifier: -999
+
+- faction_disposition: friendly
+  encounter_tag: patrol_hostile
+  weight_modifier: -2
+
+- faction_disposition: friendly
+  encounter_tag: trade_opportunity
+  weight_modifier: 2
+
+- faction_disposition: unfriendly
+  encounter_tag: patrol_hostile
+  weight_modifier: 2
+
+- faction_disposition: unfriendly
+  encounter_tag: spy_encounter
+  weight_modifier: 1
+
+- faction_disposition: hostile
+  encounter_tag: patrol_hostile
+  weight_modifier: 4
+
+- faction_disposition: hostile
+  encounter_tag: bounty_hunter
+  weight_modifier: 2
+
+- faction_disposition: hostile
+  encounter_tag: ambush
+  weight_modifier: 1

@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_wasteland
+category: encounter
+name: "Wasteland Encounters"
+tags: [wasteland]
+entries:
+  - weight: 3
+    result:
+      type: hostile
+      name: "Wasteland Raiders"
+      description: "A ragged vehicle — jury-rigged from salvage parts — pulls up ahead. Its occupants are armed and look hungry."
+  - weight: 2
+    result:
+      type: hostile
+      name: "Mutant Pack Animal"
+      description: "Something that was once livestock, heavily altered by generations of wasteland exposure. It regards you as food."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Salvage Crew"
+      description: "A small team of salvagers works a debris field nearby. They're wary but not immediately hostile — competition, not enemies."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Wasteland Wanderer"
+      description: "A lone traveller in improvised protective gear plods along the same blasted track. They nod wearily."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Chemical Haze"
+      description: "A low-lying haze clings to the ground here — some industrial residue that never broke down. Eyes water, throat tightens."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Automated Hazard"
+      description: "A pretech automated system — sensor-triggered, still active — sweeps the area with something that might be a weapon or might be a scanner."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Ash Storm"
+      description: "Fine grey ash gusts across the landscape, coating everything and reducing visibility to a few metres."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Crash Site"
+      description: "The remains of some kind of vehicle — aerial, maybe — half-buried in the ash. Old but not ancient. Someone died here."

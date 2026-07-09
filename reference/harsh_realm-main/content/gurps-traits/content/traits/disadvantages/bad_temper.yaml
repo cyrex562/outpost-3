@@ -1,0 +1,13 @@
+id: disadvantages.bad_temper
+name: Bad Temper
+category: disadvantage
+description: Volatile reactions make tense social checks harder.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.talk.tense
+    value: -2
+    stacking: additive
+    description: Penalty to calm or diplomatic checks in tense scenes.
+provides_tags: [volatile]
+tags: [gurps, social]
+

@@ -1,0 +1,13 @@
+id: gurps-traits
+version: 0.1.0
+name: GURPS Traits (Modifier Subset)
+description: |
+  A representative slice of GURPS-style advantages and disadvantages,
+  restricted to passive modifier mechanics. Triggered and active variants are
+  deferred until the trigger/effect engine ships.
+authors: [Harsh Realm Project]
+depends:
+  - id: xwn-core
+    version: ">=1.0.0"
+provides: [gurps-traits-modifier-subset]
+

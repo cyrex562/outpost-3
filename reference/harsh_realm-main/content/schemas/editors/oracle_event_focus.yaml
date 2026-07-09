@@ -1,0 +1,9 @@
+pattern: "tables/oracle/event_focus"
+label: "Event Focus (Range Table)"
+widget: RangeTableEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: focus, type: text, label: Focus, width: md }
+  - { key: description, type: text, label: Description, width: full }
+allow_add: true
+allow_delete: true

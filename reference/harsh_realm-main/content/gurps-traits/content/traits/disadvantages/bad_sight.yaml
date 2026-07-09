@@ -1,0 +1,13 @@
+id: disadvantages.bad_sight
+name: Bad Sight
+category: disadvantage
+description: Poor eyesight penalizes vision-based Notice checks.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.notice.vision
+    value: -2
+    stacking: additive
+    description: Penalty to vision-based Notice checks.
+provides_tags: [impaired_vision]
+tags: [gurps, sensory]
+

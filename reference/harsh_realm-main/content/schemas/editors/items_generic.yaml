@@ -1,0 +1,13 @@
+pattern: "items/"
+label: "Items"
+widget: RegistryEditor
+accessor: { kind: root }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: md }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: enc, type: number, label: Enc, width: sm }
+  - { key: cost, type: number, label: Cost, width: sm }
+  - { key: tags, type: tags, label: Tags, width: full }
+allow_add: true
+allow_delete: true

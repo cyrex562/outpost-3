@@ -1,0 +1,13 @@
+id: advantages.toughness
+name: Toughness
+category: advantage
+description: Extra physical resilience represented as a small HP maximum bonus.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: resource.hp.max
+    value: 2
+    stacking: additive
+    description: Bonus to maximum HP when a resource-backed HP pool is active.
+provides_tags: [tough]
+tags: [gurps, resilience]
+

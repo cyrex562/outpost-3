@@ -1,0 +1,88 @@
+# UNE NPC Bearings table
+# Each bearing has a focus keyword and 5 sub-entries describing behavior
+# TODO: Populate from UNE rulebook — full table has more nuanced sub-entries
+id: une_bearings
+category: une
+name: "UNE NPC Bearings"
+tags: [une, npc, bearing]
+entries:
+  - weight: 1
+    result:
+      bearing: "scheming"
+      focus: "intrigue"
+      sub_entries:
+        - "deception"
+        - "proposition"
+        - "betrayal"
+        - "plotting"
+        - "manipulation"
+  - weight: 1
+    result:
+      bearing: "insane"
+      focus: "chaos"
+      sub_entries:
+        - "madness"
+        - "confusion"
+        - "erratic"
+        - "delusion"
+        - "raving"
+  - weight: 1
+    result:
+      bearing: "friendly"
+      focus: "peace"
+      sub_entries:
+        - "support"
+        - "comfort"
+        - "gratitude"
+        - "generosity"
+        - "assistance"
+  - weight: 1
+    result:
+      bearing: "hostile"
+      focus: "destruction"
+      sub_entries:
+        - "attack"
+        - "anger"
+        - "intimidation"
+        - "confrontation"
+        - "aggression"
+  - weight: 1
+    result:
+      bearing: "inquisitive"
+      focus: "knowledge"
+      sub_entries:
+        - "inquiry"
+        - "investigation"
+        - "curiosity"
+        - "examination"
+        - "interrogation"
+  - weight: 1
+    result:
+      bearing: "knowing"
+      focus: "revelation"
+      sub_entries:
+        - "information"
+        - "secrets"
+        - "advice"
+        - "guidance"
+        - "lore"
+  - weight: 1
+    result:
+      bearing: "mysterious"
+      focus: "enigma"
+      sub_entries:
+        - "cryptic"
+        - "riddle"
+        - "evasion"
+        - "obscurity"
+        - "misdirection"
+  - weight: 1
+    result:
+      bearing: "prejudiced"
+      focus: "bias"
+      sub_entries:
+        - "extortion"
+        - "judgement"
+        - "discrimination"
+        - "contempt"
+        - "distrust"

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/pyright/schema/pyrightconfig.schema.json",
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "include": [
+    "src/harsh_realm/api/state_types.py",
+    "src/harsh_realm/gm/runtime_protocols.py",
+    "src/harsh_realm/gm/controller.py",
+    "src/harsh_realm/api/routes.py",
+    "src/harsh_realm/api/menu_handler.py",
+    "src/harsh_realm/gm/entity_repository.py",
+    "src/harsh_realm/gm/scenes/exploration_persistence.py",
+    "src/harsh_realm/faction/reputation.py",
+    "src/harsh_realm/gm/entity_state_repository.py",
+    "src/harsh_realm/gm/controller_support.py"
+  ]
+}

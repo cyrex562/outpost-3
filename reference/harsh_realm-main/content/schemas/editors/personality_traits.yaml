@@ -1,0 +1,15 @@
+pattern: "tables/npcs/personality_traits"
+label: "Personality Traits"
+meta_fields:
+  - { key: id, type: text, label: ID }
+  - { key: name, type: text, label: Name }
+  - { key: category, type: text, label: Category }
+  - { key: tags, type: tags, label: Tags }
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: result, type: text, label: Result, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

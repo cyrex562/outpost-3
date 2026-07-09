@@ -1,0 +1,12 @@
+id: wickham-tables
+version: 1.0.0
+name: Wickham Tables
+description: Small procedure examples encoded from Ken Wickham's Grammar Fuel style tables.
+authors:
+  - Ken Wickham
+depends:
+  - id: xwn-core
+    version: ">=1.0.0"
+conflicts: []
+provides:
+  - grammar-fuel

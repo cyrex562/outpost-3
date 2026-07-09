@@ -1,0 +1,13 @@
+pattern: "tables/loot/"
+label: "Loot Table"
+meta_fields:
+  - { key: table_id, type: text, label: Table ID }
+  - { key: type, type: text, label: Type }
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: result, type: text, label: Result, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

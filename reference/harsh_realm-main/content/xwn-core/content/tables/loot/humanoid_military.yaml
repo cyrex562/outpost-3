@@ -1,0 +1,24 @@
+table_id: humanoid_military
+type: loot
+entries:
+  - weight: 4
+    result: "Standard military rations"
+    data: {type: consumable, name: "military rations", value: 8}
+  - weight: 3
+    result: "A short sword in decent condition"
+    data: {type: weapon, name: "short sword", value: 30, weapon_damage: "1d6"}
+  - weight: 3
+    result: "Coin pouch with 25 pieces"
+    data: {type: currency, value: 25}
+  - weight: 2
+    result: "Leather armor, serviceable"
+    data: {type: armor, name: "leather armor", value: 50, ac_bonus: 3}
+  - weight: 2
+    result: "Sealed orders (illegible)"
+    data: {type: misc, name: "sealed orders", value: 20}
+  - weight: 1
+    result: "A pretech medkit (heals 2d6)"
+    data: {type: consumable, name: "pretech medkit", value: 150, healing: "2d6"}
+  - weight: 1
+    result: "Military grade crossbow"
+    data: {type: weapon, name: "military crossbow", value: 80, weapon_damage: "1d8"}

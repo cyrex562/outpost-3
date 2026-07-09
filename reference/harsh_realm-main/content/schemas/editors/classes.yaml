@@ -1,0 +1,14 @@
+pattern: "classes"
+label: "Character Classes"
+widget: RegistryEditor
+accessor: { kind: key, key: classes }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: sm }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: description, type: textarea, label: Description, width: full }
+  - { key: hit_die, type: number, label: Hit Die, width: sm }
+  - { key: attack_bonus_per_level, type: number, label: Atk/Level, width: sm }
+  - { key: skill_points_start, type: number, label: Skill Pts, width: sm }
+allow_add: true
+allow_delete: true

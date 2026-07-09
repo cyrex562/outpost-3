@@ -1,0 +1,21 @@
+id: gifts.sun_authority
+name: The Sun's Authority
+category: gift
+description: |
+  A modifier-only subset of a solar authority Gift. The future trigger/effect
+  engine will handle active divine powers.
+source: "Godbound-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.lead
+    value: 2
+    stacking: additive
+    condition:
+      predicate: target_has_tag
+      arg: darkness
+    description: Bonus to command or inspire beings marked by darkness.
+triggers:
+  - event: phase3.placeholder
+    note: Stored for forward compatibility; not executed in Phase 2.
+provides_tags: [divine, sun]
+tags: [godbound, gift, sun]
+

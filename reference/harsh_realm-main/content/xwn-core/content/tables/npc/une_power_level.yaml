@@ -1,0 +1,21 @@
+# UNE Power Level table
+# TODO: Populate from UNE rulebook
+id: une_power_level
+category: une
+name: "UNE Power Level"
+tags: [une, npc, power_level]
+entries:
+  - weight: 1
+    result: "wretched"
+  - weight: 1
+    result: "weak"
+  - weight: 1
+    result: "below_average"
+  - weight: 1
+    result: "average"
+  - weight: 1
+    result: "above_average"
+  - weight: 1
+    result: "strong"
+  - weight: 1
+    result: "superb"

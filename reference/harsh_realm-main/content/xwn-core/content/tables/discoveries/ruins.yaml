@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_ruins
+category: discovery
+name: "Ruins Discoveries"
+tags: [ruins]
+entries:
+  - weight: 4
+    result:
+      type: environmental
+      description: "A collapsed section of wall reveals a sealed inner chamber. The air is stale."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Scrap Metal"
+      description: "Twisted structural metal, still sound. Could be repurposed or traded."
+      enc: 2
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "Old signage, partially intact — the letters are in a standard script but the name means nothing to you."
+      min_difficulty: 8
+  - weight: 3
+    result:
+      type: item
+      name: "Pretech Data Chip"
+      description: "A small chip of advanced manufacture, sealed in resin. Readable with the right equipment."
+      enc: 0
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Pretech Fragment"
+      description: "A shard of advanced alloy, edges clean as glass. Part of something larger — hard to say what."
+      enc: 0
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: clue
+      description: "Scratched into the floor: a rough map of these ruins, with one room circled and an arrow."
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: item
+      name: "Intact Pretech Device"
+      description: "A sealed device of obvious advanced manufacture. Its function is unclear but it hums faintly when held."
+      enc: 1
+      min_difficulty: 12
+  - weight: 1
+    result:
+      type: environmental
+      description: "A hidden sub-basement stairwell behind a fallen panel. Darkness and silence below."
+      min_difficulty: 12

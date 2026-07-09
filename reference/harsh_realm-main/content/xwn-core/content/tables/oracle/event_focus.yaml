@@ -1,0 +1,14 @@
+# Mythic GME Random Event Focus Table (d100)
+# NOTE: Populate with full 100 entries from source material
+entries:
+  - {min: 1, max: 7, focus: "Remote event", description: "Something happens far away that may still affect you."}
+  - {min: 8, max: 28, focus: "NPC action", description: "An NPC does something significant."}
+  - {min: 29, max: 35, focus: "Introduce new NPC", description: "A new character enters the scene."}
+  - {min: 36, max: 45, focus: "Move toward a thread", description: "Progress toward resolving a story thread."}
+  - {min: 46, max: 52, focus: "Move away from a thread", description: "A setback for a story thread."}
+  - {min: 53, max: 55, focus: "Close a thread", description: "A story thread reaches its conclusion."}
+  - {min: 56, max: 67, focus: "PC negative", description: "Something bad happens to the player."}
+  - {min: 68, max: 75, focus: "PC positive", description: "Something good happens to the player."}
+  - {min: 76, max: 83, focus: "Ambiguous event", description: "Something happens — its meaning is unclear."}
+  - {min: 84, max: 92, focus: "NPC negative", description: "Something bad happens to an NPC."}
+  - {min: 93, max: 100, focus: "NPC positive", description: "Something good happens to an NPC."}

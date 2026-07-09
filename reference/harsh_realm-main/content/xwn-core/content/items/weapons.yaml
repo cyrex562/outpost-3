@@ -1,0 +1,172 @@
+- id: weapon.unarmed
+  name: "Unarmed"
+  damage: "1d2"
+  damage_type: melee
+  attribute: str
+  shock_damage: 0
+  shock_ac_threshold: 0
+  range_band: melee
+  enc: 0
+  cost: 0
+  tags: [melee, natural]
+
+- id: weapon.knife
+  name: "Knife"
+  damage: "1d4"
+  damage_type: melee
+  attribute: str
+  shock_damage: 1
+  shock_ac_threshold: 10
+  range_band: melee
+  enc: 0
+  cost: 5
+  tags: [melee, blade, thrown]
+
+- id: weapon.short_sword
+  name: "Short Sword"
+  damage: "1d6"
+  damage_type: melee
+  attribute: str
+  shock_damage: 2
+  shock_ac_threshold: 13
+  range_band: melee
+  enc: 1
+  cost: 30
+  tags: [melee, blade]
+
+- id: weapon.longsword
+  name: "Longsword"
+  damage: "1d8"
+  damage_type: melee
+  attribute: str
+  shock_damage: 2
+  shock_ac_threshold: 15
+  range_band: melee
+  enc: 1
+  cost: 60
+  tags: [melee, blade, two_hand_optional]
+
+- id: weapon.axe
+  name: "Axe"
+  damage: "1d8"
+  damage_type: melee
+  attribute: str
+  shock_damage: 1
+  shock_ac_threshold: 15
+  range_band: melee
+  enc: 1
+  cost: 15
+  tags: [melee, axe]
+
+- id: weapon.spear
+  name: "Spear"
+  damage: "1d6"
+  damage_type: melee
+  attribute: str
+  shock_damage: 2
+  shock_ac_threshold: 13
+  range_band: melee
+  enc: 1
+  cost: 5
+  tags: [melee, polearm]
+
+- id: weapon.mace
+  name: "Mace"
+  damage: "1d6"
+  damage_type: melee
+  attribute: str
+  shock_damage: 1
+  shock_ac_threshold: 15
+  range_band: melee
+  enc: 1
+  cost: 10
+  tags: [melee, blunt]
+
+- id: weapon.great_axe
+  name: "Great Axe"
+  damage: "1d10"
+  damage_type: melee
+  attribute: str
+  shock_damage: 2
+  shock_ac_threshold: 16
+  range_band: melee
+  enc: 2
+  cost: 30
+  tags: [melee, axe, two_hand]
+
+- id: weapon.short_bow
+  name: "Short Bow"
+  damage: "1d6"
+  damage_type: ranged
+  attribute: dex
+  shock_damage: 0
+  shock_ac_threshold: 0
+  range_band: near
+  ammo_type: ammo.arrow
+  enc: 1
+  cost: 25
+  tags: [ranged, bow]
+
+- id: weapon.long_bow
+  name: "Long Bow"
+  damage: "1d8"
+  damage_type: ranged
+  attribute: dex
+  shock_damage: 0
+  shock_ac_threshold: 0
+  range_band: far
+  ammo_type: ammo.arrow
+  enc: 2
+  cost: 50
+  tags: [ranged, bow, two_hand]
+
+- id: weapon.hand_crossbow
+  name: "Hand Crossbow"
+  damage: "1d4"
+  damage_type: ranged
+  attribute: dex
+  shock_damage: 0
+  shock_ac_threshold: 0
+  range_band: near
+  ammo_type: ammo.bolt
+  enc: 1
+  cost: 30
+  tags: [ranged, crossbow]
+
+- id: weapon.heavy_crossbow
+  name: "Heavy Crossbow"
+  damage: "1d10"
+  damage_type: ranged
+  attribute: dex
+  shock_damage: 0
+  shock_ac_threshold: 0
+  range_band: far
+  ammo_type: ammo.bolt
+  enc: 2
+  cost: 50
+  tags: [ranged, crossbow, two_hand]
+
+# Natural weapons (for creatures — no cost)
+- id: weapon.natural_bite
+  name: "Bite"
+  damage: "1d6"
+  damage_type: melee
+  attribute: str
+  shock_damage: 1
+  shock_ac_threshold: 13
+  range_band: melee
+  enc: 0
+  cost: 0
+  tags: [melee, natural]
+
+- id: weapon.natural_claws
+  name: "Claws"
+  damage: "1d4"
+  damage_type: melee
+  attribute: str
+  shock_damage: 1
+  shock_ac_threshold: 10
+  range_band: melee
+  enc: 0
+  cost: 0
+  tags: [melee, natural]

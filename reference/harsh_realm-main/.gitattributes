@@ -1,0 +1,8 @@
+# Generated TypeScript event bindings must stay LF-only.
+#
+# The `committed_events_gen_matches_export` drift-gate test (crates/harsh-core/
+# src/payloads/client_event.rs) does an exact byte comparison of the committed
+# file against `generate_ts_bindings()`, which always emits LF. Without pinning
+# EOL, a Windows checkout with `core.autocrlf=true` would rewrite the file to
+# CRLF and the gate would fail permanently. Pin it to LF on every platform.
+frontend/src/types/events.gen.ts text eol=lf

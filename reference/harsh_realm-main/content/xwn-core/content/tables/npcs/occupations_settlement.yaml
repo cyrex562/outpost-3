@@ -1,0 +1,91 @@
+# TODO: Expand from source material
+id: npcs_occupations_settlement
+category: npc_occupation
+name: "Settlement Occupations"
+tags: [npc, occupation, settlement]
+entries:
+  - weight: 3
+    result:
+      type: occupation
+      name: "blacksmith"
+      business_type: "forge"
+      business_name_template: "The {adj} Anvil"
+  - weight: 3
+    result:
+      type: occupation
+      name: "merchant"
+      business_type: "trading_post"
+      business_name_template: "{settlement} Trading Post"
+  - weight: 2
+    result:
+      type: occupation
+      name: "innkeeper"
+      business_type: "inn"
+      business_name_template: "The {adj} {noun} (inn)"
+  - weight: 2
+    result:
+      type: occupation
+      name: "healer"
+      business_type: "healer"
+      business_name_template: "Healer's Hut"
+  - weight: 2
+    result:
+      type: occupation
+      name: "farmer"
+      business_type: null
+  - weight: 1
+    result:
+      type: occupation
+      name: "guard"
+      business_type: null
+  - weight: 1
+    result:
+      type: occupation
+      name: "elder"
+      business_type: null
+  - weight: 2
+    result:
+      type: occupation
+      name: "carpenter"
+      business_type: "workshop"
+      business_name_template: "{surname}'s Workshop"
+  - weight: 1
+    result:
+      type: occupation
+      name: "tanner"
+      business_type: "tannery"
+      business_name_template: "The Tannery"
+  - weight: 2
+    result:
+      type: occupation
+      name: "herbalist"
+      business_type: "herb_shop"
+      business_name_template: "The Green Stall"
+  - weight: 2
+    result:
+      type: occupation
+      name: "shepherd"
+      business_type: null
+  - weight: 1
+    result:
+      type: occupation
+      name: "miller"
+      business_type: "mill"
+      business_name_template: "{settlement} Mill"
+  - weight: 1
+    result:
+      type: occupation
+      name: "brewer"
+      business_type: "brewery"
+      business_name_template: "The {adj} Barrel"
+  - weight: 1
+    result:
+      type: occupation
+      name: "scribe"
+      business_type: "scriptorium"
+      business_name_template: "Scrivener's Den"
+  - weight: 1
+    result:
+      type: occupation
+      name: "scout"
+      business_type: null

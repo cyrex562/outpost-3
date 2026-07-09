@@ -1,0 +1,74 @@
+terrains:
+  # Dungeon terrain types (square grid)
+  - id: corridor
+    name: Corridor
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_corridor
+  - id: room_floor
+    name: Room Floor
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_room
+  - id: wall
+    name: Wall
+    passable: false
+    blocks_vision: true
+    description_pool: ""
+  - id: door
+    name: Door
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_door
+  - id: stairs_up
+    name: Stairs Up
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_stairs
+  - id: stairs_down
+    name: Stairs Down
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_stairs
+  - id: trap_floor
+    name: Trapped Floor
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_trap
+
+  # Town terrain types (square grid)
+  - id: road
+    name: Road
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_road
+  - id: building
+    name: Building
+    passable: false
+    blocks_vision: true
+    description_pool: ""
+  - id: shop
+    name: Shop
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_shop
+  - id: tavern
+    name: Tavern
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_tavern
+  - id: temple
+    name: Temple
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_temple
+  - id: open_ground
+    name: Open Ground
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_open_ground
+  - id: plaza
+    name: Plaza
+    passable: true
+    blocks_vision: false
+    description_pool: descriptions_plaza

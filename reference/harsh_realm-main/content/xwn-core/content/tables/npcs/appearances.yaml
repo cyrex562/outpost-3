@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: npcs_appearances
+category: npc_appearance
+name: "NPC Appearances"
+tags: [npc, appearance]
+entries:
+  - weight: 1
+    result: "A heavyset woman with calloused hands and a measuring gaze."
+  - weight: 1
+    result: "Tall and angular, with close-cropped grey hair and watchful eyes."
+  - weight: 1
+    result: "A slight figure, young-looking, with old scars on both forearms."
+  - weight: 1
+    result: "Broad-shouldered and sun-darkened, with a permanent squint."
+  - weight: 1
+    result: "A stocky man with burn-scarred hands and a steady gaze."
+  - weight: 1
+    result: "Thin and nervous-looking, with ink-stained fingers."
+  - weight: 1
+    result: "A weathered face topped by an impressive scar running ear to chin."
+  - weight: 1
+    result: "Compact and quick-moving, with the build of someone used to hard work."
+  - weight: 1
+    result: "Pale and hollow-cheeked, with eyes that dart to exits."
+  - weight: 1
+    result: "A heavyset elder with a white beard down to their chest."
+  - weight: 1
+    result: "Sandy-haired and freckled, with a gap-toothed grin."
+  - weight: 1
+    result: "Dark-eyed and still, with the patient manner of someone who waits."
+  - weight: 1
+    result: "A lean figure with roadworn clothes and a soldier's posture."
+  - weight: 1
+    result: "Ruddy complexion, broad nose, missing two fingers on the left hand."
+  - weight: 1
+    result: "A tall woman with deep laugh lines and strong hands."
+  - weight: 1
+    result: "Nondescript and forgettable — exactly the sort of face you can't quite place later."
+  - weight: 1
+    result: "Young and earnest, with the awkward confidence of someone trying to seem tough."
+  - weight: 1
+    result: "Middle-aged, fastidiously neat despite the dust of travel."
+  - weight: 1
+    result: "A heavyset man who radiates an unsettling sense of absolute calm."
+  - weight: 1
+    result: "Grey-haired and stooped, moving with surprising speed when needed."

@@ -1,0 +1,109 @@
+creatures:
+  - id: dragon_base
+    name: Dragon
+    hd: 8
+    hp_per_hd: 6
+    ac: 17
+    attack_bonus: 8
+    damage: "2d8"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "snaps enormous jaws at"
+    num_attacks: 2
+    behavior: aggressive
+    awareness_difficulty: 5
+    flee_difficulty: 14
+    unavoidable: false
+    morale: 12
+    loot_table: mythical
+    harvestable:
+      material: "dragon scale"
+      skill: "survive"
+      difficulty: 14
+    description_unseen: "A shadow crosses the sun. Something immense is circling overhead."
+    description_seen: "A dragon descends, wings beating, smoke curling from its nostrils."
+    description_short: "dragon"
+    xp_value: 120
+    tags: [mythical, wilderness, dungeon, dragon]
+    special_abilities: []
+
+  - id: basilisk
+    name: Basilisk
+    hd: 6
+    hp_per_hd: 5
+    ac: 15
+    attack_bonus: 6
+    damage: "1d10"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "lunges with petrifying gaze at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 8
+    flee_difficulty: 11
+    unavoidable: false
+    morale: 11
+    loot_table: mythical
+    harvestable:
+      material: "basilisk eye"
+      skill: "survive"
+      difficulty: 13
+    description_unseen: "You see petrified animals — and something moved at the edge of vision."
+    description_seen: "The basilisk's eight eyes fix on you, glowing with cold light."
+    description_short: "basilisk"
+    xp_value: 90
+    tags: [mythical, wilderness, ruins]
+    special_abilities: []
+
+  - id: sphinx
+    name: Sphinx
+    hd: 9
+    hp_per_hd: 6
+    ac: 16
+    attack_bonus: 9
+    damage: "2d8"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "strikes with massive paws at"
+    num_attacks: 2
+    behavior: territorial
+    awareness_difficulty: 4
+    flee_difficulty: 13
+    unavoidable: false
+    morale: 11
+    loot_table: mythical
+    harvestable: null
+    description_unseen: "You sense an ancient intelligence watching you."
+    description_seen: "The sphinx regards you with alien calm, then rises to its feet."
+    description_short: "sphinx"
+    xp_value: 135
+    tags: [mythical, ruins, desert, dungeon]
+    special_abilities: []
+
+  - id: griffon
+    name: Griffon
+    hd: 7
+    hp_per_hd: 5
+    ac: 15
+    attack_bonus: 7
+    damage: "1d10"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "tears with beak and talons at"
+    num_attacks: 2
+    behavior: aggressive
+    awareness_difficulty: 6
+    flee_difficulty: 12
+    unavoidable: false
+    morale: 11
+    loot_table: mythical
+    harvestable:
+      material: "griffon feather"
+      skill: "survive"
+      difficulty: 11
+    description_unseen: "A cry like an eagle, but much larger, echoes from above."
+    description_seen: "A griffon banks and dives toward you, talons extended."
+    description_short: "griffon"
+    xp_value: 105
+    tags: [mythical, wilderness, hills]
+    special_abilities: []

@@ -1,0 +1,17 @@
+actions:
+  - name: attack
+    description: "Attack an enemy asset"
+  - name: expand
+    description: "Move or place asset into adjacent cell"
+  - name: create
+    description: "Purchase a new asset"
+  - name: repair
+    description: "Restore HP to damaged asset"
+  - name: seize
+    description: "Take control of a cell from rival"
+  - name: sell
+    description: "Remove asset, recover partial cost"
+  - name: refit
+    description: "Recover faction HP"
+  - name: harvest
+    description: "Generate Wealth from controlled assets"

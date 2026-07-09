@@ -1,0 +1,20 @@
+# Adventure Crafter Theme Table
+# NOTE: Populate with full entries from source material
+# narration_template is content (the Mythic scene format), not engine code.
+narration_template: "[{theme}] {character}. {plot}. (Focus: {element})"
+themes:
+  - name: Action
+    weight: 30
+    elements: ["chase", "fight", "escape", "ambush", "pursuit", "rescue", "destruction"]
+  - name: Tension
+    weight: 25
+    elements: ["threat", "danger", "suspicion", "paranoia", "countdown", "trap", "betrayal"]
+  - name: Mystery
+    weight: 20
+    elements: ["clue", "revelation", "secret", "puzzle", "discovery", "hidden", "investigation"]
+  - name: Social
+    weight: 15
+    elements: ["alliance", "rivalry", "negotiation", "deception", "loyalty", "faction", "reputation"]
+  - name: Personal
+    weight: 10
+    elements: ["loss", "growth", "memory", "desire", "fear", "sacrifice", "redemption"]

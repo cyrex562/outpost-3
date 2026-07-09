@@ -1,0 +1,34 @@
+# Specific lair types for world generation
+
+id: lairs
+category: terrain
+name: Lairs
+tags: [wilderness, lair]
+entries:
+  - weight: 1
+    result:
+      type: "cave"
+      name: "Wolf Den"
+      creature_type: "wolf"
+      dungeon_type: "cave"
+
+  - weight: 1
+    result:
+      type: "ruin"
+      name: "Goblin Outpost"
+      creature_type: "goblin"
+      dungeon_type: "ruins"
+
+  - weight: 1
+    result:
+      type: "tower"
+      name: "Bandit Tower"
+      creature_type: "bandit"
+      dungeon_type: "tower"
+
+  - weight: 1
+    result:
+      type: "burrow"
+      name: "Giant Insect Hive"
+      creature_type: "giant_insect"
+      dungeon_type: "burrow"

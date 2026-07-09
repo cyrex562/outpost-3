@@ -1,0 +1,71 @@
+hit:
+  melee:
+    - "Your blade bites deep."
+    - "The blow lands solidly."
+    - "A clean strike."
+    - "You find an opening and exploit it."
+    - "The strike connects with a satisfying thud."
+  bite:
+    - "Teeth sink into flesh."
+    - "The jaws snap shut on their target."
+    - "A savage bite tears through."
+    - "The creature's maw finds its mark."
+    - "Fangs rake across skin."
+  ranged:
+    - "The shot finds its mark."
+    - "A clean hit."
+    - "The bolt drives home."
+    - "You lead the target perfectly."
+    - "The projectile strikes true."
+  punch:
+    - "The blow connects hard."
+    - "A solid hit."
+    - "You land a telling strike."
+    - "The impact is jarring."
+    - "The strike finds its mark."
+
+miss:
+  melee:
+    - "The blow glances off."
+    - "Your target sidesteps."
+    - "The strike falls short."
+    - "You overextend — they back away."
+    - "A near miss."
+  bite:
+    - "Jaws snap at empty air."
+    - "The beast lunges wide."
+    - "You dodge the bite."
+    - "The creature misses its snap."
+    - "Teeth clack together on nothing."
+  ranged:
+    - "The shot goes wide."
+    - "Your target moves at the last second."
+    - "The projectile skips off the ground."
+    - "Too high."
+    - "A near miss, but a miss."
+  punch:
+    - "The swing goes wide."
+    - "You duck under the blow."
+    - "They miss by a hair."
+    - "The attack falls short."
+    - "A glancing blow."
+
+flee:
+  clean:
+    - "You flee cleanly, disengaging smoothly and retreating to safety."
+    - "You escape cleanly, creating distance before they can close."
+    - "You escape with a tactical withdrawal — and make it look easy."
+  messy:
+    - "You break away in a panic, barely escaping."
+    - "You flee in a desperate sprint."
+    - "You escape, but not without consequence."
+
+natural_1:
+  - "Your attack goes wildly astray — a fumble."
+  - "You stumble badly, your strike missing entirely."
+  - "A catastrophic miss — you leave yourself open."
+
+natural_20:
+  - "A devastating strike lands with perfect timing!"
+  - "You find a critical gap in their defense!"
+  - "A flawless hit — they stagger from the impact!"

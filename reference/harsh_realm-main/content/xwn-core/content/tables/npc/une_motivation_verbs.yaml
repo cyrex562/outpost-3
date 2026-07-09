@@ -1,0 +1,37 @@
+# UNE Motivation Verbs table
+# TODO: Populate from UNE rulebook — full table has 100 entries
+id: une_motivation_verbs
+category: une
+name: "UNE Motivation Verbs"
+tags: [une, npc, motivation]
+entries:
+  - weight: 1
+    result: "obtain"
+  - weight: 1
+    result: "protect"
+  - weight: 1
+    result: "destroy"
+  - weight: 1
+    result: "overthrow"
+  - weight: 1
+    result: "discover"
+  - weight: 1
+    result: "hinder"
+  - weight: 1
+    result: "create"
+  - weight: 1
+    result: "guard"
+  - weight: 1
+    result: "educate"
+  - weight: 1
+    result: "liberate"
+  - weight: 1
+    result: "restore"
+  - weight: 1
+    result: "avenge"
+  - weight: 1
+    result: "conquer"
+  - weight: 1
+    result: "escape"
+  - weight: 1
+    result: "serve"

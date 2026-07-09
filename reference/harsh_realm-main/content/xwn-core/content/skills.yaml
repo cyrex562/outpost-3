@@ -1,0 +1,205 @@
+# XWN skill definitions.
+# available_milestone: the milestone at which this skill becomes mechanically active.
+# 99 = not yet active (future milestones).
+# category / subcategory: grouping for the skill-tree picker.
+# requirements: declarative constraints that must hold for the skill to be takeable
+#   (see SkillRequirement). Types: class, attribute, trait — extensible per pack.
+skills:
+  - id: administer
+    name: Administer
+    description: "Manage organizations, bureaucracy, logistics."
+    default_attribute: int
+    alternate_attributes: [cha]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Knowledge
+
+  - id: connect
+    name: Connect
+    description: "Social networking, finding contacts, gathering rumors."
+    default_attribute: cha
+    alternate_attributes: [int]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Social
+
+  - id: exert
+    name: Exert
+    description: "Physical feats of strength, endurance, forced entry."
+    default_attribute: str
+    alternate_attributes: [con]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 5
+    category: Physical
+
+  - id: fix
+    name: Fix
+    description: "Repair, disable, jury-rig mechanical and electronic devices."
+    default_attribute: int
+    alternate_attributes: [dex]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 5
+    category: Technical
+
+  - id: heal
+    name: Heal
+    description: "Medical treatment, first aid, diagnosis."
+    default_attribute: int
+    alternate_attributes: [wis]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 3
+    category: Knowledge
+
+  - id: know
+    name: Know
+    description: "Academic knowledge, history, science, identify objects."
+    default_attribute: int
+    alternate_attributes: [wis]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 2
+    category: Knowledge
+
+  - id: lead
+    name: Lead
+    description: "Command, inspire, coordinate groups."
+    default_attribute: cha
+    alternate_attributes: [wis]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Social
+
+  - id: notice
+    name: Notice
+    description: "Perception, spot hidden things, detect ambush."
+    default_attribute: wis
+    alternate_attributes: [int]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 2
+    category: Exploration
+
+  - id: perform
+    name: Perform
+    description: "Entertainment, distraction, artistic expression."
+    default_attribute: cha
+    alternate_attributes: [dex]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Social
+
+  - id: pilot
+    name: Pilot
+    description: "Operate vehicles, mounts, eventually starships."
+    default_attribute: dex
+    alternate_attributes: [int]
+    can_use_untrained: false
+    combat_skill: false
+    available_milestone: 99
+    category: Technical
+    # Example class restriction (also milestone-locked for now).
+    requirements:
+      - type: class
+        classes: [expert, adventurer]
+
+  - id: program
+    name: Program
+    description: "Computer operation, hacking, AI interaction."
+    default_attribute: int
+    alternate_attributes: []
+    can_use_untrained: false
+    combat_skill: false
+    available_milestone: 99
+    category: Technical
+    # Example attribute requirement (also milestone-locked for now).
+    requirements:
+      - type: attribute
+        attribute: int
+        min: 12
+
+  - id: punch
+    name: Punch
+    description: "Unarmed combat."
+    default_attribute: str
+    alternate_attributes: [dex]
+    can_use_untrained: true
+    combat_skill: true
+    available_milestone: 3
+    category: Combat
+
+  - id: shoot
+    name: Shoot
+    description: "Ranged weapon attacks."
+    default_attribute: dex
+    alternate_attributes: []
+    can_use_untrained: true
+    combat_skill: true
+    available_milestone: 3
+    category: Combat
+
+  - id: sneak
+    name: Sneak
+    description: "Stealth, hiding, moving silently, pickpocketing."
+    default_attribute: dex
+    alternate_attributes: [int]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 5
+    category: Exploration
+
+  - id: stab
+    name: Stab
+    description: "Melee weapon attacks."
+    default_attribute: str
+    alternate_attributes: [dex]
+    can_use_untrained: true
+    combat_skill: true
+    available_milestone: 3
+    category: Combat
+
+  - id: survive
+    name: Survive
+    description: "Wilderness survival, navigation, foraging, tracking."
+    default_attribute: wis
+    alternate_attributes: [con]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 1
+    category: Exploration
+
+  - id: talk
+    name: Talk
+    description: "Persuasion, negotiation, deception, diplomacy."
+    default_attribute: cha
+    alternate_attributes: [wis]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Social
+
+  - id: trade
+    name: Trade
+    description: "Buying, selling, appraising, bargaining."
+    default_attribute: cha
+    alternate_attributes: [int]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Social
+
+  - id: work
+    name: Work
+    description: "General labor, crafting, profession-specific tasks."
+    default_attribute: str
+    alternate_attributes: [int, dex]
+    can_use_untrained: true
+    combat_skill: false
+    available_milestone: 4
+    category: Physical

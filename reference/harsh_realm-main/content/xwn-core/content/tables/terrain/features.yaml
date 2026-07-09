@@ -1,0 +1,31 @@
+features:
+  - id: settlement
+    name: Settlement
+    placement: open_edge_priority
+    terrain_preference: [plains, hills]
+    min_count: 3
+    max_count: 5
+  - id: ruins
+    name: Ruin Site
+    placement: scattered
+    terrain_preference: [wasteland, plains, hills, desert]
+    min_count: 4
+    max_count: 8
+  - id: landmark
+    name: Landmark
+    placement: scattered
+    terrain_preference: []
+    min_count: 3
+    max_count: 6
+  - id: lair
+    name: Monster Lair
+    placement: scattered
+    terrain_preference: [forest, hills, swamp, mountains]
+    min_count: 2
+    max_count: 4
+  - id: camp
+    name: Bandit Camp
+    placement: scattered
+    terrain_preference: [plains, wasteland, hills]
+    min_count: 0
+    max_count: 2

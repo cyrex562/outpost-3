@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_hills
+category: encounter
+name: "Hills Encounters"
+tags: [hills, wilderness]
+entries:
+  - weight: 3
+    result:
+      type: hostile
+      name: "Hill Brigands"
+      description: "A half-dozen rough-looking figures emerge from behind boulders, blocking the high path. 'Everything you're carrying. Now.'"
+  - weight: 2
+    result:
+      type: hostile
+      name: "Cave Predator"
+      description: "Something large and fast moves in the rocks above you — the silhouette is wrong for any natural animal."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Shepherd with Flock"
+      description: "A shepherd moves a small flock across the hillside, keeping them to the grass patches. They regard you with suspicion."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Prospector"
+      description: "A lone figure with a pick and heavy pack is working a rocky outcrop. They seem absorbed in their work."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Rockfall"
+      description: "A crack, then a roar — a section of hillside gives way above the trail. You scramble clear as boulders bound past."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Sudden Fog"
+      description: "Thick fog rolls in from a valley below, swallowing the landscape. Navigation becomes guesswork."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Distant Drums"
+      description: "A low rhythmic drumming carries on the wind from somewhere in the hills. Regular, deliberate — a signal or ceremony."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Hidden Camp"
+      description: "A well-concealed camp tucked behind a rock formation. Cold embers, two bedrolls, and a crude map scratched on bark."

@@ -1,0 +1,21 @@
+table_id: mythical
+type: loot
+entries:
+  - weight: 2
+    result: "Rare hide or scale fragment"
+    data: {type: material, name: "mythical scale", value: 100}
+  - weight: 2
+    result: "A significant cache of old coin"
+    data: {type: currency, value: 200}
+  - weight: 2
+    result: "A pretech weapon of unknown function"
+    data: {type: pretech, name: "unknown pretech weapon", value: 500}
+  - weight: 2
+    result: "Ancient jewelry with gems"
+    data: {type: misc, name: "ancient jewelry", value: 300}
+  - weight: 1
+    result: "A functioning pretech medpack"
+    data: {type: consumable, name: "pretech medpack", value: 400, healing: "3d6+3"}
+  - weight: 1
+    result: "A star map fragment to a pretech cache"
+    data: {type: misc, name: "star map fragment", value: 750}

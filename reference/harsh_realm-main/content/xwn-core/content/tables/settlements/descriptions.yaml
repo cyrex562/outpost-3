@@ -1,0 +1,168 @@
+# TODO: Expand from source material
+id: settlement_descriptions
+category: settlement
+name: "Settlement Descriptions"
+tags: [settlement, description]
+entries:
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: plains
+      text: "A handful of farmsteads clustered around a stone well. Smoke rises from low chimneys. Dogs bark somewhere nearby."
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: forest
+      text: "A few rough-hewn cabins half-swallowed by the treeline. Paths of packed earth wind between them. The smell of woodsmoke hangs in the air."
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: hills
+      text: "A scatter of stone cottages on a wind-scoured hillside. A low wall of stacked rock surrounds the common ground."
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: swamp
+      text: "A cluster of stilted shacks rising from the mud. Plank walkways connect them. The air is thick with insects."
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: wasteland
+      text: "A desperate huddle of shelters built from salvage and ruin-stone. People here survive on grit alone."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: plains
+      text: "A modest village of wattle-and-daub buildings along a central track. A market square holds the remnants of last week's trade."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: forest
+      text: "A forest village where the great trees press close. Buildings are built between and around the trunks. Lanterns glow at every door."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: hills
+      text: "A hillside village tiered along carved stone steps. Goats pick at the verges. A bell tower watches over the valley below."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: swamp
+      text: "A village perched on raised earthworks above the wetland. Wooden bridges and causeways link the neighborhoods."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: wasteland
+      text: "A hardy village that has learned to squeeze life from dust and rubble. Walls of reclaimed pretech panels glint dully in the light."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: desert
+      text: "A low-walled village sheltered from the dunes by earthen berms. Awnings shade every doorway. A cistern dominates the square."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: plains
+      text: "A proper town with cobbled streets, a guildhall, and a covered market. Rival merchants eye each other across the square."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: forest
+      text: "A fortified town ringed by a timber palisade. Log-built halls crowd together. Sawdust and iron-smell fill the air."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: hills
+      text: "A stone-built town commanding a hilltop crossroads. Watchtowers flank the gate. Trade passes through here and is taxed accordingly."
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: ruins
+      text: "A small settlement picking through the bones of something older. Pretech fragments surface underfoot. No one discusses it."
+  - weight: 3
+    result:
+      type: description
+      size: village
+      terrain: ruins
+      text: "A village built atop ruins far older than anyone remembers. The foundations are strange. Doorways point the wrong direction."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: wasteland
+      text: "A fortified town that has endured when others fell. High walls of scavenged stone. Guards patrol in shifts. Strangers are watched."
+  - weight: 2
+    result:
+      type: description
+      size: hamlet
+      terrain: desert
+      text: "A ring of half-buried shelters around a failing moisture trap. The inhabitants wrap themselves head to toe and speak little."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: desert
+      text: "A walled town of pale stone baking under a merciless sky. Underground cisterns feed narrow channels through the streets. Merchants haggle in shaded alcoves."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: swamp
+      text: "A town of stilt-houses and pontoon markets anchored in the deepwater marsh. Pole-barges crowd the waterways. The stench of peat and industry mingles in the humid air."
+  - weight: 4
+    result:
+      type: description
+      size: town
+      terrain: ruins
+      text: "A town grafted onto the skeleton of a pretech installation. Corridors have become streets. Old machine-rooms serve as guild halls. Lights flicker in sections no one claims."
+  - weight: 5
+    result:
+      type: description
+      size: city
+      terrain: plains
+      text: "A sprawling city behind concentric walls, each ring older and more decrepit than the last. Smokestacks compete with cathedral spires. The lord's citadel looms above it all, its pretech beacon never dark."
+  - weight: 5
+    result:
+      type: description
+      size: city
+      terrain: forest
+      text: "A great city carved from and built around ancient megaflora. Suspension bridges connect districts strung between colossal trunks. Below, the forest floor seethes with those who cannot afford the canopy."
+  - weight: 5
+    result:
+      type: description
+      size: city
+      terrain: hills
+      text: "A tiered city climbing a mountainside in layers of stone and steel. Funiculars grind between districts. The upper terraces hoard pretech light while the lower wards make do with tallow and spite."
+  - weight: 5
+    result:
+      type: description
+      size: city
+      terrain: wasteland
+      text: "A walled city rising from the blasted flats like a defiant fist. Recycler stacks process every scrap. The population presses against its walls, too many for too little, and the lord's enforcers keep order with shock-lances."
+  - weight: 5
+    result:
+      type: description
+      size: city
+      terrain: ruins
+      text: "A city layered over the ruins of something vast and incomprehensible. Whole districts are repurposed pretech architecture, their original purpose lost. Strange hums rise from below on quiet nights."
+  - weight: 5
+    result:
+      type: description
+      size: city
+      terrain: desert
+      text: "A fortress-city of sandstone and salvaged alloy, its great walls holding back the dunes. Deep wells and pretech condensers sustain it. Power here is measured in water rights."

@@ -1,0 +1,11 @@
+# Settlement sizes — content, not generator code (R5-R). Authorable per setting.
+id: settlement_sizes
+category: settlement
+name: Settlement Sizes
+entries:
+  - weight: 1
+    result: hamlet
+  - weight: 1
+    result: village
+  - weight: 1
+    result: town

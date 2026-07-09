@@ -1,0 +1,12 @@
+id: advantages.acute_hearing
+name: Acute Hearing
+category: advantage
+description: Heightened hearing gives a bonus to sound-based Notice checks.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.notice.hearing
+    value: 2
+    stacking: additive
+    description: Bonus to hearing-based Notice checks.
+tags: [gurps, sensory]
+

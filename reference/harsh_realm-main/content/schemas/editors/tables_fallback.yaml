@@ -1,0 +1,17 @@
+pattern: "tables/"
+label: "Random Table"
+meta_fields:
+  - { key: id, type: text, label: ID }
+  - { key: name, type: text, label: Name }
+  - { key: category, type: text, label: Category }
+  - { key: tags, type: tags, label: Tags }
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: type, type: text, label: Type, width: sm }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: description, type: text, label: Description, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

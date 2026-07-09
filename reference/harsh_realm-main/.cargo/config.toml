@@ -1,0 +1,12 @@
+# Repo-wide cargo config.
+#
+# The `xtask` alias runs the in-repo build/orchestration tool cross-platform
+# (Linux + Windows), replacing per-platform shell/PowerShell scripts. Run from
+# the repo root:
+#
+#   cargo xtask <command>        # e.g. cargo xtask build-windows
+#   cargo xtask help
+#
+# Source: xtask/src/main.rs
+[alias]
+xtask = "run --quiet --manifest-path xtask/Cargo.toml --"

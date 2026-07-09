@@ -1,0 +1,23 @@
+# Mythic GME Random Event Action Table (d100)
+# NOTE: Populate with full 100 entries from source material
+entries:
+  - {min: 1, max: 5, action: "Attainment"}
+  - {min: 6, max: 10, action: "Starting"}
+  - {min: 11, max: 15, action: "Neglect"}
+  - {min: 16, max: 20, action: "Fight"}
+  - {min: 21, max: 25, action: "Recruit"}
+  - {min: 26, max: 30, action: "Triumph"}
+  - {min: 31, max: 35, action: "Violate"}
+  - {min: 36, max: 40, action: "Oppose"}
+  - {min: 41, max: 45, action: "Malice"}
+  - {min: 46, max: 50, action: "Communicate"}
+  - {min: 51, max: 55, action: "Persecute"}
+  - {min: 56, max: 60, action: "Increase"}
+  - {min: 61, max: 65, action: "Decrease"}
+  - {min: 66, max: 70, action: "Abandon"}
+  - {min: 71, max: 75, action: "Gratify"}
+  - {min: 76, max: 80, action: "Inquire"}
+  - {min: 81, max: 85, action: "Antagonise"}
+  - {min: 86, max: 90, action: "Move"}
+  - {min: 91, max: 95, action: "Waste"}
+  - {min: 96, max: 100, action: "Truce"}

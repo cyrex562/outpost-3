@@ -1,0 +1,13 @@
+id: disadvantages.code_of_honor
+name: Code of Honor
+category: disadvantage
+description: A binding code can constrain deception and dishonorable tactics.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.deceive.dishonorable
+    value: -2
+    stacking: additive
+    description: Penalty to actions that violate the character's code.
+provides_tags: [honorable_code]
+tags: [gurps, social]
+

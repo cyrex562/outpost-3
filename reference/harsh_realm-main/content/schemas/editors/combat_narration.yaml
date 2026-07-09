@@ -1,0 +1,9 @@
+pattern: "templates/combat_narration"
+label: "Combat Narration"
+widget: GroupedListEditor
+accessor: { kind: root }
+fields:
+  - { key: element, type: textarea, label: Text, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

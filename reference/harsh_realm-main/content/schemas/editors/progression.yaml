@@ -1,0 +1,10 @@
+pattern: "tables/xp_progression"
+label: "XP Progression"
+widget: RegistryEditor
+accessor: { kind: key, key: xp_progression }
+entry_key: level
+fields:
+  - { key: level, type: number, label: Level, width: sm }
+  - { key: xp_needed, type: number, label: "XP Threshold (Total)", width: md }
+allow_add: true
+allow_delete: true

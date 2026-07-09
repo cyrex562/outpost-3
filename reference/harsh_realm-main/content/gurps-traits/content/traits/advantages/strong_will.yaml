@@ -1,0 +1,12 @@
+id: advantages.strong_will
+name: Strong Will
+category: advantage
+description: Firm resolve improves mental resistance.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: save.mental
+    value: 2
+    stacking: additive
+    description: Bonus to mental saving throws.
+tags: [gurps, mental]
+

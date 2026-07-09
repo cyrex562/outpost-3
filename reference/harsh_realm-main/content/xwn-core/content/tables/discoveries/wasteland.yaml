@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_wasteland
+category: discovery
+name: "Wasteland Discoveries"
+tags: [wasteland]
+entries:
+  - weight: 5
+    result:
+      type: environmental
+      description: "A half-buried vehicle chassis, stripped of anything useful. Still, the undercarriage might shelter you from wind."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Salvage Scraps"
+      description: "A handful of metal odds and ends — bolts, wire, a hinge. Junk to most, but useful in a pinch."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Sealed Ration Pack"
+      description: "A military-issue ration sealed in foil. The contents are old but should be safe."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "A dry streambed with traces of chemical residue. Nothing grows here — something poisoned the water."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: clue
+      description: "A faded corporate or faction logo is stencilled on a rusted barrel. Whoever left these here had resources."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Intact Filter Mask"
+      description: "A respirator mask, old but intact. Useful against dust and fumes."
+      enc: 0
+      min_difficulty: 8
+  - weight: 1
+    result:
+      type: item
+      name: "Pretech Scanner"
+      description: "A handheld device — dead battery, cracked casing. Could still be repaired or parted out."
+      enc: 0
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: environmental
+      description: "A concealed bunker hatch, buried under ash. The locking mechanism is corroded solid."
+      min_difficulty: 10

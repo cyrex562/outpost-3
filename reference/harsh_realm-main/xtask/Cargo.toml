@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+description = "In-repo build and release orchestration for Harsh Realm (run via `cargo xtask`)."
+publish = false
+
+[dependencies]
+# Portable SHA-256 for release checksums (avoids shelling out to sha256sum /
+# certutil, which differ across Linux and Windows).
+sha2 = "0.10"

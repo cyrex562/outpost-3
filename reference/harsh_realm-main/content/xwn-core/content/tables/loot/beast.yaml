@@ -1,0 +1,18 @@
+table_id: beast
+type: loot
+entries:
+  - weight: 5
+    result: "Nothing usable"
+    data: {type: nothing, value: 0}
+  - weight: 4
+    result: "Usable hide scraps"
+    data: {type: material, name: "hide scraps", value: 5}
+  - weight: 3
+    result: "Edible meat (one meal)"
+    data: {type: consumable, name: "fresh meat", value: 3}
+  - weight: 2
+    result: "Useful claws or teeth"
+    data: {type: material, name: "claws and teeth", value: 10}
+  - weight: 1
+    result: "A rare gland or organ with alchemical value"
+    data: {type: material, name: "alchemical organ", value: 40}

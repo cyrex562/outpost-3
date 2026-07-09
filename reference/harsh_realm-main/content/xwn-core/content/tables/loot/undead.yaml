@@ -1,0 +1,21 @@
+table_id: undead
+type: loot
+entries:
+  - weight: 5
+    result: "Rotted clothing and nothing else"
+    data: {type: nothing, value: 0}
+  - weight: 3
+    result: "Corroded coin"
+    data: {type: currency, value: 5}
+  - weight: 3
+    result: "A tarnished trinket"
+    data: {type: misc, name: "tarnished trinket", value: 10}
+  - weight: 2
+    result: "Crumbling journal pages"
+    data: {type: misc, name: "journal pages", value: 15}
+  - weight: 1
+    result: "A cursed amulet (eerie, possibly valuable)"
+    data: {type: misc, name: "cursed amulet", value: 50}
+  - weight: 1
+    result: "Pre-collapse currency in good condition"
+    data: {type: currency, value: 35}

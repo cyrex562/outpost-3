@@ -1,0 +1,188 @@
+# Harsh Realm — content authoring templates
+# =========================================
+# Each `---`-separated block is ONE record. The single top-level key is the
+# record type. Compile a folder of these with:
+#
+#     hrctl content compile <dir>
+#
+# Effects inside `do:` lists use the verb-first form (apply:/damage:/log: …);
+# the compiler lowers them to the engine's {kind, params}. The full, always-up-to-
+# date key list (types, enums, defaults) is docs/content/key-reference.md —
+# regenerate it any time with `hrctl content reference`.
+#
+# Tip: write `on: combat.hit` not `on: combat.hit` quoted — but never rely on the
+# bare words on/off/yes/no as *values*; the loader keeps `on:` as a key but the
+# stock YAML bool words can still bite you as values. Prefer true/false.
+
+# ── creature: a monster/NPC stat block that references actions by id ─────────
+creature:
+  id: scrip_hound
+  name: Scrip-Hound
+  hd: 2                       # hit dice
+  hp_per_hd: 8               # default 4
+  ac: 14                     # → becomes defenses.ac unless you set `defenses`
+  attack_bonus: 3
+  damage: 1d8                # dice expression (validated at compile)
+  damage_type: melee         # default "melee"
+  num_attacks: 1             # default 1
+  behavior: aggressive       # default "aggressive"
+  morale: 9                  # default 8
+  xp_value: 30               # default 15
+  loot_table: scrip_hound_loot
+  harvestable: { material: corrosive_gland, skill: Heal, difficulty: 9 }
+  description_seen: "A skeletal hound plated in scavenged armor, jaws weeping acid."
+  tags: [engineered, beast, guard]
+  actions: [bite]            # action ids (replaces the old attack_skill/innate_attacks)
+  # pools: []  → leave empty and the host derives hp from hd*hp_per_hd
+  # defenses: {} → leave empty and the host derives {ac} from `ac`
+
+---
+# ── action: a concrete L2 action specializing an archetype via `base` ────────
+action:
+  id: bite
+  base: melee_attack         # the L1 archetype it inherits
+  resolution:
+    tn_source: { defense: ac }              # static <n> | difficulty <n|key> | defense <id> | opposed <expr>
+    roll_spec: { mechanic: xwn_d20_attack, skill: punch, attribute: STR }
+  targeting: { shape: single, range_band: melee, requires_los: true }
+  activation: { economy: action }           # free | action | reaction
+  outcome:
+    - when: success            # crit | success | miss | fumble | (or a degree/raw_margin expr)
+      do:
+        - emit_damage: { amount: 4, types: [physical, blunt], tier: sd }
+          to: target
+        - apply: corroded
+          to: target
+          for: 0               # 0 ticks = until removed
+  tags: [attack, melee]
+
+---
+# ── status_effect: a condition; can carry modifiers and triggers ─────────────
+status_effect:
+  id: corroded
+  name: Corroded Armor
+  default_duration_ticks: 0   # 0 = permanent until removed
+  stacking: stack             # replace | extend | stack
+  tags: [debuff]
+  modifiers:
+    - target: combat.ac        # a modifier target (engine vocabulary)
+      value: -1
+      stacking: additive       # additive | multiplicative | replace | max | min
+      description: "-1 AC while armor is corroded"
+
+---
+# ── trait: a feat/ability; a graph of modifiers + triggers rooted here ───────
+trait:
+  id: sand_reaver_training
+  name: Sand-Reaver Training
+  category: combat            # required: advantage/edge/feat/creature-ability/…
+  description: "Brutal desert-raider knife-work."
+  prerequisites:
+    - { kind: attribute_min, arg: DEX, value: 13 }   # trait|attribute_min|level_min|skill_min
+  provides_tags: [reaver]
+  modifiers:
+    - target: action.stab
+      value: 1
+      stacking: additive
+      condition: { predicate: entity_has_tag, arg: bloodied }   # always|entity_has_tag|target_has_tag|entity_has_trait
+  triggers:
+    - id: on_stab_bleed
+      on: combat.attack         # the event type to subscribe to
+      when: "event.hit and not has_status(target, 'bleeding')"  # condition DSL (validated)
+      do:
+        - apply: bleeding
+          to: target
+          for: 3
+
+---
+# ── skill: an L3 overlay — grants actions and modifies them per level ────────
+skill:
+  id: shoot
+  name: Shoot
+  governs:
+    - action: ranged_attack
+      per_level:
+        - { target: action.ranged_attack.roll, value: 1, stacking: additive }
+  grants: [aimed_shot, snap_shot]   # action ids this skill makes available
+  tags: [combat, ranged]
+
+---
+# ── item: a weapon (flat mechanical fields) ──────────────────────────────────
+item:
+  id: reaver_knife
+  name: Reaver's Knife
+  enc: 1
+  cost: 15
+  tags: [weapon, melee, knife]
+  damage: 1d6
+  damage_type: melee
+  attribute: DEX
+  shock_damage: 1
+  shock_ac_threshold: 15
+  weapon_tags: [light, concealable]
+  grants_traits: [keen_edge]   # an item can grant a trait that carries its modifiers
+
+---
+# ── item: a consumable (discriminated effect) ────────────────────────────────
+item:
+  id: med_kit
+  name: Med Kit
+  enc: 1
+  cost: 20
+  tags: [consumable, medical]
+  effect: { type: heal, dice: 1d6+1 }   # type ∈ food | heal | save_bonus
+
+---
+# ── tag: a category label with implications ──────────────────────────────────
+tag:
+  id: undead
+  description: "Animated dead; immune to poison, vulnerable to radiant."
+  implies: [biological_immune]
+
+---
+# ── trigger: a standalone event → effect rule ────────────────────────────────
+trigger:
+  id: low_health_warning
+  on: character.hp_changed
+  when: "entity.hp <= 3"
+  do:
+    - log: "Your vision blurs — you are gravely wounded."
+
+---
+# ── table: ranged (d100) — presence of `roll:` ⇒ range entries ──────────────
+table:
+  id: wasteland_encounters
+  category: encounter
+  name: Wasteland Wandering Monsters
+  entries:
+    - { range: [1, 40],   result: "nothing" }
+    - { range: [41, 70],  result: { spawn: scrip_hound, count: "1d4" } }
+    - { range: [71, 100], result: { table: wasteland_hazards } }   # subtable reference
+
+---
+# ── table: weighted — omit `roll:`, use `weight` ─────────────────────────────
+table:
+  id: scrip_hound_loot
+  category: loot
+  name: Scavenged Scrap
+  entries:
+    - { weight: 5, result: { give: scrap_metal, count: "2d6" } }
+    - { weight: 1, result: { give: pretech_fragment, count: 1 } }
+
+---
+# ── procedure: an ordered generator recipe ───────────────────────────────────
+procedure:
+  id: generate_scavenger
+  name: Generate Scavenger NPC
+  description: "Roll occupation, build a UNE persona, format a greeting."
+  inputs:
+    - { name: faction_id, type: string, required: false }
+  steps:
+    - { kind: roll,      assign: occ,      table: scavenger_occupations }
+    - { kind: procedure, assign: persona,  procedure: une_personality }
+    - { kind: format,    assign: greeting, template: "The {occ} eyes you warily.", params: { occ: var.occ } }
+  output:
+    fields:
+      occupation: var.occ
+      greeting: var.greeting
+  tags: [npc, generator]

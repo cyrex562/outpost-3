@@ -1,0 +1,58 @@
+worlds/
+!worlds/.gitkeep
+
+# Generated design screenshots (run `npm run screenshots` to regenerate)
+docs/design/screenshots/*.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Test artifacts
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+mutants.out/
+mutants.out.old/
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+
+# Build / runtime
+target/
+*.db
+.env
+*.log
+
+# uv.lock is intentionally tracked (do not add it here)
+
+# Bot run logs
+logs/
+
+# Git worktrees
+.worktrees/
+.agents/issue-drafts/
+
+# Tauri generated schemas/permissions (regenerated each build).
+src-tauri/gen/
+
+# Tauri build/bundle output and target dir.
+src-tauri/target/
+
+# Generated app icons (regenerated from app-icon-source.png by `tauri icon`,
+# which scripts/build_tauri.sh runs on every build). Keep only the source.
+src-tauri/icons/*
+!src-tauri/icons/app-icon-source.png
+!src-tauri/icons/README.md

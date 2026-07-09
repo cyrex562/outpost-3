@@ -1,0 +1,18 @@
+pattern: "tables/settlements/descriptions"
+label: "Settlement Descriptions"
+meta_fields:
+  - { key: id, type: text, label: ID }
+  - { key: name, type: text, label: Name }
+  - { key: category, type: text, label: Category }
+  - { key: tags, type: tags, label: Tags }
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: type, type: text, label: Type, width: sm }
+  - { key: size, type: select, label: Size, options: [hamlet, village, town], width: sm }
+  - { key: terrain, type: text, label: Terrain, width: sm }
+  - { key: text, type: textarea, label: Text, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

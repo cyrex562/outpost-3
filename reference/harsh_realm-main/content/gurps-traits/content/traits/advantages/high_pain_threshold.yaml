@@ -1,0 +1,13 @@
+id: advantages.high_pain_threshold
+name: High Pain Threshold
+category: advantage
+description: Pain is easier to ignore under stress.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: save.physical.pain
+    value: 3
+    stacking: additive
+    description: Bonus to resist pain and stunning.
+provides_tags: [pain_resistant]
+tags: [gurps, resilience]
+
