@@ -1,16 +1,16 @@
 # CLAUDE.md — Outpost 3 AI Assistant Guide
 
-**For:** AI coding assistants (Claude, Copilot, Gemini, Cursor, etc.)
-**Project:** Outpost 3 — turn-based isometric colony survival and grand strategy game
-**Engine:** Godot 4 + C#
-**Design doc:** `docs/Outpost3_Design_V5.md` — authoritative game design
-**Task list:** `docs/TODO.md` — master task list, current priorities
+**For:** AI coding assistants (Claude Code, Copilot, Cursor, etc.)
+**Project:** Outpost 3 — turn-based grand-strategy colony game, star-system scale
+**Design doc:** `docs/DESIGN.md` — authoritative game design (supersedes all prior versions)
+**Issue list:** GitHub issues #7–#35 (see `docs/HARNESS.md` for the full table)
+**Harness:** `.claude/workflows/implement-issue.js`
 
 ---
 
-## You Are a Godot 4 / C# Game Developer
+## You Are a Rust + Vue Game Developer
 
-You write idiomatic C# targeting .NET 8. You keep simulation logic in pure C# classes with zero Godot dependencies. You iterate until **all NUnit tests pass** before considering any task complete.
+You write idiomatic Rust targeting edition 2021. You keep simulation logic in a **pure library crate** (`outpost_core`) with zero I/O or framework dependencies. You iterate until **`cargo test --workspace` passes** before considering any task complete.
 
 ---
 
@@ -18,13 +18,14 @@ You write idiomatic C# targeting .NET 8. You keep simulation logic in pure C# cl
 
 | Layer | Technology | Notes |
 |---|---|---|
-| **Engine** | Godot 4.3 + C# | `.NET 8`, `Nullable enable` |
-| **Core Logic** | Pure C# (`godot/src/Core/`) | No Godot namespace — plain classes, no nodes |
-| **Rendering** | Godot nodes (`godot/src/Rendering/`) | `Node2D`, `_Draw()`, signals |
-| **UI** | Godot nodes (`godot/src/UI/`) | Control nodes, panels, labels |
-| **Content** | YAML / JSON / CSV files (`content/`) | Loaded at runtime; buildings, resources, events, tech |
-| **Testing** | NUnit 4 (`tests/OutpostCore.Tests/`) | Pure C# tests, no Godot runtime needed |
-| **Serialization** | `System.Text.Json` | Save/load, content loading |
+| **Sim core** | Pure Rust lib (`outpost_core`) | No I/O, no async, no framework deps |
+| **CLI / Harness** | Rust binary (`outpost_harness`) | Balance calculator + prototyping runner |
+| **Web host** | Rust + Axum (`outpost_web`) | Phase 6+; wraps core, serves Vue |
+| **Frontend** | Vue 3 + TypeScript + Vite | Phase 6+; Pinia state, strict TS |
+| **Content** | YAML / JSON pack files (`content/`) | Loaded at runtime; never hardcoded in kernel |
+| **Persistence** | SQLite (snapshot between turns) | NOT per-mutation live state |
+| **Testing** | `cargo test` (unit + integration) | All tests must pass before merge |
+| **Reference** | `reference/harsh_realm-main/` | Structural patterns only — different game |
 
 ---
 
@@ -32,177 +33,146 @@ You write idiomatic C# targeting .NET 8. You keep simulation logic in pure C# cl
 
 ```
 outpost-3/
-├── CLAUDE.md                       # This file
+├── CLAUDE.md                        # This file
 ├── docs/
-│   ├── Outpost3_Design_V5.md       # Game design — source of truth
-│   └── TODO.md                     # Master task list
-├── content/                        # Data files loaded at runtime
-│   ├── buildings/                  # Building definitions (YAML)
-│   ├── resources/                  # Resource definitions (YAML)
-│   ├── events/                     # Event definitions (YAML)
-│   └── tech/                       # Tech tree (YAML)
-├── data/                           # Reference data (solar system, etc.)
-├── godot/                          # Godot 4 project root
-│   ├── project.godot
-│   ├── OutpostGame.csproj
-│   ├── src/
-│   │   ├── Core/                   # Pure C# — ZERO Godot dependencies
-│   │   │   ├── Colony/             # Building, resource, population, power, labor
-│   │   │   ├── Simulation/         # Turn processor, session, save/load, difficulty
-│   │   │   └── World/              # Terrain generation, site definitions, biomes
-│   │   ├── Rendering/              # Godot rendering layer (ColonyGridView, etc.)
-│   │   ├── UI/                     # Godot UI nodes
-│   │   └── Game/                   # Scene controllers, autoloads
-│   ├── scenes/                     # Godot .tscn scene files
-│   └── tests/                      # Godot-side tests (GDUnit4 — TBD)
-└── tests/
-    └── OutpostCore.Tests/          # NUnit tests for Core logic (163 tests, all passing)
-        ├── OutpostCore.Tests.csproj
-        ├── Phase0Tests.cs
-        ├── Phase1Tests.cs
-        ...
-        └── Phase8Tests.cs
+│   ├── DESIGN.md                    # Authoritative game design (read this first)
+│   ├── ISSUES.md                    # GitHub issue breakdown
+│   ├── HARNESS.md                   # How to use the implement-issue workflow
+│   ├── REVIEW.md                    # Codebase review (2026-07-08)
+│   └── TODO.md                      # Legacy Godot+C# task list (archived)
+├── content/                         # Data pack files (YAML/JSON)
+│   └── checks/                      # Balance harness test bundles
+├── reference/
+│   └── harsh_realm-main/            # Reference architecture (read-only)
+├── .claude/
+│   └── workflows/
+│       └── implement-issue.js       # Main implementation harness
+├── Cargo.toml                       # Workspace root (Phase 1+)
+├── outpost_core/                    # Pure sim library (Phase 1+)
+├── outpost_harness/                 # Balance harness binary (Phase 3+)
+├── outpost_web/                     # Axum web host (Phase 6+)
+├── frontend/                        # Vue 3 app (Phase 6+)
+└── godot/                           # Legacy Godot+C# implementation (behavioral spec)
+    └── src/Core/                    # C# code — read as spec, do not modify
 ```
 
 ---
 
-## Critical Rule: `godot/src/Core/` Has Zero Godot Dependencies
+## Critical Rules
 
-Files under `godot/src/Core/` must **never** reference:
-- `Godot` namespace (`using Godot;`)
-- `Node`, `Resource`, `GodotObject`, or any Godot type
-- `GD.Print`, `GD.Randomize`, or any Godot global
-- `Vector2`, `Vector2I`, `Color` — use `GridPosition`, `GridSize` plain structs instead
+### 1. `outpost_core` Has Zero External Dependencies (Except serde + rusqlite)
 
-All Godot-specific code belongs in `Rendering/`, `UI/`, or `Game/`. Core ↔ Godot boundary is crossed only at the rendering/UI layer.
+Files in `outpost_core/src/` must **never** reference:
+- `tokio`, `actix-web`, `axum`, or any async runtime
+- `std::fs`, `std::io`, or any I/O
+- Any HTTP/network crates
+- Godot types (the C# layer is archived, not active)
+
+Allowed in core: `serde`, `serde_yaml`, `serde_json`, `rusqlite`, `thiserror`, `uuid`, standard library.
+
+### 2. Content Is Data, Never Code
+
+New buildings, commodities, recipes, events, tech nodes → `content/<pack>/`
+Never hardcode authored records in kernel modules.
+
+### 3. Drive Interface Is the Only Mutation Point
+
+`GameEngine::apply(cmd: Command) -> Result<Vec<Event>, EngineError>`
+
+No direct struct mutation from outside `outpost_core`. Tests use `apply()`. Frontend uses `apply()` via the web API.
+
+### 4. SQLite Is Snapshot-Only
+
+Call snapshot after `apply()` pipeline completes. Never write to SQLite *during* a turn. No per-mutation write-through.
+
+### 5. `cargo test` Must Stay Green
+
+Run `cargo test --workspace` before every commit. Never submit work with failing tests.
 
 ---
 
 ## Running Tests
 
-```powershell
-# Run all NUnit tests (the primary test suite)
-dotnet test tests/OutpostCore.Tests/OutpostCore.Tests.csproj
+```bash
+# All tests
+cargo test --workspace
 
-# Run with verbose output
-dotnet test tests/OutpostCore.Tests/OutpostCore.Tests.csproj --logger "console;verbosity=normal"
+# With output
+cargo test --workspace -- --nocapture
+
+# Single crate
+cargo test -p outpost_core
+
+# Lint
+cargo clippy --workspace -- -D warnings
+
+# Format check
+cargo fmt --check --all
 ```
 
-All 163 tests must stay green. Never submit work with failing tests.
+---
+
+## Using the Harness
+
+The implementation harness automates the full issue → branch → implement → test → PR → merge loop:
+
+```bash
+# Implement the next open issue automatically
+claude workflow implement-issue
+
+# Target a specific issue
+claude workflow implement-issue --args '{"issue_number": 7}'
+```
+
+See `docs/HARNESS.md` for the full guide.
 
 ---
 
 ## What Is Currently Implemented
 
-### Core simulation (all tested, headless)
-- `ColonyState` — grid, resources, population, labor, power, event log
-- `ColonyGrid` — multi-size building placement, occupancy validation
-- `ResourceStore` — add/consume/cap, snapshot/restore
-- `LaborPool` — allocation, skill-based efficiency (1.0 / 0.8 / 0.65 modifiers)
-- `PowerGrid` — producers/consumers, brownout, essential priority
-- `PopulationGroup` — needs satisfaction, health/morale deltas, deaths, growth
-- `ColonyTurnProcessor` — construction, production, consumption, population needs, events, power
-- `ColonySession` — high-level API (QueueConstruction, EndTurn, AutoAssignLabor, CreateSave, ApplySave)
-- `DifficultySettings` — 5 presets (Sandbox→Brutal): resource multipliers, consumption multipliers, event intervals
-- `DifficultyPreset` — wired into session init, turn processor, random events
-- `SkillType` — 6 skills (Laborer, Engineer, Scientist, Farmer, Medic, Operator)
-- `TerrainGenerator` — biome-aware two-pass terrain generation
-- `RandomEventProcessor` — strategic events (dust storms, equipment failure, supply drops, arrivals)
-- Save/load — full JSON round-trip via `ColonySaveData`
+### Legacy Godot+C# (behavioral spec — do not modify)
 
-### Registries (JSON-driven via ContentLoader)
-- `BuildingRegistry` — 13 buildings with PrimarySkill, recipes, power, labor
-  loaded from `EmbeddedContent.BuildingsJson` (mirror at `content/buildings.json`)
-- `ResourceRegistry` — 26 resources across Raw/Refined/Advanced/Virtual tiers
-  loaded from `EmbeddedContent.ResourcesJson` (mirror at `content/resources.json`)
-- Phase 3.2 task: swap embedded JSON for runtime file loading.
+The `godot/` directory contains a complete Godot 4 + C# implementation with 163 passing tests.
+This is now a **behavioral specification** for the Rust rebuild. Read it to understand:
+- What systems to implement and how they should behave
+- Edge cases and validation rules (from `tests/OutpostCore.Tests/`)
+- Content definitions (from `godot/src/Core/Content/EmbeddedContent.cs`)
 
-### Godot rendering (Phase 1)
-- `ColonyGridView` — isometric grid rendering, terrain colors per biome, building overlays
-- Camera system, building placement ghost, basic UI stubs
+Do NOT add new C# code. Do NOT run `dotnet test` as a quality gate (use `cargo test`).
+
+### Rust Rebuild (Phase 1+)
+
+Not started yet. Issue #7 (scaffold) is the first task.
 
 ---
 
-## Content Data Files
+## Reference: harsh_realm
 
-Buildings and resources flow through `ContentLoader` in `godot/src/Core/Content/`.
-There are two sources, in priority order at game runtime:
+`reference/harsh_realm-main/` is a copy of the Harsh Realm project — a Rust + Vue single-player MUD with an expert-system GM. It uses the same architectural patterns we're borrowing:
 
-1. **`user://content/<name>.json`** — per-user mod overrides (Godot writes user-data
-   here; modders drop files in to replace any individual file).
-2. **`res://content/<name>.json`** — bundled with the game (the canonical
-   shipping files at `godot/content/buildings.json` + `godot/content/resources.json`).
-3. **`EmbeddedContent.cs` constants** — compiled-in fallback that keeps tests and
-   any environment without file access working.
+- Pure Rust core library (`crates/harsh-core/`)
+- Axum web host (`crates/harsh-web/`)
+- Vue 3 + Pinia frontend (`frontend/`)
+- Content packs (`content/`)
+- Event bus architecture
 
-`ContentBootstrap.EnsureLoaded()` is called from every scene's `_Ready`; it reads the
-files via `Godot.FileAccess` and hands the strings to `BuildingRegistry.LoadFrom` /
-`ResourceRegistry.LoadFrom`. If the file is missing or malformed the embedded defaults
-remain in effect (validation runs before the registry is mutated).
-
-To add or modify a building/resource:
-
-1. Edit `godot/content/<file>.json` for the runtime change.
-2. Mirror the change in `godot/src/Core/Content/EmbeddedContent.cs` so tests and the
-   embedded fallback stay in sync.
-3. Add a test in `ContentLoaderTests.cs` if it's a new ID.
-4. Run `dotnet test` — registries reload the JSON on every static init.
-
-JSON schema rules:
-- String IDs (snake_case), unique within their file.
-- Enum fields (`category`, `tier`, `primarySkill`) take the C# enum name as a string.
-- Optional fields can be omitted — `ContentLoader` applies sensible defaults.
-- Duplicate IDs, invalid enums, and missing required fields throw
-  `ContentLoader.ContentValidationException` at load.
-
----
-
-## Coding Rules
-
-1. **Read `docs/Outpost3_Design_V5.md`** before starting new features
-2. **Check `docs/TODO.md`** to pick up the right next task
-3. **No Godot namespaces in `Core/`** — enforce this strictly
-4. **No `null!` or `!` null-forgiving** without a comment explaining why it's safe
-5. **Write tests alongside code** — every new Core class gets NUnit coverage
-6. **Iterate until tests pass** — `dotnet test` must be green before stopping
-7. **No premature abstraction** — implement what the current task needs, nothing more
-8. **No comments that describe what the code does** — only comments explaining non-obvious *why*
-9. **Content comes from data files, not hardcoded values** — new buildings/resources go in `content/`
-10. **Keep changes minimal and focused** — one feature at a time
-
----
-
-## Common Tasks
-
-### Adding a new building
-1. Add YAML entry to `content/buildings/` (or temporarily to `BuildingRegistry.cs` while loader is not yet built)
-2. Assign `PrimarySkill`, power values, labor, recipe, construction cost and turns
-3. Add NUnit test asserting the definition loads and key fields are correct
-
-### Adding a new resource
-1. Add YAML entry to `content/resources/` (or `ResourceRegistry.cs`)
-2. Specify tier, category, base weight
-3. Update any buildings that produce or consume it
-
-### Adding a Core system
-1. Create class in appropriate `Core/` subdirectory
-2. No Godot references — pure C#
-3. Expose via `ColonyState` if needed
-4. Wire into `ColonyTurnProcessor.ProcessTurn()` if turn-driven
-5. Add to `ColonySaveData` if state must persist
-6. Write NUnit tests
-
-### Adding a Godot scene/UI
-1. Create scene in `godot/scenes/`
-2. Create C# script in `godot/src/UI/` or `godot/src/Rendering/`
-3. Access Core state only through `ColonySession` — never reach into Core internals from UI
-4. Emit/handle Godot signals at the scene boundary
+**Read it for structural patterns. Do NOT copy game logic** — it is a completely different game domain.
 
 ---
 
 ## Git Workflow
 
-- Branch from `main` for each feature
-- Commit message style: `Phase N: brief description` or `Fix: brief description`
-- Tests must pass before merging
-- The worktree at `.claude/worktrees/` is used by Claude Code for isolated work
+- Branch from `main` for each issue: `issue-{N}-{slug}`
+- Commit message: `Phase N: brief description\n\nCloses #N`
+- All checks must pass before merging: `cargo test`, `clippy`, `fmt`
+- The harness handles branching, committing, and merging automatically
+
+---
+
+## Open Design Questions (from DESIGN.md §17)
+
+1. Automation approach — AI vs scripts vs DSL (chosen after mechanics exist)
+2. Commodity graph specifics — discovered via the harness, not designed on paper
+3. Building/structure roster — concrete list per scope
+4. Colony flavor-image approach — static vs state-reflecting; placeholder-first
+5. Balance numbers — all scalars, to be tuned via the harness
