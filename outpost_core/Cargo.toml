@@ -1,0 +1,23 @@
+[package]
+name = "outpost_core"
+description = "Pure Rust simulation core for Outpost 3 — no I/O or framework dependencies."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# This crate is intentionally free of any I/O, async runtime, or framework
+# dependencies so it compiles and tests headless in any context (CLI, harness,
+# web host, or direct test runner).
+[lib]
+name = "outpost_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
