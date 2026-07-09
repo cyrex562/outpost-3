@@ -25,13 +25,18 @@ pub mod turn;
 
 use thiserror::Error;
 
+use turn::{GameState, TurnProcessor};
+
+/// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
+pub const DEFAULT_SEED: u64 = 0;
+
 /// A command submitted to the engine from the outside world.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Command {
     /// Advance the simulation by one colony-sol turn.
     AdvanceColonySol,
-    /// Advance the simulation by one strategic-month turn.
+    /// Advance the simulation by one strategic-month turn (manual override).
     AdvanceStrategicMonth,
 }
 
@@ -62,22 +67,33 @@ pub enum EngineError {
 
 /// The top-level game engine.
 ///
-/// This is the only mutation point from outside `outpost_core`.
+/// Wraps [`GameState`] and [`TurnProcessor`] behind the single `apply` interface.
 /// All external callers (CLI, web host, tests) drive the simulation through
 /// [`GameEngine::apply`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GameEngine {
-    /// Current colony-sol counter.
-    sol: u64,
-    /// Current strategic-month counter.
-    month: u64,
+    /// In-memory live game state.
+    pub state: GameState,
+    /// Turn processor responsible for cadence bookkeeping.
+    processor: TurnProcessor,
 }
 
 impl GameEngine {
-    /// Create a new engine in its default starting state.
+    /// Create a new engine with the default seed.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self::with_seed(DEFAULT_SEED)
+    }
+
+    /// Create a new engine with an explicit RNG seed.
+    ///
+    /// Use a fixed seed in tests to get deterministic results.
+    #[must_use]
+    pub fn with_seed(seed: u64) -> Self {
+        Self {
+            state: GameState::new(),
+            processor: TurnProcessor::new(seed),
+        }
     }
 
     /// Apply a [`Command`] and return the resulting [`Event`]s.
@@ -91,12 +107,23 @@ impl GameEngine {
     pub fn apply(&mut self, cmd: &Command) -> Result<Vec<Event>, EngineError> {
         match *cmd {
             Command::AdvanceColonySol => {
-                self.sol += 1;
-                Ok(vec![Event::ColonySolAdvanced { sol: self.sol }])
+                let outcome = self.processor.advance(&mut self.state);
+                let mut events = vec![Event::ColonySolAdvanced { sol: outcome.sol }];
+                if outcome
+                    .cadences_fired
+                    .contains(&turn::TurnCadence::StrategicMonth)
+                {
+                    events.push(Event::StrategicMonthAdvanced {
+                        month: outcome.month,
+                    });
+                }
+                Ok(events)
             }
             Command::AdvanceStrategicMonth => {
-                self.month += 1;
-                Ok(vec![Event::StrategicMonthAdvanced { month: self.month }])
+                self.state.month += 1;
+                Ok(vec![Event::StrategicMonthAdvanced {
+                    month: self.state.month,
+                }])
             }
         }
     }
@@ -104,13 +131,19 @@ impl GameEngine {
     /// Return the current colony-sol counter.
     #[must_use]
     pub fn sol(&self) -> u64 {
-        self.sol
+        self.state.sol
     }
 
     /// Return the current strategic-month counter.
     #[must_use]
     pub fn month(&self) -> u64 {
-        self.month
+        self.state.month
+    }
+}
+
+impl Default for GameEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -151,5 +184,33 @@ mod tests {
             engine.apply(&Command::AdvanceColonySol).unwrap();
         }
         assert_eq!(engine.sol(), 5);
+    }
+
+    #[test]
+    fn strategic_month_fires_automatically_after_30_sols() {
+        let mut engine = GameEngine::with_seed(42);
+        let mut month_events = 0usize;
+        for _ in 0..30 {
+            let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+            month_events += events
+                .iter()
+                .filter(|e| matches!(e, Event::StrategicMonthAdvanced { .. }))
+                .count();
+        }
+        assert_eq!(engine.sol(), 30);
+        assert_eq!(month_events, 1);
+        assert_eq!(engine.month(), 1);
+    }
+
+    #[test]
+    fn engine_is_deterministic_for_fixed_seed() {
+        let run = || {
+            let mut engine = GameEngine::with_seed(7777);
+            for _ in 0..60 {
+                engine.apply(&Command::AdvanceColonySol).unwrap();
+            }
+            (engine.sol(), engine.month())
+        };
+        assert_eq!(run(), run());
     }
 }
