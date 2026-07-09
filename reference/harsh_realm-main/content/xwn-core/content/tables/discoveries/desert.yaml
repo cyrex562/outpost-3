@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_desert
+category: discovery
+name: "Desert Discoveries"
+tags: [desert]
+entries:
+  - weight: 5
+    result:
+      type: environmental
+      description: "A cluster of succulent plants grows in a sheltered hollow. Their flesh holds water."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Bleached Satchel"
+      description: "Sun-bleached leather, cracked but intact. Inside: a few copper coins and a folded cloth."
+      enc: 0
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Cracked Waterskin"
+      description: "An old waterskin with a repaired seam. Holds water well enough."
+      enc: 0
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "A sandstone overhang creates a natural shelter. Etchings on the rock face — old traveller marks."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Buried Chest"
+      description: "A wooden chest, mostly rotted but the contents survived: coarse cloth and a rusted hand tool."
+      enc: 2
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: clue
+      description: "A line of small stones has been arranged deliberately — a trail marker for those who know the code."
+      min_difficulty: 8
+  - weight: 1
+    result:
+      type: item
+      name: "Pretech Climate Module"
+      description: "A compact device designed to regulate temperature. Non-functional, but its power cell still holds charge."
+      enc: 1
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: environmental
+      description: "A half-buried archway of pale stone, carved with geometric patterns. No structure remains above ground."
+      min_difficulty: 10

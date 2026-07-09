@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: settlement_names_suffix
+category: settlement
+name: "Settlement Name Suffixes"
+tags: [settlement, name, suffix]
+entries:
+  - weight: 1
+    result: "haven"
+  - weight: 1
+    result: "ford"
+  - weight: 1
+    result: "gate"
+  - weight: 1
+    result: "wick"
+  - weight: 1
+    result: "moor"
+  - weight: 1
+    result: "bridge"
+  - weight: 1
+    result: "hollow"
+  - weight: 1
+    result: "keep"
+  - weight: 1
+    result: "crossing"
+  - weight: 1
+    result: "vale"
+  - weight: 1
+    result: "end"
+  - weight: 1
+    result: "mouth"
+  - weight: 1
+    result: "reach"
+  - weight: 1
+    result: "bank"
+  - weight: 1
+    result: "heath"
+  - weight: 1
+    result: "ton"
+  - weight: 1
+    result: "field"
+  - weight: 1
+    result: "wood"
+  - weight: 1
+    result: "croft"
+  - weight: 1
+    result: "fall"

@@ -1,0 +1,53 @@
+base_weights:
+  plains: 20
+  forest: 20
+  hills: 15
+  mountains: 5
+  water: 5
+  swamp: 5
+  desert: 10
+  wasteland: 15
+  ruins: 5
+
+adjacency_modifiers:
+  forest:
+    forest: 2.0
+    hills: 1.3
+    swamp: 1.5
+    plains: 0.8
+    desert: 0.3
+  mountains:
+    mountains: 2.5
+    hills: 2.0
+    plains: 0.5
+    forest: 0.7
+  hills:
+    mountains: 1.5
+    hills: 1.5
+    forest: 1.2
+    plains: 1.2
+  water:
+    water: 3.0
+    swamp: 2.0
+    plains: 1.2
+  swamp:
+    water: 2.0
+    forest: 1.5
+    swamp: 1.5
+    desert: 0.1
+  desert:
+    desert: 2.5
+    wasteland: 2.0
+    forest: 0.2
+    swamp: 0.1
+  wasteland:
+    wasteland: 2.0
+    desert: 1.5
+    ruins: 1.5
+  ruins:
+    wasteland: 1.5
+    ruins: 0.5
+  plains:
+    plains: 1.5
+    forest: 1.2
+    hills: 1.2

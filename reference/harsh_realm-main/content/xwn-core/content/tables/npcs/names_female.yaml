@@ -1,0 +1,66 @@
+# TODO: Expand from source material
+id: npcs_names_female
+category: name
+name: "Female First Names"
+tags: [npc, name, female]
+entries:
+  - weight: 1
+    result: "Maren"
+  - weight: 1
+    result: "Sera"
+  - weight: 1
+    result: "Kira"
+  - weight: 1
+    result: "Liath"
+  - weight: 1
+    result: "Vael"
+  - weight: 1
+    result: "Ryn"
+  - weight: 1
+    result: "Brynn"
+  - weight: 1
+    result: "Tess"
+  - weight: 1
+    result: "Dael"
+  - weight: 1
+    result: "Nora"
+  - weight: 1
+    result: "Elsin"
+  - weight: 1
+    result: "Caris"
+  - weight: 1
+    result: "Wren"
+  - weight: 1
+    result: "Solne"
+  - weight: 1
+    result: "Avra"
+  - weight: 1
+    result: "Mira"
+  - weight: 1
+    result: "Faye"
+  - weight: 1
+    result: "Sasha"
+  - weight: 1
+    result: "Ines"
+  - weight: 1
+    result: "Lyra"
+  - weight: 1
+    result: "Petra"
+  - weight: 1
+    result: "Cara"
+  - weight: 1
+    result: "Brea"
+  - weight: 1
+    result: "Orla"
+  - weight: 1
+    result: "Siv"
+  - weight: 1
+    result: "Dara"
+  - weight: 1
+    result: "Eira"
+  - weight: 1
+    result: "Zora"
+  - weight: 1
+    result: "Lune"
+  - weight: 1
+    result: "Thea"

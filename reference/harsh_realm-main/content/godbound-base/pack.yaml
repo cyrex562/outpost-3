@@ -1,0 +1,13 @@
+id: godbound-base
+version: 0.1.0
+name: Godbound Base (Stub)
+description: |
+  A minimal Godbound preparation pack. Phase 2 includes only modifier-shaped
+  trait and resource records; full Words, Gifts, Dominion, and triggered
+  effects are deferred to later phases.
+authors: [Harsh Realm Project]
+depends:
+  - id: xwn-core
+    version: ">=1.0.0"
+provides: [godbound-base-stub]
+

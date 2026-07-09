@@ -1,0 +1,20 @@
+# ─── Harsh Realm — Frontend (production) ──────────────────────────────────────
+# Multi-stage: build Vue SPA with Vite, serve with nginx.
+# nginx proxies /api and /ws to the backend service.
+#
+# Build context should be ./frontend:
+#   docker build -f docker/Dockerfile.frontend-prod -t harsh-realm-frontend ./frontend
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Stage 1: Build
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --ignore-scripts
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve
+FROM nginx:1-alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80

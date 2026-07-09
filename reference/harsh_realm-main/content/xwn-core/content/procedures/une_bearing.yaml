@@ -1,0 +1,21 @@
+id: une_bearing
+name: UNE Bearing Generator
+description: Generates a UNE bearing and focus pair.
+inputs:
+  - name: chaos_factor
+    type: any
+    required: false
+    default: 5
+  - name: relationship
+    type: string
+    required: false
+    default: peer
+steps:
+  - kind: roll
+    assign: bearing_record
+    table: xwn-core:tables.npc.une_bearings
+output:
+  fields:
+    bearing: bearing_record.bearing
+    focus: bearing_record.focus
+tags: [une, npc, bearing]

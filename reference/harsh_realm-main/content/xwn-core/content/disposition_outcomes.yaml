@@ -1,0 +1,30 @@
+# Disposition changes per skill check outcome band
+
+- outcome_key: exceptional_failure
+  delta: -2
+  description: "Large disposition penalty. NPC is insulted or threatened."
+
+- outcome_key: failure
+  delta: -1
+  description: "Small disposition penalty. NPC is unimpressed."
+
+- outcome_key: bare_success
+  delta: 0
+  description: "Goal achieved. No disposition change."
+
+- outcome_key: solid_success
+  delta: 1
+  description: "Goal achieved. NPC warms slightly."
+
+- outcome_key: exceptional_success
+  delta: 2
+  description: "Goal achieved. NPC is impressed. May volunteer extra info."
+
+# Special overrides for specific verbs
+- outcome_key: intimidate_success
+  delta: -1
+  description: "Intimidation always costs goodwill, even when it works."
+
+- outcome_key: deceive_caught
+  delta: -3
+  description: "NPC knows they were lied to. Major trust damage."

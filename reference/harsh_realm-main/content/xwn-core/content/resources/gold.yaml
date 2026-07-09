@@ -1,0 +1,9 @@
+id: gold
+name: Gold
+description: Currency. The character's wealth in coin.
+default_max: null
+default_current: 0
+can_go_negative: false
+regeneration: null
+tags: [currency]
+

@@ -1,0 +1,66 @@
+# TODO: Expand from source material
+id: npcs_greetings
+category: npc_greeting
+name: "NPC Greeting Templates"
+tags: [npc, greeting]
+entries:
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "hostile"
+      text: "They glare at you, hand resting on their weapon. 'Move along. Now.'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "hostile"
+      text: "'You've got nerve showing up here.' They don't look pleased."
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "hostile"
+      text: "A cold stare. They say nothing, but the message is clear: you're not welcome."
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "wary"
+      text: "They look up, eyes narrowed. 'What do you want?'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "wary"
+      text: "A guarded nod. 'Stranger. State your business.'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "wary"
+      text: "They keep their hands visible and watch you carefully. 'Haven't seen you before.'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "neutral"
+      text: "They glance up briefly. 'Passing through?'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "neutral"
+      text: "A brief nod of acknowledgment. They return to what they were doing."
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "neutral"
+      text: "'Hm.' Not unwelcoming, not warm. Just present."
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "friendly"
+      text: "'Welcome, traveler! Come, sit. You look like you've been on the road long.'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "friendly"
+      text: "They break into a genuine smile. 'Always good to see a new face around here.'"
+  - weight: 1
+    result:
+      type: greeting
+      disposition: "friendly"
+      text: "'Hah! A visitor. The gods must be in a good mood today. What brings you here?'"

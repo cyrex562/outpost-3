@@ -1,0 +1,33 @@
+# Tag logic mappings for Harsh Realm
+# Defines how creature/item tags affect game mechanics (interactions, damage types, etc.)
+
+tags:
+  - id: humanoid
+    description: "Sapient being capable of social interaction."
+    can_talk: true
+    is_animal: false
+
+  - id: beast
+    description: "Non-sapient animal or monster."
+    can_talk: false
+    is_animal: true
+
+  - id: undead
+    description: "Reanimated corpse or spirit."
+    can_talk: false
+    vulnerable_to: [holy, fire]
+    resistant_to: [poison, cold]
+
+  - id: construct
+    description: "Artificial creation or machine."
+    can_talk: false
+    vulnerable_to: [electricity]
+    resistant_to: [poison, mental]
+
+  - id: holy
+    description: "Divine or blessed energy."
+    affects: [undead, demon]
+
+  - id: wilderness
+    description: "Found in wild terrain."
+    forageable: true

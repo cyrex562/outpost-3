@@ -1,0 +1,156 @@
+creatures:
+  - id: bandit
+    name: Bandit
+    hd: 1
+    hp_per_hd: 4
+    ac: 12
+    attack_bonus: 1
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: stab
+    attack_description: "swings a rusty blade at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 8
+    flee_difficulty: 8
+    unavoidable: false
+    morale: 7
+    loot_table: humanoid_common
+    harvestable: null
+    description_unseen: "You hear rough voices and the clink of metal ahead."
+    description_seen: "A hard-eyed bandit steps from cover, blade drawn."
+    description_short: "bandit"
+    xp_value: 15
+    tags: [humanoid, pack, wilderness, plains, hills, roads]
+    special_abilities: []
+
+  - id: scavenger
+    name: Scavenger
+    hd: 1
+    hp_per_hd: 3
+    ac: 11
+    attack_bonus: 1
+    damage: "1d4"
+    damage_type: melee
+    attack_skill: stab
+    attack_description: "lunges with a makeshift weapon at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 7
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 6
+    loot_table: humanoid_common
+    harvestable: null
+    description_unseen: "You hear scrabbling and muttering from the ruins ahead."
+    description_seen: "A ragged scavenger snarls and charges, wielding a sharpened pipe."
+    description_short: "scavenger"
+    xp_value: 15
+    tags: [humanoid, ruins, wasteland]
+    special_abilities: []
+
+  - id: kobold
+    name: Kobold
+    hd: 1
+    hp_per_hd: 3
+    ac: 12
+    attack_bonus: 1
+    damage: "1d4"
+    damage_type: melee
+    attack_skill: stab
+    attack_description: "slashes with a small blade at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 9
+    flee_difficulty: 6
+    unavoidable: false
+    morale: 6
+    loot_table: humanoid_common
+    harvestable: null
+    description_unseen: "You hear high-pitched chitterings and the smell of musk."
+    description_seen: "A pack of small, scaled creatures bares their teeth and hisses."
+    description_short: "kobold"
+    xp_value: 15
+    tags: [humanoid, pack, wilderness, hills, ruins, dungeon]
+    special_abilities: []
+
+  - id: goblin
+    name: Goblin
+    hd: 1
+    hp_per_hd: 4
+    ac: 13
+    attack_bonus: 1
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: stab
+    attack_description: "hacks with a jagged blade at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 8
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 7
+    loot_table: humanoid_common
+    harvestable: null
+    description_unseen: "Green faces peer from behind rocks — too many to count."
+    description_seen: "Goblins pour out from hiding, shrieking battle cries."
+    description_short: "goblin"
+    xp_value: 15
+    tags: [humanoid, pack, wilderness, hills, forest, dungeon]
+    special_abilities: []
+
+  - id: lizardfolk
+    name: Lizardfolk
+    hd: 2
+    hp_per_hd: 5
+    ac: 14
+    attack_bonus: 2
+    damage: "1d8"
+    damage_type: melee
+    attack_skill: stab
+    attack_description: "strikes with a bone-tipped spear at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 9
+    flee_difficulty: 8
+    unavoidable: false
+    morale: 9
+    loot_table: humanoid_common
+    harvestable:
+      material: "lizardfolk scales"
+      skill: "survive"
+      difficulty: 9
+    description_unseen: "A territorial hiss echoes from the swamp."
+    description_seen: "A lizardfolk warrior steps forward, spear leveled."
+    description_short: "lizardfolk"
+    xp_value: 30
+    tags: [humanoid, swamp, coastal, wilderness]
+    special_abilities: []
+
+  - id: minotaur
+    name: Minotaur
+    hd: 6
+    hp_per_hd: 6
+    ac: 14
+    attack_bonus: 6
+    damage: "2d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "charges with massive horns at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 6
+    flee_difficulty: 12
+    unavoidable: false
+    morale: 12
+    loot_table: humanoid_military
+    harvestable:
+      material: "minotaur horn"
+      skill: "survive"
+      difficulty: 12
+    description_unseen: "The ground shakes. Something enormous is moving nearby."
+    description_seen: "A minotaur bellows and charges, axes raised."
+    description_short: "minotaur"
+    xp_value: 90
+    tags: [humanoid, dungeon, ruins, wilderness]
+    special_abilities: []

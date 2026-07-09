@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_hills
+category: discovery
+name: "Hills Discoveries"
+tags: [hills, wilderness]
+entries:
+  - weight: 5
+    result:
+      type: environmental
+      description: "A spring seeps from the rock face — clean, cold water."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Stone-carved Bowl"
+      description: "A heavy bowl carved from local rock. Crude but functional."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Bundle of Dried Bark"
+      description: "Useful as tinder or crude rope. Whoever left it here knew wilderness survival."
+      enc: 0
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "A narrow cave mouth, barely wide enough to squeeze through. Smells of old ash."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Hidden Flask"
+      description: "A ceramic flask wedged in a rock crevice. Still sealed — some kind of spirit inside."
+      enc: 0
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: clue
+      description: "Chipped stonework on a boulder face — ancient writing in a script you don't recognise."
+      min_difficulty: 8
+  - weight: 1
+    result:
+      type: item
+      name: "Pretech Power Cell"
+      description: "A dull grey cylinder about the size of your fist. Partially charged — some device once relied on this."
+      enc: 0
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: environmental
+      description: "A concealed observation post — flat stones arranged for a lookout, with old fire ash. Someone watched this valley."
+      min_difficulty: 10

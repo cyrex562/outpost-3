@@ -1,0 +1,10 @@
+pattern: "generators/"
+label: "Generator"
+widget: RegistryEditor
+accessor: { kind: key, key: steps }
+entry_key: assign
+fields:
+  - { key: roll, type: text, label: Table ID, width: md }
+  - { key: assign, type: text, label: Assign To, width: md }
+allow_add: true
+allow_delete: true

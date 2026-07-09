@@ -1,0 +1,13 @@
+pattern: "terrain"
+label: "Terrain Types"
+widget: RegistryEditor
+accessor: { kind: key, key: terrains }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: sm }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: passable, type: boolean, label: Passable }
+  - { key: blocks_vision, type: boolean, label: Blocks Vision }
+  - { key: description_pool, type: text, label: Desc Pool, width: md }
+allow_add: true
+allow_delete: true

@@ -1,0 +1,58 @@
+# Skill mappings: verb → XWN skill + attribute + difficulty
+# Intimidate uses CHA (confirmed design decision)
+
+- verb: convince
+  skill: Talk
+  attribute: CHA
+  base_difficulty: 8
+  opposed: true
+  description: "Persuade an NPC to agree with you or do something."
+  notes: "Target resists with WIS modifier. Friendly NPCs are easier to convince."
+
+- verb: intimidate
+  skill: Talk
+  attribute: STR
+  base_difficulty: 10
+  opposed: true
+  description: "Coerce an NPC through threat of force."
+  notes: "Uses STR — physical presence is the mechanic. Always costs disposition on success."
+
+- verb: deceive
+  skill: Talk
+  attribute: CHA
+  base_difficulty: 10
+  opposed: true
+  description: "Lie to an NPC."
+  notes: "Graduated failure: fail by 1 → -1, fail by 2-3 → -2, fail by 4+ → -3."
+
+- verb: bribe
+  skill: Trade
+  attribute: CHA
+  base_difficulty: 8
+  opposed: false
+  description: "Offer payment to get what you want."
+  notes: "Requires gold/item in hand. Amount offered can modify difficulty."
+
+- verb: connect
+  skill: Connect
+  attribute: CHA
+  base_difficulty: 8
+  opposed: false
+  description: "Leverage existing social network or contacts."
+  notes: "Only works if NPC has a plausible connection to the character's background."
+
+- verb: ask
+  skill: Talk
+  attribute: CHA
+  base_difficulty: 6
+  opposed: false
+  description: "Ask an NPC a direct question."
+  notes: "Free unless the topic is sensitive. Sensitive topics use full difficulty."
+
+- verb: perform
+  skill: Perform
+  attribute: CHA
+  base_difficulty: 8
+  opposed: false
+  description: "Entertain or impress an NPC through performance."
+  notes: "Deferred to future milestone. Placeholder only."

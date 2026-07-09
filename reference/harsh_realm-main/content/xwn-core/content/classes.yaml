@@ -1,0 +1,84 @@
+# XWN class definitions.
+# Advancement is data, not engine code (R5-R): the system-agnostic `progression`
+# fields (hit_die, attack_bonus_by_level [index = level-1], skill_points_per_level)
+# drive the engine. Any ruleset authors a class by filling these in.
+classes:
+  - id: warrior
+    name: Warrior
+    description: "The combat specialist. Best attack progression, toughest in a fight."
+    hit_die: 8
+    attack_bonus_by_level: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # warrior: +1/level
+    skill_points_per_level: 1
+    skill_points_start: 2       # PLACEHOLDER — verify against source
+    # Skills the auto-picker trains, in priority order (locked skills are skipped).
+    recommended_skills:
+      - skill: stab
+        level: 0
+      - skill: notice
+        level: 0
+    abilities:
+      - id: veterans_luck
+        name: "Veteran's Luck"
+        description: "Once per fight, negate a hit against you OR turn a miss into a hit."
+        refresh: combat
+      - id: killing_blow
+        name: "Killing Blow"
+        description: "Add half your level (round up) as a bonus to damage rolls."
+    saving_throws:              # PLACEHOLDER
+      physical: 15
+      evasion: 15
+      mental: 15
+
+  - id: expert
+    name: Expert
+    description: "The skilled specialist. More versatile, can retry failed checks."
+    hit_die: 6
+    attack_bonus_by_level: [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]  # expert: ceil(level/2)
+    skill_points_per_level: 2
+    skill_points_start: 3        # PLACEHOLDER
+    recommended_skills:
+      - skill: notice
+        level: 0
+      - skill: talk
+        level: 0
+      - skill: sneak
+        level: 0
+    abilities:
+      - id: masterful_expertise
+        name: "Masterful Expertise"
+        description: "Once per scene, reroll one failed skill check. Must take the new result."
+        refresh: scene
+      - id: quick_learner
+        name: "Quick Learner"
+        description: "Gain a bonus skill point every 2 levels."
+    saving_throws:               # PLACEHOLDER
+      physical: 15
+      evasion: 15
+      mental: 15
+
+  - id: adventurer
+    name: Adventurer
+    description: "Hybrid class combining partial Warrior and partial Expert abilities."
+    hit_die: 6
+    attack_bonus_by_level: [1, 2, 2, 3, 4, 4, 5, 6, 6, 7]  # adventurer: ceil(level*2/3)
+    skill_points_per_level: 1
+    skill_points_start: 2        # PLACEHOLDER
+    partial_classes: [warrior, expert]
+    recommended_skills:
+      - skill: stab
+        level: 0
+      - skill: survive
+        level: 0
+    abilities:
+      - id: partial_veterans_luck
+        name: "Veteran's Luck (Partial)"
+        description: "Veteran's Luck, usable once every other fight."
+        refresh: combat
+      - id: partial_expertise
+        name: "Expertise (Partial)"
+        description: "Once per day, reroll one failed skill check."
+        refresh: daily
+    saving_throws:               # PLACEHOLDER
+      physical: 15
+      evasion: 15
+      mental: 15

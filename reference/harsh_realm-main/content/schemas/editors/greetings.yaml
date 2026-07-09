@@ -1,0 +1,17 @@
+pattern: "tables/npcs/greetings"
+label: "NPC Greetings"
+meta_fields:
+  - { key: id, type: text, label: ID }
+  - { key: name, type: text, label: Name }
+  - { key: category, type: text, label: Category }
+  - { key: tags, type: tags, label: Tags }
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: disposition, type: select, label: Disposition, width: sm, options: [hostile, wary, neutral, friendly, helpful] }
+  - { key: type, type: text, label: Type, width: sm }
+  - { key: text, type: textarea, label: Greeting, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_desert
+category: encounter
+name: "Desert Encounters"
+tags: [desert]
+entries:
+  - weight: 2
+    result:
+      type: hostile
+      name: "Desert Raiders"
+      description: "Riders on lean, desert-adapted mounts appear from behind a dune. They're moving fast and they've seen you."
+  - weight: 2
+    result:
+      type: hostile
+      name: "Burrowing Predator"
+      description: "The ground trembles — then erupts. Something large and armoured has been waiting in the sand."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Desert Guide"
+      description: "A figure in bleached robes, face covered, watches you from a ridge. They hold up an open hand — peace — then gesture toward something."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Water Merchant"
+      description: "A small caravan appears on the horizon — two carts and four people. They're selling water. The price will be high."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Sandstorm"
+      description: "A wall of sand approaches from the south, moving faster than you can run. You have minutes to find cover."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Mirage or Signal"
+      description: "Something shimmers on the horizon — distant structures, or a trick of heat haze. Hard to say which."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Extreme Heat"
+      description: "The day's heat peaks here with unusual ferocity. Water consumption doubles. Keep moving or find shade."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Ancient Well"
+      description: "A stone well, old beyond reckoning, stands in the open desert. The rope is gone but the shaft goes deep — and damp air rises from it."

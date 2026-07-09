@@ -1,0 +1,12 @@
+id: advantages.acute_vision
+name: Acute Vision
+category: advantage
+description: Sharp eyesight gives a bonus to sight-based Notice checks.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: skill.notice.vision
+    value: 2
+    stacking: additive
+    description: Bonus to vision-based Notice checks.
+tags: [gurps, sensory]
+

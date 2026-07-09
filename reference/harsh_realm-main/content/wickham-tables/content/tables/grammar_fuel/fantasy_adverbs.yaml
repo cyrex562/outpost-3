@@ -1,0 +1,11 @@
+# Source sample: Ken Wickham, Grammar Fuel: Genres, Fantasy table.
+# TODO: Populate from licensed source material. Minimal excerpt below.
+id: fantasy_adverbs
+name: Grammar Fuel Fantasy Adverbs
+entries:
+  - weight: 1
+    result: adventurously
+  - weight: 1
+    result: aggressively
+  - weight: 1
+    result: agilely

@@ -1,0 +1,7 @@
+# Templates for describing what's visible in adjacent cells.
+# {direction} and {terrain} are substituted.
+hints:
+  - "To the {direction} you can make out {terrain}."
+  - "The terrain {direction} looks like {terrain}."
+  - "{direction_cap} of here: {terrain}."
+  - "You note {terrain} to the {direction}."

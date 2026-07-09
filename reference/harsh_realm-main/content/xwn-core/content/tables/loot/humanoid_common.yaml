@@ -1,0 +1,27 @@
+table_id: humanoid_common
+type: loot
+entries:
+  - weight: 5
+    result: "Nothing of value"
+    data: {type: nothing, value: 0}
+  - weight: 4
+    result: "A handful of copper coins"
+    data: {type: currency, value: 5}
+  - weight: 3
+    result: "A battered knife"
+    data: {type: weapon, name: "battered knife", value: 8, weapon_damage: "1d4"}
+  - weight: 3
+    result: "A few days of rations"
+    data: {type: consumable, name: "rations", value: 5}
+  - weight: 2
+    result: "A worn leather pouch with 10 coin"
+    data: {type: currency, value: 10}
+  - weight: 2
+    result: "A crude crossbow bolt"
+    data: {type: ammo, name: "crossbow bolt", value: 1}
+  - weight: 1
+    result: "A small coin purse with 20 silver pieces"
+    data: {type: currency, value: 20}
+  - weight: 1
+    result: "A folded map fragment"
+    data: {type: misc, name: "map fragment", value: 15}

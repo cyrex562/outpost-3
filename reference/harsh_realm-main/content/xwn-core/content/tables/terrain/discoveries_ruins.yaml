@@ -1,0 +1,44 @@
+# Discoveries for the ruins terrain
+
+id: discoveries_ruins
+category: terrain
+name: Ruin Discoveries
+tags: [wilderness, ruins]
+entries:
+  - weight: 5
+    result:
+      type: "item"
+      name: "Rusted Gear"
+      description: "A pile of ancient, semi-functional mechanical parts."
+      items: [{"name": "Rusted Gear", "type": "scrap"}]
+      min_difficulty: 6
+
+  - weight: 3
+    result:
+      type: "relic"
+      name: "Pretech Component"
+      description: "A small, glowing crystal from the old world."
+      items: [{"name": "Pretech Component", "type": "relic"}]
+      min_difficulty: 10
+
+  - weight: 2
+    result:
+      type: "environmental"
+      name: "Hidden Cache"
+      description: "You find a concealed compartment in a wall containing emergency supplies."
+      items: [{"name": "Standard Rations", "type": "gear", "quantity": 7}]
+      min_difficulty: 9
+
+  - weight: 4
+    result:
+      type: "clue"
+      name: "Ancient Map Fragment"
+      description: "A fragment of a map showing a nearby location marked with a strange sigil."
+      min_difficulty: 8
+
+  - weight: 1
+    result:
+      type: "environmental"
+      name: "Functional Terminal"
+      description: "A flickering computer terminal that still responds to basic queries."
+      min_difficulty: 12

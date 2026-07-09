@@ -1,0 +1,74 @@
+# TODO: Expand from source material
+id: npcs_personality_traits
+category: npc_trait
+name: "Personality Traits"
+tags: [npc, trait, personality]
+entries:
+  - weight: 1
+    result: "gruff"
+  - weight: 1
+    result: "suspicious"
+  - weight: 1
+    result: "generous"
+  - weight: 1
+    result: "fearful"
+  - weight: 1
+    result: "curious"
+  - weight: 1
+    result: "cautious"
+  - weight: 1
+    result: "boastful"
+  - weight: 1
+    result: "quiet"
+  - weight: 1
+    result: "bitter"
+  - weight: 1
+    result: "hopeful"
+  - weight: 1
+    result: "wary"
+  - weight: 1
+    result: "cynical"
+  - weight: 1
+    result: "jovial"
+  - weight: 1
+    result: "paranoid"
+  - weight: 1
+    result: "earnest"
+  - weight: 1
+    result: "pragmatic"
+  - weight: 1
+    result: "defiant"
+  - weight: 1
+    result: "meek"
+  - weight: 1
+    result: "calculating"
+  - weight: 1
+    result: "volatile"
+  - weight: 1
+    result: "fatalistic"
+  - weight: 1
+    result: "ruthless"
+  - weight: 1
+    result: "devout"
+  - weight: 1
+    result: "scheming"
+  - weight: 1
+    result: "haunted"
+  - weight: 1
+    result: "servile"
+  - weight: 1
+    result: "zealous"
+  - weight: 1
+    result: "melancholic"
+  - weight: 1
+    result: "treacherous"
+  - weight: 1
+    result: "stoic"
+  - weight: 1
+    result: "fanatical"
+  - weight: 1
+    result: "craven"
+  - weight: 1
+    result: "predatory"
+  - weight: 1
+    result: "despairing"

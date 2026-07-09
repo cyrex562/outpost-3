@@ -1,0 +1,15 @@
+pattern: "factions/starting_factions"
+label: "Starting Factions"
+widget: RegistryEditor
+accessor: { kind: key, key: factions }
+entry_key: name
+fields:
+  - { key: name, type: text, label: Name, width: md }
+  - { key: hp, type: number, label: HP, width: sm }
+  - { key: max_hp, type: number, label: Max HP, width: sm }
+  - { key: force, type: number, label: Force, width: sm }
+  - { key: cunning, type: number, label: Cunning, width: sm }
+  - { key: wealth, type: number, label: Wealth, width: sm }
+  - { key: tags, type: tags, label: Tags, width: full }
+allow_add: true
+allow_delete: true

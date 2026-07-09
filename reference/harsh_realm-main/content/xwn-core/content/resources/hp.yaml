@@ -1,0 +1,13 @@
+id: hp
+name: Hit Points
+description: |
+  The character's resilience. Combat damage reduces HP. Reaching 0 triggers
+  death or last-stand mechanics.
+default_max: null
+default_current: max
+can_go_negative: false
+zero_event: character.hp_zero
+full_event: character.hp_full
+regeneration: null
+tags: [vital, combat]
+

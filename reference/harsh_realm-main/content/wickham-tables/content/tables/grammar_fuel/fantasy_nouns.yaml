@@ -1,0 +1,11 @@
+# Source sample: Ken Wickham, Grammar Fuel: Genres, Fantasy table.
+# TODO: Populate from licensed source material. Minimal excerpt below.
+id: fantasy_nouns
+name: Grammar Fuel Fantasy Nouns
+entries:
+  - weight: 1
+    result: adventure
+  - weight: 1
+    result: aggression
+  - weight: 1
+    result: alchemy

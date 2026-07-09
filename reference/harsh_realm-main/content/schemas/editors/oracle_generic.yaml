@@ -1,0 +1,10 @@
+pattern: "tables/oracle/"
+label: "Oracle Table"
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: weight, type: number, label: Weight, width: sm }
+  - { key: result, type: textarea, label: Result, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

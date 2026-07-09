@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_forest
+category: encounter
+name: "Forest Encounters"
+tags: [forest, wilderness]
+entries:
+  - weight: 3
+    result:
+      type: hostile
+      name: "Pack of Feral Dogs"
+      description: "A pack of gaunt, feral dogs blocks the trail, snarling with hunger."
+  - weight: 2
+    result:
+      type: hostile
+      name: "Desperate Bandits"
+      description: "Three ragged figures step from the trees, blades drawn. 'Your supplies, or your life.'"
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Wandering Herbalist"
+      description: "An elderly figure with a laden pack picks through the undergrowth, muttering. They glance up, wary but not hostile."
+  - weight: 2
+    result:
+      type: neutral_npc
+      name: "Refugee Family"
+      description: "A haggard man and woman with two children huddle under an improvised lean-to. They eye you with equal parts fear and desperation."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Sudden Rainstorm"
+      description: "Dark clouds mass overhead and a cold rain begins, reducing visibility and making the ground treacherous."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Distant Smoke"
+      description: "A column of black smoke rises from somewhere to the northeast. Cookfire? Structure fire? Hard to say from here."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Animal Sign"
+      description: "Fresh tracks in the soft earth — something large moved through here recently, heading north."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Abandoned Camp"
+      description: "The remains of a camp: cold ashes, a torn bedroll, an overturned cookpot. Whoever was here left in a hurry."

@@ -1,0 +1,15 @@
+id: une_motivation
+name: UNE Motivation Generator
+description: Generates a UNE motivation verb and noun pair.
+steps:
+  - kind: roll
+    assign: verb
+    table: xwn-core:tables.npc.une_motivation_verbs
+  - kind: roll
+    assign: noun
+    table: xwn-core:tables.npc.une_motivation_nouns
+output:
+  fields:
+    verb: verb
+    noun: noun
+tags: [une, npc, motivation]

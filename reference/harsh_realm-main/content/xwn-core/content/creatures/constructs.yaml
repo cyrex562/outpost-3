@@ -1,0 +1,165 @@
+creatures:
+  - id: ancient_automaton
+    name: Ancient Automaton
+    hd: 4
+    hp_per_hd: 6
+    ac: 16
+    attack_bonus: 4
+    damage: "1d10"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "strikes with a metal limb at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 7
+    flee_difficulty: 10
+    unavoidable: false
+    morale: 12
+    loot_table: construct
+    harvestable:
+      material: "pretech components"
+      skill: "survive"
+      difficulty: 12
+    description_unseen: "You hear grinding gears and the hiss of pneumatics."
+    description_seen: "An ancient war machine pivots toward you, optical sensors glowing red."
+    description_short: "ancient automaton"
+    xp_value: 60
+    tags: [construct, ruins, dungeon, pretech]
+    special_abilities: []
+
+  - id: gargoyle
+    name: Gargoyle
+    hd: 3
+    hp_per_hd: 5
+    ac: 15
+    attack_bonus: 3
+    damage: "1d8"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "rakes with stone claws at"
+    num_attacks: 2
+    behavior: territorial
+    awareness_difficulty: 11
+    flee_difficulty: 9
+    unavoidable: false
+    morale: 11
+    loot_table: construct
+    harvestable: null
+    description_unseen: "A stone statue — wait, it just moved."
+    description_seen: "The gargoyle spreads its wings and drops from its perch."
+    description_short: "gargoyle"
+    xp_value: 45
+    tags: [construct, ruins, dungeon]
+    special_abilities: []
+
+  - id: security_turret
+    name: Security Turret
+    hd: 3
+    hp_per_hd: 6
+    ac: 16
+    attack_bonus: 3
+    damage: "1d8"
+    damage_type: ranged
+    attack_skill: shoot
+    attack_description: "fires a burst of slugs at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 6
+    flee_difficulty: 12
+    unavoidable: false
+    morale: 12
+    loot_table: construct
+    harvestable:
+      material: "targeting assembly"
+      skill: "fix"
+      difficulty: 13
+    description_unseen: "A faint targeting laser sweeps the floor ahead."
+    description_seen: "A pre-Silence gun emplacement rotates toward you, optical sensor locking on."
+    description_short: "security turret"
+    xp_value: 45
+    tags: [construct, ruins, dungeon, engineered, pretech]
+    special_abilities: []
+
+  - id: repair_unit
+    name: Malfunctioning Repair Unit
+    hd: 2
+    hp_per_hd: 5
+    ac: 13
+    attack_bonus: 2
+    damage: "1d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "strikes with manipulator arms at"
+    num_attacks: 2
+    behavior: territorial
+    awareness_difficulty: 8
+    flee_difficulty: 7
+    unavoidable: false
+    morale: 10
+    loot_table: construct
+    harvestable:
+      material: "servo motor"
+      skill: "fix"
+      difficulty: 10
+    description_unseen: "Grinding gears. Sparks scatter from somewhere in the dark."
+    description_seen: "A squat maintenance robot jerks toward you, its repair arms flailing erratically."
+    description_short: "repair unit"
+    xp_value: 30
+    tags: [construct, ruins, dungeon, engineered]
+    special_abilities: []
+
+  - id: sentinel_drone
+    name: Sentinel Drone
+    hd: 2
+    hp_per_hd: 4
+    ac: 14
+    attack_bonus: 3
+    damage: "1d6"
+    damage_type: ranged
+    attack_skill: shoot
+    attack_description: "fires a charged energy burst at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 9
+    flee_difficulty: 6
+    unavoidable: false
+    morale: 12
+    loot_table: construct
+    harvestable:
+      material: "pretech energy cell"
+      skill: "fix"
+      difficulty: 12
+    description_unseen: "A high-pitched hum from above. Something is tracking you."
+    description_seen: "A disc-shaped drone drops from the ceiling, a charged emitter glowing at its center."
+    description_short: "sentinel drone"
+    xp_value: 30
+    tags: [construct, ruins, dungeon, engineered, pretech]
+    special_abilities: []
+
+  - id: war_chassis
+    name: War Chassis
+    hd: 6
+    hp_per_hd: 6
+    ac: 18
+    attack_bonus: 6
+    damage: "2d6"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "drives a powered fist into"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 5
+    flee_difficulty: 11
+    unavoidable: false
+    morale: 12
+    loot_table: construct
+    harvestable:
+      material: "military-grade actuator"
+      skill: "fix"
+      difficulty: 14
+    description_unseen: "The floor trembles under something heavy. Weapons-lock alarm sounds."
+    description_seen: "A two-meter military combat frame stamps toward you, actuators whining under load."
+    description_short: "war chassis"
+    xp_value: 90
+    tags: [construct, ruins, dungeon, engineered, pretech]
+    special_abilities: []

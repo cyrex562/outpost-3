@@ -1,0 +1,137 @@
+# WWN faction asset definitions (from faction_turns.md rules reference)
+# NOTE: Populate full asset list from WWN source book
+
+# Force assets
+- asset_type: Warriors
+  category: force
+  min_attribute: 1
+  cost: 2
+  upkeep: 0
+  max_hp: 6
+  attack_stat: force_vs_force
+  counter_stat: force_vs_force
+  attack_roll: "1d6"
+  special: ""
+  description: "Armed soldiers loyal to the faction."
+
+- asset_type: Militia
+  category: force
+  min_attribute: 2
+  cost: 4
+  upkeep: 0
+  max_hp: 8
+  attack_stat: force_vs_force
+  counter_stat: force_vs_force
+  attack_roll: "1d8"
+  special: ""
+  description: "A well-organized militia force."
+
+- asset_type: Elite_Troops
+  category: force
+  min_attribute: 3
+  cost: 5
+  upkeep: 1
+  max_hp: 8
+  attack_stat: force_vs_force
+  counter_stat: force_vs_force
+  attack_roll: "1d10"
+  special: ""
+  description: "Highly trained professional soldiers."
+
+- asset_type: Fortress
+  category: force
+  min_attribute: 2
+  cost: 4
+  upkeep: 0
+  max_hp: 8
+  attack_stat: ""
+  counter_stat: force_vs_force
+  attack_roll: ""
+  special: '{"ability": "defend_cell"}'
+  description: "A fortified position that defends a cell."
+
+# Cunning assets
+- asset_type: Informers
+  category: cunning
+  min_attribute: 1
+  cost: 2
+  upkeep: 0
+  max_hp: 4
+  attack_stat: cunning_vs_cunning
+  counter_stat: cunning_vs_cunning
+  attack_roll: "1d4"
+  special: '{"ability": "reveal_assets"}'
+  description: "A network of spies and informants."
+
+- asset_type: Spies
+  category: cunning
+  min_attribute: 2
+  cost: 4
+  upkeep: 0
+  max_hp: 4
+  attack_stat: cunning_vs_force
+  counter_stat: cunning_vs_cunning
+  attack_roll: "1d6"
+  special: ""
+  description: "Trained espionage agents."
+
+- asset_type: Saboteurs
+  category: cunning
+  min_attribute: 2
+  cost: 3
+  upkeep: 0
+  max_hp: 4
+  attack_stat: cunning_vs_wealth
+  counter_stat: cunning_vs_cunning
+  attack_roll: "1d6"
+  special: ""
+  description: "Agents skilled at disrupting enemy operations."
+
+- asset_type: Smugglers
+  category: cunning
+  min_attribute: 1
+  cost: 2
+  upkeep: 0
+  max_hp: 4
+  attack_stat: cunning_vs_wealth
+  counter_stat: cunning_vs_cunning
+  attack_roll: "1d4"
+  special: '{"ability": "generate_wealth", "amount": 1}'
+  description: "Illicit trade network that generates income."
+
+# Wealth assets
+- asset_type: Merchants
+  category: wealth
+  min_attribute: 1
+  cost: 2
+  upkeep: 0
+  max_hp: 4
+  attack_stat: ""
+  counter_stat: wealth_vs_wealth
+  attack_roll: ""
+  special: '{"ability": "generate_wealth", "amount": 1}'
+  description: "Legitimate trade operations generating income."
+
+- asset_type: Merchant_Caravan
+  category: wealth
+  min_attribute: 2
+  cost: 4
+  upkeep: 0
+  max_hp: 6
+  attack_stat: wealth_vs_cunning
+  counter_stat: wealth_vs_wealth
+  attack_roll: "1d6"
+  special: '{"ability": "generate_wealth", "amount": 1}'
+  description: "Armed trade caravan moving goods between settlements."
+
+- asset_type: Monopoly
+  category: wealth
+  min_attribute: 3
+  cost: 4
+  upkeep: 1
+  max_hp: 5
+  attack_stat: wealth_vs_wealth
+  counter_stat: wealth_vs_wealth
+  attack_roll: "1d6"
+  special: '{"ability": "generate_wealth", "amount": 2}'
+  description: "Control of a vital trade good or service."

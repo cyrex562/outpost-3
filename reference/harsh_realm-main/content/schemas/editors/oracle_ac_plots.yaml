@@ -1,0 +1,9 @@
+pattern: "tables/oracle/ac_plots"
+label: "AC Plot Elements"
+widget: WeightedListEditor
+accessor: { kind: key, key: entries }
+fields:
+  - { key: value, type: text, label: Plot Element, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

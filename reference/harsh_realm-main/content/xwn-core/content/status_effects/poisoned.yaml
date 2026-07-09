@@ -1,0 +1,8 @@
+id: poisoned
+name: Poisoned
+description: |
+  The character has been poisoned. Without treatment or strong constitution,
+  the poison runs its course and clears.
+default_duration_ticks: 6
+tags: [debuff, biological]
+stacking: extend

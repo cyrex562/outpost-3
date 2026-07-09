@@ -1,0 +1,12 @@
+pattern: "equipment_kits"
+label: "Equipment Kits"
+widget: RegistryEditor
+accessor: { kind: key, key: kits }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: sm }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: class, type: select, label: Class, options: [warrior, expert, adventurer], width: sm }
+  - { key: description, type: text, label: Description, width: full }
+allow_add: true
+allow_delete: true

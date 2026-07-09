@@ -1,0 +1,124 @@
+# Schema reference for random table YAML files.
+# This file is documentation only — it is not enforced in code.
+#
+# All table YAML files must reside under data/tables/ and match this structure.
+
+# -------------------------------------------------------------------------
+# Table definition fields
+# -------------------------------------------------------------------------
+
+# id: string (required)
+#   Unique identifier for the table.  Used as the primary key in SQLite and
+#   as the reference value in subtable entries.
+#   Example: "discoveries_forest"
+
+# category: string (required)
+#   Broad grouping for the table.  Used by roll_with_tags() to select tables.
+#   Common values: "encounter", "discovery", "npc", "name", "item", "event"
+#   Example: "discovery"
+
+# name: string (required)
+#   Human-readable display name.
+#   Example: "Forest Discoveries"
+
+# tags: list[string] (optional)
+#   Tag list for filtered queries.  Used by roll_with_tags() to narrow results
+#   to tables matching a given environment, faction, or theme.
+#   Example: [forest, wilderness]
+
+# entries: list[Entry] (required)
+#   The rollable entries.  See Entry fields below.
+
+# source: string (auto-populated)
+#   File path inserted automatically when load_tables() ingests the file.
+
+
+# -------------------------------------------------------------------------
+# Entry fields  (each item in the entries list)
+# -------------------------------------------------------------------------
+
+# weight: number (required)
+#   Relative probability weight.  Higher weight → more frequent result.
+#   Weights do not need to sum to 100; they are treated as relative ratios.
+#   Example: 5
+
+# result: string | dict (required)
+#   The outcome when this entry is selected.  Three forms are supported:
+#
+#   1. Plain string  → result_type becomes "text", raw_text set to the string.
+#      Example: "A clump of edible mushrooms grows at the base of an oak."
+#
+#   2. Dict with "table" key  → subtable reference.  The engine rolls on the
+#      named table recursively and returns that result.  roll_chain records
+#      every table visited.
+#      Example: {table: "items_common"}
+#
+#   3. Dict without "table" key  → typed result.  Must include a "type" field.
+#      The type field becomes result_type.  All other keys are included verbatim
+#      in the result dict.
+#      Example: {type: "item", name: "Corroded Pretech Component", enc: 1}
+
+# min_difficulty: integer (optional, default 0)
+#   Minimum skill check difficulty required to obtain this result.
+#   0 means no gate — always included.
+#   Reserved for future context-gating logic; currently treated as metadata.
+
+# tags: list[string] (optional)
+#   Entry-level tags for fine-grained filtering (e.g. rarity, environment).
+#   Example: [rare, pretech]
+
+
+# -------------------------------------------------------------------------
+# Example table
+# -------------------------------------------------------------------------
+#
+# id: discoveries_forest
+# category: discovery
+# name: "Forest Discoveries"
+# tags: [forest, wilderness]
+# entries:
+#   - weight: 5
+#     result: "A clump of edible mushrooms grows at the base of an oak."
+#     min_difficulty: 0
+#     tags: [common]
+#   - weight: 2
+#     result: {type: "item", name: "Corroded Pretech Component", enc: 1}
+#     min_difficulty: 10
+#     tags: [rare, pretech]
+#   - weight: 1
+#     result: {table: "items_ruins"}
+#     tags: [rare]
+
+
+# -------------------------------------------------------------------------
+# Generator YAML files  (data/generators/*.yaml)
+# -------------------------------------------------------------------------
+# Generator files are NOT stored in the database.  They are loaded from disk
+# on demand by TableEngine.generate().
+#
+# id: string  — unique generator identifier (also the filename stem)
+# name: string  — human-readable name
+# steps: list[Step]
+#   Each step has:
+#     roll: string   — table id to roll on
+#     assign: string — field name in the returned result dict
+#
+# Example generator (npc_basic.yaml):
+#
+# id: npc_basic
+# name: "Basic NPC Generator"
+# steps:
+#   - roll: names_male
+#     assign: first_name
+#   - roll: names_surnames
+#     assign: surname
+#   - roll: npcs_occupations_settlement
+#     assign: occupation
+#   - roll: npcs_personality_traits
+#     assign: trait_1
+#   - roll: npcs_personality_traits
+#     assign: trait_2
+#   - roll: npcs_motivations
+#     assign: motivation
+#   - roll: npcs_appearances
+#     assign: appearance

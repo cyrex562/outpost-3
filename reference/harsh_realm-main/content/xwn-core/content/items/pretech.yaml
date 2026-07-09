@@ -1,0 +1,18 @@
+- id: pretech.energy_cell
+  name: "Energy Cell"
+  enc: 0
+  cost: 100
+  power_charges: 5
+  tags: [pretech]
+
+- id: pretech.circuit_board
+  name: "Pretech Circuit Board"
+  enc: 0
+  cost: 75
+  tags: [pretech, component]
+
+- id: pretech.data_chip
+  name: "Pretech Data Chip"
+  enc: 0
+  cost: 50
+  tags: [pretech, component]

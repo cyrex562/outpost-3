@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# World databases (mounted as a volume at runtime)
+worlds/*.db
+
+# Frontend runtime junk
+frontend/node_modules/
+frontend/dist/
+
+# Dev / editor
+.env
+.git/
+.gitignore
+*.md
+docs/

@@ -1,0 +1,16 @@
+# Dungeon room types — content, not generator code (R5-R).
+# A weighted table; authorable per setting. The generator reads the results.
+id: dungeon_room_types
+category: dungeon
+name: Dungeon Room Types
+entries:
+  - weight: 1
+    result: corridor
+  - weight: 1
+    result: chamber
+  - weight: 1
+    result: vault
+  - weight: 1
+    result: crypt
+  - weight: 1
+    result: laboratory

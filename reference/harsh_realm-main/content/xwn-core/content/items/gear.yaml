@@ -1,0 +1,59 @@
+- id: gear.backpack
+  name: "Backpack"
+  enc: 0
+  cost: 5
+  tags: [container]
+
+- id: gear.rope_50ft
+  name: "Rope (50 ft)"
+  enc: 1
+  cost: 5
+  tags: []
+
+- id: gear.tinderbox
+  name: "Tinderbox"
+  enc: 0
+  cost: 2
+  tags: []
+
+- id: gear.tools_basic
+  name: "Tools (basic set)"
+  enc: 1
+  cost: 15
+  tags: [tool]
+
+- id: gear.torch
+  name: "Torch (3-pack)"
+  enc: 1
+  cost: 1
+  tags: [light_source]
+
+- id: gear.lantern
+  name: "Lantern"
+  enc: 1
+  cost: 10
+  tags: [light_source]
+
+- id: gear.grappling_hook
+  name: "Grappling Hook"
+  enc: 1
+  cost: 5
+  tags: []
+
+- id: gear.crowbar
+  name: "Crowbar"
+  enc: 1
+  cost: 3
+  tags: [tool]
+
+- id: gear.bedroll
+  name: "Bedroll"
+  enc: 1
+  cost: 2
+  tags: []
+
+- id: gear.waterskin
+  name: "Waterskin"
+  enc: 1
+  cost: 1
+  tags: []

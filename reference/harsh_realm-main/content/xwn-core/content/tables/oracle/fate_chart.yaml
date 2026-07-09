@@ -1,0 +1,334 @@
+likelihoods:
+  certain:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 100
+      exceptional_yes: 10
+      yes_threshold: 99
+  even_odds:
+    chaos_1:
+      exceptional_no: 82
+      exceptional_yes: 2
+      yes_threshold: 10
+    chaos_2:
+      exceptional_no: 85
+      exceptional_yes: 5
+      yes_threshold: 25
+    chaos_3:
+      exceptional_no: 87
+      exceptional_yes: 7
+      yes_threshold: 35
+    chaos_4:
+      exceptional_no: 90
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 11
+      yes_threshold: 55
+    chaos_6:
+      exceptional_no: 95
+      exceptional_yes: 15
+      yes_threshold: 75
+    chaos_7:
+      exceptional_no: 97
+      exceptional_yes: 17
+      yes_threshold: 85
+    chaos_8:
+      exceptional_no: 98
+      exceptional_yes: 18
+      yes_threshold: 90
+    chaos_9:
+      exceptional_no: 99
+      exceptional_yes: 19
+      yes_threshold: 95
+  impossible:
+    chaos_1:
+      exceptional_no: 95
+      exceptional_yes: 0
+      yes_threshold: 1
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+  likely:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+  no_way:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+  somewhat_likely:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+  unlikely:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+  very_likely:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+  very_unlikely:
+    chaos_1:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_2:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_3:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_4:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_5:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_6:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_7:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_8:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50
+    chaos_9:
+      exceptional_no: 91
+      exceptional_yes: 10
+      yes_threshold: 50

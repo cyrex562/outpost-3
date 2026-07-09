@@ -1,0 +1,17 @@
+id: npc_basic
+name: "Basic NPC Generator"
+steps:
+  - roll: npcs_names_male
+    assign: first_name
+  - roll: npcs_names_surnames
+    assign: surname
+  - roll: npcs_occupations_settlement
+    assign: occupation
+  - roll: npcs_personality_traits
+    assign: trait_1
+  - roll: npcs_personality_traits
+    assign: trait_2
+  - roll: npcs_motivations
+    assign: motivation
+  - roll: npcs_appearances
+    assign: appearance

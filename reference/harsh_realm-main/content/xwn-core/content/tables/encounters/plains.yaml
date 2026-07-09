@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_plains
+category: encounter
+name: "Plains Encounters"
+tags: [plains, wilderness]
+entries:
+  - weight: 2
+    result:
+      type: hostile
+      name: "Mounted Toll Collectors"
+      description: "Two riders on horseback block the road ahead. 'Toll for passage. Pay or turn back.' Their swords are sheathed but hands are ready."
+  - weight: 2
+    result:
+      type: hostile
+      name: "Feral Livestock"
+      description: "A small herd of cattle — gone feral after their holding collapsed. They're between you and your route, heads low and eyes wild."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Travelling Merchant"
+      description: "A weathered merchant with a loaded cart makes slow progress along the same road. They wave cautiously."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Militia Patrol"
+      description: "A patrol of four armed men in mismatched armour watches you approach. They're not hostile, but they're asking questions."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Dust Storm"
+      description: "A wall of dust sweeps across the plains with little warning. Visibility drops to nothing."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Overturned Wagon"
+      description: "A cargo wagon lies on its side across the track. The draft animal is gone. The cargo — if there was any — is already picked clean."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Signal Fire"
+      description: "A fire burns on a hillock nearby — too regular to be accidental. Someone is signalling."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Dead Courier"
+      description: "A body slumped against a roadside marker — courier's satchel still strapped to them. The satchel has been cut but not fully emptied."

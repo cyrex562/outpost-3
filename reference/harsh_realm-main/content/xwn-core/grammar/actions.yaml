@@ -1,0 +1,128 @@
+# XWN core action vocabulary (R5-A3, grammar form-2).
+# ===================================================
+# Two L1 archetypes carry the full resolution; the concrete attacks are thin L2
+# variants that set `base:` and only their overrides — the compiler deep-merges the
+# archetype in (so `roll_spec: { skill: punch }` keeps the archetype's mechanic +
+# attribute and inherits tn_source/targeting/activation/outcome).
+#
+# Damage `amount: weapon` is a formula the host resolves to the actor's natural /
+# equipped weapon damage (a creature's `damage` field, a PC's equipped weapon).
+#
+# Compile + store via the Content UI (Upload → Compile → Store), or
+# `hrctl content compile packs/xwn-core/grammar/`.
+
+# ── L1 archetypes (full resolution) ──────────────────────────────────────────
+action:
+  id: melee_attack
+  kind: contest
+  resolution:
+    roller: actor
+    tn_source: { defense: ac }
+    roll_spec: { mechanic: xwn_d20_attack, attribute: STR }
+  targeting: { shape: single, range_band: melee, requires_los: true }
+  activation: { economy: action }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical], tier: sd }
+          to: target
+  tags: [attack, melee, archetype]
+
+---
+action:
+  id: ranged_attack
+  kind: contest
+  resolution:
+    roller: actor
+    tn_source: { defense: ac }
+    roll_spec: { mechanic: xwn_d20_attack, attribute: DEX }
+  targeting: { shape: single, range_band: ranged, requires_los: true }
+  activation: { economy: action }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical], tier: sd }
+          to: target
+  tags: [attack, ranged, archetype]
+
+# ── Thin L2 melee variants (base-merge fills the rest) ───────────────────────
+# Generic attacks for skill-only creatures (attack_skill punch / stab):
+---
+action:
+  id: strike
+  base: melee_attack
+  resolution: { roll_spec: { skill: punch } }
+  tags: [attack, melee, natural]
+
+---
+action:
+  id: stab_attack
+  base: melee_attack
+  resolution: { roll_spec: { skill: stab } }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical, pierce], tier: sd }
+          to: target
+  tags: [attack, melee, bladed]
+
+# Named natural attacks (creature innate_attacks):
+---
+action:
+  id: bite
+  base: melee_attack
+  resolution: { roll_spec: { skill: punch } }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical, pierce], tier: sd }
+          to: target
+  tags: [attack, melee, natural, bite]
+
+---
+action:
+  id: claws
+  base: melee_attack
+  resolution: { roll_spec: { skill: punch } }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical, slash], tier: sd }
+          to: target
+  tags: [attack, melee, natural, claws]
+
+---
+action:
+  id: gore
+  base: melee_attack
+  resolution: { roll_spec: { skill: punch } }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical, pierce], tier: sd }
+          to: target
+  tags: [attack, melee, natural, gore]
+
+---
+action:
+  id: sting
+  base: melee_attack
+  resolution: { roll_spec: { skill: punch, attribute: DEX } }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical, pierce], tier: sd }
+          to: target
+  tags: [attack, melee, natural, sting]
+
+---
+action:
+  id: swarm_bite
+  base: melee_attack
+  resolution: { roll_spec: { skill: punch, attribute: DEX } }
+  outcome:
+    - when: success
+      do:
+        - emit_damage: { amount: weapon, types: [physical, pierce], tier: sd }
+          to: target
+  tags: [attack, melee, natural, swarm]

@@ -1,0 +1,15 @@
+pattern: "skills"
+label: "Skills"
+widget: RegistryEditor
+accessor: { kind: key, key: skills }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: sm }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: description, type: text, label: Description, width: full }
+  - { key: default_attribute, type: select, label: Default Attr, options: [str, dex, con, int, wis, cha], width: sm }
+  - { key: can_use_untrained, type: boolean, label: Untrained }
+  - { key: combat_skill, type: boolean, label: Combat }
+  - { key: available_milestone, type: number, label: Milestone, width: sm }
+allow_add: true
+allow_delete: true

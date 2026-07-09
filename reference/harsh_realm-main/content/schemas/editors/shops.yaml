@@ -1,0 +1,9 @@
+pattern: "shops/"
+label: "Shop Tiers"
+widget: TieredConfigEditor
+accessor: { kind: tiered, tiers: [small, medium, large] }
+fields:
+  - { key: item_id, type: text, label: Item ID, width: md }
+  - { key: quantity, type: number, label: Quantity, width: sm }
+allow_add: true
+allow_delete: true

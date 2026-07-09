@@ -1,0 +1,53 @@
+id: une_personality
+name: UNE Personality Generator
+description: Generates a complete UNE personality block for an NPC.
+inputs:
+  - name: power_level
+    type: string
+    required: false
+    default: ""
+  - name: chaos_factor
+    type: integer
+    required: false
+    default: 5
+  - name: relationship
+    type: string
+    required: false
+    default: peer
+steps:
+  - kind: roll
+    assign: power_level_rolled
+    table: xwn-core:tables.npc.une_power_level
+  - kind: compute
+    assign: power_level_selected
+    function: xwn-core:power_level_or_preset
+    params:
+      preset: "{power_level}"
+      rolled: "{power_level_rolled}"
+  - kind: roll
+    assign: descriptor
+    table: xwn-core:tables.npc.une_descriptors
+  - kind: procedure
+    assign: motivation
+    procedure: xwn-core:procedures.une_motivation
+  - kind: procedure
+    assign: bearing
+    procedure: xwn-core:procedures.une_bearing
+    params:
+      chaos_factor: "{chaos_factor}"
+      relationship: "{relationship}"
+  - kind: compute
+    assign: base_disposition
+    function: xwn-core:disposition_from_chaos
+    params:
+      chaos_factor: "{chaos_factor}"
+output:
+  fields:
+    power_level: power_level_selected
+    descriptor: descriptor
+    motivation_verb: motivation.verb
+    motivation_noun: motivation.noun
+    bearing: bearing.bearing
+    bearing_focus: bearing.focus
+    base_disposition: base_disposition
+tags: [une, npc, personality]

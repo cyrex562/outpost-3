@@ -1,0 +1,17 @@
+id: advantages.combat_reflexes
+name: Combat Reflexes
+category: advantage
+description: Battle readiness improves initiative and surprise resistance.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: combat.initiative
+    value: 1
+    stacking: additive
+    description: Bonus to initiative-like combat readiness checks.
+  - target: skill.notice.surprise
+    value: 2
+    stacking: additive
+    description: Bonus to noticing ambushes and surprise threats.
+provides_tags: [combat_ready]
+tags: [gurps, combat]
+

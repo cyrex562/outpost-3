@@ -1,0 +1,9 @@
+pattern: "templates/adjacent_hints"
+label: "Adjacent Hints"
+widget: WeightedListEditor
+accessor: { kind: key, key: hints }
+fields:
+  - { key: result, type: textarea, label: Template, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

@@ -1,0 +1,206 @@
+# TODO: Expand from source material
+id: settlement_establishment_names
+category: settlement
+name: "Establishment Name Templates"
+tags: [settlement, establishment, name]
+entries:
+  - weight: 1
+    result:
+      type: inn
+      name: "The Weary Traveler"
+  - weight: 1
+    result:
+      type: inn
+      name: "The Cracked Lantern"
+  - weight: 1
+    result:
+      type: inn
+      name: "The Muddy Boot"
+  - weight: 1
+    result:
+      type: inn
+      name: "The Iron Bedroll"
+  - weight: 1
+    result:
+      type: inn
+      name: "The Saltwind Inn"
+  - weight: 1
+    result:
+      type: forge
+      name: "The Rusty Anvil"
+  - weight: 1
+    result:
+      type: forge
+      name: "Coldstrike Smithy"
+  - weight: 1
+    result:
+      type: forge
+      name: "The Black Hammer"
+  - weight: 1
+    result:
+      type: forge
+      name: "Ironmaw Forge"
+  - weight: 1
+    result:
+      type: forge
+      name: "The Ember Works"
+  - weight: 1
+    result:
+      type: trading_post
+      name: "The Dusty Counter"
+  - weight: 1
+    result:
+      type: trading_post
+      name: "Borderland Goods"
+  - weight: 1
+    result:
+      type: trading_post
+      name: "The Open Palm"
+  - weight: 1
+    result:
+      type: trading_post
+      name: "Last Chance Supplies"
+  - weight: 1
+    result:
+      type: trading_post
+      name: "The Bartered Wheel"
+  - weight: 1
+    result:
+      type: healer
+      name: "The Healing Hands"
+  - weight: 1
+    result:
+      type: healer
+      name: "Thornroot Remedies"
+  - weight: 1
+    result:
+      type: healer
+      name: "The Green Stall"
+  - weight: 1
+    result:
+      type: healer
+      name: "Coldwater's Curative"
+  - weight: 1
+    result:
+      type: healer
+      name: "The Bone-Setter's Hut"
+  - weight: 1
+    result:
+      type: tavern
+      name: "The Crooked Cup"
+  - weight: 1
+    result:
+      type: tavern
+      name: "The Drowning Stone"
+  - weight: 1
+    result:
+      type: tavern
+      name: "The Rat and Barrel"
+  - weight: 1
+    result:
+      type: tavern
+      name: "Grimgut's"
+  - weight: 1
+    result:
+      type: tavern
+      name: "The Last Round"
+  - weight: 1
+    result:
+      type: temple
+      name: "The Ashen Reliquary"
+  - weight: 1
+    result:
+      type: temple
+      name: "Shrine of the Dying Signal"
+  - weight: 1
+    result:
+      type: temple
+      name: "The Burnt Covenant"
+  - weight: 1
+    result:
+      type: temple
+      name: "Hall of Forgotten Frequencies"
+  - weight: 1
+    result:
+      type: temple
+      name: "The Iron Sanctum"
+  - weight: 1
+    result:
+      type: warehouse
+      name: "The Sealed Vault"
+  - weight: 1
+    result:
+      type: warehouse
+      name: "Rustgate Storage"
+  - weight: 1
+    result:
+      type: warehouse
+      name: "The Dustbound Hold"
+  - weight: 1
+    result:
+      type: warehouse
+      name: "Blackledger Stores"
+  - weight: 1
+    result:
+      type: warehouse
+      name: "The Tithe Cellar"
+  - weight: 1
+    result:
+      type: barracks
+      name: "The Ashwall Garrison"
+  - weight: 1
+    result:
+      type: barracks
+      name: "Ironwatch Quarters"
+  - weight: 1
+    result:
+      type: barracks
+      name: "The Broken Shield Post"
+  - weight: 1
+    result:
+      type: barracks
+      name: "Duskward Barracks"
+  - weight: 1
+    result:
+      type: barracks
+      name: "The Warden's Billet"
+  - weight: 1
+    result:
+      type: library
+      name: "The Hollow Archive"
+  - weight: 1
+    result:
+      type: library
+      name: "Cipherhouse"
+  - weight: 1
+    result:
+      type: library
+      name: "The Faded Index"
+  - weight: 1
+    result:
+      type: library
+      name: "Vault of Dead Tongues"
+  - weight: 1
+    result:
+      type: library
+      name: "The Threadbare Scriptorium"
+  - weight: 1
+    result:
+      type: market_stall
+      name: "The Scrapmonger's Lean-to"
+  - weight: 1
+    result:
+      type: market_stall
+      name: "Gutter Wares"
+  - weight: 1
+    result:
+      type: market_stall
+      name: "The Rust Picker's Table"
+  - weight: 1
+    result:
+      type: market_stall
+      name: "Blindside Bargains"
+  - weight: 1
+    result:
+      type: market_stall
+      name: "The Salvage Cart"

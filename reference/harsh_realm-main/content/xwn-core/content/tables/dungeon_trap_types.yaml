@@ -1,0 +1,11 @@
+# Dungeon trap types — content, not generator code (R5-R). Authorable per setting.
+id: dungeon_trap_types
+category: dungeon
+name: Dungeon Trap Types
+entries:
+  - weight: 1
+    result: pit
+  - weight: 1
+    result: dart
+  - weight: 1
+    result: gas

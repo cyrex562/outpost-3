@@ -1,0 +1,30 @@
+# Starter quests (HR-19) — example content driving the QuestService.
+# Each entry is a Quest record; the QuestCatalog loads every quest under
+# content/xwn-core/content/quests/*.yaml.
+
+- id: clear_the_crawlers
+  name: Clear the Crawlers
+  description: |
+    Rust-crawlers have infested the old drainage tunnels beneath the settlement.
+    Thin their numbers before they spill into the streets.
+  objectives:
+    - key: crawlers_slain
+      description: Slay rust-crawlers in the tunnels
+      target: 5
+  reward_gold: 40
+  reward_xp: 120
+
+- id: recover_the_relic
+  name: Recover the Pretech Relic
+  description: |
+    With the tunnels cleared, the settlement elder asks you to retrieve a
+    pretech relic said to lie in the deepest chamber.
+  objectives:
+    - key: relic_recovered
+      description: Recover the pretech relic from the deep chamber
+  prerequisites:
+    - clear_the_crawlers
+  reward_gold: 150
+  reward_xp: 300
+  reward_items:
+    - pretech_relic

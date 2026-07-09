@@ -1,0 +1,13 @@
+id: disadvantages.low_pain_threshold
+name: Low Pain Threshold
+category: disadvantage
+description: Pain is harder to ignore under stress.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: save.physical.pain
+    value: -3
+    stacking: additive
+    description: Penalty to resist pain and stunning.
+provides_tags: [pain_sensitive]
+tags: [gurps, resilience]
+

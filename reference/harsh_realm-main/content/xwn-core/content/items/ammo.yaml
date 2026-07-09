@@ -1,0 +1,15 @@
+- id: ammo.arrow
+  name: "Arrow"
+  weapon_tags: [bow]
+  enc_per_20: 1
+  cost_per_20: 5
+  enc: 0
+  cost: 5
+
+- id: ammo.bolt
+  name: "Crossbow Bolt"
+  weapon_tags: [crossbow]
+  enc_per_20: 1
+  cost_per_20: 5
+  enc: 0
+  cost: 5

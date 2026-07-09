@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: settlement_names_prefix
+category: settlement
+name: "Settlement Name Prefixes"
+tags: [settlement, name, prefix]
+entries:
+  - weight: 1
+    result: "Mill"
+  - weight: 1
+    result: "Iron"
+  - weight: 1
+    result: "Ash"
+  - weight: 1
+    result: "Stone"
+  - weight: 1
+    result: "Crow"
+  - weight: 1
+    result: "Grey"
+  - weight: 1
+    result: "Thorn"
+  - weight: 1
+    result: "Mud"
+  - weight: 1
+    result: "Black"
+  - weight: 1
+    result: "Red"
+  - weight: 1
+    result: "North"
+  - weight: 1
+    result: "South"
+  - weight: 1
+    result: "West"
+  - weight: 1
+    result: "East"
+  - weight: 1
+    result: "Old"
+  - weight: 1
+    result: "New"
+  - weight: 1
+    result: "Hollow"
+  - weight: 1
+    result: "Marsh"
+  - weight: 1
+    result: "River"
+  - weight: 1
+    result: "Hill"

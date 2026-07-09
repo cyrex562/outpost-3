@@ -1,0 +1,37 @@
+# UNE Motivation Nouns table
+# TODO: Populate from UNE rulebook — full table has 100 entries
+id: une_motivation_nouns
+category: une
+name: "UNE Motivation Nouns"
+tags: [une, npc, motivation]
+entries:
+  - weight: 1
+    result: "wealth"
+  - weight: 1
+    result: "knowledge"
+  - weight: 1
+    result: "family"
+  - weight: 1
+    result: "power"
+  - weight: 1
+    result: "freedom"
+  - weight: 1
+    result: "vengeance"
+  - weight: 1
+    result: "territory"
+  - weight: 1
+    result: "magic"
+  - weight: 1
+    result: "the_oppressed"
+  - weight: 1
+    result: "secrets"
+  - weight: 1
+    result: "justice"
+  - weight: 1
+    result: "the_status_quo"
+  - weight: 1
+    result: "a_promise"
+  - weight: 1
+    result: "nature"
+  - weight: 1
+    result: "the_truth"

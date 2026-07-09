@@ -1,0 +1,36 @@
+# UNE Disposition Moods table
+# Maps disposition score ranges to mood labels
+# TODO: Populate from UNE rulebook for finer granularity
+id: une_moods
+category: une
+name: "UNE Disposition Moods"
+tags: [une, npc, disposition]
+entries:
+  - weight: 1
+    result:
+      score: -3
+      label: "hostile"
+  - weight: 1
+    result:
+      score: -2
+      label: "unsteady"
+  - weight: 1
+    result:
+      score: -1
+      label: "guarded"
+  - weight: 1
+    result:
+      score: 0
+      label: "indifferent"
+  - weight: 1
+    result:
+      score: 1
+      label: "sociable"
+  - weight: 1
+    result:
+      score: 2
+      label: "friendly"
+  - weight: 1
+    result:
+      score: 3
+      label: "helpful"

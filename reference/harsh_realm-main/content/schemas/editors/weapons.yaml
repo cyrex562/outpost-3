@@ -1,0 +1,19 @@
+pattern: "items/weapons"
+label: "Weapons"
+widget: RegistryEditor
+accessor: { kind: root }
+entry_key: id
+fields:
+  - { key: id, type: text, label: ID, width: md }
+  - { key: name, type: text, label: Name, width: md }
+  - { key: damage, type: text, label: Damage, width: sm }
+  - { key: damage_type, type: select, label: Damage Type, options: [melee, ranged, thrown], width: sm }
+  - { key: attribute, type: select, label: Attribute, options: [str, dex], width: sm }
+  - { key: shock_damage, type: number, label: Shock Dmg, width: sm }
+  - { key: shock_ac_threshold, type: number, label: Shock AC, width: sm }
+  - { key: range_band, type: select, label: Range, options: [melee, short, medium, long], width: sm }
+  - { key: enc, type: number, label: Enc, width: sm }
+  - { key: cost, type: number, label: Cost, width: sm }
+  - { key: tags, type: tags, label: Tags, width: full }
+allow_add: true
+allow_delete: true

@@ -1,0 +1,74 @@
+# One block per terrain_id. Each has a list of description variants.
+# Use {feature} as a placeholder if the cell has a named feature.
+# Use {name} as a placeholder if the cell has a name.
+descriptions:
+  plains:
+    - "Rolling grasslands stretch in every direction, broken only by the occasional scrub brush."
+    - "A wide expanse of yellowed grass ripples in the wind. The sky is overcast and grey."
+    - "Flat plains extend as far as you can see. The ground is hard-packed and dusty."
+    - "Open ground, easy to cross but offering little cover. Good sightlines in all directions."
+    - "The plains here are silent except for the wind. Nothing moves."
+  forest:
+    - "Dense trees press close on all sides. Shafts of pale light filter through the canopy."
+    - "A forest of twisted hardwoods, bark scarred by old fires. The undergrowth is thick."
+    - "Gnarled trunks rise around you. The forest floor is carpeted with dead leaves."
+    - "The canopy is high overhead, blocking most of the sky. It is cool and dim here."
+    - "Old growth timber, dark and quiet. Something rustles in the branches above."
+  hills:
+    - "Broken terrain — rocky slopes and narrow gullies. The footing is treacherous."
+    - "Low hills of grey stone and scrub brush. A cold wind cuts across the ridgeline."
+    - "The land rises and falls in uneven waves. Good ground for an ambush."
+    - "Steep rocky hillsides. The path winds around outcroppings of bare stone."
+    - "Windswept hills with shallow soil. Sparse vegetation clings to the slopes."
+  mountains:
+    - "Towering peaks loom above, their upper reaches lost in cloud. The air is thin."
+    - "Jagged cliffs and narrow passes. Moving here requires care and strength."
+    - "The mountains are immense and cold. Every sound echoes off the stone faces."
+    - "Sheer walls of rock rise on all sides. The path is little more than a goat trail."
+    - "High altitude. The cold bites through your clothing. The wind never stops."
+  swamp:
+    - "Dark water and thick reeds. The ground squelches underfoot with every step."
+    - "A fetid swamp. The air smells of rot and standing water."
+    - "Murky pools lurk between tufts of coarse grass. It is difficult to tell solid ground from mud."
+    - "The swamp is unnaturally quiet. Dead trees stand in black water."
+    - "Insects swarm in clouds above the stagnant pools. The going is slow and miserable."
+  desert:
+    - "Endless sand and bare rock. The sun hammers down without mercy."
+    - "A blasted waste of cracked earth and drifting dust. Nothing lives here."
+    - "Heat shimmer distorts the horizon. The silence is total."
+    - "The desert floor is hard-baked clay, cut with erosion channels. Brutal terrain."
+    - "Fine dust coats everything. The wind picks it up in small stinging devils."
+  ruins:
+    - "Crumbling walls and broken columns mark what was once a settlement of some kind."
+    - "The ruins are extensive — foundations, collapsed roofs, overgrown plazas."
+    - "Old construction, pre-Collapse perhaps. Hard to say what it was. Dangerous to explore."
+    - "Rubble and broken stone as far as you can see. Something may still lurk here."
+    - "The ruins are quiet now, but they weren't always. You can feel it."
+  water:
+    - "A stretch of open water blocks the way. Deep and cold-looking."
+    - "The river here is fast-moving and wide. Crossing without a boat would be dangerous."
+    - "Standing water. Hard to gauge the depth."
+    - "A lake, grey in the overcast light. Nothing stirs on its surface."
+    - "The water smells clean enough. You could refill your supplies here."
+  settlement:
+    - "Clustered buildings and the smell of cookfires. People move between the structures."
+    - "A settlement of some size. Walls — or at least a palisade — mark its boundary."
+    - "The settlement looks worn down. Times have been hard here."
+    - "Figures watch you approach from the settlement's edge. Their expressions are unreadable."
+    - "The place has the feel of somewhere that has survived a lot. Still standing, at least."
+  wasteland:
+    - "A blasted expanse of ruined earth. Nothing has grown here in years."
+    - "The wasteland stretches on without relief. Ash and broken stone underfoot."
+    - "Desolate ground, stripped of life. The wind carries a chemical smell."
+    - "Cracked and barren soil, grey as a dead world. No shelter anywhere."
+    - "The wasteland is eerily silent. Not even insects survive here."
+
+first_visit_suffix:
+  - " You have not been here before."
+  - " This is new ground for you."
+  - " You note your position carefully."
+
+feature_prefix:
+  settlement: "Dominating the area is {name}, {feature}."
+  ruins: "At the center of this area stands {name} — {feature}."
+  default: "Nearby: {feature}."

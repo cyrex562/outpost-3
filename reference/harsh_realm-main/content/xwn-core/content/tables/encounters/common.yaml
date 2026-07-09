@@ -1,0 +1,46 @@
+# TODO: Expand from source material
+id: encounters_common
+category: encounter
+name: "Common Encounters"
+tags: [common]
+entries:
+  - weight: 3
+    result:
+      type: hostile
+      name: "Desperate Bandits"
+      description: "Armed figures step from cover, weapons levelled. Their clothes are ragged, their eyes desperate."
+  - weight: 2
+    result:
+      type: hostile
+      name: "Wild Animal"
+      description: "A large predator regards you with flat, hungry eyes."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Lone Traveller"
+      description: "A solitary traveller shares the road briefly. They're heading the opposite direction and don't want trouble."
+  - weight: 3
+    result:
+      type: neutral_npc
+      name: "Small Trade Group"
+      description: "A small group of traders moves through the area. They have goods, they want coin, and they don't linger."
+  - weight: 3
+    result:
+      type: environmental
+      name: "Strange Weather"
+      description: "The weather turns — wind shifts, temperature drops, sky darkens. Something unusual is coming."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Signs of Violence"
+      description: "Evidence of recent conflict: dried blood on the ground, scattered possessions, the buzz of flies."
+  - weight: 2
+    result:
+      type: environmental
+      name: "Distant Sound"
+      description: "An unidentifiable sound carries on the wind — too far away to place, too regular to be natural."
+  - weight: 1
+    result:
+      type: discovery
+      name: "Something Left Behind"
+      description: "Someone left something here deliberately — or dropped it in flight. A small bundle, a sealed container, a scrawled note."

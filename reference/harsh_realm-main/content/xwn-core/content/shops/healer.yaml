@@ -1,0 +1,32 @@
+# Healer shop inventory by building tier.
+# Small settlements have a herbalist, larger ones have a proper healer/temple.
+
+small:
+  name: "Herbalist's Hut"
+  items:
+    - item_id: consumable.lazarus_patch
+      quantity: 2
+    - item_id: consumable.antitoxin
+      quantity: 1
+
+medium:
+  name: "Healer's Hall"
+  items:
+    - item_id: consumable.lazarus_patch
+      quantity: 3
+    - item_id: consumable.antitoxin
+      quantity: 2
+    - item_id: consumable.pretech_medkit
+      quantity: 1
+
+large:
+  name: "Temple of Healing"
+  items:
+    - item_id: consumable.lazarus_patch
+      quantity: 5
+    - item_id: consumable.antitoxin
+      quantity: 3
+    - item_id: consumable.pretech_medkit
+      quantity: 2
+    - item_id: consumable.pretech_medpack
+      quantity: 1

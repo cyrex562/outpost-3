@@ -1,0 +1,13 @@
+id: xwn-core
+version: 1.0.0
+name: XWN Core
+description: |
+  Default Harsh Realm content pack. Provides XWN (Worlds Without Number /
+  Stars Without Number) rules content: skills, classes, weapons, armor,
+  creatures, encounter tables, social mechanics, faction system.
+authors:
+  - Harsh Realm Project
+depends: []
+conflicts: []
+provides:
+  - xwn-core

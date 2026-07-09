@@ -1,0 +1,34 @@
+- id: armor.none
+  name: "No Armor"
+  ac: 10
+  enc: 0
+  cost: 0
+  tags: []
+
+- id: armor.leather
+  name: "Leather Armor"
+  ac: 13
+  enc: 1
+  cost: 50
+  tags: [light]
+
+- id: armor.chain_mail
+  name: "Chain Mail"
+  ac: 14
+  enc: 2
+  cost: 100
+  tags: [medium]
+
+- id: armor.plate_armor
+  name: "Plate Armor"
+  ac: 16
+  enc: 3
+  cost: 300
+  tags: [heavy]
+
+- id: armor.shield
+  name: "Shield"
+  ac_bonus: 1
+  enc: 1
+  cost: 20
+  tags: [shield]

@@ -1,0 +1,54 @@
+# TODO: Expand from source material
+id: discoveries_plains
+category: discovery
+name: "Plains Discoveries"
+tags: [plains, wilderness]
+entries:
+  - weight: 5
+    result:
+      type: environmental
+      description: "A shallow depression in the ground holds stagnant water — just enough to refill a canteen."
+      min_difficulty: 0
+  - weight: 4
+    result:
+      type: item
+      name: "Discarded Pack"
+      description: "A traveller's pack, torn and empty save for a few strips of dried leather."
+      enc: 1
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: item
+      name: "Rusted Knife"
+      description: "A short blade, rusted but the edge is intact. Better than nothing."
+      enc: 0
+      min_difficulty: 0
+  - weight: 3
+    result:
+      type: environmental
+      description: "A low earthen mound breaks the flat ground — old grave markers or a field boundary."
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: item
+      name: "Hidden Crate"
+      description: "A rough wooden crate buried under loose soil. Inside: coarse cloth and a tin of salted meat."
+      enc: 2
+      min_difficulty: 8
+  - weight: 2
+    result:
+      type: clue
+      description: "Wagon ruts lead toward the horizon — a regular trade or patrol route."
+      min_difficulty: 8
+  - weight: 1
+    result:
+      type: item
+      name: "Pretech Survey Stake"
+      description: "A gleaming metal stake driven into the earth, etched with survey markings. Pretech origin — someone was mapping this area."
+      enc: 0
+      min_difficulty: 10
+  - weight: 1
+    result:
+      type: environmental
+      description: "A scatter of bleached bones — human, and recent. Something killed them here."
+      min_difficulty: 10

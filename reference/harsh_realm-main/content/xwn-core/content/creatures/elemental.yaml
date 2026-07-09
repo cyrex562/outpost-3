@@ -1,0 +1,100 @@
+creatures:
+  - id: fire_elemental
+    name: Fire Elemental
+    hd: 4
+    hp_per_hd: 5
+    ac: 14
+    attack_bonus: 4
+    damage: "1d8"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "lashes out with burning hands at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 5
+    flee_difficulty: 9
+    unavoidable: false
+    morale: 12
+    loot_table: null
+    harvestable: null
+    description_unseen: "You feel an unnatural heat and smell scorched air."
+    description_seen: "A column of living fire whirls toward you."
+    description_short: "fire elemental"
+    xp_value: 60
+    tags: [elemental, fire, wilderness, ruins, dungeon]
+    special_abilities: []
+
+  - id: water_elemental
+    name: Water Elemental
+    hd: 4
+    hp_per_hd: 5
+    ac: 13
+    attack_bonus: 4
+    damage: "1d8"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "buffets with a crushing wave at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 8
+    flee_difficulty: 9
+    unavoidable: false
+    morale: 11
+    loot_table: null
+    harvestable: null
+    description_unseen: "Water begins to move against the current — something is in there."
+    description_seen: "A mass of water rises and forms a vaguely humanoid shape."
+    description_short: "water elemental"
+    xp_value: 60
+    tags: [elemental, water, swamp, coastal]
+    special_abilities: []
+
+  - id: earth_elemental
+    name: Earth Elemental
+    hd: 5
+    hp_per_hd: 6
+    ac: 16
+    attack_bonus: 5
+    damage: "1d10"
+    damage_type: melee
+    attack_skill: punch
+    attack_description: "slams with a rocky fist at"
+    num_attacks: 1
+    behavior: territorial
+    awareness_difficulty: 9
+    flee_difficulty: 11
+    unavoidable: false
+    morale: 12
+    loot_table: null
+    harvestable: null
+    description_unseen: "The ground trembles rhythmically — something is beneath the surface."
+    description_seen: "Stone and soil coalesce into a massive elemental form."
+    description_short: "earth elemental"
+    xp_value: 75
+    tags: [elemental, earth, wilderness, hills, dungeon]
+    special_abilities: []
+
+  - id: air_elemental
+    name: Air Elemental
+    hd: 4
+    hp_per_hd: 4
+    ac: 14
+    attack_bonus: 4
+    damage: "1d6"
+    damage_type: special
+    attack_skill: punch
+    attack_description: "buffets with razor winds at"
+    num_attacks: 1
+    behavior: aggressive
+    awareness_difficulty: 11
+    flee_difficulty: 8
+    unavoidable: false
+    morale: 10
+    loot_table: null
+    harvestable: null
+    description_unseen: "The air begins to whirl unnaturally — a cyclone forming from nothing."
+    description_seen: "A vortex of razor-sharp wind spirals toward you."
+    description_short: "air elemental"
+    xp_value: 60
+    tags: [elemental, air, wilderness, plains]
+    special_abilities: []

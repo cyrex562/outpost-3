@@ -1,0 +1,52 @@
+[package]
+name = "harsh-core"
+version = "0.50.0"
+edition = "2021"
+description = "Pure-Rust core game logic for Harsh Realm, ported incrementally from the Python engine."
+license = "MIT"
+
+# This crate is intentionally free of any GUI / Tauri dependencies so it can be
+# compiled and tested on its own (`cargo test -p harsh-core`). It is the home
+# for game-logic components migrated from the Python engine over time; the
+# Tauri shell (../../src-tauri) depends on it and exposes its functions as
+# IPC commands.
+
+[lib]
+name = "harsh_core"
+path = "src/lib.rs"
+
+[dependencies]
+# `small_rng` is required by lib modules (world-gen, weather, narrator), so it
+# must live here, not only in dev-dependencies — otherwise a plain library build
+# (e.g. as a dependency of harsh-web) fails to resolve `rand::rngs::SmallRng`.
+rand = { version = "0.8", features = ["small_rng"] }
+# Context-carrying error type for I/O-heavy boundaries (the export-schema binary
+# and the content loader), replacing bare `std::io::Result`.
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Authored game content is YAML; loaders parse it into the typed models.
+serde_yaml = "0.9"
+# Character ids are UUIDv4.
+uuid = { version = "1", features = ["v4"] }
+# ISO-8601 timestamps for game events.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# World state is SQLite (one file per world). Sync rusqlite with a bundled
+# SQLite; the async web host wraps it off the request thread.
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+# JSON Schema derivation for the IR — exported as the single source of truth for
+# the Python validation contract and the LLM authoring target.
+schemars = "0.8"
+# TypeScript type generation from Rust structs. Derives on client-facing payload
+# structs generate events.gen.ts — the source of truth for frontend event types.
+# Do NOT add the serde-json-impl feature: it maps serde_json::Value to `any`,
+# violating the no-any rule. Use explicit #[ts(type = "...")] overrides instead.
+ts-rs = { version = "12", features = ["serde-compat"] }
+
+[[bin]]
+name = "export-schema"
+path = "src/bin/export_schema.rs"
+
+[[bin]]
+name = "export-types"
+path = "src/bin/export_types.rs"

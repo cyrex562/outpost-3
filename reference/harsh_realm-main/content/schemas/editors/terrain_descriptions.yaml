@@ -1,0 +1,9 @@
+pattern: "templates/terrain_descriptions"
+label: "Terrain Descriptions"
+widget: GroupedListEditor
+accessor: { kind: key, key: descriptions }
+fields:
+  - { key: element, type: textarea, label: Description, width: full }
+sortable: true
+allow_add: true
+allow_delete: true

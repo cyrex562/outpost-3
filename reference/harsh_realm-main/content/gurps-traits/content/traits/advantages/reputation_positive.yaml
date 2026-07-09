@@ -1,0 +1,16 @@
+id: advantages.reputation_positive
+name: Reputation (Positive)
+category: advantage
+description: Favorable reputation improves relevant reaction checks.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: social.reaction
+    value: 1
+    stacking: additive
+    condition:
+      predicate: entity_has_tag
+      arg: reputable
+    description: Bonus when the reputation is known and relevant.
+provides_tags: [reputable]
+tags: [gurps, social]
+

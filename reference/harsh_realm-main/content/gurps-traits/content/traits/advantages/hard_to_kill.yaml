@@ -1,0 +1,13 @@
+id: advantages.hard_to_kill
+name: Hard to Kill
+category: advantage
+description: A passive bonus to checks made to avoid death.
+source: "GURPS-inspired passive modifier subset; page reference omitted."
+modifiers:
+  - target: save.physical.death
+    value: 2
+    stacking: additive
+    description: Bonus to death and mortal injury checks.
+provides_tags: [death_resistant]
+tags: [gurps, resilience]
+

@@ -1,0 +1,64 @@
+factions:
+  - name: "House Valdris"
+    hp: 8
+    max_hp: 8
+    force: 3
+    cunning: 2
+    wealth: 4
+    goals: ["expand_territory", "hoard_pretech"]
+    tags: ["noble_house", "oppressive"]
+    assets:
+      - type: Warriors
+        category: force
+      - type: Merchants
+        category: wealth
+
+  - name: "The Free Traders"
+    hp: 6
+    max_hp: 6
+    force: 1
+    cunning: 3
+    wealth: 3
+    goals: ["profit", "independence"]
+    tags: ["merchant_guild"]
+    assets:
+      - type: Smugglers
+        category: cunning
+      - type: Merchants
+        category: wealth
+
+  - name: "Iron Brotherhood"
+    hp: 7
+    max_hp: 7
+    force: 4
+    cunning: 1
+    wealth: 2
+    goals: ["control_ruins", "military_dominance"]
+    tags: ["military", "aggressive"]
+    assets:
+      - type: Warriors
+        category: force
+      - type: Elite_Troops
+        category: force
+
+  - name: "The Remnant Seekers"
+    hp: 5
+    max_hp: 5
+    force: 1
+    cunning: 4
+    wealth: 2
+    goals: ["recover_pretech", "knowledge"]
+    tags: ["scholars", "secretive"]
+    assets:
+      - type: Informers
+        category: cunning
+      - type: Saboteurs
+        category: cunning
+
+relations:
+  - factions: ["House Valdris", "Iron Brotherhood"]
+    disposition: "allied"
+  - factions: ["House Valdris", "The Free Traders"]
+    disposition: "unfriendly"
+  - factions: ["Iron Brotherhood", "The Remnant Seekers"]
+    disposition: "hostile"

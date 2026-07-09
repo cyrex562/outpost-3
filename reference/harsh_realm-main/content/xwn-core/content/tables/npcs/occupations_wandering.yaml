@@ -1,0 +1,26 @@
+# TODO: Expand from source material
+id: npcs_occupations_wandering
+category: npc_occupation
+name: "Wandering Occupations"
+tags: [npc, occupation, wandering]
+entries:
+  - weight: 2
+    result: "trader"
+  - weight: 2
+    result: "mercenary"
+  - weight: 2
+    result: "scout"
+  - weight: 1
+    result: "refugee"
+  - weight: 1
+    result: "pilgrim"
+  - weight: 1
+    result: "tinker"
+  - weight: 1
+    result: "herbalist"
+  - weight: 1
+    result: "courier"
+  - weight: 1
+    result: "deserter"
+  - weight: 1
+    result: "exile"

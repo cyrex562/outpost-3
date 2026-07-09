@@ -1,0 +1,24 @@
+# Tavern/inn inventory by building tier.
+# Sells food, drink, and basic rest services.
+
+small:
+  name: "Wayside Inn"
+  items:
+    - item_id: consumable.rations
+      quantity: 3
+
+medium:
+  name: "Tavern"
+  items:
+    - item_id: consumable.rations
+      quantity: 5
+    - item_id: consumable.rations_week
+      quantity: 2
+
+large:
+  name: "Grand Inn"
+  items:
+    - item_id: consumable.rations
+      quantity: 10
+    - item_id: consumable.rations_week
+      quantity: 5
