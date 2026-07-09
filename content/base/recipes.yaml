@@ -1,0 +1,23 @@
+# Production recipe definitions for the base-colony pack.
+
+- id: smelt_iron
+  name: Smelt Iron
+  building: smelter
+  cycle_sols: 2
+  inputs:
+    - id: iron_ore
+      quantity: 2.0
+  outputs:
+    - id: iron_plate
+      quantity: 1.0
+
+- id: grow_rations
+  name: Grow Rations
+  building: hydroponic_bay
+  cycle_sols: 3
+  inputs:
+    - id: water
+      quantity: 3.0
+  outputs:
+    - id: food_ration
+      quantity: 5.0

@@ -1,0 +1,7 @@
+id: base-colony
+name: Base Colony Pack
+version: "0.1.0"
+description: >
+  The minimal built-in content pack shipped with Outpost 3.
+  Defines survival-tier commodities, basic production recipes,
+  and essential colony buildings.

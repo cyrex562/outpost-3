@@ -1,0 +1,23 @@
+# Building definitions for the base-colony pack.
+
+- id: smelter
+  name: Smelter
+  description: Converts raw metallic ore into refined plate stock.
+  category: production
+  power_delta: -10.0
+  worker_slots: 2
+  construction_cost:
+    - id: iron_plate
+      quantity: 20.0
+
+- id: hydroponic_bay
+  name: Hydroponic Bay
+  description: >
+    Sealed growing chamber that produces food rations from water
+    under artificial lighting.
+  category: production
+  power_delta: -5.0
+  worker_slots: 1
+  construction_cost:
+    - id: iron_plate
+      quantity: 10.0

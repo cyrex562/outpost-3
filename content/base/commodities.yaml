@@ -1,0 +1,48 @@
+# Base-colony commodity definitions.
+# All authored records live here — never hardcoded in kernel code.
+
+- id: water
+  name: Water
+  description: >
+    Potable water is the most essential survival resource.
+    Harvested from ice deposits or atmospheric condensation.
+  category: consumable
+  phase: liquid
+  base_value: 5.0
+  tradeable: true
+
+- id: food_ration
+  name: Food Ration
+  description: >
+    Compact, shelf-stable ration block.  Produced by hydroponic bays
+    and distributed to the colony population each sol.
+  category: consumable
+  phase: solid
+  base_value: 8.0
+  tradeable: true
+
+- id: iron_ore
+  name: Iron Ore
+  description: Raw iron ore extracted from surface deposits.
+  category: metallic_ore
+  phase: solid
+  base_value: 10.0
+  tradeable: true
+
+- id: iron_plate
+  name: Iron Plate
+  description: Refined iron sheeting produced by the smelter.
+  category: metal
+  phase: solid
+  base_value: 25.0
+  tradeable: true
+
+- id: power_cell
+  name: Power Cell
+  description: >
+    Rechargeable solid-state power cell.  Powers hand tools
+    and light equipment; currency substitute in frontier zones.
+  category: energy
+  phase: solid
+  base_value: 20.0
+  tradeable: true
