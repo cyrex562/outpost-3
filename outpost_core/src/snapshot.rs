@@ -31,7 +31,7 @@ use crate::turn::GameState;
 /// fractional population growth (Phase 2 — issue #15).
 pub const SCHEMA_VERSION: u32 = 2;
 
-// ─── DDL ─────────────────────────────────────────────────────────────────────
+// ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
 const SCHEMA_SQL: &str = "
 PRAGMA journal_mode = WAL;
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS populations (
 );
 ";
 
-// ─── Errors ──────────────────────────────────────────────────────────────────
+// ─── Errors ───────────────────────────────────────────────────────────────────────
 
 /// Errors that can occur during snapshot save or load.
 #[derive(Debug, thiserror::Error)]
@@ -80,7 +80,7 @@ pub enum SnapshotError {
     MissingGameState,
 }
 
-// ─── Snapshot ────────────────────────────────────────────────────────────────
+// ─── Snapshot ─────────────────────────────────────────────────────────────────────
 
 /// Handle to a `SQLite` snapshot file.
 ///
@@ -269,10 +269,12 @@ impl Snapshot {
             cumulative_research: 0,
             expedition_launched: false,
             planet_map: None,
+            victory: None,
             unlocked_buildings: std::collections::HashSet::new(),
             unlocked_capabilities: std::collections::HashSet::new(),
             unlocked_commodities: std::collections::HashSet::new(),
             modifier_accumulator: crate::modifier::ModifierAccumulator::new(),
+            system_state: crate::system::SystemState::new(),
         })
     }
 
@@ -288,7 +290,7 @@ impl Snapshot {
     }
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+// ─── Tests ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -306,7 +308,7 @@ mod tests {
         s
     }
 
-    // ── round-trip fidelity ──────────────────────────────────────────────────
+    // ── round-trip fidelity ─────────────────────────────────────────────────────
 
     #[test]
     fn round_trip_preserves_turn_counters() {
@@ -454,7 +456,7 @@ mod tests {
         }
     }
 
-    // ── overwrite (save multiple times) ──────────────────────────────────────
+    // ── overwrite (save multiple times) ────────────────────────────────────
 
     #[test]
     fn second_save_overwrites_first() {
@@ -474,7 +476,7 @@ mod tests {
         assert_eq!(restored.month, 3);
     }
 
-    // ── on-disk file round-trip ───────────────────────────────────────────────
+    // ── on-disk file round-trip ───────────────────────────────────────────
 
     #[test]
     fn file_round_trip() {

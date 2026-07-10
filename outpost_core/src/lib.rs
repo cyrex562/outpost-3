@@ -335,6 +335,20 @@ pub enum Command {
         radius: u32,
     },
 
+    // ── M1: Megaproject / Victory ─────────────────────────────────────────
+    /// Contribute progress to an active megaproject.
+    ///
+    /// `progress` units are applied as research contribution to the current
+    /// milestone.  When the milestone completes the engine checks whether the
+    /// whole project is done; if it is an `InterstellarExpedition` the engine
+    /// emits [`Event::VictoryAchieved`] and locks further commands.
+    AdvanceMegaproject {
+        /// The megaproject to advance.
+        project_id: system::MegaprojectId,
+        /// Research units to contribute this tick.
+        progress: u32,
+    },
+
     // ── M1: Research direction ────────────────────────────────────────────
     /// Set the active research project, replacing any current one.
     ResearchTech {
@@ -749,6 +763,18 @@ pub enum Event {
         r: i32,
     },
 
+    /// A cargo shipment arrived and its contents were credited to the destination colony pool.
+    CargoDelivered {
+        /// Stable identifier of the shipment that arrived.
+        shipment_id: uuid::Uuid,
+        /// Colony whose pool was credited.
+        colony_id: ColonyId,
+        /// Commodity that was deposited.
+        commodity_id: String,
+        /// Quantity deposited into the colony pool.
+        amount: f64,
+    },
+
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -806,6 +832,12 @@ pub enum EngineError {
     /// A colony already occupies the hex cell at the requested site.
     #[error("site is already occupied")]
     SiteOccupied,
+    /// A command was submitted after the game has been won.
+    ///
+    /// The player must activate sandbox-continue mode via
+    /// [`Command::ContinueAfterVictory`] to resume play.
+    #[error("game over: victory already achieved")]
+    GameOver,
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -860,6 +892,14 @@ impl GameEngine {
     /// current engine state.
     #[allow(clippy::too_many_lines)]
     pub fn apply(&mut self, cmd: &Command) -> Result<Vec<Event>, EngineError> {
+        // Block all commands once victory is recorded, unless sandbox-continue is active.
+        if self.state.victory.is_some()
+            && !self.state.victory_state.sandbox_continue
+            && !matches!(cmd, Command::ContinueAfterVictory)
+        {
+            return Err(EngineError::GameOver);
+        }
+
         match cmd {
             Command::AdvanceColonySol => {
                 let outcome = self.processor.advance(&mut self.state);
@@ -874,6 +914,15 @@ impl GameEngine {
                     // Emit TechUnlocked for each completed tech this month.
                     for tech_id in outcome.completed_techs {
                         events.push(Event::TechUnlocked { tech_id });
+                    }
+                    // Emit one CargoDelivered event per commodity line per shipment.
+                    for record in outcome.cargo_delivered {
+                        events.push(Event::CargoDelivered {
+                            shipment_id: record.shipment_id,
+                            colony_id: record.colony_id,
+                            commodity_id: record.commodity_id,
+                            amount: record.amount,
+                        });
                     }
                 }
                 // ── Step 1: Construction ────────────────────────────────────
@@ -1719,6 +1768,56 @@ impl GameEngine {
                     radius: *radius,
                     cell_count,
                 }])
+            }
+
+            // ── M1: Megaproject / Victory ─────────────────────────────────────
+            Command::AdvanceMegaproject {
+                project_id,
+                progress,
+            } => {
+                let sys_cmd = system::SystemCommand::ContributeToMegaproject {
+                    project_id: project_id.clone(),
+                    resources: vec![],
+                    #[allow(clippy::cast_precision_loss)]
+                    research: *progress as f32,
+                };
+                let sys_events =
+                    system::apply_system_command(&mut self.state.system_state, &sys_cmd)
+                        .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+
+                let mut events: Vec<Event> = Vec::new();
+                for sys_evt in &sys_events {
+                    if let system::SystemEvent::MegaprojectCompleted { kind, .. } = sys_evt {
+                        if *kind == system::MegaprojectKind::InterstellarExpedition {
+                            self.state.expedition_launched = true;
+                        }
+                    }
+                }
+
+                if self.state.expedition_launched && self.state.victory.is_none() {
+                    let snap = victory::VictorySnapshot {
+                        expedition_launched: true,
+                        total_output: 0,
+                        total_population: self
+                            .state
+                            .populations
+                            .iter()
+                            .map(|p| {
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                {
+                                    p.count.max(0.0) as u64
+                                }
+                            })
+                            .sum(),
+                        cumulative_research: self.state.cumulative_research,
+                    };
+                    for condition in self.state.victory_state.evaluate(&snap) {
+                        self.state.victory = Some(condition.clone());
+                        events.push(Event::VictoryAchieved { condition });
+                    }
+                }
+
+                Ok(events)
             }
 
             // ── M1: Research direction ────────────────────────────────────────
@@ -4297,6 +4396,53 @@ mod tests {
         );
     }
 
+    // ── M1: Megaproject / Victory tests ──────────────────────────────────────
+
+    /// Register an `InterstellarExpedition` megaproject directly on system state
+    /// and return the [`system::MegaprojectId`] assigned to it.
+    fn register_interstellar_expedition(
+        engine: &mut GameEngine,
+        research_cost: f32,
+    ) -> system::MegaprojectId {
+        let register_cmd = system::SystemCommand::RegisterMegaproject {
+            name: "Interstellar Expedition".to_string(),
+            kind: system::MegaprojectKind::InterstellarExpedition,
+            milestones: vec![system::MilestoneSpec {
+                label: "Phase 1".to_string(),
+                resource_cost: vec![],
+                research_cost,
+            }],
+        };
+        let events =
+            system::apply_system_command(&mut engine.state.system_state, &register_cmd).unwrap();
+        for evt in events {
+            if let system::SystemEvent::MegaprojectRegistered { project_id, .. } = evt {
+                return project_id;
+            }
+        }
+        panic!("no MegaprojectRegistered event returned");
+    }
+
+    #[test]
+    fn advance_megaproject_to_completion_emits_victory_achieved() {
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 10.0);
+
+        let events = engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id: project_id.clone(),
+                progress: 100,
+            })
+            .unwrap();
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::VictoryAchieved { .. })),
+            "expected VictoryAchieved event, got: {events:?}"
+        );
+    }
+
     #[test]
     fn found_colony_at_site_rejects_unknown_site() {
         let mut engine = GameEngine::new();
@@ -4456,5 +4602,86 @@ mod tests {
         assert_eq!(node.q, coord.q);
         assert_eq!(node.r, coord.r);
         assert_eq!(node.name, "Node Colony");
+    }
+
+    #[test]
+    fn victory_field_set_after_expedition_completes() {
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 10.0);
+
+        engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id,
+                progress: 100,
+            })
+            .unwrap();
+
+        assert!(
+            engine.state.victory.is_some(),
+            "GameState::victory should be Some after expedition completes"
+        );
+    }
+
+    #[test]
+    fn engine_returns_game_over_after_victory() {
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 10.0);
+
+        engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id,
+                progress: 100,
+            })
+            .unwrap();
+
+        let err = engine.apply(&Command::AdvanceColonySol).unwrap_err();
+        assert!(
+            matches!(err, EngineError::GameOver),
+            "expected GameOver, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn sandbox_continue_allows_commands_after_victory() {
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 10.0);
+
+        engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id,
+                progress: 100,
+            })
+            .unwrap();
+
+        // Activate sandbox-continue.
+        engine.apply(&Command::ContinueAfterVictory).unwrap();
+
+        // Commands should now succeed.
+        let result = engine.apply(&Command::AdvanceColonySol);
+        assert!(
+            result.is_ok(),
+            "should be able to advance after sandbox continue"
+        );
+    }
+
+    #[test]
+    fn partial_megaproject_progress_does_not_emit_victory() {
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 100.0);
+
+        let events = engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id,
+                progress: 10, // only 10 of 100 required
+            })
+            .unwrap();
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::VictoryAchieved { .. })),
+            "should not emit VictoryAchieved for partial progress"
+        );
+        assert!(engine.state.victory.is_none());
     }
 }
