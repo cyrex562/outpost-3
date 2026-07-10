@@ -22,12 +22,14 @@ use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
 use crate::menace::MenaceState;
 use crate::migration::{PendingMigration, PopulationTracker};
-use crate::modifier::{DifficultyScalar, ModifierAccumulator, ModifierDescriptor, ModifiableQuantity};
-use crate::tech::TechEffect;
+use crate::modifier::{
+    DifficultyScalar, ModifiableQuantity, ModifierAccumulator, ModifierDescriptor,
+};
 use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
+use crate::tech::TechEffect;
 use crate::tech::{TechRegistry, TechState};
 use crate::trade::TradeNetwork;
 use crate::victory::VictoryState;
@@ -277,9 +279,11 @@ impl TurnProcessor {
                     // For now we use ProductionRate with the category string as the
                     // building-id key — a future pass can refine the mapping.
                     let quantity = ModifiableQuantity::ProductionRate(category.clone());
-                    state
-                        .modifier_accumulator
-                        .add(ModifierDescriptor::new(quantity, category.clone(), *value));
+                    state.modifier_accumulator.add(ModifierDescriptor::new(
+                        quantity,
+                        category.clone(),
+                        *value,
+                    ));
                 }
             }
         }
@@ -451,13 +455,10 @@ mod tests {
 
     // ── Tech effects wiring tests (issue #81) ────────────────────────────────
 
-    use crate::tech::{TechDef, TechEffect, TechRegistry};
     use crate::modifier::ModifiableQuantity;
+    use crate::tech::{TechDef, TechEffect, TechRegistry};
 
-    fn make_tech_registry_with_unlock(
-        building_id: &str,
-        cost: f32,
-    ) -> (TechRegistry, String) {
+    fn make_tech_registry_with_unlock(building_id: &str, cost: f32) -> (TechRegistry, String) {
         let tech_id = "unlock_test".to_string();
         let defs = vec![TechDef {
             id: tech_id.clone(),
@@ -574,7 +575,11 @@ mod tests {
         let mut unlocked = HashSet::new();
         unlocked.insert("adv_lab_tech".to_string());
         let available_after = Colony::available_buildings(buildings.iter(), &unlocked);
-        assert_eq!(available_after.len(), 1, "building should be available after unlock");
+        assert_eq!(
+            available_after.len(),
+            1,
+            "building should be available after unlock"
+        );
     }
 
     #[test]
