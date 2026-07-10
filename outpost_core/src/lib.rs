@@ -40,7 +40,7 @@ use thiserror::Error;
 
 use colony::{ColonyId, ProjectId};
 use directive::DirectiveId;
-use interrupt::{AdvanceResult, Interrupt, InterruptSource, StabilityTracker, Tier};
+use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
 use needs::{apply_needs_check, apply_population_dynamics};
 use turn::{GameState, TurnProcessor};
 
@@ -846,7 +846,7 @@ impl GameEngine {
                 self.state
                     .stability_trackers
                     .entry(*colony_id)
-                    .or_insert_with(StabilityTracker::default)
+                    .or_default()
                     .push(stability);
             }
 

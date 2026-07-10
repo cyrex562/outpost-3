@@ -151,8 +151,8 @@ impl StabilityTracker {
         let first = f64::from(*self.samples.front()?);
         let current_f64 = f64::from(current);
         let floor_f64 = f64::from(floor);
-        #[allow(clippy::cast_precision_loss)]
-        let n = (self.samples.len() - 1) as f64;
+        // samples.len() is at most MAX_SAMPLES (5) so the subtraction fits f64 exactly.
+        let n = f64::from(u32::try_from(self.samples.len() - 1).unwrap_or(1));
         let avg_delta = (current_f64 - first) / n; // negative = declining
         if avg_delta >= 0.0 {
             // Not declining.
