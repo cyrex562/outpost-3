@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::types::{BuildingDef, CommodityDef, PackManifest, RecipeDef};
+use super::types::{BuildingDef, CommodityDef, OrbitalStationBlueprint, PackManifest, RecipeDef};
 
 /// In-memory registry produced by loading one or more content packs.
 ///
@@ -18,6 +18,8 @@ pub struct ContentRegistry {
     pub(super) recipes: HashMap<String, RecipeDef>,
     /// All building definitions, keyed by id.
     pub(super) buildings: HashMap<String, BuildingDef>,
+    /// All orbital station blueprints, keyed by id.
+    pub orbital_blueprints: HashMap<String, OrbitalStationBlueprint>,
 }
 
 impl ContentRegistry {
@@ -27,6 +29,7 @@ impl ContentRegistry {
         self.commodities.extend(other.commodities);
         self.recipes.extend(other.recipes);
         self.buildings.extend(other.buildings);
+        self.orbital_blueprints.extend(other.orbital_blueprints);
     }
 
     /// The manifest of the most-recently loaded pack.
@@ -81,6 +84,11 @@ impl ContentRegistry {
     /// Insert or replace a commodity definition (used in tests and harness tooling).
     pub fn insert_commodity(&mut self, def: super::types::CommodityDef) {
         self.commodities.insert(def.id.clone(), def);
+    }
+
+    /// Insert or replace an orbital station blueprint (used in tests and harness tooling).
+    pub fn insert_orbital_blueprint(&mut self, def: OrbitalStationBlueprint) {
+        self.orbital_blueprints.insert(def.id.clone(), def);
     }
 }
 

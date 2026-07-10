@@ -440,6 +440,55 @@ impl OrbitalRegistry {
     }
 }
 
+// ─── Construction queue ───────────────────────────────────────────────────────
+
+/// An in-progress orbital station construction project.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OrbitalConstructionProject {
+    /// Content-pack blueprint id that was used to start this project.
+    pub blueprint_id: String,
+    /// Colony funding and operating this build.
+    pub colony_id: ColonyId,
+    /// Orbit band the finished station will occupy.
+    pub orbit_type: OrbitType,
+    /// Station specialisation that will be built.
+    pub station_type: StationType,
+    /// Strategic months remaining until completion.
+    pub months_remaining: u32,
+    /// Whether commodity costs have already been deducted from the colony pool.
+    pub costs_paid: bool,
+}
+
+impl OrbitalConstructionProject {
+    /// Create a new project.  `costs_paid` starts as `false`; the engine sets it
+    /// to `true` after successfully deducting commodity costs.
+    #[must_use]
+    pub fn new(
+        blueprint_id: String,
+        colony_id: ColonyId,
+        orbit_type: OrbitType,
+        station_type: StationType,
+        build_months: u32,
+    ) -> Self {
+        Self {
+            blueprint_id,
+            colony_id,
+            orbit_type,
+            station_type,
+            months_remaining: build_months,
+            costs_paid: false,
+        }
+    }
+
+    /// Decrement the countdown by one strategic month.
+    ///
+    /// Returns `true` when the station is ready to be placed (months hit zero).
+    pub fn tick(&mut self) -> bool {
+        self.months_remaining = self.months_remaining.saturating_sub(1);
+        self.months_remaining == 0
+    }
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -701,5 +750,38 @@ mod tests {
         let back: OrbitalRegistry = serde_json::from_str(&json).unwrap();
         assert_eq!(back.stations.len(), 1);
         assert_eq!(back.constellations.len(), 1);
+    }
+
+    // ── OrbitalConstructionProject ────────────────────────────────────────────
+
+    #[test]
+    fn construction_project_tick_counts_down() {
+        let colony = ColonyId::new_v4();
+        let mut project = OrbitalConstructionProject::new(
+            "habitat_bp".into(),
+            colony,
+            OrbitType::Low,
+            StationType::Habitat,
+            3,
+        );
+        assert_eq!(project.months_remaining, 3);
+        assert!(!project.tick()); // month 2 remaining
+        assert!(!project.tick()); // month 1 remaining
+        assert!(project.tick()); // completes at 0
+        assert_eq!(project.months_remaining, 0);
+    }
+
+    #[test]
+    fn construction_project_tick_returns_true_only_at_zero() {
+        let colony = ColonyId::new_v4();
+        let mut project = OrbitalConstructionProject::new(
+            "bp".into(),
+            colony,
+            OrbitType::Geostationary,
+            StationType::Logistics,
+            1,
+        );
+        // Single month to build.
+        assert!(project.tick());
     }
 }

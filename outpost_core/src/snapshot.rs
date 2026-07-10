@@ -279,6 +279,7 @@ impl Snapshot {
             hazard_config: None,
             system_state: crate::system::SystemState::new(),
             infra_routes: std::collections::HashMap::new(),
+            orbital_construction_queue: Vec::new(),
         })
     }
 
