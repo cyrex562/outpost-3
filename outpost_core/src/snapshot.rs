@@ -261,6 +261,13 @@ impl Snapshot {
             pending_migrations: Vec::new(),
             population_trackers: std::collections::HashMap::new(),
             orbital_registry: crate::orbital::OrbitalRegistry::new(),
+            difficulty_preset: crate::difficulty::DifficultyPreset::Normal,
+            difficulty_grade_table: crate::difficulty::default_grade_table(),
+            difficulty_scalar: crate::modifier::DifficultyScalar::new(),
+            menace_state: None,
+            victory_state: crate::victory::VictoryState::capstone_only(),
+            cumulative_research: 0,
+            expedition_launched: false,
         })
     }
 

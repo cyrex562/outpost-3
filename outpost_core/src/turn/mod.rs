@@ -17,15 +17,19 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
+use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
+use crate::menace::MenaceState;
 use crate::migration::{PendingMigration, PopulationTracker};
+use crate::modifier::DifficultyScalar;
 use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
 use crate::tech::{TechRegistry, TechState};
 use crate::trade::TradeNetwork;
+use crate::victory::VictoryState;
 
 /// Default number of colony-sols that constitute one strategic-month.
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
@@ -93,6 +97,25 @@ pub struct GameState {
     pub population_trackers: HashMap<ColonyId, PopulationTracker>,
     /// System-wide orbital infrastructure registry (stations + constellations).
     pub orbital_registry: OrbitalRegistry,
+
+    // ── Phase 10: Difficulty / Menace / Victory ───────────────────────────
+
+    /// Active difficulty preset.
+    pub difficulty_preset: DifficultyPreset,
+    /// Grade table used to derive [`DifficultyScalar`] from the active preset.
+    pub difficulty_grade_table: DifficultyGradeTable,
+    /// Current difficulty scalar (derived from preset + grade table).
+    pub difficulty_scalar: DifficultyScalar,
+    /// Runtime state of the existential clock, if a menace is active.
+    ///
+    /// `None` in sandbox mode or when no menace has been loaded.
+    pub menace_state: Option<MenaceState>,
+    /// Victory tracking state.
+    pub victory_state: VictoryState,
+    /// Cumulative research accumulated over the whole campaign (for the science victory).
+    pub cumulative_research: u64,
+    /// Whether the interstellar expedition has been launched (primary victory trigger).
+    pub expedition_launched: bool,
 }
 
 impl GameState {
@@ -115,6 +138,13 @@ impl GameState {
             pending_migrations: Vec::new(),
             population_trackers: HashMap::new(),
             orbital_registry: OrbitalRegistry::new(),
+            difficulty_preset: DifficultyPreset::Normal,
+            difficulty_grade_table: default_grade_table(),
+            difficulty_scalar: DifficultyScalar::new(),
+            menace_state: None,
+            victory_state: VictoryState::capstone_only(),
+            cumulative_research: 0,
+            expedition_launched: false,
         }
     }
 
