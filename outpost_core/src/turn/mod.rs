@@ -19,6 +19,7 @@ use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
 use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
+use crate::migration::{PendingMigration, PopulationTracker};
 use crate::needs::NeedsConfig;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
@@ -85,6 +86,10 @@ pub struct GameState {
     pub stability_trackers: HashMap<ColonyId, StabilityTracker>,
     /// Planetary trade network: infrastructure routes + per-colony overrides.
     pub trade_network: TradeNetwork,
+    /// In-transit migration batches (voluntary + forced + immigration waves).
+    pub pending_migrations: Vec<PendingMigration>,
+    /// Per-colony population history for predictive population warnings.
+    pub population_trackers: HashMap<ColonyId, PopulationTracker>,
 }
 
 impl GameState {
@@ -104,6 +109,8 @@ impl GameState {
             directive_store: DirectiveStore::default(),
             stability_trackers: HashMap::new(),
             trade_network: TradeNetwork::new(),
+            pending_migrations: Vec::new(),
+            population_trackers: HashMap::new(),
         }
     }
 

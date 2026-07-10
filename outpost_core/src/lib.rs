@@ -30,6 +30,7 @@ pub mod content;
 pub mod directive;
 pub mod interrupt;
 pub mod map;
+pub mod migration;
 pub mod modifier;
 pub mod needs;
 pub mod population;
@@ -46,6 +47,10 @@ use thiserror::Error;
 use colony::{ColonyId, ProjectId};
 use directive::DirectiveId;
 use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
+use migration::{
+    compute_attractiveness, compute_auto_flows, resolve_arrival, AutoMigrationParams,
+    ColonyAttractiveness, PendingMigration,
+};
 use needs::{apply_needs_check, apply_population_dynamics};
 use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
@@ -54,6 +59,10 @@ use turn::{GameState, TurnProcessor};
 const STABILITY_CRISIS_FLOOR: f32 = 0.2;
 /// Default ETA horizon (in turns) for predictive warnings.
 const PREDICTIVE_WARNING_ETA: u32 = 10;
+/// Population floor (absolute) below which a population-decline warning is emitted.
+const POPULATION_CRISIS_FLOOR: f32 = 10.0;
+/// ETA horizon (turns) for population-decline predictive warnings.
+const POPULATION_WARNING_ETA: u32 = 10;
 
 /// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
 pub const DEFAULT_SEED: u64 = 0;
@@ -185,6 +194,58 @@ pub enum Command {
         /// Commodity identifier whose override should be removed.
         commodity_id: String,
     },
+    /// Schedule an immigration wave to arrive at a gateway colony.
+    ///
+    /// Models external colonist ships landing at a spaceport colony after a
+    /// transit delay.  The wave is queued as a [`migration::PendingMigration`]
+    /// with `from_colony = None` and arrives after `transit_turns` strategic
+    /// months.
+    ScheduleImmigrationWave {
+        /// Colony where the immigrants will land (must have a spaceport / gateway role).
+        colony_id: ColonyId,
+        /// Number of colonists in the incoming wave.
+        count: f32,
+        /// Strategic-month turns until arrival.
+        transit_turns: u32,
+    },
+    /// Direct colonists to migrate from one colony to another.
+    ///
+    /// A voluntary directed override: colonists depart immediately and arrive
+    /// after `transit_turns` strategic months.  No stability penalty.
+    DirectMigration {
+        /// Source colony.
+        from_colony: ColonyId,
+        /// Destination colony.
+        to_colony: ColonyId,
+        /// Number of colonists to move.
+        count: f32,
+        /// Transit time in strategic months.
+        transit_turns: u32,
+    },
+    /// Force an evacuation from one colony to another.
+    ///
+    /// A forced move: colonists depart immediately, stability of the sending
+    /// colony is penalised, and overcrowding pressure may hit the receiver.
+    EvacuateColony {
+        /// Colony being evacuated.
+        from_colony: ColonyId,
+        /// Colony receiving the evacuees.
+        to_colony: ColonyId,
+        /// Fraction of the source colony's population to evacuate (`[0.0, 1.0]`).
+        fraction: f32,
+        /// Transit time in strategic months.
+        transit_turns: u32,
+    },
+    /// Run one strategic-month pass of auto migration between colonies.
+    ///
+    /// Computes attractiveness scores for all colonies and queues voluntary
+    /// pull-flow migrations toward the most attractive destinations.
+    RunAutoMigration,
+    /// Resolve all pending migrations that have reached `turns_remaining == 0`.
+    ///
+    /// Colonists arrive at their destination colonies; overcrowding and forced-
+    /// move stability effects are applied.
+    ResolvePendingMigrations,
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -429,6 +490,46 @@ pub enum Event {
         /// Commodity identifier.
         commodity_id: String,
     },
+    /// An immigration wave was scheduled to arrive at a gateway colony.
+    ImmigrationWaveScheduled {
+        /// Destination colony.
+        colony_id: ColonyId,
+        /// Number of incoming colonists.
+        count: f32,
+        /// Turns until arrival.
+        transit_turns: u32,
+    },
+    /// Colonists arrived at their destination colony (wave or directed migration).
+    MigrationArrived {
+        /// Source colony (`None` for off-map immigration waves).
+        from_colony: Option<ColonyId>,
+        /// Destination colony.
+        to_colony: ColonyId,
+        /// Number of colonists who arrived.
+        count: f32,
+        /// Stability penalty applied to the receiving colony for overcrowding.
+        overcrowding_stability_penalty: f32,
+        /// Stability penalty applied to the sending colony for forced departure.
+        forced_departure_stability_penalty: f32,
+    },
+    /// Colonists departed a colony as part of a directed migration or evacuation.
+    MigrationDeparted {
+        /// Source colony.
+        from_colony: ColonyId,
+        /// Destination colony.
+        to_colony: ColonyId,
+        /// Number of colonists who departed.
+        count: f32,
+        /// Whether this was a forced evacuation.
+        forced: bool,
+    },
+    /// Auto migration flows were computed and queued for the strategic month.
+    AutoMigrationQueued {
+        /// Number of migration legs queued.
+        flow_count: usize,
+        /// Total colonists in transit across all flows.
+        total_in_transit: f32,
+    },
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -646,9 +747,9 @@ impl GameEngine {
                     }
                 }
 
-                // ── Step 4b: Stability tracking ───────────────────────────
-                // Record a stability sample per colony so predictive warnings
-                // can extrapolate trajectory without full forward simulation.
+                // ── Step 4b: Stability + population tracking ─────────────
+                // Record samples per colony so predictive warnings can
+                // extrapolate trajectory without full forward simulation.
                 let colony_ids_for_tracking: Vec<ColonyId> =
                     self.state.colonies.iter().map(|c| c.id).collect();
                 for (i, colony_id) in colony_ids_for_tracking.iter().enumerate() {
@@ -659,6 +760,12 @@ impl GameEngine {
                             .entry(*colony_id)
                             .or_default()
                             .push(stability);
+                        let count = pop.count;
+                        self.state
+                            .population_trackers
+                            .entry(*colony_id)
+                            .or_default()
+                            .push(count);
                     }
                 }
 
@@ -975,6 +1082,195 @@ impl GameEngine {
                     commodity_id: commodity_id.clone(),
                 }])
             }
+
+            Command::ScheduleImmigrationWave {
+                colony_id,
+                count,
+                transit_turns,
+            } => {
+                self.find_colony_index(*colony_id)?;
+                if *count <= 0.0 {
+                    return Err(EngineError::InvalidArgument(
+                        "immigration wave count must be > 0".into(),
+                    ));
+                }
+                let wave =
+                    PendingMigration::new(None, *colony_id, *count, *transit_turns, false, 0.0);
+                self.state.pending_migrations.push(wave);
+                Ok(vec![Event::ImmigrationWaveScheduled {
+                    colony_id: *colony_id,
+                    count: *count,
+                    transit_turns: *transit_turns,
+                }])
+            }
+
+            Command::DirectMigration {
+                from_colony,
+                to_colony,
+                count,
+                transit_turns,
+            } => {
+                let from_idx = self.find_colony_index(*from_colony)?;
+                self.find_colony_index(*to_colony)?;
+                if *count <= 0.0 {
+                    return Err(EngineError::InvalidArgument(
+                        "migration count must be > 0".into(),
+                    ));
+                }
+                let available = self.state.populations[from_idx].count;
+                if *count > available {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "requested {count} migrants but only {available:.0} available"
+                    )));
+                }
+                // Deduct from source immediately (they are in transit).
+                self.state.populations[from_idx].count -= count;
+                let mig = PendingMigration::new(
+                    Some(*from_colony),
+                    *to_colony,
+                    *count,
+                    *transit_turns,
+                    false,
+                    count * 0.1,
+                );
+                self.state.pending_migrations.push(mig);
+                Ok(vec![Event::MigrationDeparted {
+                    from_colony: *from_colony,
+                    to_colony: *to_colony,
+                    count: *count,
+                    forced: false,
+                }])
+            }
+
+            Command::EvacuateColony {
+                from_colony,
+                to_colony,
+                fraction,
+                transit_turns,
+            } => {
+                let from_idx = self.find_colony_index(*from_colony)?;
+                self.find_colony_index(*to_colony)?;
+                let fraction = fraction.clamp(0.0, 1.0);
+                let count = (self.state.populations[from_idx].count * fraction).floor();
+                if count < 1.0 {
+                    return Err(EngineError::InvalidArgument(
+                        "evacuation fraction too small to move any colonists".into(),
+                    ));
+                }
+                // Deduct from source; apply forced-move stability penalty.
+                self.state.populations[from_idx].count -= count;
+                self.state.populations[from_idx].stability = (self.state.populations[from_idx]
+                    .stability
+                    - migration::FORCED_MOVE_STABILITY_COST)
+                    .clamp(0.0, 1.0);
+                let mig = PendingMigration::new(
+                    Some(*from_colony),
+                    *to_colony,
+                    count,
+                    *transit_turns,
+                    true,
+                    count * 0.2,
+                );
+                self.state.pending_migrations.push(mig);
+                Ok(vec![Event::MigrationDeparted {
+                    from_colony: *from_colony,
+                    to_colony: *to_colony,
+                    count,
+                    forced: true,
+                }])
+            }
+
+            Command::RunAutoMigration => {
+                // Compute attractiveness for every colony.
+                let attractiveness: Vec<ColonyAttractiveness> = self
+                    .state
+                    .colonies
+                    .iter()
+                    .zip(self.state.populations.iter())
+                    .map(|(colony, pop)| {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let housing = colony.pool.amount("housing") as f32;
+                        compute_attractiveness(
+                            colony.id,
+                            pop.stability,
+                            housing,
+                            pop.count,
+                            1.0, // conservative default
+                        )
+                    })
+                    .collect();
+
+                let populations: Vec<f32> =
+                    self.state.populations.iter().map(|p| p.count).collect();
+                let colony_ids: Vec<ColonyId> = self.state.colonies.iter().map(|c| c.id).collect();
+                let params = AutoMigrationParams::default();
+
+                let flows = compute_auto_flows(&attractiveness, &populations, &colony_ids, &params);
+                let flow_count = flows.len();
+                let total_in_transit: f32 = flows.iter().map(|f| f.count).sum();
+
+                // Deduct departing colonists from source colonies.
+                for flow in &flows {
+                    if let Some(src_id) = flow.from_colony {
+                        if let Ok(idx) = self.find_colony_index(src_id) {
+                            self.state.populations[idx].count =
+                                (self.state.populations[idx].count - flow.count).max(0.0);
+                        }
+                    }
+                }
+                self.state.pending_migrations.extend(flows);
+
+                Ok(vec![Event::AutoMigrationQueued {
+                    flow_count,
+                    total_in_transit,
+                }])
+            }
+
+            Command::ResolvePendingMigrations => {
+                let mut events = Vec::new();
+
+                // Tick all pending migrations; collect those that arrive.
+                let mut arrived = Vec::new();
+                self.state.pending_migrations.retain_mut(|m| {
+                    if m.tick() {
+                        arrived.push(m.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                for mig in &arrived {
+                    let Ok(to_idx) = self.find_colony_index(mig.to_colony) else {
+                        continue; // destination no longer exists; drop
+                    };
+
+                    #[allow(clippy::cast_possible_truncation)]
+                    let housing = self.state.colonies[to_idx].pool.amount("housing") as f32;
+                    let current_pop = self.state.populations[to_idx].count;
+                    let outcome = resolve_arrival(mig, housing, current_pop);
+
+                    // Add arrived colonists.
+                    self.state.populations[to_idx].count += outcome.arrived;
+
+                    // Apply overcrowding penalty to receiver.
+                    self.state.populations[to_idx].stability = (self.state.populations[to_idx]
+                        .stability
+                        + outcome.overcrowding_stability_penalty)
+                        .clamp(0.0, 1.0);
+
+                    events.push(Event::MigrationArrived {
+                        from_colony: mig.from_colony,
+                        to_colony: mig.to_colony,
+                        count: outcome.arrived,
+                        overcrowding_stability_penalty: outcome.overcrowding_stability_penalty,
+                        forced_departure_stability_penalty: outcome
+                            .forced_departure_stability_penalty,
+                    });
+                }
+
+                Ok(events)
+            }
         }
     }
 
@@ -1175,15 +1471,21 @@ impl GameEngine {
         for _ in 0..n {
             let events = self.apply(&Command::AdvanceColonySol)?;
 
-            // Update per-colony stability trackers after each sol.
+            // Update per-colony stability + population trackers after each sol.
             let colony_ids: Vec<_> = self.state.colonies.iter().map(|c| c.id).collect();
             for (i, colony_id) in colony_ids.iter().enumerate() {
                 let stability = self.state.populations[i].stability;
+                let count = self.state.populations[i].count;
                 self.state
                     .stability_trackers
                     .entry(*colony_id)
                     .or_default()
                     .push(stability);
+                self.state
+                    .population_trackers
+                    .entry(*colony_id)
+                    .or_default()
+                    .push(count);
             }
 
             let turn_interrupts = self.collect_turn_interrupts(&events);
@@ -1281,6 +1583,27 @@ impl GameEngine {
                                 "Colony '{}': stability declining — crisis in ~{eta} turns \
                                  (current: {:.2})",
                                 colony.name, pop.stability
+                            ),
+                        ));
+                    }
+                }
+            }
+
+            // Predictive population warnings → Urgent.
+            if let Some(pop_tracker) = self.state.population_trackers.get(&colony.id) {
+                if let Some(eta) = pop_tracker.eta_to_floor(POPULATION_CRISIS_FLOOR) {
+                    if eta <= POPULATION_WARNING_ETA {
+                        interrupts.push(Interrupt::new(
+                            Tier::Urgent,
+                            InterruptSource::PredictiveWarning {
+                                quantity: pop.count,
+                                eta_turns: eta,
+                            },
+                            Some(colony.id),
+                            format!(
+                                "Colony '{}': population declining — critical low in ~{eta} turns \
+                                 (current: {:.0})",
+                                colony.name, pop.count
                             ),
                         ));
                     }
@@ -2828,6 +3151,344 @@ mod tests {
             "expected ColonyFoundedAtSite with correct site_id and focus"
         );
         assert_eq!(engine.state.colonies.len(), 1);
+    }
+
+    // ── Phase 7: Population dynamics, migration, immigration waves ────────────
+
+    /// Done-when: growth under good conditions (needs fully met, high stability).
+    #[test]
+    fn growth_under_good_conditions() {
+        use crate::needs::{NeedDef, NeedScaling, NeedsConfig};
+
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Thriving Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Configure minimal needs that we can easily satisfy.
+        engine.state.needs_config = Some(NeedsConfig {
+            needs: vec![
+                NeedDef {
+                    commodity_id: "food".into(),
+                    scaling: NeedScaling::PerCapita { rate: 0.1 },
+                    weight: 1.0,
+                },
+                NeedDef {
+                    commodity_id: "housing".into(),
+                    scaling: NeedScaling::Housing,
+                    weight: 0.8,
+                },
+            ],
+            stability_recovery_rate: 0.05,
+            stability_decay_rate: 0.10,
+            growth_stability_threshold: 0.70,
+            growth_rate: 0.005,
+            decline_stability_threshold: 0.30,
+            decline_rate: 0.001,
+        });
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let initial_pop = engine.state.populations[idx].count;
+
+        // Seed abundant food and housing for 10 turns.
+        for _ in 0..10 {
+            engine.state.colonies[idx].pool.deposit("food", 1000.0);
+            engine.state.colonies[idx].pool.deposit("housing", 500.0);
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let final_pop = engine.state.populations[idx].count;
+        assert!(
+            final_pop > initial_pop,
+            "population should grow under good conditions: initial={initial_pop}, final={final_pop}"
+        );
+    }
+
+    /// Done-when: stability decline under starvation.
+    #[test]
+    fn stability_declines_under_starvation() {
+        use crate::needs::NeedsConfig;
+
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Starved Base".into(),
+                starting_population: 200,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Enable needs with no supplies.
+        engine.state.needs_config = Some(NeedsConfig::default_survival());
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let initial_stability = engine.state.populations[idx].stability;
+
+        // Advance 20 turns with no food, water, etc.
+        for _ in 0..20 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let final_stability = engine.state.populations[idx].stability;
+        assert!(
+            final_stability < initial_stability,
+            "stability should decline under starvation: initial={initial_stability}, final={final_stability}"
+        );
+    }
+
+    /// Done-when: migration flow — auto pull-flow moves colonists toward more attractive colony.
+    #[test]
+    fn auto_migration_flow_moves_colonists_toward_attractive_colony() {
+        let mut engine = GameEngine::with_seed(42);
+
+        // Found two colonies: one stable with housing room, one unstable.
+        let e1 = engine
+            .apply(&Command::FoundColony {
+                name: "Thriving".into(),
+                starting_population: 300,
+            })
+            .unwrap();
+        let e2 = engine
+            .apply(&Command::FoundColony {
+                name: "Struggling".into(),
+                starting_population: 300,
+            })
+            .unwrap();
+        let id_thriving = match &e1[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!(),
+        };
+        let id_struggling = match &e2[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!(),
+        };
+
+        // Make "Thriving" very attractive: high housing headroom, full stability.
+        let idx_t = engine.find_colony_index(id_thriving).unwrap();
+        engine.state.colonies[idx_t].pool.deposit("housing", 1000.0);
+        engine.state.populations[idx_t].stability = 1.0;
+
+        // Make "Struggling" unattractive: low stability, no housing.
+        let idx_s = engine.find_colony_index(id_struggling).unwrap();
+        engine.state.populations[idx_s].stability = 0.1;
+        let pop_before_struggling = engine.state.populations[idx_s].count;
+        let pop_before_thriving = engine.state.populations[idx_t].count;
+
+        // Run auto migration.
+        let events = engine.apply(&Command::RunAutoMigration).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::AutoMigrationQueued { .. })),
+            "RunAutoMigration should emit AutoMigrationQueued event"
+        );
+
+        // At least one flow should have been queued.
+        let &Event::AutoMigrationQueued {
+            flow_count,
+            total_in_transit,
+        } = events
+            .iter()
+            .find(|e| matches!(e, Event::AutoMigrationQueued { .. }))
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert!(flow_count > 0, "should queue at least one migration flow");
+        assert!(total_in_transit >= 1.0, "should have colonists in transit");
+
+        // Struggling colony's population should have been reduced (colonists departed).
+        let pop_after_struggling = engine.state.populations[idx_s].count;
+        assert!(
+            pop_after_struggling < pop_before_struggling,
+            "struggling colony should have lost colonists to migration"
+        );
+
+        // Resolve the migrations (transit_turns = 1, so one tick arrives them).
+        let arrive_events = engine.apply(&Command::ResolvePendingMigrations).unwrap();
+        assert!(
+            arrive_events
+                .iter()
+                .any(|e| matches!(e, Event::MigrationArrived { .. })),
+            "ResolvePendingMigrations should emit MigrationArrived event"
+        );
+
+        let pop_after_thriving = engine.state.populations[idx_t].count;
+        assert!(
+            pop_after_thriving > pop_before_thriving,
+            "thriving colony should have gained colonists: before={pop_before_thriving}, after={pop_after_thriving}"
+        );
+    }
+
+    /// Done-when: predictive warning timing — fires before crash, not on it.
+    /// (Already tested in advance_halts_on_urgent_interrupt; this exercises
+    ///  population-decline path specifically.)
+    #[test]
+    fn predictive_population_warning_fires_before_colony_empties() {
+        use crate::interrupt::{AdvanceResult, Tier};
+
+        let mut engine = GameEngine::with_seed(99);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Dying Colony".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Pre-load a steep declining population trajectory; current value must
+        // be *above* POPULATION_CRISIS_FLOOR (10) so the ETA can be computed.
+        let tracker = engine
+            .state
+            .population_trackers
+            .entry(colony_id)
+            .or_default();
+        for count in [100.0f32, 70.0, 45.0, 25.0, 15.0] {
+            tracker.push(count);
+        }
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].count = 15.0;
+
+        // Also set up a stability tracker so the advance doesn't halt on stability.
+        // Keep stability stable to isolate the population warning.
+        let stab_tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
+        for s in [0.9f32, 0.9, 0.9, 0.9, 0.9] {
+            stab_tracker.push(s);
+        }
+
+        let result = engine.advance_until_interrupted(20, Tier::Urgent).unwrap();
+
+        // The advance should halt due to the population predictive warning.
+        assert!(
+            matches!(result, AdvanceResult::Halted { .. }),
+            "expected Halted on population warning"
+        );
+    }
+
+    /// Done-when: immigration wave — off-map colonists arrive at gateway colony.
+    #[test]
+    fn immigration_wave_arrives_at_gateway_colony() {
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Gateway".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let pop_before = engine.state.populations[idx].count;
+
+        // Schedule a wave of 50 arriving in 1 turn.
+        engine
+            .apply(&Command::ScheduleImmigrationWave {
+                colony_id,
+                count: 50.0,
+                transit_turns: 1,
+            })
+            .unwrap();
+
+        // One tick of resolve — wave arrives.
+        let arrive_events = engine.apply(&Command::ResolvePendingMigrations).unwrap();
+        let arrived = arrive_events.iter().find(|e| {
+            matches!(
+                e,
+                Event::MigrationArrived {
+                    from_colony: None,
+                    ..
+                }
+            )
+        });
+        assert!(
+            arrived.is_some(),
+            "immigration wave should produce MigrationArrived with from_colony=None"
+        );
+
+        let pop_after = engine.state.populations[idx].count;
+        assert!(
+            (pop_after - (pop_before + 50.0)).abs() < 1.0,
+            "population should have increased by 50 from immigration wave; before={pop_before}, after={pop_after}"
+        );
+    }
+
+    /// Done-when: evacuation displaces problem to receiver (overcrowding → stability hit).
+    #[test]
+    fn evacuation_displaces_to_receiver_with_overcrowding_penalty() {
+        let mut engine = GameEngine::with_seed(42);
+
+        let e1 = engine
+            .apply(&Command::FoundColony {
+                name: "Crisis Colony".into(),
+                starting_population: 200,
+            })
+            .unwrap();
+        let e2 = engine
+            .apply(&Command::FoundColony {
+                name: "Receiver".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let id_crisis = match &e1[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!(),
+        };
+        let id_recv = match &e2[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!(),
+        };
+
+        let idx_c = engine.find_colony_index(id_crisis).unwrap();
+        let idx_r = engine.find_colony_index(id_recv).unwrap();
+
+        // Give receiver very limited housing so evacuation causes overcrowding.
+        engine.state.colonies[idx_r].pool.deposit("housing", 30.0);
+        let recv_stability_before = engine.state.populations[idx_r].stability;
+        let crisis_stability_before = engine.state.populations[idx_c].stability;
+
+        // Evacuate 50 % of crisis colony.
+        engine
+            .apply(&Command::EvacuateColony {
+                from_colony: id_crisis,
+                to_colony: id_recv,
+                fraction: 0.5,
+                transit_turns: 1,
+            })
+            .unwrap();
+
+        // Sending colony gets stability penalty immediately.
+        let crisis_stability_after_departure = engine.state.populations[idx_c].stability;
+        assert!(
+            crisis_stability_after_departure < crisis_stability_before,
+            "evacuation departure should cost stability at source"
+        );
+
+        // Resolve arrivals.
+        engine.apply(&Command::ResolvePendingMigrations).unwrap();
+
+        let recv_stability_after = engine.state.populations[idx_r].stability;
+        assert!(
+            recv_stability_after < recv_stability_before,
+            "overcrowded receiver should lose stability: before={recv_stability_before}, after={recv_stability_after}"
+        );
     }
 
     #[test]
