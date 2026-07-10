@@ -58,6 +58,7 @@ use migration::{
     ColonyAttractiveness, PendingMigration,
 };
 use needs::{apply_needs_check, apply_population_dynamics};
+use map::PlanetMap;
 use orbital::{OrbitalError, OrbitalStation, SatelliteConstellation};
 use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
@@ -319,6 +320,19 @@ pub enum Command {
     InitVictoryConditions {
         /// Conditions to track.
         conditions: Vec<victory::VictoryCondition>,
+    },
+
+    // ── M1: Planet map ────────────────────────────────────────────────────
+    /// Generate and store a planet map from an RNG seed and cell radius.
+    ///
+    /// Overwrites any previously seeded map. The generated map is stored in
+    /// `GameState::planet_map` and subsequent [`Command::FoundColonyAtSite`]
+    /// commands can reference hex sites by their [`SiteId`].
+    SeedPlanet {
+        /// Deterministic RNG seed for map generation.
+        seed: u64,
+        /// Hex radius of the generated map (cell count = 3r²+3r+1).
+        radius: u32,
     },
 
     // ── M1: Research direction ────────────────────────────────────────────
@@ -715,6 +729,26 @@ pub enum Event {
     /// The research queue and current project were cleared.
     ResearchCancelled,
 
+    /// A planet map was generated and stored in `GameState`.
+    PlanetSeeded {
+        /// Seed used for generation.
+        seed: u64,
+        /// Hex radius of the generated map.
+        radius: u32,
+        /// Total number of hex cells in the map.
+        cell_count: usize,
+    },
+
+    /// A colony was placed on its hex coordinate in the planet map.
+    ColonyPlacedOnMap {
+        /// The colony that was placed.
+        colony_id: ColonyId,
+        /// Axial column of the hex.
+        q: i32,
+        /// Axial row of the hex.
+        r: i32,
+    },
+
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -760,6 +794,18 @@ pub enum EngineError {
     /// An orbital slot operation failed (orbit band full, station not found, etc.).
     #[error("orbital error: {0}")]
     OrbitalError(#[from] OrbitalError),
+    /// No planet map has been seeded yet.
+    #[error("no planet map: call SeedPlanet first")]
+    NoPlanetMap,
+    /// The referenced site identifier is not in the planet map.
+    #[error("site not found: {0:?}")]
+    SiteNotFound(SiteId),
+    /// The hex cell at the requested site is not habitable (ocean or similar).
+    #[error("site is not habitable")]
+    SiteNotHabitable,
+    /// A colony already occupies the hex cell at the requested site.
+    #[error("site is already occupied")]
+    SiteOccupied,
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -1189,16 +1235,60 @@ impl GameEngine {
                         "colony name must not be empty".into(),
                     ));
                 }
+                // Require a seeded planet map.
+                let coord = {
+                    let pm = self
+                        .state
+                        .planet_map
+                        .as_ref()
+                        .ok_or(EngineError::NoPlanetMap)?;
+                    pm.coord_for_site(*site_id)
+                        .ok_or(EngineError::SiteNotFound(*site_id))?
+                };
+                // Validate habitability and occupancy before mutating state.
+                // planet_map is guaranteed Some here (we just resolved coord from it).
+                let pm = self
+                    .state
+                    .planet_map
+                    .as_ref()
+                    .ok_or(EngineError::NoPlanetMap)?;
+                let cell = pm
+                    .cells
+                    .get(&coord)
+                    .ok_or(EngineError::SiteNotFound(*site_id))?;
+                if !cell.is_habitable() {
+                    return Err(EngineError::SiteNotHabitable);
+                }
+                if pm.colonies.iter().any(|n| n.coord == coord) {
+                    return Err(EngineError::SiteOccupied);
+                }
+                let _ = pm;
                 let colony = colony::Colony::new(name.clone());
-                let id = colony.id;
+                let colony_id = colony.id;
                 self.state.add_colony(colony, *starting_population);
-                Ok(vec![Event::ColonyFoundedAtSite {
-                    colony_id: id,
-                    name: name.clone(),
-                    starting_population: *starting_population,
-                    site_id: *site_id,
-                    focus: focus.clone(),
-                }])
+                // Place colony node on the map.
+                let pm_mut = self
+                    .state
+                    .planet_map
+                    .as_mut()
+                    .ok_or(EngineError::NoPlanetMap)?;
+                pm_mut
+                    .place_colony(colony_id, coord)
+                    .map_err(|e| EngineError::InvalidState(e.to_string()))?;
+                Ok(vec![
+                    Event::ColonyFoundedAtSite {
+                        colony_id,
+                        name: name.clone(),
+                        starting_population: *starting_population,
+                        site_id: *site_id,
+                        focus: focus.clone(),
+                    },
+                    Event::ColonyPlacedOnMap {
+                        colony_id,
+                        q: coord.q,
+                        r: coord.r,
+                    },
+                ])
             }
 
             Command::AddTradeRoute {
@@ -1619,6 +1709,18 @@ impl GameEngine {
                 Ok(vec![])
             }
 
+            // ── M1: Planet map ────────────────────────────────────────────────
+            Command::SeedPlanet { seed, radius } => {
+                let map = PlanetMap::generate(*seed, *radius);
+                let cell_count = map.cells.len();
+                self.state.planet_map = Some(map);
+                Ok(vec![Event::PlanetSeeded {
+                    seed: *seed,
+                    radius: *radius,
+                    cell_count,
+                }])
+            }
+
             // ── M1: Research direction ────────────────────────────────────────
             Command::ResearchTech { tech_id } => {
                 let registry = self.state.tech_registry.as_ref().ok_or_else(|| {
@@ -1769,30 +1871,71 @@ impl GameEngine {
             }
 
             Query::PlanetMap => {
-                // Phase 6 stub: return a minimal planet map with colony nodes
-                // but no hex grid (hex topology is a Phase 5 deliverable).
-                let colony_nodes = self
-                    .state
-                    .colonies
-                    .iter()
-                    .zip(self.state.populations.iter())
-                    .enumerate()
-                    .map(|(i, (c, p))| {
-                        let q_coord = i32::try_from(i).unwrap_or(i32::MAX);
-                        ui::ColonyNode {
-                            colony_id: c.id,
-                            name: c.name.clone(),
-                            q: q_coord,
-                            r: 0,
-                            population: p.count,
-                        }
+                let Some(pm) = self.state.planet_map.as_ref() else {
+                    // No planet seeded yet — return an empty map.
+                    return Ok(QueryResult::PlanetMap(ui::PlanetMapData {
+                        planet_name: "Unknown Planet".to_string(),
+                        hexes: Vec::new(),
+                        colony_nodes: Vec::new(),
+                        infrastructure: Vec::new(),
+                    }));
+                };
+
+                // Map map::HexCell → ui::HexCell.
+                let hexes: Vec<ui::HexCell> = pm
+                    .cells
+                    .values()
+                    .map(|cell| ui::HexCell {
+                        q: cell.coord.q,
+                        r: cell.coord.r,
+                        biome: format!("{:?}", cell.biome).to_lowercase(),
+                        deposits: cell
+                            .deposits
+                            .iter()
+                            .map(|d| d.commodity_id.clone())
+                            .collect(),
                     })
                     .collect();
+
+                // Map map::ColonyNode → ui::ColonyNode, joining with colony/population data.
+                let colony_nodes: Vec<ui::ColonyNode> = pm
+                    .colonies
+                    .iter()
+                    .filter_map(|node| {
+                        let idx = self
+                            .state
+                            .colonies
+                            .iter()
+                            .position(|c| c.id == node.colony_id)?;
+                        let c = &self.state.colonies[idx];
+                        let p = &self.state.populations[idx];
+                        Some(ui::ColonyNode {
+                            colony_id: node.colony_id,
+                            name: c.name.clone(),
+                            q: node.coord.q,
+                            r: node.coord.r,
+                            population: p.count,
+                        })
+                    })
+                    .collect();
+
+                // Map map::InfraEdge → ui::InfraEdge.
+                let infrastructure: Vec<ui::InfraEdge> = pm
+                    .edges
+                    .iter()
+                    .map(|edge| ui::InfraEdge {
+                        from_colony_id: edge.from,
+                        to_colony_id: edge.to,
+                        kind: format!("{:?}", edge.infra_type).to_lowercase(),
+                        throughput: edge.throughput / edge.infra_type.base_throughput(),
+                    })
+                    .collect();
+
                 Ok(QueryResult::PlanetMap(ui::PlanetMapData {
                     planet_name: "Unknown Planet".to_string(),
-                    hexes: Vec::new(),
+                    hexes,
                     colony_nodes,
-                    infrastructure: Vec::new(),
+                    infrastructure,
                 }))
             }
 
@@ -3373,20 +3516,49 @@ mod tests {
         assert!(matches!(result, Err(EngineError::ColonyNotFound(_))));
     }
 
-    /// Query::PlanetMap returns colony nodes for all founded colonies.
+    /// Query::PlanetMap returns colony nodes for colonies founded at sites.
     #[test]
     fn query_planet_map_returns_colony_nodes() {
         let mut engine = GameEngine::with_seed(0);
+        // Seed a planet so FoundColonyAtSite has a map to look up.
         engine
-            .apply(&Command::FoundColony {
+            .apply(&Command::SeedPlanet {
+                seed: 10,
+                radius: 5,
+            })
+            .unwrap();
+
+        // Pick two distinct habitable sites.
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let mut habitable_sites: Vec<trade::SiteId> = pm
+            .sites
+            .iter()
+            .filter(|(_, &coord)| pm.cells.get(&coord).map_or(false, |c| c.is_habitable()))
+            .map(|(&sid, _)| sid)
+            .take(2)
+            .collect();
+        assert!(
+            habitable_sites.len() >= 2,
+            "need at least 2 habitable sites for this test"
+        );
+        let site_a = habitable_sites.pop().unwrap();
+        let site_b = habitable_sites.pop().unwrap();
+        drop(pm);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
                 name: "Alpha".into(),
                 starting_population: 10,
+                site_id: site_a,
+                focus: None,
             })
             .unwrap();
         engine
-            .apply(&Command::FoundColony {
+            .apply(&Command::FoundColonyAtSite {
                 name: "Beta".into(),
                 starting_population: 20,
+                site_id: site_b,
+                focus: None,
             })
             .unwrap();
 
@@ -3394,8 +3566,11 @@ mod tests {
         match result {
             QueryResult::PlanetMap(map) => {
                 assert_eq!(map.colony_nodes.len(), 2);
-                assert_eq!(map.colony_nodes[0].name, "Alpha");
-                assert_eq!(map.colony_nodes[1].name, "Beta");
+                // Names may appear in any order — just check both are present.
+                let names: std::collections::HashSet<_> =
+                    map.colony_nodes.iter().map(|n| n.name.as_str()).collect();
+                assert!(names.contains("Alpha"));
+                assert!(names.contains("Beta"));
             }
             other => panic!("expected PlanetMap, got {other:?}"),
         }
@@ -3540,7 +3715,22 @@ mod tests {
     #[test]
     fn found_colony_at_site_emits_event_with_site_id() {
         let mut engine = GameEngine::new();
-        let site = trade::SiteId::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 77,
+                radius: 3,
+            })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let best = pm.best_landing_site().unwrap();
+        let site = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == best)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
         let evs = engine
             .apply(&Command::FoundColonyAtSite {
                 name: "Nova Camp".into(),
@@ -4061,5 +4251,217 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::ResearchCancelled)));
         assert!(engine.state.tech_state.current_project.is_none());
         assert!(engine.state.tech_state.research_queue.is_empty());
+    }
+
+    // ── M1: Planet map integration tests ─────────────────────────────────
+
+    #[test]
+    fn seed_planet_stores_map_in_game_state() {
+        let mut engine = GameEngine::new();
+        assert!(engine.state.planet_map.is_none());
+        let events = engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                radius: 3,
+            })
+            .unwrap();
+        assert!(
+            engine.state.planet_map.is_some(),
+            "planet_map must be Some after SeedPlanet"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::PlanetSeeded { seed: 42, .. })),
+            "PlanetSeeded event must be emitted"
+        );
+        // Cell count = 3r²+3r+1 = 3*9+9+1 = 37
+        if let Event::PlanetSeeded { cell_count, .. } = &events[0] {
+            assert_eq!(*cell_count, 37);
+        }
+    }
+
+    #[test]
+    fn found_colony_at_site_requires_planet_map() {
+        let mut engine = GameEngine::new();
+        // No planet seeded — must return NoPlanetMap.
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Alpha".into(),
+            starting_population: 100,
+            site_id: trade::SiteId::new(),
+            focus: None,
+        });
+        assert!(
+            matches!(result, Err(EngineError::NoPlanetMap)),
+            "expected NoPlanetMap, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn found_colony_at_site_rejects_unknown_site() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                radius: 3,
+            })
+            .unwrap();
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Beta".into(),
+            starting_population: 50,
+            site_id: trade::SiteId::new(), // random UUID — not in map
+            focus: None,
+        });
+        assert!(
+            matches!(result, Err(EngineError::SiteNotFound(_))),
+            "expected SiteNotFound, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn found_colony_at_site_valid_site_registers_colony_on_map() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 99,
+                radius: 3,
+            })
+            .unwrap();
+        // Pick the best landing site and find its SiteId.
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let best_coord = pm.best_landing_site().expect("map must have habitable cells");
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == best_coord)
+            .map(|(id, _)| id)
+            .expect("best landing site must have a SiteId");
+        drop(pm);
+
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Outpost Alpha".into(),
+                starting_population: 200,
+                site_id,
+                focus: Some("mining".into()),
+            })
+            .unwrap();
+
+        // Colony must be registered in GameState.
+        assert_eq!(engine.state.colonies.len(), 1);
+        // Colony must appear in planet_map.colonies.
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        assert_eq!(pm.colonies.len(), 1);
+        assert_eq!(pm.colonies[0].coord, best_coord);
+        // Events must include ColonyFoundedAtSite and ColonyPlacedOnMap.
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyFoundedAtSite { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyPlacedOnMap { q, r, .. } if *q == best_coord.q && *r == best_coord.r)));
+    }
+
+    #[test]
+    fn found_colony_at_site_rejects_duplicate_placement() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 55,
+                radius: 3,
+            })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let best_coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == best_coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "First".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+            })
+            .unwrap();
+
+        // Second colony at the same site must fail.
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Second".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+        });
+        assert!(
+            matches!(result, Err(EngineError::SiteOccupied)),
+            "expected SiteOccupied, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn planet_map_query_returns_real_hex_data_after_seed() {
+        let mut engine = GameEngine::new();
+        // Before seeding: empty result.
+        let QueryResult::PlanetMap(empty) = engine.query(&Query::PlanetMap).unwrap() else {
+            panic!("expected PlanetMap result");
+        };
+        assert!(empty.hexes.is_empty());
+        assert!(empty.colony_nodes.is_empty());
+
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 1,
+                radius: 2,
+            })
+            .unwrap();
+
+        let QueryResult::PlanetMap(data) = engine.query(&Query::PlanetMap).unwrap() else {
+            panic!("expected PlanetMap result");
+        };
+        // radius 2: 3*4+6+1 = 19 cells
+        assert_eq!(data.hexes.len(), 19, "radius 2 must yield 19 hex cells");
+        assert!(data.colony_nodes.is_empty(), "no colonies placed yet");
+    }
+
+    #[test]
+    fn planet_map_query_includes_colony_node_after_founding() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 2,
+                radius: 3,
+            })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Node Colony".into(),
+                starting_population: 150,
+                site_id,
+                focus: None,
+            })
+            .unwrap();
+
+        let QueryResult::PlanetMap(data) = engine.query(&Query::PlanetMap).unwrap() else {
+            panic!("expected PlanetMap result");
+        };
+        assert_eq!(data.colony_nodes.len(), 1);
+        let node = &data.colony_nodes[0];
+        assert_eq!(node.q, coord.q);
+        assert_eq!(node.r, coord.r);
+        assert_eq!(node.name, "Node Colony");
     }
 }

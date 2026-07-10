@@ -17,6 +17,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
+use crate::map::PlanetMap;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
@@ -121,6 +122,10 @@ pub struct GameState {
     /// Whether the interstellar expedition has been launched (primary victory trigger).
     pub expedition_launched: bool,
 
+    // ── M1: Planet map ────────────────────────────────────────────────────
+    /// Planet hex map, populated by `Command::SeedPlanet`. `None` until seeded.
+    pub planet_map: Option<PlanetMap>,
+
     // ── Phase M1: Tech effects wired to live state ────────────────────────
     /// Building IDs unlocked by completed tech nodes.
     pub unlocked_buildings: HashSet<String>,
@@ -159,6 +164,7 @@ impl GameState {
             victory_state: VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
+            planet_map: None,
             unlocked_buildings: HashSet::new(),
             unlocked_capabilities: HashSet::new(),
             unlocked_commodities: HashSet::new(),

@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::colony::ColonyId;
+use crate::trade::SiteId;
 
 // ─── Hex Coordinates ─────────────────────────────────────────────────────────
 
@@ -248,21 +249,27 @@ pub struct PlanetMap {
     pub colonies: Vec<ColonyNode>,
     /// Infrastructure edges connecting colony nodes.
     pub edges: Vec<InfraEdge>,
+    /// Deterministic site identifiers for each cell, keyed by [`SiteId`].
+    pub sites: HashMap<SiteId, HexCoord>,
 }
 
 impl PlanetMap {
     /// Generate a planet map deterministically from `seed` and `radius`.
     ///
     /// All cells within the hex radius of the origin are generated.
+    /// Each cell receives a deterministic [`SiteId`] derived from the seed and coordinate.
     #[must_use]
     pub fn generate(seed: u64, radius: u32) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let coords = HexCoord::origin().within_radius(radius);
         let mut cells = HashMap::with_capacity(coords.len());
+        let mut sites = HashMap::with_capacity(coords.len());
 
         for coord in &coords {
             let cell = generate_cell(&mut rng, *coord, radius);
             cells.insert(*coord, cell);
+            let site_id = site_id_for_coord(seed, *coord);
+            sites.insert(site_id, *coord);
         }
 
         Self {
@@ -271,7 +278,14 @@ impl PlanetMap {
             cells,
             colonies: Vec::new(),
             edges: Vec::new(),
+            sites,
         }
+    }
+
+    /// Return the hex coordinate for a given site identifier, if it exists.
+    #[must_use]
+    pub fn coord_for_site(&self, site_id: SiteId) -> Option<HexCoord> {
+        self.sites.get(&site_id).copied()
     }
 
     /// Return a reference to a cell by coordinate, if it exists.
@@ -465,6 +479,44 @@ pub enum MapError {
 }
 
 // ─── Generation Helpers ──────────────────────────────────────────────────────
+
+/// Derive a deterministic [`SiteId`] from a map seed and hex coordinate.
+///
+/// Uses a simple mixing of seed, q, and r so every (seed, coord) pair maps to
+/// a stable, unique UUID that survives save/load round-trips.
+#[must_use]
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+fn site_id_for_coord(seed: u64, coord: HexCoord) -> SiteId {
+    // Pack seed + q + r into 16 bytes without any std hashing that may change.
+    let q = i64::from(coord.q);
+    let r = i64::from(coord.r);
+    // Mix: combine seed with rotated q/r words.  Sign loss is intentional —
+    // we want all bits of q/r to participate in the hash.
+    let high = seed ^ ((q as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+        ^ ((r as u64).wrapping_mul(0x6c62_272e_07bb_0142));
+    let low = seed
+        .wrapping_add((q as u64).wrapping_mul(0x517c_c1b7_2722_0a95))
+        .wrapping_add((r as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9));
+    let bytes = [
+        (high >> 56) as u8,
+        (high >> 48) as u8,
+        (high >> 40) as u8,
+        (high >> 32) as u8,
+        (high >> 24) as u8,
+        (high >> 16) as u8,
+        (high >> 8) as u8,
+        high as u8,
+        (low >> 56) as u8,
+        (low >> 48) as u8,
+        (low >> 40) as u8,
+        (low >> 32) as u8,
+        (low >> 24) as u8,
+        (low >> 16) as u8,
+        (low >> 8) as u8,
+        low as u8,
+    ];
+    SiteId(uuid::Uuid::from_bytes(bytes))
+}
 
 /// Generate a single hex cell at `coord` using the given RNG.
 fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell {
