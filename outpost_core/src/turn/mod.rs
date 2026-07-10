@@ -15,6 +15,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::colony::Colony;
 use crate::content::ContentRegistry;
+use crate::directive::DirectiveStore;
 use crate::needs::NeedsConfig;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
@@ -69,6 +70,8 @@ pub struct GameState {
     pub needs_config: Option<NeedsConfig>,
     /// System-wide research pool: research drained from all colonies each turn.
     pub research_pool: SystemResearchPool,
+    /// Directive store: active directives and manual-override registry.
+    pub directive_store: DirectiveStore,
 }
 
 impl GameState {
@@ -83,6 +86,7 @@ impl GameState {
             registry: None,
             needs_config: None,
             research_pool: SystemResearchPool::new(),
+            directive_store: DirectiveStore::default(),
         }
     }
 
@@ -167,18 +171,9 @@ impl TurnProcessor {
     }
 
     /// Colony-sol sub-pipeline (cadence bookkeeping and RNG advancement).
-    ///
-    /// Higher-level steps (construction, production) are wired in
-    /// `GameEngine::apply` after calling this, so that they can emit typed
-    /// [`Event`]s that the engine collects and returns to the caller.
     fn run_colony_sol_pipeline(&mut self, state: &mut GameState) {
-        // Consume one RNG tick per sol for determinism (seeds must advance
-        // consistently across pipeline extensions).
         let _tick: u64 = rand::RngCore::next_u64(&mut self.rng);
 
-        // Placeholder growth tick when no needs config is loaded.
-        // When NeedsConfig is present, the caller (GameEngine::apply) runs the
-        // needs resolution step after this method returns so it can emit events.
         if state.needs_config.is_none() {
             for pop in &mut state.populations {
                 pop.apply_growth_tick();
@@ -195,6 +190,7 @@ impl TurnProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::colony::Colony;
 
     fn make_state() -> GameState {
@@ -205,7 +201,6 @@ mod tests {
 
     #[test]
     fn turn_context_stores_cadence_and_number() {
-        // Legacy smoke-test retained for API compatibility during the transition.
         assert_eq!(DEFAULT_SOLS_PER_MONTH, 30);
     }
 
@@ -236,7 +231,6 @@ mod tests {
 
     #[test]
     fn advance_m_sols_and_assert_one_strategic_month() {
-        // Done-when: advance M sols and 1 strategic month, assert stable results.
         const SOLS_PER_MONTH: u64 = 30;
         let mut state = make_state();
         let mut proc = TurnProcessor::with_cadence(99, SOLS_PER_MONTH);
@@ -256,7 +250,6 @@ mod tests {
 
     #[test]
     fn deterministic_for_fixed_seed() {
-        // Done-when: advancing a turn mutates state deterministically for a fixed seed.
         let run = |seed: u64| {
             let mut state = make_state();
             let mut proc = TurnProcessor::new(seed);
@@ -271,8 +264,6 @@ mod tests {
         assert_eq!(a, b, "same seed must produce same outcome");
 
         let c = run(5678);
-        // Different seeds advance sol/month counts identically (pure cadence math)
-        // but internal RNG state differs — confirmed by different pipeline state.
         assert_eq!(a.0, c.0);
         assert_eq!(a.1, c.1);
     }
@@ -299,5 +290,12 @@ mod tests {
         state.add_colony(Colony::new("Outpost Alpha"), 200);
         assert_eq!(state.colonies.len(), 1);
         assert!((state.populations[0].count - 200.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn game_state_directives_and_manual_override_start_empty() {
+        let state = GameState::new();
+        assert!(state.directive_store.directives.is_empty());
+        assert!(state.directive_store.manual_override.is_empty());
     }
 }
