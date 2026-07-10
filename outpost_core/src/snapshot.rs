@@ -257,6 +257,7 @@ impl Snapshot {
             tech_registry: None,
             directive_store: crate::directive::DirectiveStore::default(),
             stability_trackers: std::collections::HashMap::new(),
+            trade_network: crate::trade::TradeNetwork::new(),
         })
     }
 

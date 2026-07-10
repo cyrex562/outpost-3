@@ -204,6 +204,22 @@ pub enum RecipeOutcome {
     },
 }
 
+// ─── TradePool impl ──────────────────────────────────────────────────────────
+
+impl crate::trade::TradePool for ColonyPool {
+    fn amount(&self, commodity_id: &str) -> f64 {
+        self.amount(commodity_id)
+    }
+
+    fn deposit(&mut self, commodity_id: &str, qty: f64) {
+        self.deposit(commodity_id, qty);
+    }
+
+    fn withdraw(&mut self, commodity_id: &str, qty: f64) {
+        self.withdraw(commodity_id, qty);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
