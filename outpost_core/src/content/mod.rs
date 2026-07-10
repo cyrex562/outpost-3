@@ -26,7 +26,9 @@ pub mod types;
 pub use error::ContentError;
 pub use loader::PackLoader;
 pub use registry::ContentRegistry;
-pub use types::{BuildingCategory, BuildingDef, CommodityDef, Ingredient, Phase, RecipeDef};
+pub use types::{
+    BuildingCategory, BuildingDef, CommodityDef, CommodityTier, Ingredient, Phase, RecipeDef,
+};
 
 #[cfg(test)]
 mod tests {
