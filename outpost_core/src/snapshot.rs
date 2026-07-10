@@ -254,6 +254,7 @@ impl Snapshot {
             needs_config: None,
             research_pool: crate::research::SystemResearchPool::new(),
             directive_store: crate::directive::DirectiveStore::default(),
+            stability_trackers: std::collections::HashMap::new(),
         })
     }
 
