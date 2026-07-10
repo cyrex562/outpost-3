@@ -2103,7 +2103,11 @@ mod tests {
         let colony_id = *colony_id;
 
         // Pre-load a steep declining stability trajectory so the first sol fires Urgent.
-        let tracker = engine.state.stability_trackers.entry(colony_id).or_default();
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
         for s in [1.0f32, 0.7, 0.5, 0.3, 0.22] {
             tracker.push(s);
         }
@@ -2134,7 +2138,13 @@ mod tests {
         // No colonies → no interrupts → should complete all 5 turns.
         let result = engine.advance_until_interrupted(5, Tier::Urgent).unwrap();
         assert!(
-            matches!(result, AdvanceResult::Completed { turns_advanced: 5, .. }),
+            matches!(
+                result,
+                AdvanceResult::Completed {
+                    turns_advanced: 5,
+                    ..
+                }
+            ),
             "expected Completed{{5}}, got {result:?}"
         );
     }
@@ -2157,7 +2167,11 @@ mod tests {
         let colony_id = *colony_id;
 
         // Steep declining trajectory: will project crisis within 10 turns.
-        let tracker = engine.state.stability_trackers.entry(colony_id).or_default();
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
         for s in [0.9f32, 0.75, 0.6, 0.45, 0.3] {
             tracker.push(s);
         }
@@ -2201,7 +2215,11 @@ mod tests {
         let colony_id = *colony_id;
 
         // Steep declining stability: will emit Urgent warnings during advance.
-        let tracker = engine.state.stability_trackers.entry(colony_id).or_default();
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
         for s in [0.9f32, 0.7, 0.5, 0.3, 0.22] {
             tracker.push(s);
         }
@@ -2209,9 +2227,7 @@ mod tests {
         engine.state.populations[idx].stability = 0.22;
 
         // Blocking threshold: Urgent interrupts don't halt, they go to the digest.
-        let result = engine
-            .advance_until_interrupted(5, Tier::Blocking)
-            .unwrap();
+        let result = engine.advance_until_interrupted(5, Tier::Blocking).unwrap();
 
         let digest = match result {
             AdvanceResult::Completed { digest, .. } => digest,

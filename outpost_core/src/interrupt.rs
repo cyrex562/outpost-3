@@ -229,6 +229,12 @@ mod tests {
         };
         let json = serde_json::to_string(&result).unwrap();
         let back: AdvanceResult = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back, AdvanceResult::Completed { turns_advanced: 5, .. }));
+        assert!(matches!(
+            back,
+            AdvanceResult::Completed {
+                turns_advanced: 5,
+                ..
+            }
+        ));
     }
 }
