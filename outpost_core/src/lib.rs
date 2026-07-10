@@ -1658,11 +1658,9 @@ impl GameEngine {
                     #[allow(clippy::cast_precision_loss)]
                     research: *progress as f32,
                 };
-                let sys_events = system::apply_system_command(
-                    &mut self.state.system_state,
-                    &sys_cmd,
-                )
-                .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+                let sys_events =
+                    system::apply_system_command(&mut self.state.system_state, &sys_cmd)
+                        .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
 
                 let mut events: Vec<Event> = Vec::new();
                 for sys_evt in &sys_events {
@@ -1682,10 +1680,7 @@ impl GameEngine {
                             .populations
                             .iter()
                             .map(|p| {
-                                #[allow(
-                                    clippy::cast_possible_truncation,
-                                    clippy::cast_sign_loss
-                                )]
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                                 {
                                     p.count.max(0.0) as u64
                                 }

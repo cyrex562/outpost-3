@@ -29,9 +29,9 @@ use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
+use crate::system::SystemState;
 use crate::tech::TechEffect;
 use crate::tech::{TechRegistry, TechState};
-use crate::system::SystemState;
 use crate::trade::TradeNetwork;
 use crate::victory::{VictoryCondition, VictoryState};
 
