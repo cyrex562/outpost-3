@@ -2114,11 +2114,7 @@ mod tests {
         let idx = engine.find_colony_index(colony_id).unwrap();
         engine.state.populations[idx].stability = 0.22;
 
-<<<<<<< Updated upstream
         let result = engine.advance_until_interrupted(20, Tier::Urgent).unwrap();
-=======
-        let result = engine.advance_until_interrupted(20, Tier::Urgent);
->>>>>>> Stashed changes
 
         assert!(
             matches!(result, AdvanceResult::Halted { .. }),
@@ -2139,13 +2135,8 @@ mod tests {
         use crate::interrupt::{AdvanceResult, Tier};
 
         let mut engine = GameEngine::with_seed(1);
-<<<<<<< Updated upstream
         // No colonies → no interrupts → should complete all 5 turns.
         let result = engine.advance_until_interrupted(5, Tier::Urgent).unwrap();
-=======
-        // No colonies — nothing to interrupt.
-        let result = engine.advance_until_interrupted(5, Tier::Urgent);
->>>>>>> Stashed changes
         assert!(
             matches!(
                 result,
@@ -2187,11 +2178,7 @@ mod tests {
         let idx = engine.find_colony_index(colony_id).unwrap();
         engine.state.populations[idx].stability = 0.3;
 
-<<<<<<< Updated upstream
         let result = engine.advance_until_interrupted(20, Tier::Urgent).unwrap();
-=======
-        let result = engine.advance_until_interrupted(20, Tier::Urgent);
->>>>>>> Stashed changes
 
         match result {
             AdvanceResult::Halted { interrupt, .. } => {
@@ -2239,13 +2226,8 @@ mod tests {
         let idx = engine.find_colony_index(colony_id).unwrap();
         engine.state.populations[idx].stability = 0.22;
 
-<<<<<<< Updated upstream
         // Blocking threshold: Urgent interrupts don't halt, they go to the digest.
         let result = engine.advance_until_interrupted(5, Tier::Blocking).unwrap();
-=======
-        // With threshold = Blocking, Urgent interrupts don't halt — they go to digest.
-        let result = engine.advance_until_interrupted(5, Tier::Blocking);
->>>>>>> Stashed changes
 
         let digest = match result {
             AdvanceResult::Completed { digest, .. } => digest,
