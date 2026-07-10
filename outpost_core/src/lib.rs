@@ -28,6 +28,7 @@ pub mod balance;
 pub mod colony;
 pub mod content;
 pub mod directive;
+pub mod expedition;
 pub mod interrupt;
 pub mod map;
 pub mod migration;
