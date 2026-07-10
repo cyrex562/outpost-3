@@ -1,0 +1,650 @@
+//! Tech DAG — authored technology definitions, state, and unlock application.
+//!
+//! Tech is **unlocks-first**: most techs are binary gates making a new
+//! building, commodity type, or capability *available*.  The DAG shape emerges
+//! from authored data (`{ id, prerequisites[], cost, effects[] }`).
+//!
+//! See `docs/DESIGN.md §7A`.
+
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use serde::{Deserialize, Serialize};
+
+use crate::research::SystemResearchPool;
+
+// ─── Content types (pack-level authoring schema) ─────────────────────────────
+
+/// Identifier for a tech node.
+pub type TechId = String;
+
+/// Identifier for a capability gate (string slug).
+pub type CapabilityId = String;
+
+/// One effect granted by completing a technology.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TechEffect {
+    /// Makes a building type constructable.
+    UnlockBuilding {
+        /// Building definition id.
+        building_id: String,
+    },
+    /// Makes a commodity type produceable / tradeable.
+    UnlockCommodity {
+        /// Commodity definition id.
+        commodity_id: String,
+    },
+    /// Enables a named capability gate.
+    UnlockCapability {
+        /// Capability slug.
+        capability_id: CapabilityId,
+    },
+    /// Applies an additive numeric bonus within a named category.
+    Bonus {
+        /// The quantity category being boosted (e.g. `"production_efficiency"`).
+        category: String,
+        /// Additive modifier value (e.g. `0.20` for +20 %).
+        value: f32,
+    },
+}
+
+/// Authored technology definition — stored in content pack files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TechDef {
+    /// Unique identifier across all packs.
+    pub id: TechId,
+    /// Human-readable name.
+    pub display_name: String,
+    /// IDs of techs that must be researched before this one is available.
+    #[serde(default)]
+    pub prerequisites: Vec<TechId>,
+    /// Research points required to complete this tech.
+    pub research_cost: f32,
+    /// Effects applied when this tech is completed.
+    #[serde(default)]
+    pub effects: Vec<TechEffect>,
+}
+
+// ─── Runtime state ────────────────────────────────────────────────────────────
+
+/// System-wide tech research state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TechState {
+    /// Set of completed tech IDs.
+    pub researched: HashSet<TechId>,
+    /// The tech currently being researched, if any.
+    pub current_project: Option<TechId>,
+    /// Research points accumulated toward `current_project`.
+    pub progress: f32,
+    /// Queued tech IDs (first = next after current project completes).
+    pub research_queue: VecDeque<TechId>,
+}
+
+impl TechState {
+    /// Create a new, empty tech state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns `true` if the given tech has been researched.
+    #[must_use]
+    pub fn is_researched(&self, id: &str) -> bool {
+        self.researched.contains(id)
+    }
+
+    /// Returns `true` if all prerequisites for `def` are satisfied.
+    #[must_use]
+    pub fn prerequisites_met(&self, def: &TechDef) -> bool {
+        def.prerequisites
+            .iter()
+            .all(|p| self.researched.contains(p))
+    }
+
+    /// Start researching `tech_id`, replacing any current project.
+    ///
+    /// Does **not** validate prerequisites — call [`prerequisites_met`] first.
+    pub fn set_current_project(&mut self, tech_id: TechId) {
+        self.current_project = Some(tech_id);
+        self.progress = 0.0;
+    }
+
+    /// Enqueue a tech for research after the current project.
+    pub fn enqueue(&mut self, tech_id: TechId) {
+        self.research_queue.push_back(tech_id);
+    }
+}
+
+// ─── Turn drain logic ─────────────────────────────────────────────────────────
+
+/// Result of applying one turn's worth of research spending.
+#[derive(Debug, Clone)]
+pub struct ResearchTurnResult {
+    /// Tech IDs completed this turn (normally 0 or 1).
+    pub completed: Vec<TechId>,
+    /// Effects that should be applied to game state (one vec per completed tech).
+    pub new_effects: Vec<Vec<TechEffect>>,
+}
+
+/// Drain research from `pool` into `state`, completing techs when cost is met.
+///
+/// On completion the next queued tech (if any) becomes `current_project`.
+/// Returns which techs (if any) completed and their effects.
+pub fn apply_research_turn(
+    state: &mut TechState,
+    pool: &mut SystemResearchPool,
+    registry: &TechRegistry,
+) -> ResearchTurnResult {
+    let mut completed = Vec::new();
+    let mut new_effects = Vec::new();
+
+    // Drain all available research this turn toward the current project.
+    let available = pool.total();
+    if available <= 0.0 {
+        return ResearchTurnResult {
+            completed,
+            new_effects,
+        };
+    }
+
+    let mut remaining = available;
+
+    loop {
+        let project_id = match state.current_project.clone() {
+            Some(id) => id,
+            None => {
+                // Try to advance from queue.
+                match state.research_queue.pop_front() {
+                    Some(next) => {
+                        state.current_project = Some(next.clone());
+                        state.progress = 0.0;
+                        next
+                    }
+                    None => break,
+                }
+            }
+        };
+
+        let Some(def) = registry.get(&project_id) else {
+            break; // Unknown tech — stop silently.
+        };
+
+        let needed = (def.research_cost - state.progress).max(0.0);
+        if remaining >= needed {
+            // Tech completes.
+            remaining -= needed;
+            state.progress = 0.0;
+            state.current_project = None;
+            state.researched.insert(project_id.clone());
+            completed.push(project_id);
+            new_effects.push(def.effects.clone());
+
+            // Advance to next in queue if any research remains.
+            if remaining <= 0.0 {
+                break;
+            }
+        } else {
+            state.progress += remaining;
+            remaining = 0.0;
+            break;
+        }
+    }
+
+    // Spend from pool.
+    let spent = available - remaining;
+    if spent > 0.0 {
+        // Pool only has `deposit`; we simulate spend by reconstructing.
+        pool.total -= spent;
+    }
+
+    ResearchTurnResult {
+        completed,
+        new_effects,
+    }
+}
+
+// ─── Tech registry (validated in-memory index) ───────────────────────────────
+
+/// In-memory registry of tech definitions, built from content pack files.
+#[derive(Debug, Clone, Default)]
+pub struct TechRegistry {
+    techs: HashMap<TechId, TechDef>,
+}
+
+/// Error produced during tech registry construction or pack validation.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum TechRegistryError {
+    /// A tech references a prerequisite that does not exist in the pack.
+    #[error("tech '{id}' references unknown prerequisite '{prereq}'")]
+    UnknownPrerequisite {
+        /// Tech that has the bad reference.
+        id: TechId,
+        /// The missing prerequisite id.
+        prereq: TechId,
+    },
+    /// The prerequisites form a cycle; the cycle is described in the message.
+    #[error("tech DAG contains a cycle involving: {cycle}")]
+    CycleDetected {
+        /// A human-readable description of the cycle members.
+        cycle: String,
+    },
+}
+
+impl TechRegistry {
+    /// Build and validate a [`TechRegistry`] from a list of [`TechDef`]s.
+    ///
+    /// Validates that all prerequisite IDs exist and that the DAG is acyclic.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TechRegistryError::UnknownPrerequisite`] if a referenced
+    /// prerequisite is not found, or [`TechRegistryError::CycleDetected`] if
+    /// the prerequisite graph contains a cycle.
+    ///
+    /// # Panics
+    ///
+    /// Panics if internal state is inconsistent (should not occur if the
+    /// prerequisite validation above passes).
+    pub fn build(defs: Vec<TechDef>) -> Result<Self, TechRegistryError> {
+        let techs: HashMap<TechId, TechDef> = defs.into_iter().map(|d| (d.id.clone(), d)).collect();
+
+        // Validate all prerequisites exist.
+        for def in techs.values() {
+            for prereq in &def.prerequisites {
+                if !techs.contains_key(prereq) {
+                    return Err(TechRegistryError::UnknownPrerequisite {
+                        id: def.id.clone(),
+                        prereq: prereq.clone(),
+                    });
+                }
+            }
+        }
+
+        // Cycle detection via Kahn's algorithm (topological sort).
+        let mut in_degree: HashMap<&str, usize> = techs.keys().map(|id| (id.as_str(), 0)).collect();
+
+        for def in techs.values() {
+            for _prereq in &def.prerequisites {
+                // Each tech is a dependent of its prerequisites, so increment
+                // the in-degree of the dependent (this tech).
+                *in_degree.entry(def.id.as_str()).or_insert(0) += 1;
+            }
+        }
+
+        // Actually we need: for each edge (prereq → tech), in_degree[tech]++.
+        // Re-compute correctly.
+        let mut in_degree: HashMap<&str, usize> =
+            techs.keys().map(|id| (id.as_str(), 0usize)).collect();
+        for def in techs.values() {
+            for _prereq in &def.prerequisites {
+                *in_degree.get_mut(def.id.as_str()).unwrap() += 1;
+            }
+        }
+
+        let mut queue: VecDeque<&str> = in_degree
+            .iter()
+            .filter(|(_, &d)| d == 0)
+            .map(|(id, _)| *id)
+            .collect();
+
+        let mut visited = 0usize;
+        while let Some(node) = queue.pop_front() {
+            visited += 1;
+            // Find all techs that list `node` as a prerequisite.
+            for def in techs.values() {
+                if def.prerequisites.iter().any(|p| p == node) {
+                    let deg = in_degree.get_mut(def.id.as_str()).unwrap();
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(def.id.as_str());
+                    }
+                }
+            }
+        }
+
+        if visited != techs.len() {
+            // Some nodes were never drained → cycle.
+            let cycle_members: Vec<_> = in_degree
+                .iter()
+                .filter(|(_, &d)| d > 0)
+                .map(|(id, _)| *id)
+                .collect();
+            return Err(TechRegistryError::CycleDetected {
+                cycle: cycle_members.join(", "),
+            });
+        }
+
+        Ok(Self { techs })
+    }
+
+    /// Look up a tech definition by id.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&TechDef> {
+        self.techs.get(id)
+    }
+
+    /// Iterate over all tech definitions.
+    pub fn all(&self) -> impl Iterator<Item = &TechDef> {
+        self.techs.values()
+    }
+
+    /// Returns the set of tech IDs whose prerequisites are all in `researched`.
+    #[must_use]
+    pub fn available_techs<'a>(&'a self, researched: &'a HashSet<TechId>) -> Vec<&'a TechDef> {
+        self.techs
+            .values()
+            .filter(|def| {
+                !researched.contains(&def.id)
+                    && def.prerequisites.iter().all(|p| researched.contains(p))
+            })
+            .collect()
+    }
+}
+
+// ─── Colony unlock helpers ────────────────────────────────────────────────────
+
+/// Returns the building IDs unlocked by a set of researched techs.
+///
+/// A building is available if it has no `tech_prerequisite` OR its prerequisite
+/// is in `researched`.
+#[must_use]
+pub fn unlocked_buildings<'a, S: ::std::hash::BuildHasher>(
+    all_buildings: impl Iterator<Item = &'a crate::content::types::BuildingDef>,
+    researched: &HashSet<TechId, S>,
+) -> Vec<&'a crate::content::types::BuildingDef> {
+    all_buildings
+        .filter(|b| match &b.tech_prerequisite {
+            None => true,
+            Some(req) => researched.contains(req),
+        })
+        .collect()
+}
+
+// ─── Pack loading ────────────────────────────────────────────────────────────
+
+/// Load and validate a [`TechRegistry`] from raw YAML bytes.
+///
+/// The YAML should be a sequence of [`TechDef`] records.
+/// Validates all prerequisite references and detects cycles.
+///
+/// # Errors
+///
+/// Returns a [`TechRegistryError`] if the YAML is malformed, prerequisites
+/// are unknown, or the DAG contains a cycle.
+pub fn load_tech_registry(yaml: &str) -> Result<TechRegistry, TechLoadError> {
+    let defs: Vec<TechDef> =
+        serde_yaml::from_str(yaml).map_err(|e| TechLoadError::Parse(e.to_string()))?;
+    TechRegistry::build(defs).map_err(TechLoadError::Registry)
+}
+
+/// Error type returned by [`load_tech_registry`].
+#[derive(Debug, thiserror::Error)]
+pub enum TechLoadError {
+    /// YAML parse error.
+    #[error("tech pack parse error: {0}")]
+    Parse(String),
+    /// DAG validation error.
+    #[error("{0}")]
+    Registry(#[from] TechRegistryError),
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn simple_tech(id: &str, prereqs: Vec<&str>, cost: f32) -> TechDef {
+        TechDef {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            prerequisites: prereqs.into_iter().map(str::to_string).collect(),
+            research_cost: cost,
+            effects: vec![TechEffect::UnlockBuilding {
+                building_id: format!("{id}_building"),
+            }],
+        }
+    }
+
+    fn make_pool(amount: f32) -> SystemResearchPool {
+        let mut p = SystemResearchPool::new();
+        p.deposit(amount);
+        p
+    }
+
+    // ── DAG validation ────────────────────────────────────────────────────
+
+    #[test]
+    fn build_empty_registry() {
+        let reg = TechRegistry::build(vec![]).unwrap();
+        assert_eq!(reg.all().count(), 0);
+    }
+
+    #[test]
+    fn build_linear_chain() {
+        let defs = vec![
+            simple_tech("alpha", vec![], 10.0),
+            simple_tech("beta", vec!["alpha"], 20.0),
+            simple_tech("gamma", vec!["beta"], 30.0),
+        ];
+        assert!(TechRegistry::build(defs).is_ok());
+    }
+
+    #[test]
+    fn unknown_prerequisite_rejected() {
+        let defs = vec![simple_tech("beta", vec!["nonexistent"], 10.0)];
+        let err = TechRegistry::build(defs).unwrap_err();
+        assert!(matches!(err, TechRegistryError::UnknownPrerequisite { .. }));
+    }
+
+    #[test]
+    fn cycle_detected_simple() {
+        let defs = vec![
+            simple_tech("a", vec!["b"], 10.0),
+            simple_tech("b", vec!["a"], 10.0),
+        ];
+        let err = TechRegistry::build(defs).unwrap_err();
+        assert!(matches!(err, TechRegistryError::CycleDetected { .. }));
+    }
+
+    #[test]
+    fn cycle_detected_three_node() {
+        let defs = vec![
+            simple_tech("a", vec!["c"], 10.0),
+            simple_tech("b", vec!["a"], 10.0),
+            simple_tech("c", vec!["b"], 10.0),
+        ];
+        let err = TechRegistry::build(defs).unwrap_err();
+        assert!(matches!(err, TechRegistryError::CycleDetected { .. }));
+    }
+
+    #[test]
+    fn self_referential_cycle_detected() {
+        let defs = vec![simple_tech("a", vec!["a"], 10.0)];
+        let err = TechRegistry::build(defs).unwrap_err();
+        assert!(matches!(err, TechRegistryError::CycleDetected { .. }));
+    }
+
+    // ── Prerequisite enforcement ──────────────────────────────────────────
+
+    #[test]
+    fn prerequisites_met_empty() {
+        let def = simple_tech("alpha", vec![], 10.0);
+        let state = TechState::new();
+        assert!(state.prerequisites_met(&def));
+    }
+
+    #[test]
+    fn prerequisites_not_met_when_prereq_missing() {
+        let def = simple_tech("beta", vec!["alpha"], 10.0);
+        let state = TechState::new();
+        assert!(!state.prerequisites_met(&def));
+    }
+
+    #[test]
+    fn prerequisites_met_when_prereq_researched() {
+        let def = simple_tech("beta", vec!["alpha"], 10.0);
+        let mut state = TechState::new();
+        state.researched.insert("alpha".to_string());
+        assert!(state.prerequisites_met(&def));
+    }
+
+    // ── Research turn drain ───────────────────────────────────────────────
+
+    #[test]
+    fn research_completes_tech_on_sufficient_pool() {
+        let defs = vec![simple_tech("alpha", vec![], 10.0)];
+        let reg = TechRegistry::build(defs).unwrap();
+        let mut state = TechState::new();
+        state.set_current_project("alpha".to_string());
+        let mut pool = make_pool(15.0);
+
+        let result = apply_research_turn(&mut state, &mut pool, &reg);
+
+        assert_eq!(result.completed, vec!["alpha"]);
+        assert!(state.is_researched("alpha"));
+        // Surplus 5.0 remains.
+        assert!((pool.total() - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn research_partial_progress_no_completion() {
+        let defs = vec![simple_tech("alpha", vec![], 20.0)];
+        let reg = TechRegistry::build(defs).unwrap();
+        let mut state = TechState::new();
+        state.set_current_project("alpha".to_string());
+        let mut pool = make_pool(5.0);
+
+        let result = apply_research_turn(&mut state, &mut pool, &reg);
+
+        assert!(result.completed.is_empty());
+        assert!(!state.is_researched("alpha"));
+        assert!((state.progress - 5.0).abs() < 1e-4);
+        assert!((pool.total()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn research_chains_to_next_queued_tech() {
+        let defs = vec![
+            simple_tech("alpha", vec![], 10.0),
+            simple_tech("beta", vec!["alpha"], 10.0),
+        ];
+        let reg = TechRegistry::build(defs).unwrap();
+        let mut state = TechState::new();
+        state.researched.insert("alpha".to_string()); // prereq already done
+        state.set_current_project("beta".to_string());
+        let mut pool = make_pool(10.0);
+
+        let result = apply_research_turn(&mut state, &mut pool, &reg);
+
+        assert_eq!(result.completed, vec!["beta"]);
+        assert!(state.is_researched("beta"));
+    }
+
+    #[test]
+    fn unlock_effects_returned_on_completion() {
+        let defs = vec![TechDef {
+            id: "alpha".to_string(),
+            display_name: "Alpha".to_string(),
+            prerequisites: vec![],
+            research_cost: 5.0,
+            effects: vec![
+                TechEffect::UnlockBuilding {
+                    building_id: "lab".to_string(),
+                },
+                TechEffect::UnlockCapability {
+                    capability_id: "warp".to_string(),
+                },
+            ],
+        }];
+        let reg = TechRegistry::build(defs).unwrap();
+        let mut state = TechState::new();
+        state.set_current_project("alpha".to_string());
+        let mut pool = make_pool(10.0);
+
+        let result = apply_research_turn(&mut state, &mut pool, &reg);
+
+        assert_eq!(result.new_effects.len(), 1);
+        assert_eq!(result.new_effects[0].len(), 2);
+    }
+
+    // ── available_techs helper ────────────────────────────────────────────
+
+    #[test]
+    fn available_techs_excludes_researched() {
+        let defs = vec![
+            simple_tech("alpha", vec![], 10.0),
+            simple_tech("beta", vec!["alpha"], 10.0),
+        ];
+        let reg = TechRegistry::build(defs).unwrap();
+        let mut researched = HashSet::new();
+        researched.insert("alpha".to_string());
+
+        let avail: Vec<_> = reg.available_techs(&researched);
+        assert_eq!(avail.len(), 1);
+        assert_eq!(avail[0].id, "beta");
+    }
+
+    #[test]
+    fn available_techs_requires_prerequisite() {
+        let defs = vec![
+            simple_tech("alpha", vec![], 10.0),
+            simple_tech("beta", vec!["alpha"], 10.0),
+        ];
+        let reg = TechRegistry::build(defs).unwrap();
+        let researched = HashSet::new();
+
+        let avail: Vec<_> = reg.available_techs(&researched);
+        // Only alpha is available (beta requires alpha).
+        assert_eq!(avail.len(), 1);
+        assert_eq!(avail[0].id, "alpha");
+    }
+
+    // ── unlocked_buildings helper ─────────────────────────────────────────
+
+    #[test]
+    fn unlocked_buildings_no_prereq_always_available() {
+        use crate::content::types::{BuildingCategory, BuildingDef};
+        let buildings = vec![BuildingDef {
+            id: "shelter".to_string(),
+            name: "Shelter".to_string(),
+            description: String::new(),
+            category: BuildingCategory::Housing,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+        }];
+        let researched = HashSet::new();
+        let result = unlocked_buildings(buildings.iter(), &researched);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn unlocked_buildings_gated_by_tech() {
+        use crate::content::types::{BuildingCategory, BuildingDef};
+        let buildings = vec![BuildingDef {
+            id: "adv_lab".to_string(),
+            name: "Advanced Lab".to_string(),
+            description: String::new(),
+            category: BuildingCategory::Research,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 2,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 3,
+            tech_prerequisite: Some("science_tier2".to_string()),
+        }];
+
+        let empty: HashSet<TechId> = HashSet::new();
+        assert!(unlocked_buildings(buildings.iter(), &empty).is_empty());
+
+        let mut with_tech = HashSet::new();
+        with_tech.insert("science_tier2".to_string());
+        assert_eq!(unlocked_buildings(buildings.iter(), &with_tech).len(), 1);
+    }
+}
