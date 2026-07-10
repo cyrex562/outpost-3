@@ -260,6 +260,7 @@ impl Snapshot {
             trade_network: crate::trade::TradeNetwork::new(),
             pending_migrations: Vec::new(),
             population_trackers: std::collections::HashMap::new(),
+            orbital_registry: crate::orbital::OrbitalRegistry::new(),
         })
     }
 

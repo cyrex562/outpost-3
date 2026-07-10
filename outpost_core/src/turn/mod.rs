@@ -21,6 +21,7 @@ use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
 use crate::migration::{PendingMigration, PopulationTracker};
 use crate::needs::NeedsConfig;
+use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
 use crate::tech::{TechRegistry, TechState};
@@ -90,6 +91,8 @@ pub struct GameState {
     pub pending_migrations: Vec<PendingMigration>,
     /// Per-colony population history for predictive population warnings.
     pub population_trackers: HashMap<ColonyId, PopulationTracker>,
+    /// System-wide orbital infrastructure registry (stations + constellations).
+    pub orbital_registry: OrbitalRegistry,
 }
 
 impl GameState {
@@ -111,6 +114,7 @@ impl GameState {
             trade_network: TradeNetwork::new(),
             pending_migrations: Vec::new(),
             population_trackers: HashMap::new(),
+            orbital_registry: OrbitalRegistry::new(),
         }
     }
 
