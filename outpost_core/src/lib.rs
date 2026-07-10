@@ -1897,12 +1897,12 @@ impl GameEngine {
             }
 
             Command::AddHauler { count } => {
-                self.state.system_state.transport_capacity.haulers =
-                    self.state
-                        .system_state
-                        .transport_capacity
-                        .haulers
-                        .saturating_add(*count);
+                self.state.system_state.transport_capacity.haulers = self
+                    .state
+                    .system_state
+                    .transport_capacity
+                    .haulers
+                    .saturating_add(*count);
                 Ok(vec![])
             }
 
@@ -6214,7 +6214,11 @@ mod tests {
         let before = engine.state.system_state.transport_capacity.haulers;
         engine.apply(&Command::AddHauler { count: 3 }).unwrap();
         let after = engine.state.system_state.transport_capacity.haulers;
-        assert_eq!(after, before + 3, "AddHauler should increase fleet by count");
+        assert_eq!(
+            after,
+            before + 3,
+            "AddHauler should increase fleet by count"
+        );
     }
 
     #[test]
@@ -6224,7 +6228,11 @@ mod tests {
         let before = engine.state.system_state.transport_capacity.haulers;
         engine.apply(&Command::RemoveHauler { count: 2 }).unwrap();
         let after = engine.state.system_state.transport_capacity.haulers;
-        assert_eq!(after, before - 2, "RemoveHauler should decrease fleet by count");
+        assert_eq!(
+            after,
+            before - 2,
+            "RemoveHauler should decrease fleet by count"
+        );
     }
 
     #[test]
@@ -6233,11 +6241,12 @@ mod tests {
         // Remove more haulers than exist — should not underflow.
         let current = engine.state.system_state.transport_capacity.haulers;
         engine
-            .apply(&Command::RemoveHauler { count: current + 100 })
+            .apply(&Command::RemoveHauler {
+                count: current + 100,
+            })
             .unwrap();
         assert_eq!(
-            engine.state.system_state.transport_capacity.haulers,
-            0,
+            engine.state.system_state.transport_capacity.haulers, 0,
             "RemoveHauler must clamp at zero"
         );
     }
@@ -6249,7 +6258,11 @@ mod tests {
 
         // Set capacity = 1 hauler × 10 colonists = 10 total.
         engine.state.system_state.transport_capacity.haulers = 1;
-        engine.state.system_state.transport_capacity.colonists_per_hauler = 10;
+        engine
+            .state
+            .system_state
+            .transport_capacity
+            .colonists_per_hauler = 10;
 
         // Try to move 25 colonists — only 10 fit.
         let events = engine
@@ -6305,7 +6318,11 @@ mod tests {
         let (mut engine, id_a, id_b) = two_colony_engine_with_pop(100, 50);
         // Capacity 100 — enough for 10 colonists.
         engine.state.system_state.transport_capacity.haulers = 10;
-        engine.state.system_state.transport_capacity.colonists_per_hauler = 10;
+        engine
+            .state
+            .system_state
+            .transport_capacity
+            .colonists_per_hauler = 10;
 
         let events = engine
             .apply(&Command::DirectMigration {
@@ -6330,7 +6347,11 @@ mod tests {
 
         // 1 hauler × 10 per hauler = capacity 10.
         engine.state.system_state.transport_capacity.haulers = 1;
-        engine.state.system_state.transport_capacity.colonists_per_hauler = 10;
+        engine
+            .state
+            .system_state
+            .transport_capacity
+            .colonists_per_hauler = 10;
 
         // Evacuate 50 % of 100 = 50 colonists; only 10 fit.
         let events = engine
