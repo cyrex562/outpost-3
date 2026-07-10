@@ -120,6 +120,7 @@ pub struct SurveyModifiers {
 /// a deterministic outcome.  The seed is typically derived from the expedition id XOR
 /// the current turn counter.
 #[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn resolve_survey(
     expedition_type: ExpeditionType,
     body_id: BodyId,
@@ -128,8 +129,7 @@ pub fn resolve_survey(
     site_name: impl Into<String>,
     deposits: HashMap<String, f64>,
 ) -> SurveyOutcome {
-    let full_p = (expedition_type.base_full_reveal_prob()
-        + modifiers.full_reveal_bonus
+    let full_p = (expedition_type.base_full_reveal_prob() + modifiers.full_reveal_bonus
         - modifiers.full_reveal_penalty)
         .clamp(0.0, 1.0);
     let partial_p = (expedition_type.base_partial_reveal_prob() + modifiers.partial_reveal_bonus)
@@ -193,8 +193,13 @@ pub struct AnomalyOutcome {
 ///
 /// The expedition must be of an eligible type; otherwise the anomaly never fires.
 #[must_use]
-pub fn check_anomaly_trigger(anomaly: &AnomalyDef, expedition_type: ExpeditionType, roll: f32) -> bool {
-    anomaly.eligible_expedition_types.contains(&expedition_type) && roll < anomaly.trigger_probability
+pub fn check_anomaly_trigger(
+    anomaly: &AnomalyDef,
+    expedition_type: ExpeditionType,
+    roll: f32,
+) -> bool {
+    anomaly.eligible_expedition_types.contains(&expedition_type)
+        && roll < anomaly.trigger_probability
 }
 
 // ─── Mid-Mission Event / Decision ────────────────────────────────────────────
@@ -353,6 +358,8 @@ impl ExpeditionRegistry {
 
     /// Apply a player decision to the pending mid-mission event.
     ///
+    /// # Errors
+    ///
     /// Returns `Err` if the expedition is not currently in
     /// [`ExpeditionPhase::AwaitingDecision`] or the choice id is unknown.
     pub fn resolve_decision(
@@ -430,7 +437,9 @@ pub enum ExpeditionError {
 pub fn travel_time_turns(distance_au: f32, propulsion_factor: f32) -> u32 {
     let factor = propulsion_factor.max(1.0);
     // Base: 1 AU ≈ 4 turns; factor reduces linearly.
-    ((distance_au * 4.0) / factor).ceil() as u32
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let turns = ((distance_au * 4.0) / factor).ceil() as u32;
+    turns
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -640,7 +649,10 @@ mod tests {
 
         let updated = registry.get(&id).unwrap();
         assert_eq!(updated.phase, ExpeditionPhase::Aborted);
-        assert!(matches!(updated.outcome, Some(SurveyOutcome::Failed { .. })));
+        assert!(matches!(
+            updated.outcome,
+            Some(SurveyOutcome::Failed { .. })
+        ));
     }
 
     #[test]
@@ -691,10 +703,7 @@ mod tests {
     fn expedition_registry_serde_round_trip() {
         let body = sample_body();
         let mut registry = ExpeditionRegistry::default();
-        registry.launch(ExpeditionState::new(
-            ExpeditionType::OrbitalSurvey,
-            body,
-        ));
+        registry.launch(ExpeditionState::new(ExpeditionType::OrbitalSurvey, body));
         let json = serde_json::to_string(&registry).unwrap();
         let back: ExpeditionRegistry = serde_json::from_str(&json).unwrap();
         assert_eq!(back.expeditions.len(), 1);
