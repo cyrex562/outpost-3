@@ -34,7 +34,7 @@ use crate::orbital::{OrbitalConstructionProject, OrbitalRegistry};
 use crate::population::Population;
 use crate::research::SystemResearchPool;
 use crate::system::SystemState;
-use crate::tech::{TechState};
+use crate::tech::TechState;
 use crate::trade::TradeNetwork;
 use crate::turn::GameState;
 use crate::victory::{VictoryCondition, VictoryState};
@@ -133,11 +133,7 @@ struct FullStateBlob {
 impl FullStateBlob {
     fn from_game_state(state: &GameState) -> Self {
         // HashMap<(ColonyId, ColonyId), Uuid> → Vec for JSON (tuple keys not supported directly).
-        let infra_routes: Vec<_> = state
-            .infra_routes
-            .iter()
-            .map(|(k, v)| (*k, *v))
-            .collect();
+        let infra_routes: Vec<_> = state.infra_routes.iter().map(|(k, v)| (*k, *v)).collect();
 
         Self {
             sol: state.sol,
@@ -535,12 +531,7 @@ mod tests {
         state.add_colony(Colony::new("Alpha"), 100);
         let colony_id = state.colonies[0].id;
 
-        let directive = Directive::new(
-            colony_id,
-            Predicate::Always,
-            Command::AdvanceColonySol,
-            10,
-        );
+        let directive = Directive::new(colony_id, Predicate::Always, Command::AdvanceColonySol, 10);
         let directive_id = directive.id;
         state.directive_store.directives.push(directive);
 
@@ -641,8 +632,11 @@ mod tests {
             },
         )
         .unwrap();
-        apply_system_command(&mut state.system_state, &SystemCommand::AddHauler { capacity: 200.0 })
-            .unwrap();
+        apply_system_command(
+            &mut state.system_state,
+            &SystemCommand::AddHauler { capacity: 200.0 },
+        )
+        .unwrap();
 
         let mut snap = Snapshot::open_in_memory().unwrap();
         snap.save(&state).unwrap();
