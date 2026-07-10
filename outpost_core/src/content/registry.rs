@@ -8,7 +8,7 @@ use super::types::{BuildingDef, CommodityDef, PackManifest, RecipeDef};
 ///
 /// Queryable by typed accessor methods.  Merge multiple packs with
 /// [`ContentRegistry::merge`] — later wins on ID collision.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ContentRegistry {
     /// Manifest of the last pack merged (or the only pack).
     pub(super) manifest: PackManifest,
@@ -66,6 +66,21 @@ impl ContentRegistry {
     /// All buildings as an iterator.
     pub fn buildings(&self) -> impl Iterator<Item = &BuildingDef> {
         self.buildings.values()
+    }
+
+    /// Insert or replace a building definition (used in tests and harness tooling).
+    pub fn insert_building(&mut self, def: BuildingDef) {
+        self.buildings.insert(def.id.clone(), def);
+    }
+
+    /// Insert or replace a recipe definition (used in tests and harness tooling).
+    pub fn insert_recipe(&mut self, def: RecipeDef) {
+        self.recipes.insert(def.id.clone(), def);
+    }
+
+    /// Insert or replace a commodity definition (used in tests and harness tooling).
+    pub fn insert_commodity(&mut self, def: super::types::CommodityDef) {
+        self.commodities.insert(def.id.clone(), def);
     }
 }
 

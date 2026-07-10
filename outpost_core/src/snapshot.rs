@@ -243,6 +243,7 @@ impl Snapshot {
             populations,
             sol,
             month,
+            registry: None,
         })
     }
 

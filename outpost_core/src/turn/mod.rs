@@ -14,6 +14,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::colony::Colony;
+use crate::content::ContentRegistry;
 use crate::population::Population;
 
 /// Default number of colony-sols that constitute one strategic-month.
@@ -53,10 +54,16 @@ pub struct GameState {
     pub sol: u64,
     /// Strategic-month turn counter (monotonically increasing).
     pub month: u64,
+    /// Optional content registry used by the production step.
+    ///
+    /// When `None`, the production step is a no-op (used in tests that only
+    /// exercise cadence logic). Set this before calling [`TurnProcessor::advance`]
+    /// to activate real production resolution.
+    pub registry: Option<ContentRegistry>,
 }
 
 impl GameState {
-    /// Construct a fresh `GameState` with no colonies.
+    /// Construct a fresh `GameState` with no colonies and no content registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -64,6 +71,7 @@ impl GameState {
             populations: Vec::new(),
             sol: 0,
             month: 0,
+            registry: None,
         }
     }
 
@@ -141,10 +149,14 @@ impl TurnProcessor {
         }
     }
 
-    /// Colony-sol sub-pipeline (placeholder; will expand in Phase 2+).
+    /// Colony-sol sub-pipeline (cadence bookkeeping and RNG advancement).
+    ///
+    /// Higher-level steps (construction, production) are wired in
+    /// `GameEngine::apply` after calling this, so that they can emit typed
+    /// [`Event`]s that the engine collects and returns to the caller.
     fn run_colony_sol_pipeline(&mut self, _state: &mut GameState) {
-        // Phase 1 stub: deterministic RNG consumption so the seed
-        // affects ordering without any game effect yet.
+        // Consume one RNG tick per sol for determinism (seeds must advance
+        // consistently across pipeline extensions).
         let _tick: u64 = rand::RngCore::next_u64(&mut self.rng);
     }
 
