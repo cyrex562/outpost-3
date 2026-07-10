@@ -2,6 +2,7 @@
 members = [
     "outpost_core",
     "outpost_harness",
+    "outpost_web",
 ]
 resolver = "2"
 
