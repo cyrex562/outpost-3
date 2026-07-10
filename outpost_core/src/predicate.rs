@@ -135,16 +135,19 @@ impl Predicate {
     }
 
     /// Shorthand: `metric < threshold`.
+    #[must_use]
     pub fn lt(metric: Metric, threshold: f64) -> Self {
         Self::Threshold { metric, cmp: Cmp::Lt, threshold }
     }
 
     /// Shorthand: `metric > threshold`.
+    #[must_use]
     pub fn gt(metric: Metric, threshold: f64) -> Self {
         Self::Threshold { metric, cmp: Cmp::Gt, threshold }
     }
 
     /// Shorthand: AND of two predicates.
+    #[must_use]
     pub fn and(left: Self, right: Self) -> Self {
         Self::And { left: Box::new(left), right: Box::new(right) }
     }
