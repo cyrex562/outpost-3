@@ -362,6 +362,30 @@ pub enum Command {
     },
     /// Clear the research queue and stop the current project.
     CancelResearch,
+
+    // ── M1: Infrastructure ────────────────────────────────────────────────
+    /// Begin construction of an infrastructure edge between two colonies.
+    ///
+    /// Both colonies must be placed on the planet map. The edge is added
+    /// instantly (prototype behaviour) and a [`TradeRoute`](trade::TradeRoute) is wired up so
+    /// commodity auto-flow activates on the next strategic turn.
+    BuildInfrastructure {
+        /// Source colony endpoint.
+        from_colony: ColonyId,
+        /// Destination colony endpoint.
+        to_colony: ColonyId,
+        /// Type of infrastructure to construct.
+        infra_type: map::InfraType,
+    },
+    /// Remove an infrastructure edge between two colonies.
+    ///
+    /// Also removes the corresponding trade route so commodity flow stops.
+    DemolishInfrastructure {
+        /// Source colony endpoint.
+        from_colony: ColonyId,
+        /// Destination colony endpoint.
+        to_colony: ColonyId,
+    },
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -785,6 +809,30 @@ pub enum Event {
         scale: f64,
         /// Category of shortfall that caused the reduction.
         reason: colony::ShortfallReason,
+    },
+
+    // ── M1: Infrastructure events ─────────────────────────────────────────
+    /// An infrastructure edge was built and the corresponding trade route activated.
+    InfrastructureBuilt {
+        /// Source colony.
+        from_colony: ColonyId,
+        /// Destination colony.
+        to_colony: ColonyId,
+        /// Type of infrastructure constructed.
+        infra_type: map::InfraType,
+        /// Construction cost in abstract resource units.
+        cost: f32,
+        /// Stable identifier of the trade route created for this edge.
+        route_id: uuid::Uuid,
+    },
+    /// An infrastructure edge was demolished and its trade route removed.
+    InfrastructureDemolished {
+        /// Source colony.
+        from_colony: ColonyId,
+        /// Destination colony.
+        to_colony: ColonyId,
+        /// Stable identifier of the trade route that was removed.
+        route_id: uuid::Uuid,
     },
 }
 
@@ -1858,6 +1906,70 @@ impl GameEngine {
                 self.state.tech_state.research_queue.clear();
                 Ok(vec![Event::ResearchCancelled])
             }
+
+            // ── M1: Infrastructure ────────────────────────────────────────
+            Command::BuildInfrastructure {
+                from_colony,
+                to_colony,
+                infra_type,
+            } => {
+                // Validate both colonies exist.
+                self.find_colony_index(*from_colony)?;
+                self.find_colony_index(*to_colony)?;
+                // Require a planet map and that both colonies are placed on it.
+                let pm = self
+                    .state
+                    .planet_map
+                    .as_mut()
+                    .ok_or(EngineError::NoPlanetMap)?;
+                let edge = pm
+                    .add_edge(*from_colony, *to_colony, *infra_type)
+                    .map_err(|e| EngineError::InvalidState(e.to_string()))?;
+                let cost = edge.cost;
+                let throughput = f64::from(edge.throughput);
+                // Wire up a trade route so auto-flow activates.
+                let route = TradeRoute::new(*from_colony, *to_colony, throughput);
+                let route_id = route.id;
+                self.state.trade_network.add_route(route);
+                // Track the route so DemolishInfrastructure can remove it.
+                let key = canonical_infra_key(*from_colony, *to_colony);
+                self.state.infra_routes.insert(key, route_id);
+                Ok(vec![Event::InfrastructureBuilt {
+                    from_colony: *from_colony,
+                    to_colony: *to_colony,
+                    infra_type: *infra_type,
+                    cost,
+                    route_id,
+                }])
+            }
+
+            Command::DemolishInfrastructure {
+                from_colony,
+                to_colony,
+            } => {
+                // Validate both colonies exist.
+                self.find_colony_index(*from_colony)?;
+                self.find_colony_index(*to_colony)?;
+                let key = canonical_infra_key(*from_colony, *to_colony);
+                let route_id = self.state.infra_routes.remove(&key).ok_or_else(|| {
+                    EngineError::InvalidArgument(format!(
+                        "no infrastructure edge between colonies {from_colony} and {to_colony}"
+                    ))
+                })?;
+                // Remove the edge from the planet map if one is seeded.
+                if let Some(pm) = self.state.planet_map.as_mut() {
+                    pm.edges
+                        .retain(|e| !(e.from == *from_colony && e.to == *to_colony)
+                            && !(e.from == *to_colony && e.to == *from_colony));
+                }
+                // Remove the backing trade route.
+                self.state.trade_network.remove_route(route_id);
+                Ok(vec![Event::InfrastructureDemolished {
+                    from_colony: *from_colony,
+                    to_colony: *to_colony,
+                    route_id,
+                }])
+            }
         }
     }
 
@@ -2272,6 +2384,14 @@ impl GameEngine {
             .position(|c| c.id == id)
             .ok_or(EngineError::ColonyNotFound(id))
     }
+}
+
+/// Return a canonical `(from, to)` key for the infra-route map.
+///
+/// Ensures that `(a, b)` and `(b, a)` map to the same slot so bidirectional
+/// lookup works without storing both orderings.
+fn canonical_infra_key(a: ColonyId, b: ColonyId) -> (ColonyId, ColonyId) {
+    if a <= b { (a, b) } else { (b, a) }
 }
 
 impl Default for GameEngine {
@@ -4683,5 +4803,171 @@ mod tests {
             "should not emit VictoryAchieved for partial progress"
         );
         assert!(engine.state.victory.is_none());
+    }
+
+    // ── Issue #84: Infrastructure build/demolish ──────────────────────────────
+
+    /// Helper: spin up an engine with a seeded planet and two colonies placed on it.
+    fn setup_two_colony_map() -> (GameEngine, colony::ColonyId, colony::ColonyId) {
+        let mut engine = GameEngine::new();
+        // Seed a small map so we can find two habitable plains cells.
+        engine.apply(&Command::SeedPlanet { seed: 42, radius: 3 }).unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        // Collect two habitable coords and their site IDs.
+        let habitable: Vec<(trade::SiteId, map::HexCoord)> = pm
+            .sites
+            .iter()
+            .filter(|(_, coord)| pm.cells.get(coord).map_or(false, |c| c.is_habitable()))
+            .map(|(sid, coord)| (*sid, *coord))
+            .take(2)
+            .collect();
+        assert!(habitable.len() >= 2, "map must have at least 2 habitable cells");
+        let (site_a, _coord_a) = habitable[0];
+        let (site_b, _coord_b) = habitable[1];
+        drop(pm);
+
+        let events_a = engine.apply(&Command::FoundColonyAtSite {
+            name: "Alpha".into(),
+            starting_population: 100,
+            site_id: site_a,
+            focus: None,
+        }).unwrap();
+        let colony_a = events_a.iter().find_map(|e| {
+            if let Event::ColonyFoundedAtSite { colony_id, .. } = e { Some(*colony_id) } else { None }
+        }).unwrap();
+
+        let events_b = engine.apply(&Command::FoundColonyAtSite {
+            name: "Beta".into(),
+            starting_population: 80,
+            site_id: site_b,
+            focus: None,
+        }).unwrap();
+        let colony_b = events_b.iter().find_map(|e| {
+            if let Event::ColonyFoundedAtSite { colony_id, .. } = e { Some(*colony_id) } else { None }
+        }).unwrap();
+
+        (engine, colony_a, colony_b)
+    }
+
+    #[test]
+    fn build_infrastructure_creates_trade_route() {
+        let (mut engine, colony_a, colony_b) = setup_two_colony_map();
+
+        let events = engine.apply(&Command::BuildInfrastructure {
+            from_colony: colony_a,
+            to_colony: colony_b,
+            infra_type: map::InfraType::Road,
+        }).unwrap();
+
+        // Event emitted.
+        let built = events.iter().find_map(|e| {
+            if let Event::InfrastructureBuilt { from_colony, to_colony, infra_type, route_id, .. } = e {
+                Some((*from_colony, *to_colony, *infra_type, *route_id))
+            } else { None }
+        });
+        assert!(built.is_some(), "InfrastructureBuilt event must be emitted");
+        let (fc, tc, it, route_id) = built.unwrap();
+        assert_eq!(fc, colony_a);
+        assert_eq!(tc, colony_b);
+        assert_eq!(it, map::InfraType::Road);
+
+        // Edge stored on planet map.
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        assert!(pm.edges.iter().any(|e| e.from == colony_a && e.to == colony_b));
+
+        // Trade route present in network.
+        let route = engine.state.trade_network.routes.iter().find(|r| r.id == route_id);
+        assert!(route.is_some(), "trade route must be wired up");
+        let route = route.unwrap();
+        assert!(route.throughput_cap > 0.0);
+    }
+
+    #[test]
+    fn build_infrastructure_throughput_matches_infra_type() {
+        let (mut engine, colony_a, colony_b) = setup_two_colony_map();
+
+        let events = engine.apply(&Command::BuildInfrastructure {
+            from_colony: colony_a,
+            to_colony: colony_b,
+            infra_type: map::InfraType::Rail,
+        }).unwrap();
+
+        let route_id = events.iter().find_map(|e| {
+            if let Event::InfrastructureBuilt { route_id, .. } = e { Some(*route_id) } else { None }
+        }).unwrap();
+        let route = engine.state.trade_network.routes.iter().find(|r| r.id == route_id).unwrap();
+        // Rail throughput should be the Rail base throughput.
+        assert!((route.throughput_cap - f64::from(map::InfraType::Rail.base_throughput())).abs() < 1.0,
+            "throughput cap should match Rail base_throughput");
+    }
+
+    #[test]
+    fn demolish_infrastructure_removes_edge_and_route() {
+        let (mut engine, colony_a, colony_b) = setup_two_colony_map();
+
+        // Build first.
+        let build_events = engine.apply(&Command::BuildInfrastructure {
+            from_colony: colony_a,
+            to_colony: colony_b,
+            infra_type: map::InfraType::Pipeline,
+        }).unwrap();
+        let route_id = build_events.iter().find_map(|e| {
+            if let Event::InfrastructureBuilt { route_id, .. } = e { Some(*route_id) } else { None }
+        }).unwrap();
+
+        // Demolish.
+        let demolish_events = engine.apply(&Command::DemolishInfrastructure {
+            from_colony: colony_a,
+            to_colony: colony_b,
+        }).unwrap();
+
+        // Event emitted with correct route_id.
+        let demolished = demolish_events.iter().find_map(|e| {
+            if let Event::InfrastructureDemolished { route_id, .. } = e { Some(*route_id) } else { None }
+        });
+        assert!(demolished.is_some(), "InfrastructureDemolished event must be emitted");
+        assert_eq!(demolished.unwrap(), route_id);
+
+        // Edge removed from planet map.
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        assert!(pm.edges.is_empty(), "edge should be removed from planet map");
+
+        // Trade route removed from network.
+        assert!(
+            engine.state.trade_network.routes.iter().all(|r| r.id != route_id),
+            "trade route should be removed from network"
+        );
+    }
+
+    #[test]
+    fn demolish_nonexistent_infrastructure_returns_error() {
+        let (mut engine, colony_a, colony_b) = setup_two_colony_map();
+
+        let result = engine.apply(&Command::DemolishInfrastructure {
+            from_colony: colony_a,
+            to_colony: colony_b,
+        });
+        assert!(result.is_err(), "demolish without prior build must fail");
+    }
+
+    #[test]
+    fn build_infrastructure_requires_planet_map() {
+        let mut engine = GameEngine::new();
+        // Found two colonies without a planet map.
+        let ev_a = engine.apply(&Command::FoundColony { name: "Alpha".into(), starting_population: 50 }).unwrap();
+        let colony_a = ev_a.iter().find_map(|e| {
+            if let Event::ColonyFounded { colony_id, .. } = e { Some(*colony_id) } else { None }
+        }).unwrap();
+        let ev_b = engine.apply(&Command::FoundColony { name: "Beta".into(), starting_population: 50 }).unwrap();
+        let colony_b = ev_b.iter().find_map(|e| {
+            if let Event::ColonyFounded { colony_id, .. } = e { Some(*colony_id) } else { None }
+        }).unwrap();
+
+        let result = engine.apply(&Command::BuildInfrastructure {
+            from_colony: colony_a,
+            to_colony: colony_b,
+            infra_type: map::InfraType::Road,
+        });
+        assert!(matches!(result, Err(EngineError::NoPlanetMap)));
     }
 }

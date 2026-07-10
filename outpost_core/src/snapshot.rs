@@ -275,6 +275,7 @@ impl Snapshot {
             unlocked_commodities: std::collections::HashSet::new(),
             modifier_accumulator: crate::modifier::ModifierAccumulator::new(),
             system_state: crate::system::SystemState::new(),
+            infra_routes: std::collections::HashMap::new(),
         })
     }
 

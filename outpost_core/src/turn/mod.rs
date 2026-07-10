@@ -15,6 +15,8 @@ use std::collections::{HashMap, HashSet};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
+use uuid::Uuid;
+
 use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
@@ -158,6 +160,11 @@ pub struct GameState {
     pub modifier_accumulator: ModifierAccumulator,
     /// System-zoom layer state: node map, hauler fleet, in-transit shipments, megaprojects.
     pub system_state: SystemState,
+    /// Maps `(from_colony, to_colony)` pairs to the trade route UUID created by
+    /// `BuildInfrastructure` so `DemolishInfrastructure` can remove the right route.
+    ///
+    /// Keys are stored in canonical order (smaller id first) to allow bidirectional lookup.
+    pub infra_routes: HashMap<(ColonyId, ColonyId), Uuid>,
 }
 
 impl GameState {
@@ -194,6 +201,7 @@ impl GameState {
             unlocked_commodities: HashSet::new(),
             modifier_accumulator: ModifierAccumulator::new(),
             system_state: SystemState::new(),
+            infra_routes: HashMap::new(),
         }
     }
 
