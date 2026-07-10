@@ -1958,9 +1958,10 @@ impl GameEngine {
                 })?;
                 // Remove the edge from the planet map if one is seeded.
                 if let Some(pm) = self.state.planet_map.as_mut() {
-                    pm.edges
-                        .retain(|e| !(e.from == *from_colony && e.to == *to_colony)
-                            && !(e.from == *to_colony && e.to == *from_colony));
+                    pm.edges.retain(|e| {
+                        !(e.from == *from_colony && e.to == *to_colony
+                            || e.from == *to_colony && e.to == *from_colony)
+                    });
                 }
                 // Remove the backing trade route.
                 self.state.trade_network.remove_route(route_id);
@@ -2391,7 +2392,11 @@ impl GameEngine {
 /// Ensures that `(a, b)` and `(b, a)` map to the same slot so bidirectional
 /// lookup works without storing both orderings.
 fn canonical_infra_key(a: ColonyId, b: ColonyId) -> (ColonyId, ColonyId) {
-    if a <= b { (a, b) } else { (b, a) }
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 impl Default for GameEngine {
@@ -4811,7 +4816,12 @@ mod tests {
     fn setup_two_colony_map() -> (GameEngine, colony::ColonyId, colony::ColonyId) {
         let mut engine = GameEngine::new();
         // Seed a small map so we can find two habitable plains cells.
-        engine.apply(&Command::SeedPlanet { seed: 42, radius: 3 }).unwrap();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                radius: 3,
+            })
+            .unwrap();
         let pm = engine.state.planet_map.as_ref().unwrap();
         // Collect two habitable coords and their site IDs.
         let habitable: Vec<(trade::SiteId, map::HexCoord)> = pm
@@ -4821,30 +4831,51 @@ mod tests {
             .map(|(sid, coord)| (*sid, *coord))
             .take(2)
             .collect();
-        assert!(habitable.len() >= 2, "map must have at least 2 habitable cells");
+        assert!(
+            habitable.len() >= 2,
+            "map must have at least 2 habitable cells"
+        );
         let (site_a, _coord_a) = habitable[0];
         let (site_b, _coord_b) = habitable[1];
         drop(pm);
 
-        let events_a = engine.apply(&Command::FoundColonyAtSite {
-            name: "Alpha".into(),
-            starting_population: 100,
-            site_id: site_a,
-            focus: None,
-        }).unwrap();
-        let colony_a = events_a.iter().find_map(|e| {
-            if let Event::ColonyFoundedAtSite { colony_id, .. } = e { Some(*colony_id) } else { None }
-        }).unwrap();
+        let events_a = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Alpha".into(),
+                starting_population: 100,
+                site_id: site_a,
+                focus: None,
+            })
+            .unwrap();
+        let colony_a = events_a
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFoundedAtSite { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
-        let events_b = engine.apply(&Command::FoundColonyAtSite {
-            name: "Beta".into(),
-            starting_population: 80,
-            site_id: site_b,
-            focus: None,
-        }).unwrap();
-        let colony_b = events_b.iter().find_map(|e| {
-            if let Event::ColonyFoundedAtSite { colony_id, .. } = e { Some(*colony_id) } else { None }
-        }).unwrap();
+        let events_b = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Beta".into(),
+                starting_population: 80,
+                site_id: site_b,
+                focus: None,
+            })
+            .unwrap();
+        let colony_b = events_b
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFoundedAtSite { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         (engine, colony_a, colony_b)
     }
@@ -4853,17 +4884,28 @@ mod tests {
     fn build_infrastructure_creates_trade_route() {
         let (mut engine, colony_a, colony_b) = setup_two_colony_map();
 
-        let events = engine.apply(&Command::BuildInfrastructure {
-            from_colony: colony_a,
-            to_colony: colony_b,
-            infra_type: map::InfraType::Road,
-        }).unwrap();
+        let events = engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+                infra_type: map::InfraType::Road,
+            })
+            .unwrap();
 
         // Event emitted.
         let built = events.iter().find_map(|e| {
-            if let Event::InfrastructureBuilt { from_colony, to_colony, infra_type, route_id, .. } = e {
+            if let Event::InfrastructureBuilt {
+                from_colony,
+                to_colony,
+                infra_type,
+                route_id,
+                ..
+            } = e
+            {
                 Some((*from_colony, *to_colony, *infra_type, *route_id))
-            } else { None }
+            } else {
+                None
+            }
         });
         assert!(built.is_some(), "InfrastructureBuilt event must be emitted");
         let (fc, tc, it, route_id) = built.unwrap();
@@ -4873,10 +4915,18 @@ mod tests {
 
         // Edge stored on planet map.
         let pm = engine.state.planet_map.as_ref().unwrap();
-        assert!(pm.edges.iter().any(|e| e.from == colony_a && e.to == colony_b));
+        assert!(pm
+            .edges
+            .iter()
+            .any(|e| e.from == colony_a && e.to == colony_b));
 
         // Trade route present in network.
-        let route = engine.state.trade_network.routes.iter().find(|r| r.id == route_id);
+        let route = engine
+            .state
+            .trade_network
+            .routes
+            .iter()
+            .find(|r| r.id == route_id);
         assert!(route.is_some(), "trade route must be wired up");
         let route = route.unwrap();
         assert!(route.throughput_cap > 0.0);
@@ -4886,19 +4936,36 @@ mod tests {
     fn build_infrastructure_throughput_matches_infra_type() {
         let (mut engine, colony_a, colony_b) = setup_two_colony_map();
 
-        let events = engine.apply(&Command::BuildInfrastructure {
-            from_colony: colony_a,
-            to_colony: colony_b,
-            infra_type: map::InfraType::Rail,
-        }).unwrap();
+        let events = engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+                infra_type: map::InfraType::Rail,
+            })
+            .unwrap();
 
-        let route_id = events.iter().find_map(|e| {
-            if let Event::InfrastructureBuilt { route_id, .. } = e { Some(*route_id) } else { None }
-        }).unwrap();
-        let route = engine.state.trade_network.routes.iter().find(|r| r.id == route_id).unwrap();
+        let route_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::InfrastructureBuilt { route_id, .. } = e {
+                    Some(*route_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let route = engine
+            .state
+            .trade_network
+            .routes
+            .iter()
+            .find(|r| r.id == route_id)
+            .unwrap();
         // Rail throughput should be the Rail base throughput.
-        assert!((route.throughput_cap - f64::from(map::InfraType::Rail.base_throughput())).abs() < 1.0,
-            "throughput cap should match Rail base_throughput");
+        assert!(
+            (route.throughput_cap - f64::from(map::InfraType::Rail.base_throughput())).abs() < 1.0,
+            "throughput cap should match Rail base_throughput"
+        );
     }
 
     #[test]
@@ -4906,35 +4973,61 @@ mod tests {
         let (mut engine, colony_a, colony_b) = setup_two_colony_map();
 
         // Build first.
-        let build_events = engine.apply(&Command::BuildInfrastructure {
-            from_colony: colony_a,
-            to_colony: colony_b,
-            infra_type: map::InfraType::Pipeline,
-        }).unwrap();
-        let route_id = build_events.iter().find_map(|e| {
-            if let Event::InfrastructureBuilt { route_id, .. } = e { Some(*route_id) } else { None }
-        }).unwrap();
+        let build_events = engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+                infra_type: map::InfraType::Pipeline,
+            })
+            .unwrap();
+        let route_id = build_events
+            .iter()
+            .find_map(|e| {
+                if let Event::InfrastructureBuilt { route_id, .. } = e {
+                    Some(*route_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         // Demolish.
-        let demolish_events = engine.apply(&Command::DemolishInfrastructure {
-            from_colony: colony_a,
-            to_colony: colony_b,
-        }).unwrap();
+        let demolish_events = engine
+            .apply(&Command::DemolishInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+            })
+            .unwrap();
 
         // Event emitted with correct route_id.
         let demolished = demolish_events.iter().find_map(|e| {
-            if let Event::InfrastructureDemolished { route_id, .. } = e { Some(*route_id) } else { None }
+            if let Event::InfrastructureDemolished { route_id, .. } = e {
+                Some(*route_id)
+            } else {
+                None
+            }
         });
-        assert!(demolished.is_some(), "InfrastructureDemolished event must be emitted");
+        assert!(
+            demolished.is_some(),
+            "InfrastructureDemolished event must be emitted"
+        );
         assert_eq!(demolished.unwrap(), route_id);
 
         // Edge removed from planet map.
         let pm = engine.state.planet_map.as_ref().unwrap();
-        assert!(pm.edges.is_empty(), "edge should be removed from planet map");
+        assert!(
+            pm.edges.is_empty(),
+            "edge should be removed from planet map"
+        );
 
         // Trade route removed from network.
         assert!(
-            engine.state.trade_network.routes.iter().all(|r| r.id != route_id),
+            engine
+                .state
+                .trade_network
+                .routes
+                .iter()
+                .all(|r| r.id != route_id),
             "trade route should be removed from network"
         );
     }
@@ -4954,14 +5047,38 @@ mod tests {
     fn build_infrastructure_requires_planet_map() {
         let mut engine = GameEngine::new();
         // Found two colonies without a planet map.
-        let ev_a = engine.apply(&Command::FoundColony { name: "Alpha".into(), starting_population: 50 }).unwrap();
-        let colony_a = ev_a.iter().find_map(|e| {
-            if let Event::ColonyFounded { colony_id, .. } = e { Some(*colony_id) } else { None }
-        }).unwrap();
-        let ev_b = engine.apply(&Command::FoundColony { name: "Beta".into(), starting_population: 50 }).unwrap();
-        let colony_b = ev_b.iter().find_map(|e| {
-            if let Event::ColonyFounded { colony_id, .. } = e { Some(*colony_id) } else { None }
-        }).unwrap();
+        let ev_a = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let colony_a = ev_a
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let ev_b = engine
+            .apply(&Command::FoundColony {
+                name: "Beta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let colony_b = ev_b
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         let result = engine.apply(&Command::BuildInfrastructure {
             from_colony: colony_a,
