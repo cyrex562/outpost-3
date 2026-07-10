@@ -1,0 +1,22 @@
+# Victory Conditions — Outpost 3 base pack
+#
+# All four standard conditions are listed here.  The engine loads these at
+# startup and tracks progress toward each one during the strategic-month loop.
+# The first condition satisfied emits VictoryAchieved and (unless sandbox-
+# continue is active) halts the game.
+
+conditions:
+  # Primary capstone — system-scale megaproject.
+  - type: interstellar_expedition_launched
+
+  # Alternate 1 — population milestone.
+  - type: population_milestone
+    target_population: 1000000
+
+  # Alternate 2 — complete all tech tree nodes.
+  - type: tech_tree_complete
+
+  # Alternate 3 — trade dominance in food (60% of total inter-colony volume).
+  - type: trade_dominance
+    commodity_id: food
+    share_pct: 60.0
