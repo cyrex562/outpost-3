@@ -37,6 +37,7 @@ pub mod research;
 pub mod snapshot;
 pub mod tech;
 pub mod turn;
+pub mod ui;
 
 use thiserror::Error;
 
@@ -159,6 +160,19 @@ pub enum Query {
     },
     /// Return the current system-wide accumulated research total.
     SystemResearchTotal,
+    /// Return the full colony management screen data bundle for a colony.
+    ColonyScreen {
+        /// Target colony.
+        colony_id: ColonyId,
+    },
+    /// Return the planet hex map data (all hexes, colony nodes, infrastructure).
+    PlanetMap,
+    /// Return the interrupt digest from the most recent advance run.
+    ///
+    /// Returns an empty digest when no advance has been run yet.
+    InterruptDigest,
+    /// Return the current time-control state (sol, month, threshold, max turns).
+    TimeControl,
 }
 
 /// The result returned by [`GameEngine::query`].
@@ -176,6 +190,14 @@ pub enum QueryResult {
     Labour(f32),
     /// Total accumulated research in the system-wide pool.
     ResearchTotal(f32),
+    /// Colony management screen data bundle.
+    ColonyScreen(ui::ColonyScreenData),
+    /// Planet hex map data bundle.
+    PlanetMap(ui::PlanetMapData),
+    /// Interrupt digest from the most recent advance run.
+    InterruptDigest(ui::InterruptDigestData),
+    /// Current time-control state.
+    TimeControl(ui::TimeControlState),
 }
 
 /// Lightweight colony summary returned by [`Query::ListColonies`].
@@ -364,6 +386,12 @@ pub struct GameEngine {
     pub state: GameState,
     /// Turn processor responsible for cadence bookkeeping.
     processor: TurnProcessor,
+    /// Digest from the most recent `advance_until_interrupted` run (for the UI digest panel).
+    last_advance_digest: Option<ui::InterruptDigestData>,
+    /// Current interrupt threshold used for time-control display.
+    pub interrupt_threshold: interrupt::Tier,
+    /// Maximum turns for the next advance-until-interrupted run.
+    pub max_advance_turns: u32,
 }
 
 impl GameEngine {
@@ -381,6 +409,9 @@ impl GameEngine {
         Self {
             state: GameState::new(),
             processor: TurnProcessor::new(seed),
+            last_advance_digest: None,
+            interrupt_threshold: interrupt::Tier::Notable,
+            max_advance_turns: 10,
         }
     }
 
@@ -757,6 +788,7 @@ impl GameEngine {
     /// # Errors
     ///
     /// Returns [`EngineError`] if the query references an entity that does not exist.
+    #[allow(clippy::too_many_lines)]
     pub fn query(&self, q: &Query) -> Result<QueryResult, EngineError> {
         match q {
             Query::CurrentSol => Ok(QueryResult::Counter(self.state.sol)),
@@ -800,6 +832,111 @@ impl GameEngine {
             Query::SystemResearchTotal => {
                 Ok(QueryResult::ResearchTotal(self.state.research_pool.total()))
             }
+
+            Query::ColonyScreen { colony_id } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let c = &self.state.colonies[idx];
+                let p = &self.state.populations[idx];
+                let buildings = c
+                    .buildings
+                    .iter()
+                    .map(|b| ui::BuildingRow {
+                        building_type: b.building_type.clone(),
+                        labour_assigned: 0,
+                        slot_cost: b.slot_cost,
+                        full_capacity: true,
+                    })
+                    .collect();
+                let stockpile = c
+                    .pool
+                    .commodity_ids()
+                    .map(|cid| {
+                        let cap = c.pool.capacity(cid);
+                        ui::StockpileRow {
+                            commodity_id: cid.to_string(),
+                            amount: c.pool.amount(cid),
+                            capacity: if cap.is_finite() { Some(cap) } else { None },
+                            net_per_turn: c.pool.delta(cid),
+                        }
+                    })
+                    .collect();
+                let construction_queue = c
+                    .build_queue
+                    .projects
+                    .iter()
+                    .map(|proj| ui::ConstructionQueueRow {
+                        project_id: proj.id,
+                        building_type: proj.building_type.clone(),
+                        turns_completed: proj.turns_completed,
+                        turns_total: proj.total_turns,
+                        slot_cost: proj.slot_cost,
+                    })
+                    .collect();
+                let manual_override =
+                    self.state.directive_store.is_manual_override(*colony_id);
+                Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
+                    colony_id: c.id,
+                    name: c.name.clone(),
+                    population: p.count,
+                    stability: p.stability,
+                    slots_used: c.slots_used(),
+                    slot_capacity: c.slot_capacity,
+                    labour_available: p.available_labor(),
+                    labour_total: p.count * 0.5,
+                    buildings,
+                    stockpile,
+                    construction_queue,
+                    manual_override,
+                }))
+            }
+
+            Query::PlanetMap => {
+                // Phase 6 stub: return a minimal planet map with colony nodes
+                // but no hex grid (hex topology is a Phase 5 deliverable).
+                let colony_nodes = self
+                    .state
+                    .colonies
+                    .iter()
+                    .zip(self.state.populations.iter())
+                    .enumerate()
+                    .map(|(i, (c, p))| {
+                        let q_coord = i32::try_from(i).unwrap_or(i32::MAX);
+                        ui::ColonyNode {
+                            colony_id: c.id,
+                            name: c.name.clone(),
+                            q: q_coord,
+                            r: 0,
+                            population: p.count,
+                        }
+                    })
+                    .collect();
+                Ok(QueryResult::PlanetMap(ui::PlanetMapData {
+                    planet_name: "Unknown Planet".to_string(),
+                    hexes: Vec::new(),
+                    colony_nodes,
+                    infrastructure: Vec::new(),
+                }))
+            }
+
+            Query::InterruptDigest => {
+                let digest = self.last_advance_digest.clone().unwrap_or_else(|| {
+                    ui::InterruptDigestData {
+                        stopped_at_turn: self.state.sol,
+                        turns_advanced: 0,
+                        halting_interrupt: None,
+                        digest_items: Vec::new(),
+                        active_filter: ui::DigestFilter::new(),
+                    }
+                });
+                Ok(QueryResult::InterruptDigest(digest))
+            }
+
+            Query::TimeControl => Ok(QueryResult::TimeControl(ui::TimeControlState {
+                current_sol: self.state.sol,
+                current_month: self.state.month,
+                threshold: self.interrupt_threshold,
+                max_advance_turns: self.max_advance_turns,
+            })),
         }
     }
 
@@ -856,6 +993,20 @@ impl GameEngine {
 
             for irq in turn_interrupts {
                 if irq.tier >= threshold {
+                    let digest_items: Vec<ui::DigestItem> = digest
+                        .iter()
+                        .map(|i| ui::DigestItem {
+                            interrupt: i.clone(),
+                            acknowledged: false,
+                        })
+                        .collect();
+                    self.last_advance_digest = Some(ui::InterruptDigestData {
+                        stopped_at_turn: self.state.sol,
+                        turns_advanced: n,
+                        halting_interrupt: Some(irq.clone()),
+                        digest_items,
+                        active_filter: ui::DigestFilter::new(),
+                    });
                     return Ok(AdvanceResult::Halted {
                         at_turn: self.state.sol,
                         interrupt: irq,
@@ -867,6 +1018,20 @@ impl GameEngine {
             }
         }
 
+        let digest_items: Vec<ui::DigestItem> = digest
+            .iter()
+            .map(|i| ui::DigestItem {
+                interrupt: i.clone(),
+                acknowledged: false,
+            })
+            .collect();
+        self.last_advance_digest = Some(ui::InterruptDigestData {
+            stopped_at_turn: self.state.sol,
+            turns_advanced: n,
+            halting_interrupt: None,
+            digest_items,
+            active_filter: ui::DigestFilter::new(),
+        });
         Ok(AdvanceResult::Completed {
             turns_advanced: n,
             digest,
@@ -2239,5 +2404,119 @@ mod tests {
             !digest.is_empty(),
             "digest should contain accumulated Urgent interrupts"
         );
+    }
+
+    // ─── UI query tests ──────────────────────────────────────────────────────
+
+    /// Query::ColonyScreen returns correct data for a founded colony.
+    #[test]
+    fn query_colony_screen_returns_colony_data() {
+        let mut engine = GameEngine::with_seed(0);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "UI Test Colony".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let result = engine
+            .query(&Query::ColonyScreen { colony_id })
+            .unwrap();
+        match result {
+            QueryResult::ColonyScreen(data) => {
+                assert_eq!(data.name, "UI Test Colony");
+                assert_eq!(data.colony_id, colony_id);
+                assert!(data.population > 0.0);
+                assert_eq!(data.slot_capacity, colony::BASE_SLOT_CAPACITY);
+            }
+            other => panic!("expected ColonyScreen, got {other:?}"),
+        }
+    }
+
+    /// Query::ColonyScreen returns error for unknown colony.
+    #[test]
+    fn query_colony_screen_unknown_colony_returns_error() {
+        let engine = GameEngine::with_seed(0);
+        let result = engine.query(&Query::ColonyScreen {
+            colony_id: uuid::Uuid::new_v4(),
+        });
+        assert!(matches!(result, Err(EngineError::ColonyNotFound(_))));
+    }
+
+    /// Query::PlanetMap returns colony nodes for all founded colonies.
+    #[test]
+    fn query_planet_map_returns_colony_nodes() {
+        let mut engine = GameEngine::with_seed(0);
+        engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 10,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::FoundColony {
+                name: "Beta".into(),
+                starting_population: 20,
+            })
+            .unwrap();
+
+        let result = engine.query(&Query::PlanetMap).unwrap();
+        match result {
+            QueryResult::PlanetMap(map) => {
+                assert_eq!(map.colony_nodes.len(), 2);
+                assert_eq!(map.colony_nodes[0].name, "Alpha");
+                assert_eq!(map.colony_nodes[1].name, "Beta");
+            }
+            other => panic!("expected PlanetMap, got {other:?}"),
+        }
+    }
+
+    /// Query::InterruptDigest returns empty digest before any advance.
+    #[test]
+    fn query_interrupt_digest_empty_before_advance() {
+        let engine = GameEngine::with_seed(0);
+        let result = engine.query(&Query::InterruptDigest).unwrap();
+        match result {
+            QueryResult::InterruptDigest(d) => {
+                assert_eq!(d.turns_advanced, 0);
+                assert!(d.digest_items.is_empty());
+                assert!(d.halting_interrupt.is_none());
+            }
+            other => panic!("expected InterruptDigest, got {other:?}"),
+        }
+    }
+
+    /// Query::InterruptDigest returns populated digest after advance.
+    #[test]
+    fn query_interrupt_digest_populated_after_advance() {
+        let mut engine = GameEngine::with_seed(0);
+        engine
+            .advance_until_interrupted(3, interrupt::Tier::Blocking)
+            .unwrap();
+        let result = engine.query(&Query::InterruptDigest).unwrap();
+        assert!(matches!(result, QueryResult::InterruptDigest(_)));
+    }
+
+    /// Query::TimeControl returns correct current sol and threshold.
+    #[test]
+    fn query_time_control_returns_current_state() {
+        let mut engine = GameEngine::with_seed(0);
+        engine.interrupt_threshold = interrupt::Tier::Urgent;
+        engine.max_advance_turns = 5;
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let result = engine.query(&Query::TimeControl).unwrap();
+        match result {
+            QueryResult::TimeControl(tc) => {
+                assert_eq!(tc.current_sol, 1);
+                assert!(matches!(tc.threshold, interrupt::Tier::Urgent));
+                assert_eq!(tc.max_advance_turns, 5);
+            }
+            other => panic!("expected TimeControl, got {other:?}"),
+        }
     }
 }
