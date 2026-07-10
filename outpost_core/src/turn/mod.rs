@@ -152,6 +152,11 @@ pub struct GameState {
     /// blocks further commands and returns [`EngineError::GameOver`] unless the
     /// player activates sandbox-continue mode.
     pub victory: Option<VictoryCondition>,
+    /// Whether the player has opted into sandbox-continue mode (issue #96).
+    ///
+    /// `true` after [`Command::ContinueSandbox`] or [`Command::ContinueAfterVictory`]
+    /// is applied post-victory.  Mirrors `victory_state.sandbox_continue`.
+    pub sandbox_mode: bool,
     // ── M1: Planet map ────────────────────────────────────────────────────
     /// Planet hex map, populated by `Command::SeedPlanet`. `None` until seeded.
     pub planet_map: Option<PlanetMap>,
@@ -211,6 +216,7 @@ impl GameState {
             expedition_launched: false,
             planet_map: None,
             victory: None,
+            sandbox_mode: false,
             unlocked_buildings: HashSet::new(),
             unlocked_capabilities: HashSet::new(),
             unlocked_commodities: HashSet::new(),

@@ -44,7 +44,7 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Increment this whenever the on-disk layout changes.  Forward-migration
 /// documentation must accompany each bump.
 /// Schema version 2: `populations.count` changed from INTEGER to REAL.
-/// Schema version 3: full `GameState` blob added (`state_json` column).
+/// Schema version 3: full `GameState` blob added (`state_json` column); `sandbox_mode` stored in blob.
 pub const SCHEMA_VERSION: u32 = 3;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
@@ -128,6 +128,10 @@ struct FullStateBlob {
     // ── Planet map ────────────────────────────────────────────────────────────
     #[serde(default)]
     planet_map: Option<PlanetMap>,
+
+    // ── Sandbox mode (issue #96) ──────────────────────────────────────────────
+    #[serde(default)]
+    sandbox_mode: bool,
 }
 
 impl FullStateBlob {
@@ -165,6 +169,7 @@ impl FullStateBlob {
             unlocked_commodities: state.unlocked_commodities.clone(),
             modifier_accumulator: state.modifier_accumulator.clone(),
             planet_map: state.planet_map.clone(),
+            sandbox_mode: state.sandbox_mode,
         }
     }
 
@@ -202,6 +207,7 @@ impl FullStateBlob {
             unlocked_commodities: self.unlocked_commodities,
             modifier_accumulator: self.modifier_accumulator,
             planet_map: self.planet_map,
+            sandbox_mode: self.sandbox_mode,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
@@ -751,6 +757,32 @@ mod tests {
         let restored = snap.load().unwrap();
         assert_eq!(restored.sol, 99);
         assert_eq!(restored.month, 3);
+    }
+
+    // ── sandbox_mode round-trip (issue #96) ─────────────────────────────
+    #[test]
+    fn round_trip_preserves_sandbox_mode_false() {
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        let state = GameState::new();
+        assert!(!state.sandbox_mode);
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+        assert!(!restored.sandbox_mode, "sandbox_mode should survive as false");
+    }
+
+    #[test]
+    fn round_trip_preserves_sandbox_mode_true() {
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        let mut state = GameState::new();
+        state.sandbox_mode = true;
+        state.victory_state.activate_sandbox_continue();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+        assert!(restored.sandbox_mode, "sandbox_mode should survive as true");
+        assert!(
+            restored.victory_state.sandbox_continue,
+            "victory_state.sandbox_continue must mirror sandbox_mode on load"
+        );
     }
 
     // ── on-disk file round-trip ───────────────────────────────────────────
