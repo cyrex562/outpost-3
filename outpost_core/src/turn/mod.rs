@@ -77,7 +77,8 @@ impl GameState {
 
     /// Add a colony with the given starting population count.
     pub fn add_colony(&mut self, colony: Colony, starting_pop: u64) {
-        self.populations.push(Population::new(starting_pop));
+        #[allow(clippy::cast_precision_loss)]
+        self.populations.push(Population::new(starting_pop as f32));
         self.colonies.push(colony);
     }
 }
@@ -154,10 +155,15 @@ impl TurnProcessor {
     /// Higher-level steps (construction, production) are wired in
     /// `GameEngine::apply` after calling this, so that they can emit typed
     /// [`Event`]s that the engine collects and returns to the caller.
-    fn run_colony_sol_pipeline(&mut self, _state: &mut GameState) {
+    fn run_colony_sol_pipeline(&mut self, state: &mut GameState) {
         // Consume one RNG tick per sol for determinism (seeds must advance
         // consistently across pipeline extensions).
         let _tick: u64 = rand::RngCore::next_u64(&mut self.rng);
+
+        // Apply population growth placeholder (full model in Phase 7).
+        for pop in &mut state.populations {
+            pop.apply_growth_tick();
+        }
     }
 
     /// Strategic-month sub-pipeline (placeholder; will be wired in Phase 5+).
@@ -272,6 +278,6 @@ mod tests {
         assert!(state.colonies.is_empty());
         state.add_colony(Colony::new("Outpost Alpha"), 200);
         assert_eq!(state.colonies.len(), 1);
-        assert_eq!(state.populations[0].count, 200);
+        assert!((state.populations[0].count - 200.0).abs() < f32::EPSILON);
     }
 }

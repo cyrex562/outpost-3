@@ -27,7 +27,9 @@ use crate::turn::GameState;
 ///
 /// Increment this whenever the on-disk layout changes.  Forward-migration
 /// documentation must accompany each bump.
-pub const SCHEMA_VERSION: u32 = 1;
+/// Schema version 2: `populations.count` changed from INTEGER to REAL to support
+/// fractional population growth (Phase 2 — issue #15).
+pub const SCHEMA_VERSION: u32 = 2;
 
 // ─── DDL ─────────────────────────────────────────────────────────────────────
 
@@ -52,7 +54,7 @@ CREATE TABLE IF NOT EXISTS colonies (
 
 CREATE TABLE IF NOT EXISTS populations (
     idx         INTEGER NOT NULL,
-    count       INTEGER NOT NULL,
+    count       REAL    NOT NULL,
     stability   REAL    NOT NULL
 );
 ";
@@ -232,9 +234,14 @@ impl Snapshot {
             .prepare("SELECT count, stability FROM populations ORDER BY idx")?;
         let populations: Vec<Population> = stmt
             .query_map([], |row| {
-                let count: u64 = row.get(0)?;
+                let count: f64 = row.get(0)?;
                 let stability: f64 = row.get(1)?;
-                Ok(Population { count, stability })
+                #[allow(clippy::cast_possible_truncation)]
+                Ok(Population::with_skills(
+                    count as f32,
+                    stability as f32,
+                    crate::population::default_skill_distribution_pub(),
+                ))
             })?
             .collect::<Result<_, _>>()?;
 
@@ -310,9 +317,9 @@ mod tests {
         snap.save(&state).unwrap();
         let restored = snap.load().unwrap();
 
-        assert_eq!(restored.populations[0].count, 100);
-        assert!((restored.populations[0].stability - 1.0).abs() < f64::EPSILON);
-        assert_eq!(restored.populations[1].count, 250);
+        assert!((restored.populations[0].count - 100.0).abs() < 1.0);
+        assert!((restored.populations[0].stability - 1.0).abs() < 0.01);
+        assert!((restored.populations[1].count - 250.0).abs() < 1.0);
     }
 
     #[test]

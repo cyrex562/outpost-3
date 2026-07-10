@@ -90,10 +90,10 @@ pub struct ProductionStepOutcome {
     pub building_results: Vec<BuildingProductionResult>,
     /// Power grid state computed at the start of the step.
     pub power_grid: PowerGrid,
-    /// Labor available vs labor demanded this turn.
-    pub labor_available: u64,
+    /// Labor available vs labor demanded this turn (fractional).
+    pub labor_available: f32,
     /// Total labor demanded by all operational production buildings.
-    pub labor_demanded: u64,
+    pub labor_demanded: f32,
 }
 
 // ─── Internal helpers for two-pass production resolution ─────────────────────
@@ -123,12 +123,12 @@ struct PendingProduction<'a> {
 ///
 /// * `pool`            — mutable colony stockpile (modified in-place)
 /// * `buildings`       — slice of `(building_type, slot_cost)` pairs for placed buildings
-/// * `labor_available` — labour units available this turn (from `Population::available_labour`)
+/// * `labor_available` — labour units available this turn (from `PopulationPool::available_labor`)
 /// * `registry`        — content registry for looking up `BuildingDef` and `RecipeDef`
 pub fn process_production(
     pool: &mut ColonyPool,
     buildings: &[(String, u32)],
-    labor_available: u64,
+    labor_available: f32,
     registry: &ContentRegistry,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
@@ -136,18 +136,22 @@ pub fn process_production(
     let brownout_ratio = power_grid.supply_ratio();
 
     // ── Step 2: compute labor ratio ──────────────────────────────────────────
-    let labor_demanded: u64 = buildings
+    let labor_demanded: f32 = buildings
         .iter()
         .filter_map(|(bt, _)| registry.building(bt))
         .filter(|bd| has_recipe(bd.id.as_str(), registry))
-        .map(|bd| u64::from(bd.worker_slots))
+        .map(|bd| {
+            #[allow(clippy::cast_precision_loss)]
+            {
+                bd.worker_slots as f32
+            }
+        })
         .sum();
 
-    #[allow(clippy::cast_precision_loss)]
-    let labor_ratio = if labor_demanded == 0 {
-        1.0
+    let labor_ratio = if labor_demanded <= 0.0 {
+        1.0_f64
     } else {
-        (labor_available as f64 / labor_demanded as f64).min(1.0)
+        (f64::from(labor_available) / f64::from(labor_demanded)).min(1.0)
     };
 
     // ── Step 3: two-pass resolution ───────────────────────────────────────────
@@ -410,7 +414,7 @@ mod tests {
 
         let placed = buildings(&["solar_array", "mine", "smelter"]);
         // labor: mine needs 2, smelter needs 3 → 5 total; give 10
-        let outcome = process_production(&mut pool, &placed, 10, &reg);
+        let outcome = process_production(&mut pool, &placed, 10.0_f32, &reg);
 
         // Mine ran at scale 1.0 (no inputs required, power ample)
         let mine_res = outcome
@@ -452,7 +456,7 @@ mod tests {
         pool.deposit("iron_ore", 1.0);
 
         let placed = buildings(&["solar_array", "smelter"]);
-        let outcome = process_production(&mut pool, &placed, 100, &reg);
+        let outcome = process_production(&mut pool, &placed, 100.0_f32, &reg);
 
         let smelt = outcome
             .building_results
@@ -490,7 +494,7 @@ mod tests {
         // Two mines (60 kW) + smelter (50 kW) = 110 kW demand, 100 kW supply
         // brownout_ratio = 100 / 110 ≈ 0.909...
         let placed = buildings(&["solar_array", "mine", "mine", "smelter"]);
-        let outcome = process_production(&mut pool, &placed, 100, &reg);
+        let outcome = process_production(&mut pool, &placed, 100.0_f32, &reg);
 
         let expected_ratio = 100.0_f64 / 110.0;
         assert!(
@@ -530,7 +534,7 @@ mod tests {
         // mine needs 2 workers + smelter needs 3 workers = 5 total.
         // Give only 2 → labor_ratio = 2/5 = 0.4
         let placed = buildings(&["solar_array", "mine", "smelter"]);
-        let outcome = process_production(&mut pool, &placed, 2, &reg);
+        let outcome = process_production(&mut pool, &placed, 2.0_f32, &reg);
 
         let expected_ratio = 2.0_f64 / 5.0;
 
@@ -564,7 +568,7 @@ mod tests {
             let mut pool = ColonyPool::new();
             pool.deposit("iron_ore", 5.0);
             let placed = buildings(&["solar_array", "mine", "smelter"]);
-            process_production(&mut pool, &placed, 4, &reg);
+            process_production(&mut pool, &placed, 4.0_f32, &reg);
             (pool.amount("iron_ore"), pool.amount("iron_plate"))
         };
 
@@ -584,7 +588,7 @@ mod tests {
         let mut pool = ColonyPool::new();
         pool.deposit("iron_ore", 200.0);
         let placed = buildings(&["solar_array", "mine", "smelter"]);
-        let out = process_production(&mut pool, &placed, 100, &reg);
+        let out = process_production(&mut pool, &placed, 100.0_f32, &reg);
         assert!(
             out.building_results
                 .iter()
@@ -595,7 +599,7 @@ mod tests {
         // Now drain ore to force partial production.
         pool.withdraw("iron_ore", pool.amount("iron_ore")); // clear
         pool.deposit("iron_ore", 1.0); // only 1 unit
-        let out2 = process_production(&mut pool, &placed, 100, &reg);
+        let out2 = process_production(&mut pool, &placed, 100.0_f32, &reg);
         let smelt = out2
             .building_results
             .iter()
@@ -621,7 +625,7 @@ mod tests {
         pool.deposit("iron_ore", 100.0);
 
         let placed = buildings(&["solar_array", "smelter", "smelter", "smelter"]);
-        let outcome = process_production(&mut pool, &placed, 100, &reg);
+        let outcome = process_production(&mut pool, &placed, 100.0_f32, &reg);
 
         let supply_ratio = outcome.power_grid.supply_ratio();
         assert!(

@@ -133,7 +133,8 @@ pub enum QueryResult {
     /// Status report for a single colony.
     ColonyStatus(ColonyStatus),
     /// Available labour units for a colony.
-    Labour(u64),
+    /// Available labour (f32 since population count is now fractional).
+    Labour(f32),
 }
 
 /// Lightweight colony summary returned by [`Query::ListColonies`].
@@ -143,8 +144,8 @@ pub struct ColonySummary {
     pub id: ColonyId,
     /// Colony display name.
     pub name: String,
-    /// Current colonist head-count.
-    pub population: u64,
+    /// Current colonist head-count (fractional for growth modelling).
+    pub population: f32,
 }
 
 /// Detailed colony status returned by [`Query::ColonyStatus`].
@@ -154,12 +155,12 @@ pub struct ColonyStatus {
     pub id: ColonyId,
     /// Colony display name.
     pub name: String,
-    /// Current colonist head-count.
-    pub population: u64,
+    /// Current colonist head-count (fractional for growth modelling).
+    pub population: f32,
     /// Stability scalar in `[0.0, 1.0]`.
-    pub stability: f64,
+    pub stability: f32,
     /// Labour units available this turn.
-    pub available_labour: u64,
+    pub available_labour: f32,
 }
 
 // ─── Events ──────────────────────────────────────────────────────────────────
@@ -347,7 +348,7 @@ impl GameEngine {
                         .iter_mut()
                         .zip(self.state.populations.iter())
                     {
-                        let labor = pop.available_labour();
+                        let labor = pop.available_labor();
                         let placed: Vec<(String, u32)> = colony
                             .buildings
                             .iter()
@@ -520,14 +521,14 @@ impl GameEngine {
                     name: c.name.clone(),
                     population: p.count,
                     stability: p.stability,
-                    available_labour: p.available_labour(),
+                    available_labour: p.available_labor(),
                 }))
             }
 
             Query::AvailableLabour { colony_id } => {
                 let idx = self.find_colony_index(*colony_id)?;
                 Ok(QueryResult::Labour(
-                    self.state.populations[idx].available_labour(),
+                    self.state.populations[idx].available_labor(),
                 ))
             }
         }
@@ -663,7 +664,7 @@ mod tests {
         assert_eq!(cols.len(), 1);
         assert_eq!(cols[0].id, *colony_id);
         assert_eq!(cols[0].name, "Alpha Base");
-        assert_eq!(cols[0].population, 150);
+        assert!((cols[0].population - 150.0).abs() < 1.0);
     }
 
     #[test]
@@ -987,9 +988,9 @@ mod tests {
         };
         assert_eq!(status.id, colony_id);
         assert_eq!(status.name, "Zeta");
-        assert_eq!(status.population, 200);
-        assert!((status.stability - 1.0).abs() < f64::EPSILON);
-        assert_eq!(status.available_labour, 200);
+        assert!((status.population - 200.0).abs() < 1.0);
+        assert!((status.stability - 1.0).abs() < 0.01);
+        assert!((status.available_labour - 200.0).abs() < 1.0);
     }
 
     #[test]
@@ -1023,7 +1024,7 @@ mod tests {
         else {
             panic!()
         };
-        assert_eq!(labour, 80);
+        assert!((labour - 80.0).abs() < 1.0, "labour was {labour}");
     }
 
     // ── full-turn integration (Done-when bullet) ──
@@ -1058,7 +1059,7 @@ mod tests {
         else {
             panic!()
         };
-        assert_eq!(labour, 120);
+        assert!((labour - 120.0).abs() < 1.0, "labour was {labour}");
 
         // 3. Queue construction via apply().
         engine
@@ -1093,7 +1094,7 @@ mod tests {
             panic!()
         };
         assert_eq!(status.name, "Outpost Prime");
-        assert_eq!(status.population, 120);
+        assert!((status.population - 120.0).abs() < 1.0);
 
         // 7. Confirm all colonies are listed.
         let QueryResult::Colonies(cols) = engine.query(&Query::ListColonies).unwrap() else {
