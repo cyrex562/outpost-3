@@ -674,6 +674,11 @@ pub enum Event {
         /// Content-pack id of the menace.
         menace_id: String,
     },
+    /// A technology node completed research and its effects were applied.
+    TechUnlocked {
+        /// Content-pack id of the tech that finished.
+        tech_id: String,
+    },
     /// A victory condition was newly satisfied.
     VictoryAchieved {
         /// The condition that was satisfied.
@@ -792,6 +797,10 @@ impl GameEngine {
                     events.push(Event::StrategicMonthAdvanced {
                         month: outcome.month,
                     });
+                    // Emit TechUnlocked for each completed tech this month.
+                    for tech_id in outcome.completed_techs {
+                        events.push(Event::TechUnlocked { tech_id });
+                    }
                 }
                 // ── Step 1: Construction ────────────────────────────────────
                 for colony in &mut self.state.colonies {
@@ -1878,6 +1887,18 @@ impl GameEngine {
                     InterruptSource::ConstructionComplete,
                     Some(*colony_id),
                     format!("{building_type} construction complete"),
+                ));
+            }
+        }
+
+        // Tech completions → Notable.
+        for ev in events {
+            if let Event::TechUnlocked { tech_id } = ev {
+                interrupts.push(Interrupt::new(
+                    Tier::Notable,
+                    InterruptSource::TechUnlocked,
+                    None,
+                    format!("Tech researched: {tech_id}"),
                 ));
             }
         }
