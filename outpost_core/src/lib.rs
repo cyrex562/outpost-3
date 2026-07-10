@@ -29,6 +29,7 @@ pub mod colony;
 pub mod content;
 pub mod needs;
 pub mod population;
+pub mod predicate;
 pub mod research;
 pub mod snapshot;
 pub mod turn;

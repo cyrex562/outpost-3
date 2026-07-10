@@ -115,6 +115,15 @@ impl ColonyPool {
         self.entries.keys().map(String::as_str)
     }
 
+    /// Directly set the delta for a commodity — **test-only helper**.
+    ///
+    /// This bypasses the deposit/withdraw bookkeeping so tests can inject an
+    /// arbitrary rate of change without running a full production turn.
+    #[cfg(test)]
+    pub fn set_delta_for_test(&mut self, commodity_id: &str, delta: f64) {
+        self.entry_mut(commodity_id).delta = delta;
+    }
+
     /// Get or create a mutable entry for a commodity.
     fn entry_mut(&mut self, commodity_id: &str) -> &mut StockpileEntry {
         self.entries.entry(commodity_id.to_owned()).or_default()
