@@ -1,0 +1,113 @@
+/**
+ * API response shapes and WebSocket message types for Outpost 3.
+ *
+ * All server→client WebSocket messages are discriminated by a `type` field.
+ * Client→server messages are discriminated by `type` and carry a `command`
+ * or `query` sub-object discriminated by `kind`.
+ */
+
+import type { ServerEvent } from './events'
+
+// ─── Shared domain types ─────────────────────────────────────────────────────
+
+/** Lightweight summary of a colony returned by ListColonies. */
+export interface ColonySummary {
+  id: string
+  name: string
+  population: number
+}
+
+/** Detailed colony status returned by ColonyStatus query. */
+export interface ColonyStatus {
+  id: string
+  name: string
+  population: number
+  stability: number
+  available_labour: number
+}
+
+/** Full world snapshot delivered on WebSocket connect. */
+export interface WorldSnapshot {
+  sol: number
+  month: number
+  colonies: ColonySummary[]
+}
+
+// ─── Server → Client messages ────────────────────────────────────────────────
+
+export interface SnapshotMessage {
+  type: 'snapshot'
+  state: WorldSnapshot
+}
+
+export interface EventMessage {
+  type: 'event'
+  event: ServerEvent
+}
+
+export interface ErrorMessage {
+  type: 'error'
+  message: string
+}
+
+export interface AckMessage {
+  type: 'ack'
+  seq: number
+}
+
+export interface QueryResultMessage {
+  type: 'query_result'
+  seq: number
+  result: QueryResultPayload
+}
+
+export type QueryResultPayload =
+  | { kind: 'counter'; value: number }
+  | { kind: 'colonies'; colonies: ColonySummary[] }
+  | { kind: 'colony_status'; status: ColonyStatus }
+  | { kind: 'research_total'; total: number }
+  | { kind: 'labour'; labour: number }
+
+/** Union of all server→client WebSocket messages. */
+export type ServerMessage =
+  | SnapshotMessage
+  | EventMessage
+  | ErrorMessage
+  | AckMessage
+  | QueryResultMessage
+
+// ─── Client → Server messages ────────────────────────────────────────────────
+
+export type ClientCommand =
+  | { kind: 'advance_sol' }
+  | { kind: 'found_colony'; name: string; starting_population: number }
+  | {
+      kind: 'queue_construction'
+      colony_id: string
+      building_type: string
+      slot_cost: number
+      labor_per_turn: number
+      construction_cost: [string, number][]
+      construction_turns: number
+    }
+  | { kind: 'assign_labour'; colony_id: string; slot: string; labour: number }
+
+export type ClientQuery =
+  | { kind: 'current_sol' }
+  | { kind: 'current_month' }
+  | { kind: 'list_colonies' }
+  | { kind: 'colony_status'; colony_id: string }
+
+export interface ClientCommandMessage {
+  type: 'command'
+  seq: number
+  command: ClientCommand
+}
+
+export interface ClientQueryMessage {
+  type: 'query'
+  seq: number
+  query: ClientQuery
+}
+
+export type ClientMessage = ClientCommandMessage | ClientQueryMessage
