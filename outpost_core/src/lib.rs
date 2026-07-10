@@ -33,6 +33,7 @@ pub mod map;
 pub mod migration;
 pub mod modifier;
 pub mod needs;
+pub mod orbital;
 pub mod population;
 pub mod predicate;
 pub mod research;
@@ -52,6 +53,7 @@ use migration::{
     ColonyAttractiveness, PendingMigration,
 };
 use needs::{apply_needs_check, apply_population_dynamics};
+use orbital::{OrbitalError, OrbitalStation, SatelliteConstellation};
 use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
 
@@ -246,6 +248,36 @@ pub enum Command {
     /// Colonists arrive at their destination colonies; overcrowding and forced-
     /// move stability effects are applied.
     ResolvePendingMigrations,
+    /// Build an orbital station in the given orbit band, linked to a colony.
+    ///
+    /// Fails with [`EngineError::OrbitalSlotExceeded`] if the orbit band is full.
+    BuildOrbitalStation {
+        /// Colony that funds and operates the station.
+        colony_id: ColonyId,
+        /// Station specialization type.
+        station_type: orbital::StationType,
+        /// Target orbit band.
+        orbit_type: orbital::OrbitType,
+    },
+    /// Demolish (decommission) an orbital station by its stable id.
+    DecommissionOrbitalStation {
+        /// Stable identifier of the station to remove.
+        station_id: uuid::Uuid,
+    },
+    /// Deploy a satellite constellation in the given orbit band.
+    DeployConstellation {
+        /// Satellite type (coverage layer).
+        satellite_type: orbital::SatelliteType,
+        /// Orbit band for the constellation.
+        orbit_type: orbital::OrbitType,
+        /// Number of satellites to deploy.
+        count: u32,
+    },
+    /// Toggle the map-overlay visibility of a satellite constellation.
+    ToggleConstellationOverlay {
+        /// Stable identifier of the constellation.
+        constellation_id: uuid::Uuid,
+    },
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -530,6 +562,42 @@ pub enum Event {
         /// Total colonists in transit across all flows.
         total_in_transit: f32,
     },
+    /// An orbital station was built.
+    OrbitalStationBuilt {
+        /// Stable identifier of the new station.
+        station_id: uuid::Uuid,
+        /// Colony that owns the station.
+        colony_id: ColonyId,
+        /// Station specialization type.
+        station_type: orbital::StationType,
+        /// Orbit band the station occupies.
+        orbit_type: orbital::OrbitType,
+        /// Slots consumed in the orbit band.
+        slot_cost: u32,
+    },
+    /// An orbital station was decommissioned; its slots are freed.
+    OrbitalStationDecommissioned {
+        /// Stable identifier of the decommissioned station.
+        station_id: uuid::Uuid,
+    },
+    /// A satellite constellation was deployed.
+    ConstellationDeployed {
+        /// Stable identifier of the constellation.
+        constellation_id: uuid::Uuid,
+        /// Coverage type.
+        satellite_type: orbital::SatelliteType,
+        /// Orbit band.
+        orbit_type: orbital::OrbitType,
+        /// Number of satellites in the array.
+        count: u32,
+    },
+    /// The map-overlay visibility of a constellation was toggled.
+    ConstellationOverlayToggled {
+        /// Stable identifier of the constellation.
+        constellation_id: uuid::Uuid,
+        /// New visibility state.
+        visible: bool,
+    },
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -572,6 +640,9 @@ pub enum EngineError {
     /// The referenced directive does not exist.
     #[error("directive not found: {0}")]
     DirectiveNotFound(directive::DirectiveId),
+    /// An orbital slot operation failed (orbit band full, station not found, etc.).
+    #[error("orbital error: {0}")]
+    OrbitalError(#[from] OrbitalError),
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -1270,6 +1341,65 @@ impl GameEngine {
                 }
 
                 Ok(events)
+            }
+
+            Command::BuildOrbitalStation {
+                colony_id,
+                station_type,
+                orbit_type,
+            } => {
+                self.find_colony_index(*colony_id)?;
+                let station = OrbitalStation::new(*station_type, *orbit_type, *colony_id);
+                let station_id = station.id;
+                let slot_cost = station.slot_cost;
+                self.state.orbital_registry.add_station(station)?;
+                Ok(vec![Event::OrbitalStationBuilt {
+                    station_id,
+                    colony_id: *colony_id,
+                    station_type: *station_type,
+                    orbit_type: *orbit_type,
+                    slot_cost,
+                }])
+            }
+
+            Command::DecommissionOrbitalStation { station_id } => {
+                self.state.orbital_registry.remove_station(*station_id)?;
+                Ok(vec![Event::OrbitalStationDecommissioned {
+                    station_id: *station_id,
+                }])
+            }
+
+            Command::DeployConstellation {
+                satellite_type,
+                orbit_type,
+                count,
+            } => {
+                if *count == 0 {
+                    return Err(EngineError::InvalidArgument(
+                        "constellation count must be > 0".into(),
+                    ));
+                }
+                let constellation =
+                    SatelliteConstellation::new(*satellite_type, *orbit_type, *count);
+                let constellation_id = constellation.id;
+                self.state.orbital_registry.deploy_constellation(constellation);
+                Ok(vec![Event::ConstellationDeployed {
+                    constellation_id,
+                    satellite_type: *satellite_type,
+                    orbit_type: *orbit_type,
+                    count: *count,
+                }])
+            }
+
+            Command::ToggleConstellationOverlay { constellation_id } => {
+                let visible = self
+                    .state
+                    .orbital_registry
+                    .toggle_overlay(*constellation_id)?;
+                Ok(vec![Event::ConstellationOverlayToggled {
+                    constellation_id: *constellation_id,
+                    visible,
+                }])
             }
         }
     }
