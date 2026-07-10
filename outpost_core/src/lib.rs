@@ -284,7 +284,6 @@ pub enum Command {
     },
 
     // ── Phase 10: Difficulty / Menace / Victory ───────────────────────────
-
     /// Set the active difficulty preset, rebuilding the difficulty scalar from the grade table.
     SetDifficulty {
         /// Preset to activate.
@@ -653,7 +652,6 @@ pub enum Event {
         visible: bool,
     },
     // ── Phase 10 events ───────────────────────────────────────────────────
-
     /// The difficulty preset was changed.
     DifficultyChanged {
         /// The new active preset.
@@ -1490,13 +1488,10 @@ impl GameEngine {
             }
 
             // ── Phase 10: Difficulty / Menace / Victory ───────────────────
-
             Command::SetDifficulty { preset } => {
                 self.state.difficulty_preset = *preset;
-                self.state.difficulty_scalar = self
-                    .state
-                    .difficulty_grade_table
-                    .build_scalar(*preset);
+                self.state.difficulty_scalar =
+                    self.state.difficulty_grade_table.build_scalar(*preset);
                 Ok(vec![Event::DifficultyChanged { preset: *preset }])
             }
 
@@ -1538,7 +1533,9 @@ impl GameEngine {
                         .iter()
                         .map(|p| {
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            { p.count.max(0.0) as u64 }
+                            {
+                                p.count.max(0.0) as u64
+                            }
                         })
                         .sum(),
                     cumulative_research: self.state.cumulative_research,
@@ -1560,7 +1557,9 @@ impl GameEngine {
                         .iter()
                         .map(|p| {
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            { p.count.max(0.0) as u64 }
+                            {
+                                p.count.max(0.0) as u64
+                            }
                         })
                         .sum(),
                     cumulative_research: self.state.cumulative_research,
@@ -1745,15 +1744,11 @@ impl GameEngine {
                 Ok(QueryResult::DifficultyStatus(self.state.difficulty_preset))
             }
 
-            Query::MenaceStatus => {
-                Ok(QueryResult::MenaceStatus(self.state.menace_state.clone()))
-            }
+            Query::MenaceStatus => Ok(QueryResult::MenaceStatus(self.state.menace_state.clone())),
 
-            Query::VictoryStatus => {
-                Ok(QueryResult::VictoryStatus(
-                    self.state.victory_state.conditions.clone(),
-                ))
-            }
+            Query::VictoryStatus => Ok(QueryResult::VictoryStatus(
+                self.state.victory_state.conditions.clone(),
+            )),
         }
     }
 

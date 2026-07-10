@@ -183,18 +183,16 @@ fn required_for(condition: &VictoryCondition) -> u64 {
 }
 
 /// Evaluate one condition against a snapshot. Returns `(current, satisfied)`.
-fn evaluate_condition(
-    condition: &VictoryCondition,
-    snapshot: &VictorySnapshot,
-) -> (u64, bool) {
+fn evaluate_condition(condition: &VictoryCondition, snapshot: &VictorySnapshot) -> (u64, bool) {
     match condition {
         VictoryCondition::InterstellarExpeditionLaunched => {
             let v = u64::from(snapshot.expedition_launched);
             (v, snapshot.expedition_launched)
         }
-        VictoryCondition::EconomicMilestone { target_output } => {
-            (snapshot.total_output, snapshot.total_output >= *target_output)
-        }
+        VictoryCondition::EconomicMilestone { target_output } => (
+            snapshot.total_output,
+            snapshot.total_output >= *target_output,
+        ),
         VictoryCondition::PopulationMilestone { target_population } => (
             snapshot.total_population,
             snapshot.total_population >= *target_population,
@@ -310,7 +308,10 @@ mod tests {
         };
         vs.evaluate(&snap);
         let second = vs.evaluate(&snap);
-        assert!(second.is_empty(), "should not re-emit already achieved condition");
+        assert!(
+            second.is_empty(),
+            "should not re-emit already achieved condition"
+        );
     }
 
     #[test]
@@ -363,7 +364,9 @@ mod tests {
         let conditions = vec![
             VictoryCondition::InterstellarExpeditionLaunched,
             VictoryCondition::EconomicMilestone { target_output: 1 },
-            VictoryCondition::PopulationMilestone { target_population: 1 },
+            VictoryCondition::PopulationMilestone {
+                target_population: 1,
+            },
             VictoryCondition::ScienceMilestone { target_research: 1 },
         ];
         for c in conditions {

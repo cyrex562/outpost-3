@@ -193,7 +193,7 @@ pub fn default_grade_table() -> DifficultyGradeTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modifier::{ModifiableQuantity, ModifierAccumulator, resolve};
+    use crate::modifier::{resolve, ModifiableQuantity, ModifierAccumulator};
 
     fn make_table() -> DifficultyGradeTable {
         let mut t = DifficultyGradeTable::new();
@@ -258,7 +258,11 @@ mod tests {
         let q = ModifiableQuantity::LaborEfficiency;
 
         let mut accum = ModifierAccumulator::new();
-        accum.add(crate::modifier::ModifierDescriptor::new(q.clone(), "tech", 0.50));
+        accum.add(crate::modifier::ModifierDescriptor::new(
+            q.clone(),
+            "tech",
+            0.50,
+        ));
 
         // base=100, tech: ×1.50 → 150, brutal scalar (0.70): 150×0.70 = 105
         let result = resolve(100.0, &q, &accum, &brutal);

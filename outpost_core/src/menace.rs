@@ -108,10 +108,7 @@ impl MenaceDefinition {
         if self.phases.is_empty() {
             return false;
         }
-        let last_trigger = self
-            .phases
-            .last()
-            .map_or(u64::MAX, |p| p.trigger_time);
+        let last_trigger = self.phases.last().map_or(u64::MAX, |p| p.trigger_time);
         elapsed_months >= last_trigger
     }
 }
@@ -172,14 +169,11 @@ impl MenaceState {
             .map(|i| self.definition.phases[i].effects.clone())
             .unwrap_or_default();
 
-        let hazard_injection: Option<String> = phase_entered
-            .and_then(|i| self.definition.phases[i].hazard_injection.clone());
+        let hazard_injection: Option<String> =
+            phase_entered.and_then(|i| self.definition.phases[i].hazard_injection.clone());
 
-        let final_phase_reached = self
-            .definition
-            .is_final_phase_active(self.elapsed_months)
-            && phase_entered
-                .is_some_and(|i| i + 1 == self.definition.phases.len());
+        let final_phase_reached = self.definition.is_final_phase_active(self.elapsed_months)
+            && phase_entered.is_some_and(|i| i + 1 == self.definition.phases.len());
 
         self.last_phase_index = new_phase;
 
@@ -256,11 +250,7 @@ mod tests {
                             "menace",
                             -0.50,
                         ),
-                        ModifierDescriptor::new(
-                            ModifiableQuantity::StabilityRate,
-                            "menace",
-                            2.00,
-                        ),
+                        ModifierDescriptor::new(ModifiableQuantity::StabilityRate, "menace", 2.00),
                     ],
                     hazard_injection: Some("stellar_collapse_wave".into()),
                 },

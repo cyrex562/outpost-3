@@ -99,7 +99,6 @@ pub struct GameState {
     pub orbital_registry: OrbitalRegistry,
 
     // ── Phase 10: Difficulty / Menace / Victory ───────────────────────────
-
     /// Active difficulty preset.
     pub difficulty_preset: DifficultyPreset,
     /// Grade table used to derive [`DifficultyScalar`] from the active preset.
