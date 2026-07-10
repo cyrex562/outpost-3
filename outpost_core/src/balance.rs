@@ -116,6 +116,7 @@ pub struct BalanceReport {
 
 impl BalanceReport {
     /// Look up the balance entry for a specific commodity id, if present.
+    #[must_use]
     pub fn commodity(&self, id: &str) -> Option<&CommodityBalance> {
         self.commodities.iter().find(|c| c.commodity_id == id)
     }
@@ -139,6 +140,7 @@ impl BalanceCalculator {
     /// # Returns
     ///
     /// A [`BalanceReport`] with per-commodity net rates and an overall verdict.
+    #[must_use]
     pub fn compute(buildings: &[BuildingInstance], imports: &[Flow]) -> BalanceReport {
         // Accumulate production and consumption rates per commodity.
         // We track them separately so we can detect "no source" (Impossible).
@@ -157,17 +159,15 @@ impl BalanceCalculator {
             let Some(recipe) = &inst.recipe else {
                 continue;
             };
-            let cycle = recipe.cycle_sols.max(1) as f64;
+            let cycle = f64::from(recipe.cycle_sols.max(1));
             for input in &recipe.inputs {
                 if input.quantity > 0.0 {
-                    *consumption.entry(input.id.clone()).or_default() +=
-                        input.quantity / cycle;
+                    *consumption.entry(input.id.clone()).or_default() += input.quantity / cycle;
                 }
             }
             for output in &recipe.outputs {
                 if output.quantity > 0.0 {
-                    *production.entry(output.id.clone()).or_default() +=
-                        output.quantity / cycle;
+                    *production.entry(output.id.clone()).or_default() += output.quantity / cycle;
                 }
             }
         }
@@ -223,9 +223,10 @@ impl BalanceCalculator {
         }
 
         // Pass 3: Trivial — every consumed commodity has a comfortable surplus.
-        let all_trivial = commodities.iter().filter(|cb| cb.consumption_rate > 0.0).all(
-            |cb| cb.net_rate >= TRIVIAL_SURPLUS_THRESHOLD,
-        );
+        let all_trivial = commodities
+            .iter()
+            .filter(|cb| cb.consumption_rate > 0.0)
+            .all(|cb| cb.net_rate >= TRIVIAL_SURPLUS_THRESHOLD);
 
         // Also trivial if there are no consumed commodities but production exists
         // (pure extractors with no downstream — nothing constraining).
@@ -309,7 +310,12 @@ mod tests {
     #[test]
     fn closed_chain_reports_closed() {
         let mine_recipe = make_recipe("mine_ore", "mine", vec![], vec![("ore", 10.0)]);
-        let smelt_recipe = make_recipe("smelt", "smelter", vec![("ore", 10.0)], vec![("plate", 5.0)]);
+        let smelt_recipe = make_recipe(
+            "smelt",
+            "smelter",
+            vec![("ore", 10.0)],
+            vec![("plate", 5.0)],
+        );
 
         let buildings = vec![
             instance("mine", Some(mine_recipe)),
@@ -345,7 +351,8 @@ mod tests {
     /// A smelter requires ore but there is no ore source.
     #[test]
     fn missing_input_reports_impossible() {
-        let smelt_recipe = make_recipe("smelt", "smelter", vec![("ore", 5.0)], vec![("plate", 2.0)]);
+        let smelt_recipe =
+            make_recipe("smelt", "smelter", vec![("ore", 5.0)], vec![("plate", 2.0)]);
 
         let buildings = vec![instance("smelter", Some(smelt_recipe))];
 
@@ -364,7 +371,8 @@ mod tests {
     #[test]
     fn large_surplus_reports_trivial() {
         let mine_recipe = make_recipe("mine_ore", "mine", vec![], vec![("ore", 100.0)]);
-        let smelt_recipe = make_recipe("smelt", "smelter", vec![("ore", 1.0)], vec![("plate", 1.0)]);
+        let smelt_recipe =
+            make_recipe("smelt", "smelter", vec![("ore", 1.0)], vec![("plate", 1.0)]);
 
         let buildings = vec![
             instance("mine", Some(mine_recipe)),
@@ -394,8 +402,18 @@ mod tests {
     #[test]
     fn choke_point_reports_bottleneck() {
         let mine_recipe = make_recipe("mine_ore", "mine", vec![], vec![("ore", 10.0)]);
-        let smelt1 = make_recipe("smelt_a", "smelter_a", vec![("ore", 8.0)], vec![("plate", 4.0)]);
-        let smelt2 = make_recipe("smelt_b", "smelter_b", vec![("ore", 8.0)], vec![("plate", 4.0)]);
+        let smelt1 = make_recipe(
+            "smelt_a",
+            "smelter_a",
+            vec![("ore", 8.0)],
+            vec![("plate", 4.0)],
+        );
+        let smelt2 = make_recipe(
+            "smelt_b",
+            "smelter_b",
+            vec![("ore", 8.0)],
+            vec![("plate", 4.0)],
+        );
 
         let buildings = vec![
             instance("mine", Some(mine_recipe)),
@@ -426,7 +444,8 @@ mod tests {
     /// The import makes it sustainable → Closed (ore net = import - consumption).
     #[test]
     fn import_satisfies_missing_input() {
-        let smelt_recipe = make_recipe("smelt", "smelter", vec![("ore", 5.0)], vec![("plate", 2.0)]);
+        let smelt_recipe =
+            make_recipe("smelt", "smelter", vec![("ore", 5.0)], vec![("plate", 2.0)]);
 
         let buildings = vec![instance("smelter", Some(smelt_recipe))];
         let imports = vec![Flow {
