@@ -1,0 +1,34 @@
+# Sample colony configuration for the balance harness.
+#
+# Usage:
+#   harness run content/base content/sample/colony.yaml
+#   harness run content/base content/sample/colony.yaml --json
+#
+# This colony runs a small iron-smelting + hydroponics loop.
+# Iron ore arrives via import; water also imported to feed the bay.
+
+buildings:
+  # One smelter converting imported iron ore into iron plates.
+  - building_id: smelter
+    recipe_id: smelt_iron
+
+  # One hydroponic bay growing food rations from water.
+  - building_id: hydroponic_bay
+    recipe_id: grow_rations
+
+  # A research lab consuming water to produce science.
+  - building_id: research_lab
+    recipe_id: conduct_research
+
+imports:
+  # Supply iron ore at rate needed to keep the smelter running.
+  # smelt_iron: 2 ore per 2-sol cycle = 1.0 ore/sol.
+  - commodity_id: iron_ore
+    rate: 1.0
+
+  # Supply water for both the hydroponic bay and the research lab.
+  # grow_rations: 3 water per 3-sol cycle = 1.0 water/sol
+  # conduct_research: 1 water per 1-sol cycle = 1.0 water/sol
+  # Total needed: 2.0 water/sol — import 2.0 to close the chain.
+  - commodity_id: water
+    rate: 2.0

@@ -76,7 +76,7 @@ pub struct BuildingInstance {
 // ─── Output types ─────────────────────────────────────────────────────────────
 
 /// Steady-state balance for one commodity across the full configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommodityBalance {
     /// Commodity identifier.
     pub commodity_id: String,
@@ -89,7 +89,7 @@ pub struct CommodityBalance {
 }
 
 /// Overall classification verdict for a colony/network configuration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BalanceVerdict {
     /// All commodity nets ≥ 0 and at least one is a binding constraint.
     Closed,
@@ -106,7 +106,7 @@ pub enum BalanceVerdict {
 }
 
 /// Full output of a [`BalanceCalculator::compute`] call.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BalanceReport {
     /// Per-commodity steady-state balances, sorted by commodity id.
     pub commodities: Vec<CommodityBalance>,
