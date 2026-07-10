@@ -2947,14 +2947,10 @@ impl GameEngine {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn build_victory_snapshot(&self) -> victory::VictorySnapshot {
         // Tech tree completion: all techs in registry must be researched.
-        let tech_tree_complete = self
-            .state
-            .tech_registry
-            .as_ref()
-            .is_some_and(|reg| {
-                reg.all()
-                    .all(|def| self.state.tech_state.is_researched(&def.id))
-            });
+        let tech_tree_complete = self.state.tech_registry.as_ref().is_some_and(|reg| {
+            reg.all()
+                .all(|def| self.state.tech_state.is_researched(&def.id))
+        });
 
         // Trade dominance volumes: every colony is considered player-controlled.
         // Total traded volume = sum of all TradeTransfer amounts recorded this turn.
@@ -2966,7 +2962,8 @@ impl GameEngine {
         // For the victory check we compute volumes from the live pools:
         // total_traded_volume tracks total held per commodity system-wide;
         // player_traded_volume equals total (all colonies are player-owned for now).
-        let mut total_traded: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut total_traded: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
         for colony in &self.state.colonies {
             for commodity_id in colony.pool.commodity_ids() {
                 let amt = colony.pool.amount(commodity_id);

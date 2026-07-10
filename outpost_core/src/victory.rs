@@ -59,10 +59,11 @@ impl VictoryCondition {
             VictoryCondition::ScienceMilestone { target_research } => {
                 format!("Accumulate {target_research} total research points")
             }
-            VictoryCondition::TechTreeComplete => {
-                "Complete the entire tech tree".to_string()
-            }
-            VictoryCondition::TradeDominance { commodity_id, share_pct } => {
+            VictoryCondition::TechTreeComplete => "Complete the entire tech tree".to_string(),
+            VictoryCondition::TradeDominance {
+                commodity_id,
+                share_pct,
+            } => {
                 format!("Control {share_pct:.0}% of traded {commodity_id} volume")
             }
         }
@@ -208,7 +209,11 @@ fn required_for(condition: &VictoryCondition) -> u64 {
 }
 
 /// Evaluate one condition against a snapshot. Returns `(current, satisfied)`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
 fn evaluate_condition(condition: &VictoryCondition, snapshot: &VictorySnapshot) -> (u64, bool) {
     match condition {
         VictoryCondition::InterstellarExpeditionLaunched => {
@@ -231,10 +236,25 @@ fn evaluate_condition(condition: &VictoryCondition, snapshot: &VictorySnapshot) 
             let v = u64::from(snapshot.tech_tree_complete);
             (v, snapshot.tech_tree_complete)
         }
-        VictoryCondition::TradeDominance { commodity_id, share_pct } => {
-            let total = snapshot.total_traded_volume.get(commodity_id.as_str()).copied().unwrap_or(0.0);
-            let player = snapshot.player_traded_volume.get(commodity_id.as_str()).copied().unwrap_or(0.0);
-            let actual_pct = if total > 0.0 { (player / total * 100.0) as u64 } else { 0 };
+        VictoryCondition::TradeDominance {
+            commodity_id,
+            share_pct,
+        } => {
+            let total = snapshot
+                .total_traded_volume
+                .get(commodity_id.as_str())
+                .copied()
+                .unwrap_or(0.0);
+            let player = snapshot
+                .player_traded_volume
+                .get(commodity_id.as_str())
+                .copied()
+                .unwrap_or(0.0);
+            let actual_pct = if total > 0.0 {
+                (player / total * 100.0) as u64
+            } else {
+                0
+            };
             let required_pct = *share_pct as u64;
             (actual_pct, actual_pct >= required_pct)
         }
@@ -248,22 +268,45 @@ fn evaluate_condition(condition: &VictoryCondition, snapshot: &VictorySnapshot) 
 #[serde(tag = "type", rename_all = "snake_case")]
 enum VictoryConditionYaml {
     InterstellarExpeditionLaunched,
-    EconomicMilestone { target_output: u64 },
-    PopulationMilestone { target_population: u64 },
-    ScienceMilestone { target_research: u64 },
+    EconomicMilestone {
+        target_output: u64,
+    },
+    PopulationMilestone {
+        target_population: u64,
+    },
+    ScienceMilestone {
+        target_research: u64,
+    },
     TechTreeComplete,
-    TradeDominance { commodity_id: String, share_pct: f32 },
+    TradeDominance {
+        commodity_id: String,
+        share_pct: f32,
+    },
 }
 
 impl From<VictoryConditionYaml> for VictoryCondition {
     fn from(y: VictoryConditionYaml) -> Self {
         match y {
-            VictoryConditionYaml::InterstellarExpeditionLaunched => Self::InterstellarExpeditionLaunched,
-            VictoryConditionYaml::EconomicMilestone { target_output } => Self::EconomicMilestone { target_output },
-            VictoryConditionYaml::PopulationMilestone { target_population } => Self::PopulationMilestone { target_population },
-            VictoryConditionYaml::ScienceMilestone { target_research } => Self::ScienceMilestone { target_research },
+            VictoryConditionYaml::InterstellarExpeditionLaunched => {
+                Self::InterstellarExpeditionLaunched
+            }
+            VictoryConditionYaml::EconomicMilestone { target_output } => {
+                Self::EconomicMilestone { target_output }
+            }
+            VictoryConditionYaml::PopulationMilestone { target_population } => {
+                Self::PopulationMilestone { target_population }
+            }
+            VictoryConditionYaml::ScienceMilestone { target_research } => {
+                Self::ScienceMilestone { target_research }
+            }
             VictoryConditionYaml::TechTreeComplete => Self::TechTreeComplete,
-            VictoryConditionYaml::TradeDominance { commodity_id, share_pct } => Self::TradeDominance { commodity_id, share_pct },
+            VictoryConditionYaml::TradeDominance {
+                commodity_id,
+                share_pct,
+            } => Self::TradeDominance {
+                commodity_id,
+                share_pct,
+            },
         }
     }
 }
@@ -444,7 +487,9 @@ mod tests {
         let conditions = vec![
             VictoryCondition::InterstellarExpeditionLaunched,
             VictoryCondition::EconomicMilestone { target_output: 1 },
-            VictoryCondition::PopulationMilestone { target_population: 1 },
+            VictoryCondition::PopulationMilestone {
+                target_population: 1,
+            },
             VictoryCondition::ScienceMilestone { target_research: 1 },
             VictoryCondition::TechTreeComplete,
             VictoryCondition::TradeDominance {
@@ -556,7 +601,9 @@ conditions:
         ));
         assert!(matches!(
             conditions[1],
-            VictoryCondition::PopulationMilestone { target_population: 10000 }
+            VictoryCondition::PopulationMilestone {
+                target_population: 10000
+            }
         ));
         assert!(matches!(conditions[2], VictoryCondition::TechTreeComplete));
         assert!(matches!(
