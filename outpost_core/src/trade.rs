@@ -105,7 +105,7 @@ pub struct TradeOverride {
     pub suppress_auto: bool,
     /// Optional per-turn quantity cap below the route throughput cap.
     ///
-    /// `None` means "no additional cap — use route throughput_cap".
+    /// `None` means "no additional cap — use route `throughput_cap`".
     pub cap: Option<f64>,
 }
 
@@ -230,18 +230,12 @@ pub fn run_trade_flow<P: TradePool>(
 
         for commodity in commodities {
             // Per-colony override checks.
-            let ov_a = network
-                .overrides
-                .get(&(route.colony_a, commodity.clone()));
-            let ov_b = network
-                .overrides
-                .get(&(route.colony_b, commodity.clone()));
+            let ov_a = network.overrides.get(&(route.colony_a, commodity.clone()));
+            let ov_b = network.overrides.get(&(route.colony_b, commodity.clone()));
 
             // If *either* endpoint suppresses auto-flow for this commodity,
             // skip the automatic transfer.
-            if ov_a.map_or(false, |o| o.suppress_auto)
-                || ov_b.map_or(false, |o| o.suppress_auto)
-            {
+            if ov_a.is_some_and(|o| o.suppress_auto) || ov_b.is_some_and(|o| o.suppress_auto) {
                 continue;
             }
 
@@ -265,7 +259,10 @@ pub fn run_trade_flow<P: TradePool>(
 
             // How much can we actually move?
             // Capped by: route throughput, available surplus, and any override cap.
-            let mut cap = route.throughput_cap.min(surplus).min(deficit_gap / 2.0 + surplus / 2.0);
+            let mut cap = route
+                .throughput_cap
+                .min(surplus)
+                .min(deficit_gap / 2.0 + surplus / 2.0);
 
             // If both values are positive, transfer half the difference to equalise.
             let transfer_ideal = (surplus - pools[to_idx].amount(commodity)) / 2.0;

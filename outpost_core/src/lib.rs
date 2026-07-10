@@ -43,9 +43,9 @@ use thiserror::Error;
 
 use colony::{ColonyId, ProjectId};
 use directive::DirectiveId;
-use trade::{SiteId, TradeOverride, TradeRoute};
 use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
 use needs::{apply_needs_check, apply_population_dynamics};
+use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
 
 /// Stability floor below which a predictive warning is emitted.
