@@ -26,6 +26,10 @@ pub use state::{new_state, AppState};
 /// Serve the web host on `config.host:config.port` until the process exits.
 ///
 /// Requires a tokio runtime (call from `#[tokio::main]` or `Runtime::block_on`).
+///
+/// # Errors
+///
+/// Returns an error if the address cannot be parsed or the TCP listener fails to bind.
 pub async fn serve(config: RuntimeConfig) -> anyhow::Result<()> {
     use std::net::SocketAddr;
 

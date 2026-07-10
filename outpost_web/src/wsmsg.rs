@@ -285,6 +285,7 @@ pub enum ServerEvent {
 
 impl ServerEvent {
     /// Convert a core [`Event`] into the stable [`ServerEvent`] wire format.
+    #[must_use]
     pub fn from_core(event: &Event) -> Self {
         match event {
             Event::ColonySolAdvanced { sol } => Self::ColonySolAdvanced { sol: *sol },
@@ -359,12 +360,10 @@ impl ServerEvent {
             Event::DirectiveRemoved { directive_id } => Self::DirectiveRemoved {
                 directive_id: directive_id.to_string(),
             },
-            Event::ManualOverrideChanged { colony_id, enabled } => {
-                Self::ManualOverrideChanged {
-                    colony_id: colony_id.to_string(),
-                    enabled: *enabled,
-                }
-            }
+            Event::ManualOverrideChanged { colony_id, enabled } => Self::ManualOverrideChanged {
+                colony_id: colony_id.to_string(),
+                enabled: *enabled,
+            },
             Event::DirectiveFired {
                 colony_id,
                 directive_id,
@@ -402,6 +401,7 @@ pub struct WorldSnapshot {
 }
 
 /// Build a [`ServerMessage::QueryResult`] from a core [`QueryResult`].
+#[must_use]
 pub fn query_result_message(seq: u64, result: QueryResult) -> ServerMessage {
     let payload = match result {
         QueryResult::Counter(v) => QueryResultPayload::Counter { value: v },

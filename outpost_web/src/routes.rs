@@ -31,7 +31,7 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-/// List all colonies (convenience REST endpoint — mirrors Query::ListColonies).
+/// List all colonies (convenience REST endpoint — mirrors `Query::ListColonies`).
 async fn list_colonies(State(state): State<AppState>) -> impl IntoResponse {
     use outpost_core::Query;
 
@@ -88,10 +88,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body =
-            axum::body::to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["app"], "outpost3");
     }
@@ -124,10 +123,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body =
-            axum::body::to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         // QueryResult::Counter(0) serialised
         assert!(json.get("Counter").is_some() || json.to_string().contains("0"));

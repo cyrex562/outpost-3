@@ -42,9 +42,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     Some(Ok(Message::Text(text))) => {
                         handle_client_message(&text, &state, &mut socket).await;
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => break,
                     Some(Ok(_)) => {}  // ping/pong/binary: ignore
-                    Some(Err(_)) => break,
                 }
             }
             broadcast = events.recv() => {
@@ -211,10 +210,7 @@ fn build_snapshot(state: &AppState) -> WorldSnapshot {
     }
 }
 
-async fn send_json(
-    socket: &mut WebSocket,
-    msg: &ServerMessage,
-) -> Result<(), axum::Error> {
+async fn send_json(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), axum::Error> {
     match serde_json::to_string(msg) {
         Ok(json) => socket.send(Message::Text(json)).await,
         Err(_) => Ok(()),

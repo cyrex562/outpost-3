@@ -24,6 +24,7 @@ pub struct AppStateInner {
 pub type AppState = Arc<AppStateInner>;
 
 /// Construct the shared state with a fresh [`GameEngine`].
+#[must_use]
 pub fn new_state(config: RuntimeConfig) -> AppState {
     let (tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
     Arc::new(AppStateInner {
