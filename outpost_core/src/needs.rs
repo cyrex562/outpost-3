@@ -80,6 +80,19 @@ pub struct NeedsConfig {
 
     /// Fractional population loss per turn when decline is active.
     pub decline_rate: f32,
+
+    /// Stability floor at or below which voluntary emigration is auto-triggered (`[0.0, 1.0]`).
+    ///
+    /// When a colony's stability drops to or below this value the engine queues a
+    /// small voluntary emigration batch each strategic month even without an open
+    /// emigration gate.  Defaults to `0.25`.
+    pub emigration_stability_floor: f32,
+
+    /// Fraction of population that voluntarily emigrates each strategic month when
+    /// stability is at or below [`emigration_stability_floor`].
+    ///
+    /// [`emigration_stability_floor`]: NeedsConfig::emigration_stability_floor
+    pub voluntary_emigration_rate: f32,
 }
 
 impl NeedsConfig {
@@ -123,6 +136,8 @@ impl NeedsConfig {
             growth_rate: 0.002,
             decline_stability_threshold: 0.30,
             decline_rate: 0.001,
+            emigration_stability_floor: 0.25,
+            voluntary_emigration_rate: 0.03,
         }
     }
 }
