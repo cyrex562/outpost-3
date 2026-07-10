@@ -251,6 +251,7 @@ impl Snapshot {
             sol,
             month,
             registry: None,
+            needs_config: None,
         })
     }
 

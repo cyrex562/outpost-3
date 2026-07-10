@@ -20,11 +20,13 @@
 //! - [`colony`]     — pooled commodities, slots, production chains
 //! - [`content`]    — content-pack loading for authored data
 //! - [`population`] — aggregate population pool, stability, labour derivation
+//! - [`needs`]      — per-turn needs resolution and stability dynamics
 
 #![warn(missing_docs)]
 
 pub mod colony;
 pub mod content;
+pub mod needs;
 pub mod population;
 pub mod snapshot;
 pub mod turn;
@@ -32,6 +34,7 @@ pub mod turn;
 use thiserror::Error;
 
 use colony::{ColonyId, ProjectId};
+use needs::{apply_needs_check, apply_population_dynamics};
 use turn::{GameState, TurnProcessor};
 
 /// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
@@ -222,6 +225,17 @@ pub enum Event {
         /// Number of labour units assigned.
         labour: u64,
     },
+    /// Needs resolution completed for a colony this sol.
+    NeedsResolved {
+        /// Colony where needs were checked.
+        colony_id: ColonyId,
+        /// Weighted composite satisfaction score, in `[0.0, 1.0]`.
+        composite_satisfaction: f32,
+        /// Stability change applied this sol.
+        stability_delta: f32,
+        /// Population change applied this sol (positive = growth, negative = loss).
+        population_delta: f32,
+    },
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -338,8 +352,48 @@ impl GameEngine {
                     }
                 }
 
-                // ── Step 2: Production ──────────────────────────────────────
-                // Only runs when a content registry is loaded. Shortfalls are
+                // ── Step 2: Needs resolution ────────────────────────────────
+                // Consume bulk commodities, update stability and population.
+                if let Some(config) = self.state.needs_config.clone() {
+                    for (colony, pop) in self
+                        .state
+                        .colonies
+                        .iter_mut()
+                        .zip(self.state.populations.iter_mut())
+                    {
+                        let population_count = f64::from(pop.count);
+                        let report =
+                            apply_needs_check(&mut colony.pool, population_count, &config);
+
+                        let housing_sat = report
+                            .needs
+                            .iter()
+                            .find(|n| n.commodity_id == "housing")
+                            .map_or(1.0, |n| n.satisfaction);
+
+                        let pop_delta = apply_population_dynamics(
+                            population_count,
+                            pop.stability,
+                            housing_sat,
+                            &config,
+                        );
+
+                        // Apply stability and population changes.
+                        pop.stability =
+                            (pop.stability + report.stability_delta).clamp(0.0, 1.0);
+                        pop.count = (pop.count + pop_delta).max(0.0);
+
+                        events.push(Event::NeedsResolved {
+                            colony_id: colony.id,
+                            composite_satisfaction: report.composite_satisfaction,
+                            stability_delta: report.stability_delta,
+                            population_delta: pop_delta,
+                        });
+                    }
+                }
+
+                // ── Step 3: Production ──────────────────────────────────────
+                // Only runs when a content registry is loaded.  Shortfalls are
                 // emitted as `ProductionShortfall` events; no crash on partial.
                 if let Some(registry) = &self.state.registry.clone() {
                     for (colony, pop) in self
