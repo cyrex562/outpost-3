@@ -15,6 +15,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::colony::Colony;
 use crate::content::ContentRegistry;
+use crate::needs::NeedsConfig;
 use crate::population::Population;
 
 /// Default number of colony-sols that constitute one strategic-month.
@@ -60,6 +61,11 @@ pub struct GameState {
     /// exercise cadence logic). Set this before calling [`TurnProcessor::advance`]
     /// to activate real production resolution.
     pub registry: Option<ContentRegistry>,
+    /// Needs configuration used for the per-turn needs resolution step.
+    ///
+    /// When `None`, the needs step is skipped. Set via [`GameState::with_needs`]
+    /// to enable stability dynamics.
+    pub needs_config: Option<NeedsConfig>,
 }
 
 impl GameState {
@@ -72,7 +78,13 @@ impl GameState {
             sol: 0,
             month: 0,
             registry: None,
+            needs_config: None,
         }
+    }
+
+    /// Enable the needs resolution step with the given configuration.
+    pub fn with_needs(&mut self, config: NeedsConfig) {
+        self.needs_config = Some(config);
     }
 
     /// Add a colony with the given starting population count.
@@ -160,9 +172,13 @@ impl TurnProcessor {
         // consistently across pipeline extensions).
         let _tick: u64 = rand::RngCore::next_u64(&mut self.rng);
 
-        // Apply population growth placeholder (full model in Phase 7).
-        for pop in &mut state.populations {
-            pop.apply_growth_tick();
+        // Placeholder growth tick when no needs config is loaded.
+        // When NeedsConfig is present, the caller (GameEngine::apply) runs the
+        // needs resolution step after this method returns so it can emit events.
+        if state.needs_config.is_none() {
+            for pop in &mut state.populations {
+                pop.apply_growth_tick();
+            }
         }
     }
 
