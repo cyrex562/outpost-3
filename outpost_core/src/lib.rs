@@ -921,6 +921,13 @@ pub enum Event {
         /// Population lost this hazard.
         population_lost: f32,
     },
+
+    // ── M2: Interrupt-source events ───────────────────────────────────────
+    /// A named hazard or environmental event was fired by the sim.
+    HazardFired {
+        /// Content-pack identifier of the event that fired.
+        event_id: interrupt::EventId,
+    },
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -1382,6 +1389,21 @@ impl GameEngine {
                             continue;
                         };
                         let pop = &self.state.populations[idx];
+                        // Build per-commodity snapshot for commodity predicates.
+                        let commodities = self.state.colonies[idx]
+                            .pool
+                            .commodity_ids()
+                            .map(|id| {
+                                let pool = &self.state.colonies[idx].pool;
+                                (
+                                    id.to_owned(),
+                                    predicate::CommoditySnapshot {
+                                        amount: pool.amount(id),
+                                        delta: pool.delta(id),
+                                    },
+                                )
+                            })
+                            .collect();
                         let ctx = predicate::PredicateContext {
                             colony_id,
                             population: pop.count,
@@ -1390,6 +1412,7 @@ impl GameEngine {
                             system_research: self.state.research_pool.total(),
                             sol: self.state.sol,
                             month: self.state.month,
+                            commodities,
                         };
                         if let Some((dir_id, action)) = self
                             .state
@@ -2044,6 +2067,12 @@ impl GameEngine {
                             telegraph: outcome.telegraph.clone(),
                             hazard_injection: outcome.hazard_injection.clone(),
                         });
+                        // Emit HazardFired so the interrupt system can surface it.
+                        if let Some(hazard_id) = &outcome.hazard_injection {
+                            events.push(Event::HazardFired {
+                                event_id: hazard_id.clone(),
+                            });
+                        }
                         if outcome.final_phase_reached {
                             events.push(Event::MenaceFinalPhaseReached { menace_id });
                         }
@@ -2669,6 +2698,39 @@ impl GameEngine {
                     InterruptSource::TechUnlocked,
                     None,
                     format!("Tech researched: {tech_id}"),
+                ));
+            }
+        }
+
+        // StabilityCritical — stability already at or below the crisis floor → Urgent.
+        for (colony, pop) in self
+            .state
+            .colonies
+            .iter()
+            .zip(self.state.populations.iter())
+        {
+            if pop.stability <= STABILITY_CRISIS_FLOOR {
+                interrupts.push(Interrupt::new(
+                    Tier::Urgent,
+                    InterruptSource::StabilityCritical(colony.id),
+                    Some(colony.id),
+                    format!(
+                        "Colony '{}': stability critical ({:.0}%)",
+                        colony.name,
+                        pop.stability * 100.0
+                    ),
+                ));
+            }
+        }
+
+        // EventFired — named hazard / environmental events → Urgent.
+        for ev in events {
+            if let Event::HazardFired { event_id } = ev {
+                interrupts.push(Interrupt::new(
+                    Tier::Urgent,
+                    InterruptSource::EventFired(event_id.clone()),
+                    None,
+                    format!("Hazard event fired: {event_id}"),
                 ));
             }
         }
@@ -5903,6 +5965,139 @@ mod tests {
         assert!(
             pop_a_after < pop_a_before,
             "colony A population should decrease; before={pop_a_before}, after={pop_a_after}"
+        );
+    }
+
+    // ── Issue #89: StabilityCritical, TechUnlocked, EventFired interrupt sources ──
+
+    /// Done-when: StabilityCritical fires when stability drops to or below 20%.
+    #[test]
+    fn stability_critical_interrupt_fires_at_floor() {
+        use crate::interrupt::{AdvanceResult, InterruptSource, Tier};
+
+        let mut engine = GameEngine::with_seed(89);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Crisis Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Force stability to the critical floor.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].stability = STABILITY_CRISIS_FLOOR;
+
+        let result = engine.advance_until_interrupted(10, Tier::Urgent).unwrap();
+
+        assert!(
+            matches!(result, AdvanceResult::Halted { .. }),
+            "expected Halted on StabilityCritical, got: {result:?}"
+        );
+        if let AdvanceResult::Halted { interrupt, .. } = result {
+            assert!(
+                matches!(
+                    interrupt.source,
+                    InterruptSource::StabilityCritical(cid) if cid == colony_id
+                ),
+                "expected StabilityCritical interrupt, got: {:?}",
+                interrupt.source
+            );
+            assert_eq!(interrupt.colony_id, Some(colony_id));
+        }
+    }
+
+    /// Done-when: StabilityCritical does NOT fire when stability is above the floor.
+    #[test]
+    fn stability_critical_does_not_fire_above_floor() {
+        use crate::interrupt::{AdvanceResult, InterruptSource, Tier};
+
+        let mut engine = GameEngine::with_seed(89);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Healthy Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Stability well above critical floor — no StabilityCritical interrupt.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].stability = 0.80;
+
+        let result = engine.advance_until_interrupted(3, Tier::Urgent).unwrap();
+
+        if let AdvanceResult::Halted { interrupt, .. } = &result {
+            assert!(
+                !matches!(interrupt.source, InterruptSource::StabilityCritical(_)),
+                "StabilityCritical must not fire when stability is above the floor"
+            );
+        }
+        // Completed is also fine (no halting interrupt at all).
+    }
+
+    /// Done-when: EventFired interrupt fires when a HazardFired event is emitted.
+    #[test]
+    fn event_fired_interrupt_on_hazard_event() {
+        use crate::interrupt::{AdvanceResult, InterruptSource, Tier};
+
+        let mut engine = GameEngine::with_seed(89);
+        engine
+            .apply(&Command::FoundColony {
+                name: "Hazard Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+
+        use crate::menace::{FinalSemantics, MenaceDefinition, MenacePhase};
+
+        let menace = MenaceDefinition {
+            id: "dust_storm".into(),
+            name: "Dust Storm".into(),
+            phases: vec![MenacePhase {
+                trigger_time: 0, // fires immediately on first tick
+                telegraph: "Dust storm incoming.".into(),
+                effects: vec![],
+                hazard_injection: Some("dust_storm_phase1".into()),
+            }],
+            final_semantics: FinalSemantics::ProductionCollapse,
+        };
+        engine.state.menace_state = Some(crate::menace::MenaceState::new(menace));
+
+        // Tick the menace — should emit MenacePhaseTriggered + HazardFired.
+        let tick_events = engine.apply(&Command::TickMenace).unwrap();
+        assert!(
+            tick_events.iter().any(
+                |e| matches!(e, Event::HazardFired { event_id } if event_id == "dust_storm_phase1")
+            ),
+            "TickMenace with hazard_injection must emit HazardFired"
+        );
+
+        // Verify collect_turn_interrupts directly:
+        let interrupts = engine.collect_turn_interrupts(&tick_events);
+        assert!(
+            interrupts
+                .iter()
+                .any(|i| matches!(&i.source, InterruptSource::EventFired(id) if id == "dust_storm_phase1")),
+            "collect_turn_interrupts must surface EventFired for HazardFired events; interrupts: {interrupts:?}"
         );
     }
 }

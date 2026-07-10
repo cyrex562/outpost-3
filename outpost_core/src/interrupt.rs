@@ -54,7 +54,7 @@ pub enum InterruptSource {
     /// A tech node was unlocked.
     TechUnlocked,
     /// The colony's stability dropped below the critical floor.
-    StabilityCritical,
+    StabilityCritical(ColonyId),
 }
 
 /// A single interrupt emitted during turn processing.
