@@ -1,16 +1,32 @@
 //! Outpost 3 balance harness CLI.
 //!
-//! Usage: `harness run <pack_dir> <colony_config> [--json]`
+//! # Subcommands
+//!
+//! ## `harness run <pack_dir> <colony_config> [--json]`
 //!
 //! Loads a content pack and a colony configuration, runs the static
 //! flow-balance calculator, then prints either a human-readable report
 //! or machine-readable JSON.
 //!
-//! Exit codes:
+//! Exit codes for `run`:
 //! - 0 — Closed (sustainable, at least one binding constraint)
 //! - 1 — Bottleneck or Trivial
 //! - 2 — Impossible (structurally broken chain)
 //! - 3 — Error (bad args, missing files, parse failure)
+//!
+//! ## `harness check <bundle_dir> [--json]`
+//!
+//! Loads a self-contained bundle directory containing:
+//! - Content pack files (`pack.yaml`, `commodities.yaml`, etc.)
+//! - `colony.yaml` — colony configuration
+//! - `assertions.yaml` — list of pass/fail assertions
+//!
+//! Runs the balance calculator, checks each assertion, and prints PASS/FAIL.
+//!
+//! Exit codes for `check`:
+//! - 0 — all assertions passed
+//! - 1 — one or more assertions failed
+//! - 2 — error (missing files, parse failure)
 
 use std::process;
 
@@ -20,7 +36,9 @@ use outpost_core::balance::{
 use outpost_core::content::loader::{PackLoader, RawFile};
 use outpost_core::content::registry::ContentRegistry;
 
+mod assertions;
 mod config;
+use assertions::{check_assertions, Assertion, AssertionResult};
 use config::ColonyConfig;
 
 fn main() {
@@ -33,19 +51,31 @@ fn main() {
     }
 }
 
-/// Top-level entry: parse args, load data, compute, report.
+/// Top-level entry: parse args, dispatch subcommand.
 ///
 /// Returns the process exit code on success, or an error string.
 fn run() -> Result<i32, String> {
     let args: Vec<String> = std::env::args().collect();
 
-    // Parse: harness run <pack_dir> <colony_config> [--json]
-    if args.len() < 2 || args[1] != "run" {
+    if args.len() < 2 {
         return Err(format!(
-            "usage: {} run <pack_dir> <colony_config> [--json]",
+            "usage: {} <run|check> ...\n  run   <pack_dir> <colony_config> [--json]\n  check <bundle_dir> [--json]",
             args[0]
         ));
     }
+
+    match args[1].as_str() {
+        "run" => run_subcommand(&args),
+        "check" => check_subcommand(&args),
+        other => Err(format!(
+            "unknown subcommand '{other}'. usage: {} <run|check>",
+            args[0]
+        )),
+    }
+}
+
+/// `harness run <pack_dir> <colony_config> [--json]`
+fn run_subcommand(args: &[String]) -> Result<i32, String> {
     if args.len() < 4 {
         return Err(format!(
             "usage: {} run <pack_dir> <colony_config> [--json]",
@@ -90,6 +120,107 @@ fn run() -> Result<i32, String> {
     }
 
     Ok(exit_code)
+}
+
+/// `harness check <bundle_dir> [--json]`
+///
+/// A bundle directory contains:
+/// - Content pack files (`pack.yaml`, `commodities.yaml`, `buildings.yaml`, `recipes.yaml`)
+/// - `colony.yaml` — colony configuration (same schema as used by `run`)
+/// - `assertions.yaml` — list of assertions to check
+///
+/// Exit codes:
+/// - 0 — all assertions passed
+/// - 1 — one or more assertions failed
+/// - 2 — error (missing files, parse failure)
+fn check_subcommand(args: &[String]) -> Result<i32, String> {
+    if args.len() < 3 {
+        return Err(format!("usage: {} check <bundle_dir> [--json]", args[0]));
+    }
+
+    let bundle_dir = &args[2];
+    let json_mode = args.iter().any(|a| a == "--json");
+
+    let dir = std::path::Path::new(bundle_dir);
+    if !dir.is_dir() {
+        return Err(format!("bundle directory not found: {bundle_dir}"));
+    }
+
+    // Load content pack from bundle dir.
+    let registry = load_pack(bundle_dir)?;
+
+    // Load colony config from bundle dir.
+    let colony_path = dir.join("colony.yaml");
+    if !colony_path.exists() {
+        return Err(format!("bundle missing colony.yaml in {bundle_dir}"));
+    }
+    let colony_config = load_colony_config(colony_path.to_str().ok_or("invalid path")?)?;
+
+    // Load assertions.
+    let assertions_path = dir.join("assertions.yaml");
+    if !assertions_path.exists() {
+        return Err(format!("bundle missing assertions.yaml in {bundle_dir}"));
+    }
+    let assertions_text = std::fs::read_to_string(&assertions_path)
+        .map_err(|e| format!("failed to read assertions.yaml: {e}"))?;
+    let assertion_list: Vec<Assertion> = serde_yaml::from_str(&assertions_text)
+        .map_err(|e| format!("invalid assertions.yaml: {e}"))?;
+
+    // Resolve instances and run calculator.
+    let building_instances = resolve_instances(&colony_config, &registry)?;
+    let imports: Vec<Flow> = colony_config
+        .imports
+        .iter()
+        .map(|imp| Flow {
+            commodity_id: imp.commodity_id.clone(),
+            rate: imp.rate,
+        })
+        .collect();
+    let report = BalanceCalculator::compute(&building_instances, &imports);
+
+    // Check assertions.
+    let results = check_assertions(&assertion_list, &report);
+
+    let all_passed = results.iter().all(|r| r.passed);
+
+    if json_mode {
+        print_check_json(&results)?;
+    } else {
+        print_check_human(&results, all_passed);
+    }
+
+    Ok(i32::from(!all_passed))
+}
+
+/// Print check results as JSON array.
+fn print_check_json(results: &[AssertionResult]) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(results)
+        .map_err(|e| format!("failed to serialize results: {e}"))?;
+    println!("{json}");
+    Ok(())
+}
+
+/// Print check results in human-readable form.
+fn print_check_human(results: &[AssertionResult], all_passed: bool) {
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║                  ASSERTION CHECK RESULTS                    ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    for r in results {
+        let status = if r.passed { "PASS" } else { "FAIL" };
+        println!("  [{status}] {}: {}", r.label, r.message);
+    }
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    let summary = if all_passed {
+        format!("  Overall: PASS ({} assertion(s) passed)", results.len())
+    } else {
+        let failed = results.iter().filter(|r| !r.passed).count();
+        format!(
+            "  Overall: FAIL ({failed}/{} assertion(s) failed)",
+            results.len()
+        )
+    };
+    println!("{summary}");
+    println!("╚══════════════════════════════════════════════════════════════╝");
 }
 
 /// Load and parse a content pack from the given directory path.
@@ -405,6 +536,196 @@ version: '0.1.0'
     fn load_pack_rejects_missing_directory() {
         let err = load_pack("/nonexistent/dir/xyz").unwrap_err();
         assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[test]
+    fn check_subcommand_missing_bundle_dir_returns_error() {
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "check".into(),
+            "/nonexistent/bundle/xyz".into(),
+        ];
+        let err = check_subcommand(&args).unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[test]
+    fn check_subcommand_missing_colony_yaml_returns_error() {
+        // Use a temp dir with pack files but no colony.yaml
+        let tmp = std::env::temp_dir().join("outpost_check_test_no_colony");
+        std::fs::create_dir_all(&tmp).unwrap();
+        // Write a minimal pack.yaml so load_pack succeeds
+        std::fs::write(tmp.join("pack.yaml"), "id: t\nname: T\nversion: '0.1.0'\n").unwrap();
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "check".into(),
+            tmp.to_str().unwrap().to_string(),
+        ];
+        let err = check_subcommand(&args).unwrap_err();
+        assert!(err.contains("colony.yaml"), "got: {err}");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn check_subcommand_all_pass_returns_zero() {
+        use std::fs;
+
+        let tmp = std::env::temp_dir().join("outpost_check_test_all_pass");
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("pack.yaml"), "id: t\nname: T\nversion: '0.1.0'\n").unwrap();
+        fs::write(
+            tmp.join("commodities.yaml"),
+            "- id: ore\n  name: Ore\n  category: raw\n  base_value: 1.0\n\
+             - id: plate\n  name: Plate\n  category: metal\n  base_value: 3.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("buildings.yaml"),
+            "- id: smelter\n  name: Smelter\n  category: production\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("recipes.yaml"),
+            "- id: smelt\n  name: Smelt\n  building: smelter\n  cycle_sols: 1\n  \
+             inputs:\n    - id: ore\n      quantity: 2.0\n  \
+             outputs:\n    - id: plate\n      quantity: 1.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("colony.yaml"),
+            "buildings:\n  - building_id: smelter\n    recipe_id: smelt\n\
+             imports:\n  - commodity_id: ore\n    rate: 2.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("assertions.yaml"),
+            "- commodity: plate\n  expect: closed\n- expect: closed\n",
+        )
+        .unwrap();
+
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "check".into(),
+            tmp.to_str().unwrap().to_string(),
+        ];
+        let code = check_subcommand(&args).expect("should succeed");
+        assert_eq!(code, 0, "all assertions should pass");
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn check_subcommand_failing_assertion_returns_one() {
+        use std::fs;
+
+        let tmp = std::env::temp_dir().join("outpost_check_test_fail");
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("pack.yaml"), "id: t\nname: T\nversion: '0.1.0'\n").unwrap();
+        fs::write(
+            tmp.join("commodities.yaml"),
+            "- id: ore\n  name: Ore\n  category: raw\n  base_value: 1.0\n\
+             - id: plate\n  name: Plate\n  category: metal\n  base_value: 3.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("buildings.yaml"),
+            "- id: smelter\n  name: Smelter\n  category: production\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("recipes.yaml"),
+            "- id: smelt\n  name: Smelt\n  building: smelter\n  cycle_sols: 1\n  \
+             inputs:\n    - id: ore\n      quantity: 2.0\n  \
+             outputs:\n    - id: plate\n      quantity: 1.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("colony.yaml"),
+            // Only 1.0 ore imported — deficit → Bottleneck
+            "buildings:\n  - building_id: smelter\n    recipe_id: smelt\n\
+             imports:\n  - commodity_id: ore\n    rate: 1.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("assertions.yaml"),
+            // Expects closed overall — but it's a bottleneck → should fail
+            "- expect: closed\n  label: overall-should-fail\n",
+        )
+        .unwrap();
+
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "check".into(),
+            tmp.to_str().unwrap().to_string(),
+        ];
+        let code = check_subcommand(&args).expect("should run without error");
+        assert_eq!(code, 1, "failing assertion should return exit code 1");
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn check_subcommand_json_output_is_valid() {
+        use std::fs;
+
+        let tmp = std::env::temp_dir().join("outpost_check_test_json");
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("pack.yaml"), "id: t\nname: T\nversion: '0.1.0'\n").unwrap();
+        fs::write(
+            tmp.join("commodities.yaml"),
+            "- id: ore\n  name: Ore\n  category: raw\n  base_value: 1.0\n\
+             - id: plate\n  name: Plate\n  category: metal\n  base_value: 3.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("buildings.yaml"),
+            "- id: smelter\n  name: Smelter\n  category: production\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("recipes.yaml"),
+            "- id: smelt\n  name: Smelt\n  building: smelter\n  cycle_sols: 1\n  \
+             inputs:\n    - id: ore\n      quantity: 2.0\n  \
+             outputs:\n    - id: plate\n      quantity: 1.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("colony.yaml"),
+            "buildings:\n  - building_id: smelter\n    recipe_id: smelt\n\
+             imports:\n  - commodity_id: ore\n    rate: 2.0\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("assertions.yaml"),
+            "- commodity: plate\n  expect: closed\n",
+        )
+        .unwrap();
+
+        // Build the results manually to test JSON serialisation
+        let registry = load_pack(tmp.to_str().unwrap()).unwrap();
+        let colony = load_colony_config(tmp.join("colony.yaml").to_str().unwrap()).unwrap();
+        let instances = resolve_instances(&colony, &registry).unwrap();
+        let imports: Vec<outpost_core::balance::Flow> = colony
+            .imports
+            .iter()
+            .map(|i| outpost_core::balance::Flow {
+                commodity_id: i.commodity_id.clone(),
+                rate: i.rate,
+            })
+            .collect();
+        let report = outpost_core::balance::BalanceCalculator::compute(&instances, &imports);
+        let assertion_list: Vec<crate::assertions::Assertion> =
+            serde_yaml::from_str("- commodity: plate\n  expect: closed\n").unwrap();
+        let results = crate::assertions::check_assertions(&assertion_list, &report);
+        let json_str = serde_json::to_string_pretty(&results).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert!(parsed.is_array());
+        assert_eq!(parsed.as_array().unwrap().len(), 1);
+
+        fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]

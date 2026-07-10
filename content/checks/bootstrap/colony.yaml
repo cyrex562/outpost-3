@@ -1,0 +1,12 @@
+# Colony configuration for the bootstrap balance check.
+#
+# One smelter running smelt_iron, fed by an iron_ore import.
+# The import rate exactly covers the smelter's consumption (2 ore / 2 sols = 1/sol),
+# so iron_ore net is 0 (EXACT) and iron_plate has a net surplus of 0.5/sol.
+buildings:
+  - building_id: smelter
+    recipe_id: smelt_iron
+
+imports:
+  - commodity_id: iron_ore
+    rate: 1.0   # units per sol

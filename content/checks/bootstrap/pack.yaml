@@ -1,0 +1,6 @@
+id: bootstrap-check
+name: Bootstrap Balance Check
+version: '0.1.0'
+description: >
+  Canonical example bundle for `harness check`.
+  Demonstrates a minimal iron-smelting commodity chain.

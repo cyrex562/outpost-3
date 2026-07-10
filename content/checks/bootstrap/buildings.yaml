@@ -1,0 +1,4 @@
+# Buildings used in the bootstrap balance check.
+- id: smelter
+  name: Smelter
+  category: production
