@@ -73,6 +73,7 @@ pub struct ModifierAccumulator {
 
 impl ModifierAccumulator {
     /// Create an empty accumulator.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -83,6 +84,7 @@ impl ModifierAccumulator {
     }
 
     /// Sum all descriptors for `quantity` that belong to `category`.
+    #[must_use]
     pub fn additive_sum(&self, quantity: &ModifiableQuantity, category: &str) -> f32 {
         self.descriptors
             .iter()
@@ -92,6 +94,7 @@ impl ModifierAccumulator {
     }
 
     /// Sum all descriptors for `quantity` across all categories.
+    #[must_use]
     pub fn total_sum(&self, quantity: &ModifiableQuantity) -> f32 {
         self.descriptors
             .iter()
@@ -113,6 +116,7 @@ pub struct DifficultyScalar {
 
 impl DifficultyScalar {
     /// Create with no overrides (all quantities default to scalar `1.0`).
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -123,6 +127,7 @@ impl DifficultyScalar {
     }
 
     /// Return the scalar for a quantity (`1.0` if not set).
+    #[must_use]
     pub fn scalar_for(&self, quantity: &ModifiableQuantity) -> f32 {
         self.scalars.get(quantity).copied().unwrap_or(1.0)
     }
@@ -134,6 +139,7 @@ impl DifficultyScalar {
 /// `effective = base × (1 + Σ tech_bonuses) × difficulty_scalar`.
 ///
 /// This is the **single authoritative** computation point for modifier resolution.
+#[must_use]
 pub fn resolve(
     base: f32,
     quantity: &ModifiableQuantity,
@@ -165,10 +171,7 @@ mod tests {
         let difficulty = DifficultyScalar::new();
         let result = resolve(1.0, &qty(), &accum, &difficulty);
         // Expected: 1.0 × (1 + 0.60) × 1.0 = 1.60  (not 1.20^3 = 1.728)
-        assert!(
-            (result - 1.60).abs() < 1e-4,
-            "expected 1.60 got {result}"
-        );
+        assert!((result - 1.60).abs() < 1e-4, "expected 1.60 got {result}");
     }
 
     /// Bonuses in different categories still accumulate additively in the total sum.
