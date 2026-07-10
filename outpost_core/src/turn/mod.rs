@@ -29,6 +29,7 @@ use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
+use crate::system::SystemState;
 use crate::tech::TechEffect;
 use crate::tech::{TechRegistry, TechState};
 use crate::trade::TradeNetwork;
@@ -57,6 +58,21 @@ pub struct TurnOutcome {
     pub month: u64,
     /// Tech IDs that completed during this strategic month (empty if no month fired).
     pub completed_techs: Vec<String>,
+    /// Cargo delivery events produced during the strategic-month pipeline (empty on colony-sol-only turns).
+    pub cargo_delivered: Vec<CargoDeliveryRecord>,
+}
+
+/// A record of one commodity quantity delivered to a colony pool during a strategic month.
+#[derive(Debug, Clone)]
+pub struct CargoDeliveryRecord {
+    /// Shipment that arrived.
+    pub shipment_id: uuid::Uuid,
+    /// Colony that received the cargo.
+    pub colony_id: ColonyId,
+    /// Commodity deposited.
+    pub commodity_id: String,
+    /// Amount deposited.
+    pub amount: f64,
 }
 
 /// Top-level in-memory game state.
@@ -130,6 +146,8 @@ pub struct GameState {
     pub unlocked_commodities: HashSet<String>,
     /// Accumulated numeric tech bonuses (additive, per category).
     pub modifier_accumulator: ModifierAccumulator,
+    /// System-zoom layer state: node map, hauler fleet, in-transit shipments, megaprojects.
+    pub system_state: SystemState,
 }
 
 impl GameState {
@@ -163,6 +181,7 @@ impl GameState {
             unlocked_capabilities: HashSet::new(),
             unlocked_commodities: HashSet::new(),
             modifier_accumulator: ModifierAccumulator::new(),
+            system_state: SystemState::new(),
         }
     }
 
@@ -230,14 +249,16 @@ impl TurnProcessor {
     pub fn advance(&mut self, state: &mut GameState) -> TurnOutcome {
         state.sol += 1;
         let mut cadences_fired = vec![TurnCadence::ColonySol];
-
         self.run_colony_sol_pipeline(state);
 
         let mut completed_techs = Vec::new();
+        let mut cargo_delivered = Vec::new();
         if state.sol.is_multiple_of(self.sols_per_month) {
             state.month += 1;
             cadences_fired.push(TurnCadence::StrategicMonth);
-            completed_techs = Self::run_strategic_month_pipeline(state);
+            let result = Self::run_strategic_month_pipeline(state);
+            completed_techs = result.0;
+            cargo_delivered = result.1;
         }
 
         TurnOutcome {
@@ -245,6 +266,7 @@ impl TurnProcessor {
             sol: state.sol,
             month: state.month,
             completed_techs,
+            cargo_delivered,
         }
     }
 
@@ -291,8 +313,10 @@ impl TurnProcessor {
 
     /// Strategic-month sub-pipeline.
     ///
-    /// Returns the IDs of techs completed this month (may be empty).
-    fn run_strategic_month_pipeline(state: &mut GameState) -> Vec<String> {
+    /// Returns `(completed_tech_ids, cargo_delivery_records)`.
+    fn run_strategic_month_pipeline(
+        state: &mut GameState,
+    ) -> (Vec<String>, Vec<CargoDeliveryRecord>) {
         let mut completed_techs = Vec::new();
 
         // Drain research pool into tech progress if a registry is loaded.
@@ -337,7 +361,50 @@ impl TurnProcessor {
             }
         }
 
-        completed_techs
+        // ── Cargo shipment delivery ───────────────────────────────────────
+        // Decrement turns_remaining on all in-transit shipments, collect
+        // those that have arrived (turns_remaining reaches zero).
+        let mut arrived_ids: Vec<uuid::Uuid> = Vec::new();
+        for (id, shipment) in &mut state.system_state.shipments {
+            if shipment.turns_remaining > 0 {
+                shipment.turns_remaining -= 1;
+            }
+            if shipment.turns_remaining == 0 {
+                arrived_ids.push(*id);
+            }
+        }
+
+        let mut delivery_records: Vec<CargoDeliveryRecord> = Vec::new();
+        for id in arrived_ids {
+            let arrived = state.system_state.shipments.remove(&id).unwrap();
+
+            // Release hauler.
+            if let Some(hauler) = state
+                .system_state
+                .hauler_fleet
+                .haulers
+                .get_mut(&arrived.hauler_id)
+            {
+                hauler.in_transit = false;
+            }
+
+            // Credit destination colony pool for each cargo line.
+            if let Some(colony_id) = arrived.destination_colony {
+                if let Some(colony) = state.colonies.iter_mut().find(|c| c.id == colony_id) {
+                    for (commodity_id, amount) in &arrived.cargo {
+                        colony.pool.deposit(commodity_id, *amount);
+                        delivery_records.push(CargoDeliveryRecord {
+                            shipment_id: arrived.id,
+                            colony_id,
+                            commodity_id: commodity_id.clone(),
+                            amount: *amount,
+                        });
+                    }
+                }
+            }
+        }
+
+        (completed_techs, delivery_records)
     }
 }
 
@@ -597,5 +664,100 @@ mod tests {
             outcome.completed_techs.contains(&tech_id),
             "outcome should list completed tech id"
         );
+    }
+
+    /// Issue #86: a shipment with ETA=1 strategic month delivers to colony pool.
+    #[test]
+    fn cargo_shipment_delivered_to_colony_pool_after_one_month() {
+        use crate::system::{apply_system_command, BodyKind, SystemCommand};
+
+        let mut state = GameState::new();
+        let colony = Colony::new("Depot");
+        let colony_id = colony.id;
+        state.add_colony(colony, 100);
+
+        // Set up two bodies in the system state.
+        let sys = &mut state.system_state;
+        let evs_a = apply_system_command(
+            sys,
+            &SystemCommand::AddBody {
+                name: "Alpha".into(),
+                kind: BodyKind::InnerPlanet,
+                distance_au: 0.0,
+            },
+        )
+        .unwrap();
+        let evs_b = apply_system_command(
+            sys,
+            &SystemCommand::AddBody {
+                name: "Beta".into(),
+                kind: BodyKind::InnerPlanet,
+                distance_au: 1.0,
+            },
+        )
+        .unwrap();
+        let body_a = match &evs_a[0] {
+            crate::system::SystemEvent::BodyAdded { body_id, .. } => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        };
+        let body_b = match &evs_b[0] {
+            crate::system::SystemEvent::BodyAdded { body_id, .. } => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        };
+        apply_system_command(
+            sys,
+            &SystemCommand::AddShippingRoute {
+                from: body_a.clone(),
+                to: body_b.clone(),
+            },
+        )
+        .unwrap();
+        apply_system_command(sys, &SystemCommand::AddHauler { capacity: 100.0 }).unwrap();
+
+        // Dispatch a shipment of 50 iron destined for the colony pool.
+        // Bodies 1 AU apart → travel_time = 1 strategic month.
+        apply_system_command(
+            &mut state.system_state,
+            &SystemCommand::DispatchShipment {
+                from: body_a,
+                to: body_b,
+                cargo: vec![("iron".to_string(), 50.0)],
+                destination_colony: Some(colony_id),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.system_state.shipments.len(),
+            1,
+            "shipment should be in-transit"
+        );
+
+        // Advance 30 sols (1 strategic month). Delivery fires on the strategic-month pipeline.
+        let mut proc = TurnProcessor::new(0);
+        let mut delivery_records = Vec::new();
+        for _ in 0..DEFAULT_SOLS_PER_MONTH {
+            let out = proc.advance(&mut state);
+            delivery_records.extend(out.cargo_delivered);
+        }
+
+        // Shipment should have been removed.
+        assert!(
+            state.system_state.shipments.is_empty(),
+            "shipment should be removed after delivery"
+        );
+
+        // Colony pool should have been credited.
+        let amount = state.colonies[0].pool.amount("iron");
+        assert!(
+            (amount - 50.0).abs() < f64::EPSILON,
+            "colony pool should have 50 iron after delivery, got {amount}"
+        );
+
+        // Delivery records should contain one entry for 50 iron.
+        assert_eq!(delivery_records.len(), 1);
+        assert_eq!(delivery_records[0].colony_id, colony_id);
+        assert_eq!(delivery_records[0].commodity_id, "iron");
+        assert!((delivery_records[0].amount - 50.0).abs() < f64::EPSILON);
     }
 }

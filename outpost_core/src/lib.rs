@@ -715,6 +715,18 @@ pub enum Event {
     /// The research queue and current project were cleared.
     ResearchCancelled,
 
+    /// A cargo shipment arrived and its contents were credited to the destination colony pool.
+    CargoDelivered {
+        /// Stable identifier of the shipment that arrived.
+        shipment_id: uuid::Uuid,
+        /// Colony whose pool was credited.
+        colony_id: ColonyId,
+        /// Commodity that was deposited.
+        commodity_id: String,
+        /// Quantity deposited into the colony pool.
+        amount: f64,
+    },
+
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -828,6 +840,15 @@ impl GameEngine {
                     // Emit TechUnlocked for each completed tech this month.
                     for tech_id in outcome.completed_techs {
                         events.push(Event::TechUnlocked { tech_id });
+                    }
+                    // Emit one CargoDelivered event per commodity line per shipment.
+                    for record in outcome.cargo_delivered {
+                        events.push(Event::CargoDelivered {
+                            shipment_id: record.shipment_id,
+                            colony_id: record.colony_id,
+                            commodity_id: record.commodity_id,
+                            amount: record.amount,
+                        });
                     }
                 }
                 // ── Step 1: Construction ────────────────────────────────────
