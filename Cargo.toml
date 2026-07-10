@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "outpost_core",
+    "outpost_harness",
 ]
 resolver = "2"
 
