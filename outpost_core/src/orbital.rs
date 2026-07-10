@@ -767,7 +767,7 @@ mod tests {
         assert_eq!(project.months_remaining, 3);
         assert!(!project.tick()); // month 2 remaining
         assert!(!project.tick()); // month 1 remaining
-        assert!(project.tick());  // completes at 0
+        assert!(project.tick()); // completes at 0
         assert_eq!(project.months_remaining, 0);
     }
 

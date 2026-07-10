@@ -996,7 +996,9 @@ pub enum EngineError {
     #[error("project not found: {0}")]
     ProjectNotFound(ProjectId),
     /// The colony pool does not hold enough of a required commodity to start construction.
-    #[error("insufficient resources: need {needed} of '{commodity}' but only {available} available")]
+    #[error(
+        "insufficient resources: need {needed} of '{commodity}' but only {available} available"
+    )]
     InsufficientResources {
         /// Commodity that is short.
         commodity: String,
@@ -2083,7 +2085,8 @@ impl GameEngine {
                 // Validate that the colony pool can cover all commodity costs.
                 for (commodity_id, qty) in &blueprint.commodity_costs {
                     #[allow(clippy::cast_possible_truncation)]
-                    let available = self.state.colonies[colony_idx].pool.amount(commodity_id) as f32;
+                    let available =
+                        self.state.colonies[colony_idx].pool.amount(commodity_id) as f32;
                     if available < *qty {
                         return Err(EngineError::InsufficientResources {
                             commodity: commodity_id.clone(),
@@ -6439,8 +6442,14 @@ mod tests {
 
         // Advance sol 1 → strategic month 1 → months_remaining decrements to 1.
         let ev1 = engine.apply(&Command::AdvanceColonySol).unwrap();
-        assert_eq!(engine.state.orbital_construction_queue.len(), 1, "still in queue after month 1");
-        assert!(!ev1.iter().any(|e| matches!(e, Event::OrbitalStationCompleted { .. })));
+        assert_eq!(
+            engine.state.orbital_construction_queue.len(),
+            1,
+            "still in queue after month 1"
+        );
+        assert!(!ev1
+            .iter()
+            .any(|e| matches!(e, Event::OrbitalStationCompleted { .. })));
 
         // Advance sol 2 → strategic month 2 → months_remaining hits 0 → station placed.
         let ev2 = engine.apply(&Command::AdvanceColonySol).unwrap();
