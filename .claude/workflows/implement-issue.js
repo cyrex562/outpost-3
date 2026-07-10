@@ -16,8 +16,18 @@ const OWNER = 'cyrex562'
 const REPO = 'outpost-3'
 const DEFAULT_BRANCH = 'main'
 
-// Phase label priority order — earlier phases block later ones
+// Milestone label priority order — earlier milestones block later ones
 const PHASE_ORDER = [
+  'M1',
+  'M2',
+  'M3',
+  'M4',
+  'M5',
+  'M6',
+  'M7',
+  'M8',
+  'M9',
+  // Legacy phase labels (all closed)
   'phase-1-core',
   'phase-2-colony',
   'phase-3-harness',
@@ -33,18 +43,17 @@ const PHASE_ORDER = [
 ]
 
 // Issue numbers that must be closed before a phase can start
+// M-series milestones have no hard gates — all M1 issues can proceed immediately
 const PHASE_GATES = {
-  'phase-2-colony':       [7, 8, 9, 10, 11],
-  'phase-3-harness':      [12, 14],
-  'phase-4-control':      [16, 15],
-  'phase-4b-tech':        [17, 9],
-  'phase-5-planet':       [16],
-  'phase-6-ui':           [10],
-  'phase-7-pop-events':   [23],
-  'phase-8-orbital-system': [],
-  'phase-9-expeditions':  [],
-  'phase-10-endgame':     [25],
-  'phase-11-ci':          [7],
+  'M1': [],
+  'M2': [],
+  'M3': [],
+  'M4': [],
+  'M5': [],
+  'M6': [],
+  'M7': [],
+  'M8': [],
+  'M9': [],
 }
 
 // ---------------------------------------------------------------------------
@@ -105,9 +114,9 @@ Phase gates (issue numbers that must be CLOSED before starting a later phase):
 ${JSON.stringify(PHASE_GATES, null, 2)}
 
 Steps:
-1. Use the GitHub MCP tool (mcp__github__list_issues) to list open issues for ${OWNER}/${REPO}.
-2. ${targetIssue ? `Find issue #${targetIssue}.` : 'Apply the phase priority and dependency rules to select the best candidate.'}
-3. Check the PHASE_GATES: if any gate issues for this issue's phase are still open, set can_proceed=false and explain in block_reason.
+1. Use the GitHub MCP tool (mcp__github__list_issues) to list open issues for ${OWNER}/${REPO}. The new issues use milestone labels M1–M9 (not phase-N-* labels). Issues #81 and above are the active backlog.
+2. ${targetIssue ? `Find issue #${targetIssue} specifically — it is open and ready to implement, set can_proceed=true.` : 'Apply the phase priority and dependency rules to select the best candidate. Prefer M1 issues first (lowest number).'}
+3. Check the PHASE_GATES: if any gate issues for this issue's phase are still open, set can_proceed=false and explain in block_reason. For M-series issues there are no gates — always set can_proceed=true.
 4. Generate a branch name: "issue-{number}-{slug}" where slug is a short kebab-case version of the title.
 5. Return the selected issue's full body text in the "body" field.
 
