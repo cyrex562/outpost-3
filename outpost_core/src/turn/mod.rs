@@ -20,6 +20,7 @@ use crate::content::ContentRegistry;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
+use crate::map::PlanetMap;
 use crate::menace::MenaceState;
 use crate::migration::{PendingMigration, PopulationTracker};
 use crate::modifier::{
@@ -142,8 +143,9 @@ pub struct GameState {
     /// blocks further commands and returns [`EngineError::GameOver`] unless the
     /// player activates sandbox-continue mode.
     pub victory: Option<VictoryCondition>,
-    /// System-zoom state: megaprojects, celestial bodies, hauler fleet.
-    pub system_state: SystemState,
+    // ── M1: Planet map ────────────────────────────────────────────────────
+    /// Planet hex map, populated by `Command::SeedPlanet`. `None` until seeded.
+    pub planet_map: Option<PlanetMap>,
 
     // ── Phase M1: Tech effects wired to live state ────────────────────────
     /// Building IDs unlocked by completed tech nodes.
@@ -185,8 +187,8 @@ impl GameState {
             victory_state: VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
+            planet_map: None,
             victory: None,
-            system_state: SystemState::new(),
             unlocked_buildings: HashSet::new(),
             unlocked_capabilities: HashSet::new(),
             unlocked_commodities: HashSet::new(),
