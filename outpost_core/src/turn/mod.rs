@@ -13,7 +13,6 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-
 use crate::colony::Colony;
 use crate::content::ContentRegistry;
 use crate::directive::DirectiveStore;
@@ -191,8 +190,8 @@ impl TurnProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-use crate::colony::Colony;
+
+    use crate::colony::Colony;
 
     fn make_state() -> GameState {
         let mut state = GameState::new();

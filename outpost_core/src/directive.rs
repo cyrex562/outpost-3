@@ -40,12 +40,7 @@ pub struct Directive {
 impl Directive {
     /// Create a new directive with a freshly generated UUID.
     #[must_use]
-    pub fn new(
-        colony_id: ColonyId,
-        predicate: Predicate,
-        action: Command,
-        priority: u8,
-    ) -> Self {
+    pub fn new(colony_id: ColonyId, predicate: Predicate, action: Command, priority: u8) -> Self {
         Self {
             id: Uuid::new_v4(),
             colony_id,
