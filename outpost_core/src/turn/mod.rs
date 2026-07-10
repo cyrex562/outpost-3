@@ -23,6 +23,7 @@ use crate::needs::NeedsConfig;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
 use crate::tech::{TechRegistry, TechState};
+use crate::trade::TradeNetwork;
 
 /// Default number of colony-sols that constitute one strategic-month.
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
@@ -82,6 +83,8 @@ pub struct GameState {
     pub directive_store: DirectiveStore,
     /// Per-colony stability history for predictive warning trajectory.
     pub stability_trackers: HashMap<ColonyId, StabilityTracker>,
+    /// Planetary trade network: infrastructure routes + per-colony overrides.
+    pub trade_network: TradeNetwork,
 }
 
 impl GameState {
@@ -100,6 +103,7 @@ impl GameState {
             tech_registry: None,
             directive_store: DirectiveStore::default(),
             stability_trackers: HashMap::new(),
+            trade_network: TradeNetwork::new(),
         }
     }
 
@@ -205,6 +209,32 @@ impl TurnProcessor {
                 &mut state.research_pool,
                 &reg_clone,
             );
+        }
+
+        // ── Auto trade flow ───────────────────────────────────────────────
+        // Collect all commodity ids currently present in any colony pool.
+        let mut commodity_set = std::collections::HashSet::new();
+        for colony in &state.colonies {
+            for id in colony.pool.commodity_ids() {
+                commodity_set.insert(id.to_owned());
+            }
+        }
+        if !commodity_set.is_empty() && !state.trade_network.routes.is_empty() {
+            let commodities: Vec<String> = commodity_set.into_iter().collect();
+            let colony_ids: Vec<ColonyId> = state.colonies.iter().map(|c| c.id).collect();
+            let mut pools: Vec<_> = state.colonies.iter().map(|c| c.pool.clone()).collect();
+
+            crate::trade::run_trade_flow(
+                &state.trade_network,
+                &colony_ids,
+                &mut pools,
+                &commodities,
+            );
+
+            // Write mutated pools back.
+            for (colony, new_pool) in state.colonies.iter_mut().zip(pools) {
+                colony.pool = new_pool;
+            }
         }
     }
 }

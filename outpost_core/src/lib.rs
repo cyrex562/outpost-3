@@ -29,6 +29,7 @@ pub mod colony;
 pub mod content;
 pub mod directive;
 pub mod interrupt;
+pub mod map;
 pub mod modifier;
 pub mod needs;
 pub mod population;
@@ -36,6 +37,7 @@ pub mod predicate;
 pub mod research;
 pub mod snapshot;
 pub mod tech;
+pub mod trade;
 pub mod turn;
 pub mod ui;
 
@@ -45,6 +47,7 @@ use colony::{ColonyId, ProjectId};
 use directive::DirectiveId;
 use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
 use needs::{apply_needs_check, apply_population_dynamics};
+use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
 
 /// Stability floor below which a predictive warning is emitted.
@@ -131,6 +134,56 @@ pub enum Command {
         colony_id: ColonyId,
         /// `true` to enable manual override; `false` to resume automation.
         enabled: bool,
+    },
+    /// Found a new colony at a specific surveyed site.
+    ///
+    /// Similar to [`Command::FoundColony`] but records the site identifier so
+    /// the hex-map layer can link the colony to its location.
+    FoundColonyAtSite {
+        /// Display name for the new colony.
+        name: String,
+        /// Starting colonist head-count.
+        starting_population: u64,
+        /// Surveyed site where the colony is being placed.
+        site_id: SiteId,
+        /// Optional economic focus description (e.g. "mining", "agriculture").
+        focus: Option<String>,
+    },
+    /// Add an infrastructure trade route between two colonies.
+    ///
+    /// Subsequent strategic turns will flow commodity surpluses from the
+    /// higher-stockpile side toward the lower-stockpile side up to
+    /// `throughput_cap` per commodity per turn.
+    AddTradeRoute {
+        /// One colony endpoint.
+        colony_a: ColonyId,
+        /// Other colony endpoint.
+        colony_b: ColonyId,
+        /// Maximum units per commodity that may transit per strategic turn.
+        throughput_cap: f64,
+    },
+    /// Remove a trade route by its unique identifier.
+    RemoveTradeRoute {
+        /// Route identifier returned in [`Event::TradeRouteAdded`].
+        route_id: uuid::Uuid,
+    },
+    /// Set or replace a manual trade priority override for a commodity at a colony.
+    SetTradeOverride {
+        /// Colony the override applies to.
+        colony_id: ColonyId,
+        /// Commodity identifier.
+        commodity_id: String,
+        /// When `true`, auto-flow is suppressed entirely for this commodity.
+        suppress_auto: bool,
+        /// Optional per-turn quantity cap (below the route throughput cap).
+        cap: Option<f64>,
+    },
+    /// Clear a previously set trade override.
+    ClearTradeOverride {
+        /// Colony the override applied to.
+        colony_id: ColonyId,
+        /// Commodity identifier whose override should be removed.
+        commodity_id: String,
     },
 }
 
@@ -328,6 +381,53 @@ pub enum Event {
         colony_id: ColonyId,
         /// Identifier of the directive that fired.
         directive_id: DirectiveId,
+    },
+    /// A colony was founded at a specific planetary site.
+    ColonyFoundedAtSite {
+        /// Stable identifier assigned to the new colony.
+        colony_id: ColonyId,
+        /// Display name of the new colony.
+        name: String,
+        /// Starting colonist head-count.
+        starting_population: u64,
+        /// Site identifier linking the colony to its hex-map location.
+        site_id: SiteId,
+        /// Optional economic focus.
+        focus: Option<String>,
+    },
+    /// A trade route was added to the planetary trade network.
+    TradeRouteAdded {
+        /// Stable identifier for the new route.
+        route_id: uuid::Uuid,
+        /// One colony endpoint.
+        colony_a: ColonyId,
+        /// Other colony endpoint.
+        colony_b: ColonyId,
+        /// Per-commodity throughput cap.
+        throughput_cap: f64,
+    },
+    /// A trade route was removed from the planetary trade network.
+    TradeRouteRemoved {
+        /// Identifier of the removed route.
+        route_id: uuid::Uuid,
+    },
+    /// A manual trade override was set for a colony+commodity pair.
+    TradeOverrideSet {
+        /// Colony the override applies to.
+        colony_id: ColonyId,
+        /// Commodity identifier.
+        commodity_id: String,
+        /// Whether auto-flow is suppressed.
+        suppress_auto: bool,
+        /// Optional quantity cap.
+        cap: Option<f64>,
+    },
+    /// A manual trade override was cleared.
+    TradeOverrideCleared {
+        /// Colony the override was on.
+        colony_id: ColonyId,
+        /// Commodity identifier.
+        commodity_id: String,
     },
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
@@ -776,6 +876,103 @@ impl GameEngine {
                 Ok(vec![Event::ManualOverrideChanged {
                     colony_id: *colony_id,
                     enabled: *enabled,
+                }])
+            }
+
+            Command::FoundColonyAtSite {
+                name,
+                starting_population,
+                site_id,
+                focus,
+            } => {
+                if name.trim().is_empty() {
+                    return Err(EngineError::InvalidArgument(
+                        "colony name must not be empty".into(),
+                    ));
+                }
+                let colony = colony::Colony::new(name.clone());
+                let id = colony.id;
+                self.state.add_colony(colony, *starting_population);
+                Ok(vec![Event::ColonyFoundedAtSite {
+                    colony_id: id,
+                    name: name.clone(),
+                    starting_population: *starting_population,
+                    site_id: *site_id,
+                    focus: focus.clone(),
+                }])
+            }
+
+            Command::AddTradeRoute {
+                colony_a,
+                colony_b,
+                throughput_cap,
+            } => {
+                self.find_colony_index(*colony_a)?;
+                self.find_colony_index(*colony_b)?;
+                if *throughput_cap < 0.0 {
+                    return Err(EngineError::InvalidArgument(
+                        "throughput_cap must be >= 0".into(),
+                    ));
+                }
+                let route = TradeRoute::new(*colony_a, *colony_b, *throughput_cap);
+                let route_id = route.id;
+                self.state.trade_network.add_route(route);
+                Ok(vec![Event::TradeRouteAdded {
+                    route_id,
+                    colony_a: *colony_a,
+                    colony_b: *colony_b,
+                    throughput_cap: *throughput_cap,
+                }])
+            }
+
+            Command::RemoveTradeRoute { route_id } => {
+                if !self.state.trade_network.remove_route(*route_id) {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "trade route {route_id} not found"
+                    )));
+                }
+                Ok(vec![Event::TradeRouteRemoved {
+                    route_id: *route_id,
+                }])
+            }
+
+            Command::SetTradeOverride {
+                colony_id,
+                commodity_id,
+                suppress_auto,
+                cap,
+            } => {
+                self.find_colony_index(*colony_id)?;
+                if commodity_id.trim().is_empty() {
+                    return Err(EngineError::InvalidArgument(
+                        "commodity_id must not be empty".into(),
+                    ));
+                }
+                self.state.trade_network.set_override(TradeOverride {
+                    colony_id: *colony_id,
+                    commodity_id: commodity_id.clone(),
+                    suppress_auto: *suppress_auto,
+                    cap: *cap,
+                });
+                Ok(vec![Event::TradeOverrideSet {
+                    colony_id: *colony_id,
+                    commodity_id: commodity_id.clone(),
+                    suppress_auto: *suppress_auto,
+                    cap: *cap,
+                }])
+            }
+
+            Command::ClearTradeOverride {
+                colony_id,
+                commodity_id,
+            } => {
+                self.find_colony_index(*colony_id)?;
+                self.state
+                    .trade_network
+                    .clear_override(*colony_id, commodity_id);
+                Ok(vec![Event::TradeOverrideCleared {
+                    colony_id: *colony_id,
+                    commodity_id: commodity_id.clone(),
                 }])
             }
         }
@@ -2516,5 +2713,154 @@ mod tests {
             }
             other => panic!("expected TimeControl, got {other:?}"),
         }
+    }
+
+    // ── inter-colony trade (engine-level) ──────────────────────────────────
+
+    fn found_two_colonies(engine: &mut GameEngine) -> (ColonyId, ColonyId) {
+        let evs_a = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let evs_b = engine
+            .apply(&Command::FoundColony {
+                name: "Beta".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let id_a = match &evs_a[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!("expected ColonyFounded"),
+        };
+        let id_b = match &evs_b[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!("expected ColonyFounded"),
+        };
+        (id_a, id_b)
+    }
+
+    #[test]
+    fn add_trade_route_emits_event() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+
+        let evs = engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 50.0,
+            })
+            .unwrap();
+
+        assert!(matches!(evs[0], Event::TradeRouteAdded { .. }));
+        assert_eq!(engine.state.trade_network.routes.len(), 1);
+    }
+
+    #[test]
+    fn remove_trade_route_emits_event() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+
+        let evs = engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 50.0,
+            })
+            .unwrap();
+        let route_id = match &evs[0] {
+            Event::TradeRouteAdded { route_id, .. } => *route_id,
+            _ => panic!(),
+        };
+
+        let rm_evs = engine
+            .apply(&Command::RemoveTradeRoute { route_id })
+            .unwrap();
+        assert!(matches!(rm_evs[0], Event::TradeRouteRemoved { .. }));
+        assert!(engine.state.trade_network.routes.is_empty());
+    }
+
+    #[test]
+    fn set_and_clear_trade_override_emits_events() {
+        let mut engine = GameEngine::new();
+        let (a, _b) = found_two_colonies(&mut engine);
+
+        let set_evs = engine
+            .apply(&Command::SetTradeOverride {
+                colony_id: a,
+                commodity_id: "food".into(),
+                suppress_auto: true,
+                cap: None,
+            })
+            .unwrap();
+        assert!(matches!(set_evs[0], Event::TradeOverrideSet { .. }));
+
+        let clr_evs = engine
+            .apply(&Command::ClearTradeOverride {
+                colony_id: a,
+                commodity_id: "food".into(),
+            })
+            .unwrap();
+        assert!(matches!(clr_evs[0], Event::TradeOverrideCleared { .. }));
+    }
+
+    #[test]
+    fn found_colony_at_site_emits_event_with_site_id() {
+        let mut engine = GameEngine::new();
+        let site = trade::SiteId::new();
+        let evs = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Nova Camp".into(),
+                starting_population: 50,
+                site_id: site,
+                focus: Some("mining".into()),
+            })
+            .unwrap();
+
+        assert!(
+            matches!(
+                &evs[0],
+                Event::ColonyFoundedAtSite { site_id, focus, .. }
+                    if *site_id == site && focus.as_deref() == Some("mining")
+            ),
+            "expected ColonyFoundedAtSite with correct site_id and focus"
+        );
+        assert_eq!(engine.state.colonies.len(), 1);
+    }
+
+    #[test]
+    fn trade_flow_runs_on_strategic_month_via_engine() {
+        // Advance 30 sols with a trade route; goods should move once the
+        // strategic-month sub-pipeline fires.
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+
+        // Seed food into colony A's pool.
+        {
+            let idx = engine.find_colony_index(a).unwrap();
+            engine.state.colonies[idx].pool.deposit("food", 100.0);
+        }
+
+        engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 20.0,
+            })
+            .unwrap();
+
+        // Advance 30 sols so the strategic-month fires.
+        for _ in 0..30 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let idx_b = engine.find_colony_index(b).unwrap();
+        let food_at_b = engine.state.colonies[idx_b].pool.amount("food");
+        assert!(
+            food_at_b > 0.0,
+            "colony B should have received some food via trade; got {food_at_b}"
+        );
     }
 }

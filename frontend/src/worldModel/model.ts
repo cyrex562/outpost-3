@@ -1,0 +1,58 @@
+/**
+ * Renderer-agnostic world model for Outpost 3.
+ *
+ * This module defines the client-side world state that is derived entirely from
+ * the server event stream.  It is intentionally free of Vue reactivity so it
+ * can be used by any renderer (Vue, WebGL, native) without modification.
+ *
+ * The Pinia store owns a reactive copy of `WorldState`; this module provides
+ * the plain types and the initial value.
+ */
+
+import type { ColonySummary } from '@/types/api'
+
+/** Per-colony mutable state. */
+export interface ColonyState extends ColonySummary {
+  stability: number
+  available_labour: number
+  buildings: string[]
+  active_projects: ProjectState[]
+}
+
+/** A queued construction project. */
+export interface ProjectState {
+  project_id: string
+  building_type: string
+}
+
+/** The full client-side world state. */
+export interface WorldState {
+  /** Current colony-sol counter. */
+  sol: number
+  /** Current strategic-month counter. */
+  month: number
+  /** All known colonies, keyed by colony UUID. */
+  colonies: Record<string, ColonyState>
+  /** System-wide accumulated research total. */
+  research_total: number
+  /** Alerts and notable events accumulated this session. */
+  notifications: Notification[]
+}
+
+/** A player-facing notification derived from an engine event. */
+export interface Notification {
+  id: string
+  tier: 'blocking' | 'urgent' | 'notable' | 'ambient'
+  message: string
+  colony_id?: string
+  timestamp_sol: number
+}
+
+/** The initial (empty) world state before a snapshot arrives. */
+export const EMPTY_WORLD_STATE: WorldState = {
+  sol: 0,
+  month: 0,
+  colonies: {},
+  research_total: 0,
+  notifications: [],
+}
