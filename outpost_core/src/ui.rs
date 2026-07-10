@@ -220,7 +220,10 @@ impl InterruptDigestData {
     /// Apply `filter` and return only matching digest items.
     #[must_use]
     pub fn filtered_items(&self, filter: &DigestFilter) -> Vec<&DigestItem> {
-        self.digest_items.iter().filter(|i| filter.matches(i)).collect()
+        self.digest_items
+            .iter()
+            .filter(|i| filter.matches(i))
+            .collect()
     }
 }
 
@@ -247,7 +250,12 @@ mod tests {
     use crate::interrupt::{Interrupt, InterruptSource, Tier};
 
     fn make_interrupt(tier: Tier, message: &str, colony_id: Option<ColonyId>) -> Interrupt {
-        Interrupt::new(tier, InterruptSource::ConstructionComplete, colony_id, message)
+        Interrupt::new(
+            tier,
+            InterruptSource::ConstructionComplete,
+            colony_id,
+            message,
+        )
     }
 
     fn make_item(tier: Tier, msg: &str, colony_id: Option<ColonyId>) -> DigestItem {

@@ -872,8 +872,7 @@ impl GameEngine {
                         slot_cost: proj.slot_cost,
                     })
                     .collect();
-                let manual_override =
-                    self.state.directive_store.is_manual_override(*colony_id);
+                let manual_override = self.state.directive_store.is_manual_override(*colony_id);
                 Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
                     colony_id: c.id,
                     name: c.name.clone(),
@@ -919,15 +918,16 @@ impl GameEngine {
             }
 
             Query::InterruptDigest => {
-                let digest = self.last_advance_digest.clone().unwrap_or_else(|| {
-                    ui::InterruptDigestData {
-                        stopped_at_turn: self.state.sol,
-                        turns_advanced: 0,
-                        halting_interrupt: None,
-                        digest_items: Vec::new(),
-                        active_filter: ui::DigestFilter::new(),
-                    }
-                });
+                let digest =
+                    self.last_advance_digest
+                        .clone()
+                        .unwrap_or_else(|| ui::InterruptDigestData {
+                            stopped_at_turn: self.state.sol,
+                            turns_advanced: 0,
+                            halting_interrupt: None,
+                            digest_items: Vec::new(),
+                            active_filter: ui::DigestFilter::new(),
+                        });
                 Ok(QueryResult::InterruptDigest(digest))
             }
 
@@ -2423,9 +2423,7 @@ mod tests {
         };
         let colony_id = *colony_id;
 
-        let result = engine
-            .query(&Query::ColonyScreen { colony_id })
-            .unwrap();
+        let result = engine.query(&Query::ColonyScreen { colony_id }).unwrap();
         match result {
             QueryResult::ColonyScreen(data) => {
                 assert_eq!(data.name, "UI Test Colony");
