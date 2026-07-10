@@ -157,4 +157,28 @@ pub struct BuildingDef {
     /// Worker slots required to operate.
     #[serde(default)]
     pub worker_slots: u32,
+    /// Labor units consumed from the colony pool each construction turn.
+    #[serde(default = "default_labor")]
+    pub labor_required: u32,
+    /// Number of build slots this building occupies.
+    #[serde(default = "default_slot_cost")]
+    pub slot_cost: u32,
+    /// Number of colony-sol turns required to complete construction.
+    #[serde(default = "default_construction_turns")]
+    pub construction_turns: u32,
+    /// Optional tech node that must be researched before this building can be queued.
+    #[serde(default)]
+    pub tech_prerequisite: Option<String>,
+}
+
+fn default_labor() -> u32 {
+    1
+}
+
+fn default_slot_cost() -> u32 {
+    1
+}
+
+fn default_construction_turns() -> u32 {
+    1
 }

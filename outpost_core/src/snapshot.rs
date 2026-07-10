@@ -219,6 +219,9 @@ impl Snapshot {
                     id,
                     name,
                     pool: crate::colony::ColonyPool::new(),
+                    buildings: Vec::new(),
+                    build_queue: crate::colony::ConstructionQueue::new(),
+                    slot_capacity: crate::colony::BASE_SLOT_CAPACITY,
                 })
             })
             .collect::<Result<_, rusqlite::Error>>()?;

@@ -10,17 +10,19 @@
 //! All types here are pure data structures with no I/O; they are driven by
 //! [`crate::GameEngine::apply`] through the turn processor.
 
+pub mod building;
 pub mod pool;
 
+pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 
 /// Unique identifier for a colony.
 pub type ColonyId = uuid::Uuid;
 
-/// Stub representation of a colony.
-///
-/// Fields will be expanded once commodity and building mechanics are
-/// implemented (issues #8+).
+/// Base number of build slots every new colony starts with.
+pub const BASE_SLOT_CAPACITY: u32 = 5;
+
+/// A colony: the primary player-managed simulation entity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Colony {
     /// Stable identifier for this colony.
@@ -29,6 +31,12 @@ pub struct Colony {
     pub name: String,
     /// Pooled commodity stockpile for this colony.
     pub pool: ColonyPool,
+    /// Completed buildings that are operational.
+    pub buildings: Vec<PlacedBuilding>,
+    /// In-progress construction queue.
+    pub build_queue: ConstructionQueue,
+    /// Total build-slot capacity (base + tech bonuses).
+    pub slot_capacity: u32,
 }
 
 impl Colony {
@@ -39,7 +47,24 @@ impl Colony {
             id: uuid::Uuid::new_v4(),
             name: name.into(),
             pool: ColonyPool::new(),
+            buildings: Vec::new(),
+            build_queue: ConstructionQueue::new(),
+            slot_capacity: BASE_SLOT_CAPACITY,
         }
+    }
+
+    /// Return the number of build slots currently in use (completed + queued).
+    #[must_use]
+    pub fn slots_used(&self) -> u32 {
+        let from_buildings: u32 = self.buildings.iter().map(|b| b.slot_cost).sum();
+        let from_queue = self.build_queue.slots_reserved();
+        from_buildings + from_queue
+    }
+
+    /// Return the number of build slots still available.
+    #[must_use]
+    pub fn slots_available(&self) -> u32 {
+        self.slot_capacity.saturating_sub(self.slots_used())
     }
 }
 
@@ -64,5 +89,29 @@ mod tests {
     fn colony_starts_with_empty_pool() {
         let c = Colony::new("Delta");
         assert_eq!(c.pool.amount("water"), 0.0);
+    }
+
+    #[test]
+    fn colony_starts_with_base_slot_capacity() {
+        let c = Colony::new("Epsilon");
+        assert_eq!(c.slot_capacity, BASE_SLOT_CAPACITY);
+        assert_eq!(c.slots_used(), 0);
+        assert_eq!(c.slots_available(), BASE_SLOT_CAPACITY);
+    }
+
+    #[test]
+    fn placed_building_consumes_slots() {
+        let mut c = Colony::new("Zeta");
+        c.buildings.push(PlacedBuilding::new("greenhouse", 2));
+        assert_eq!(c.slots_used(), 2);
+        assert_eq!(c.slots_available(), BASE_SLOT_CAPACITY - 2);
+    }
+
+    #[test]
+    fn queued_project_reserves_slots() {
+        let mut c = Colony::new("Eta");
+        let proj = ConstructionProject::new("mine", 1, 5, vec![], 3);
+        c.build_queue.enqueue(proj);
+        assert_eq!(c.slots_used(), 1);
     }
 }
