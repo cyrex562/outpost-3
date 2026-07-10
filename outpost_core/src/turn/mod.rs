@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
+use std::collections::HashMap;
+
 use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
 use crate::directive::DirectiveStore;
@@ -75,7 +77,7 @@ pub struct GameState {
     pub research_pool: SystemResearchPool,
     /// Directive store: active directives and manual-override registry.
     pub directive_store: DirectiveStore,
-    /// Per-colony stability sample buffers used for predictive warning extrapolation.
+    /// Per-colony stability history for predictive warning trajectory.
     pub stability_trackers: HashMap<ColonyId, StabilityTracker>,
 }
 
