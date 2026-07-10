@@ -38,6 +38,7 @@ pub mod population;
 pub mod predicate;
 pub mod research;
 pub mod snapshot;
+pub mod system;
 pub mod tech;
 pub mod trade;
 pub mod turn;
