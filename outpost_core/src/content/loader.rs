@@ -69,6 +69,7 @@ impl PackLoader {
             commodities,
             recipes,
             buildings,
+            orbital_blueprints: std::collections::HashMap::new(),
         })
     }
 }

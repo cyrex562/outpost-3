@@ -182,3 +182,30 @@ fn default_slot_cost() -> u32 {
 fn default_construction_turns() -> u32 {
     1
 }
+
+/// Blueprint for an orbital station loadable from a content YAML pack.
+///
+/// Defines the resource costs and build time for constructing one station type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrbitalStationBlueprint {
+    /// Unique identifier (referenced by `Command::BeginOrbitalConstruction`).
+    pub id: String,
+    /// Human-readable name shown in the build menu.
+    pub name: String,
+    /// Station specialisation role produced by this blueprint.
+    pub station_type: crate::orbital::StationType,
+    /// Default orbit band suggested for this blueprint.
+    pub default_orbit: crate::orbital::OrbitType,
+    /// Commodity costs deducted from the colony pool when construction begins.
+    ///
+    /// Each entry is `(commodity_id, quantity)`.
+    #[serde(default)]
+    pub commodity_costs: Vec<(String, f32)>,
+    /// Strategic months required to complete construction.
+    #[serde(default = "default_build_months")]
+    pub build_months: u32,
+}
+
+fn default_build_months() -> u32 {
+    3
+}

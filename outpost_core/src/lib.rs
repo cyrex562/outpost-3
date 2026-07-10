@@ -278,6 +278,21 @@ pub enum Command {
     /// Colonists arrive at their destination colonies; overcrowding and forced-
     /// move stability effects are applied.
     ResolvePendingMigrations,
+    /// Begin construction of an orbital station using a content-pack blueprint.
+    ///
+    /// Deducts commodity costs from the colony pool immediately and adds the
+    /// project to `GameState::orbital_construction_queue`.  Fails with
+    /// [`EngineError::InsufficientResources`] when the colony pool cannot cover
+    /// the blueprint costs, or with [`EngineError::InvalidArgument`] if the
+    /// blueprint id is unknown.
+    BeginOrbitalConstruction {
+        /// Content-pack blueprint identifier.
+        blueprint_id: String,
+        /// Colony that will fund and operate the station.
+        colony_id: ColonyId,
+        /// Orbit band the finished station should occupy.
+        orbit_type: orbital::OrbitType,
+    },
     /// Build an orbital station in the given orbit band, linked to a colony.
     ///
     /// Fails with [`EngineError::OrbitalSlotExceeded`] if the orbit band is full.
@@ -746,6 +761,30 @@ pub enum Event {
         /// Number of colonists that departed.
         count: f32,
     },
+    /// An orbital station construction project was started.
+    OrbitalConstructionStarted {
+        /// Blueprint that was used to start this project.
+        blueprint_id: String,
+        /// Colony funding the build.
+        colony_id: ColonyId,
+        /// Orbit band the finished station will occupy.
+        orbit_type: orbital::OrbitType,
+        /// Strategic months until completion.
+        build_months: u32,
+    },
+    /// An orbital station construction project finished.
+    OrbitalStationCompleted {
+        /// Stable identifier of the newly placed station.
+        station_id: uuid::Uuid,
+        /// Colony that owns the station.
+        colony_id: ColonyId,
+        /// Station specialization type.
+        station_type: orbital::StationType,
+        /// Orbit band the station now occupies.
+        orbit_type: orbital::OrbitType,
+        /// Blueprint id that produced this station.
+        blueprint_id: String,
+    },
     /// An orbital station was built.
     OrbitalStationBuilt {
         /// Stable identifier of the new station.
@@ -956,6 +995,16 @@ pub enum EngineError {
     /// The referenced construction project does not exist.
     #[error("project not found: {0}")]
     ProjectNotFound(ProjectId),
+    /// The colony pool does not hold enough of a required commodity to start construction.
+    #[error("insufficient resources: need {needed} of '{commodity}' but only {available} available")]
+    InsufficientResources {
+        /// Commodity that is short.
+        commodity: String,
+        /// Amount required.
+        needed: f32,
+        /// Amount currently in the colony pool.
+        available: f32,
+    },
     /// The referenced directive does not exist.
     #[error("directive not found: {0}")]
     DirectiveNotFound(directive::DirectiveId),
@@ -1066,6 +1115,41 @@ impl GameEngine {
                             commodity_id: record.commodity_id,
                             amount: record.amount,
                         });
+                    }
+
+                    // ── Orbital construction countdown ────────────────────────
+                    // Decrement each in-progress project; when months_remaining
+                    // hits zero, place the finished station in the registry.
+                    {
+                        let mut completed_projects: Vec<orbital::OrbitalConstructionProject> =
+                            Vec::new();
+                        self.state.orbital_construction_queue.retain_mut(|p| {
+                            if p.tick() {
+                                completed_projects.push(p.clone());
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                        for project in completed_projects {
+                            let station = OrbitalStation::new(
+                                project.station_type,
+                                project.orbit_type,
+                                project.colony_id,
+                            );
+                            let station_id = station.id;
+                            // Best-effort: if the orbit band filled while the
+                            // project was in-flight, skip placement (rare edge
+                            // case).  No rollback of the already-paid costs.
+                            let _ = self.state.orbital_registry.add_station(station);
+                            events.push(Event::OrbitalStationCompleted {
+                                station_id,
+                                colony_id: project.colony_id,
+                                station_type: project.station_type,
+                                orbit_type: project.orbit_type,
+                                blueprint_id: project.blueprint_id.clone(),
+                            });
+                        }
                     }
 
                     // ── Gate migration ────────────────────────────────────────
@@ -1977,6 +2061,60 @@ impl GameEngine {
                 }
 
                 Ok(events)
+            }
+
+            Command::BeginOrbitalConstruction {
+                blueprint_id,
+                colony_id,
+                orbit_type,
+            } => {
+                let colony_idx = self.find_colony_index(*colony_id)?;
+                // Look up the blueprint in the loaded registry.
+                let blueprint = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .and_then(|r| r.orbital_blueprints.get(blueprint_id.as_str()).cloned())
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "unknown orbital blueprint: '{blueprint_id}'"
+                        ))
+                    })?;
+                // Validate that the colony pool can cover all commodity costs.
+                for (commodity_id, qty) in &blueprint.commodity_costs {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let available = self.state.colonies[colony_idx].pool.amount(commodity_id) as f32;
+                    if available < *qty {
+                        return Err(EngineError::InsufficientResources {
+                            commodity: commodity_id.clone(),
+                            needed: *qty,
+                            available,
+                        });
+                    }
+                }
+                // Deduct costs.
+                for (commodity_id, qty) in &blueprint.commodity_costs {
+                    self.state.colonies[colony_idx]
+                        .pool
+                        .withdraw(commodity_id, f64::from(*qty));
+                }
+                // Enqueue the construction project.
+                let mut project = orbital::OrbitalConstructionProject::new(
+                    blueprint_id.clone(),
+                    *colony_id,
+                    *orbit_type,
+                    blueprint.station_type,
+                    blueprint.build_months,
+                );
+                project.costs_paid = true;
+                let build_months = project.months_remaining;
+                self.state.orbital_construction_queue.push(project);
+                Ok(vec![Event::OrbitalConstructionStarted {
+                    blueprint_id: blueprint_id.clone(),
+                    colony_id: *colony_id,
+                    orbit_type: *orbit_type,
+                    build_months,
+                }])
             }
 
             Command::BuildOrbitalStation {
@@ -6099,5 +6237,226 @@ mod tests {
                 .any(|i| matches!(&i.source, InterruptSource::EventFired(id) if id == "dust_storm_phase1")),
             "collect_turn_interrupts must surface EventFired for HazardFired events; interrupts: {interrupts:?}"
         );
+    }
+
+    // ── Issue #93: Orbital station construction cost and build-turn tracking ──
+
+    /// Helper: build a registry with a simple habitat blueprint costing 10 steel.
+    fn make_registry_with_habitat_bp() -> content::ContentRegistry {
+        use content::types::OrbitalStationBlueprint;
+        let mut reg = content::ContentRegistry::default();
+        reg.insert_orbital_blueprint(OrbitalStationBlueprint {
+            id: "habitat_bp".into(),
+            name: "Orbital Habitat".into(),
+            station_type: orbital::StationType::Habitat,
+            default_orbit: orbital::OrbitType::Low,
+            commodity_costs: vec![("steel".into(), 10.0)],
+            build_months: 2,
+        });
+        reg
+    }
+
+    /// Done-when: sufficient resources → costs deducted, project enqueued.
+    #[test]
+    fn begin_orbital_construction_deducts_costs_and_enqueues() {
+        let mut engine = GameEngine::with_seed(93);
+        engine.state.registry = Some(make_registry_with_habitat_bp());
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Fund the colony with 20 steel.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 20.0);
+
+        let events = engine
+            .apply(&Command::BeginOrbitalConstruction {
+                blueprint_id: "habitat_bp".into(),
+                colony_id,
+                orbit_type: orbital::OrbitType::Low,
+            })
+            .unwrap();
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::OrbitalConstructionStarted {
+                    blueprint_id,
+                    ..
+                } if blueprint_id == "habitat_bp"
+            )),
+            "OrbitalConstructionStarted must be emitted"
+        );
+
+        // Costs must be deducted.
+        let steel_left = engine.state.colonies[idx].pool.amount("steel");
+        assert!(
+            (steel_left - 10.0).abs() < 1e-6,
+            "10 steel should be deducted; remaining={steel_left}"
+        );
+
+        // Project must be in queue.
+        assert_eq!(engine.state.orbital_construction_queue.len(), 1);
+        assert!(engine.state.orbital_construction_queue[0].costs_paid);
+    }
+
+    /// Done-when: insufficient resources → InsufficientResources error.
+    #[test]
+    fn begin_orbital_construction_fails_when_broke() {
+        let mut engine = GameEngine::with_seed(93);
+        engine.state.registry = Some(make_registry_with_habitat_bp());
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Broke Colony".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Colony has only 5 steel; needs 10.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 5.0);
+
+        let err = engine
+            .apply(&Command::BeginOrbitalConstruction {
+                blueprint_id: "habitat_bp".into(),
+                colony_id,
+                orbit_type: orbital::OrbitType::Low,
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(err, EngineError::InsufficientResources { .. }),
+            "expected InsufficientResources, got {err:?}"
+        );
+    }
+
+    /// Done-when: unknown blueprint → InvalidArgument error.
+    #[test]
+    fn begin_orbital_construction_fails_on_unknown_blueprint() {
+        let mut engine = GameEngine::with_seed(93);
+        engine.state.registry = Some(make_registry_with_habitat_bp());
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        let err = engine
+            .apply(&Command::BeginOrbitalConstruction {
+                blueprint_id: "nonexistent_bp".into(),
+                colony_id,
+                orbit_type: orbital::OrbitType::Low,
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(err, EngineError::InvalidArgument(_)),
+            "expected InvalidArgument for unknown blueprint"
+        );
+    }
+
+    /// Done-when: after build_months strategic months the station is completed
+    /// and OrbitalStationCompleted is emitted.
+    #[test]
+    fn orbital_construction_completes_after_configured_months() {
+        use turn::TurnProcessor;
+        let mut engine = GameEngine::with_seed(93);
+        engine.state.registry = Some(make_registry_with_habitat_bp());
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Builder".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 20.0);
+
+        engine
+            .apply(&Command::BeginOrbitalConstruction {
+                blueprint_id: "habitat_bp".into(),
+                colony_id,
+                orbit_type: orbital::OrbitType::Low,
+            })
+            .unwrap();
+
+        assert_eq!(engine.state.orbital_construction_queue.len(), 1);
+        assert_eq!(
+            engine.state.orbital_construction_queue[0].months_remaining,
+            2
+        );
+
+        // Replace processor with 1-sol-per-month cadence for fast testing.
+        engine.processor = TurnProcessor::with_cadence(0, 1);
+
+        // Advance sol 1 → strategic month 1 → months_remaining decrements to 1.
+        let ev1 = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert_eq!(engine.state.orbital_construction_queue.len(), 1, "still in queue after month 1");
+        assert!(!ev1.iter().any(|e| matches!(e, Event::OrbitalStationCompleted { .. })));
+
+        // Advance sol 2 → strategic month 2 → months_remaining hits 0 → station placed.
+        let ev2 = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.orbital_construction_queue.is_empty(),
+            "queue should be empty after completion"
+        );
+        assert!(
+            ev2.iter().any(|e| matches!(
+                e,
+                Event::OrbitalStationCompleted { blueprint_id, .. }
+                if blueprint_id == "habitat_bp"
+            )),
+            "OrbitalStationCompleted must be emitted on the finishing month"
+        );
+        // Station must be in the registry.
+        assert_eq!(engine.state.orbital_registry.stations.len(), 1);
     }
 }

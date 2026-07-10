@@ -126,6 +126,8 @@ pub struct GameState {
     pub population_trackers: HashMap<ColonyId, PopulationTracker>,
     /// System-wide orbital infrastructure registry (stations + constellations).
     pub orbital_registry: OrbitalRegistry,
+    /// In-progress orbital station construction projects.
+    pub orbital_construction_queue: Vec<crate::orbital::OrbitalConstructionProject>,
 
     // ── Phase 10: Difficulty / Menace / Victory ───────────────────────────
     /// Active difficulty preset.
@@ -199,6 +201,7 @@ impl GameState {
             pending_migrations: Vec::new(),
             population_trackers: HashMap::new(),
             orbital_registry: OrbitalRegistry::new(),
+            orbital_construction_queue: Vec::new(),
             difficulty_preset: DifficultyPreset::Normal,
             difficulty_grade_table: default_grade_table(),
             difficulty_scalar: DifficultyScalar::new(),
