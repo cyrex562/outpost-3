@@ -1,7 +1,18 @@
 //! Predicate language for the directive and interrupt systems.
 
+use std::collections::HashMap;
+
 use crate::colony::ColonyId;
 use serde::{Deserialize, Serialize};
+
+/// Per-commodity snapshot used by commodity predicates.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommoditySnapshot {
+    /// Current stockpile amount.
+    pub amount: f64,
+    /// Net change last turn (positive = surplus, negative = deficit).
+    pub delta: f64,
+}
 
 /// A snapshot of colony-level observable state for predicate evaluation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +31,9 @@ pub struct PredicateContext {
     pub sol: u64,
     /// Current strategic-month counter.
     pub month: u64,
+    /// Per-commodity stockpile snapshot for commodity predicates.
+    #[serde(default)]
+    pub commodities: HashMap<String, CommoditySnapshot>,
 }
 
 /// A measurable quantity that a predicate can test.
@@ -118,11 +132,40 @@ pub enum Predicate {
         /// Inner predicate to negate.
         inner: Box<Predicate>,
     },
+    /// True when the named commodity's stockpile is strictly below `threshold`.
+    StockpileBelow {
+        /// Commodity to check.
+        commodity_id: String,
+        /// Stockpile threshold (exclusive lower bound).
+        threshold: f32,
+    },
+    /// True when the named commodity's stockpile is strictly above `threshold`.
+    StockpileAbove {
+        /// Commodity to check.
+        commodity_id: String,
+        /// Stockpile threshold (exclusive upper bound).
+        threshold: f32,
+    },
+    /// True when the commodity will exhaust within `sols` turns at the current burn rate.
+    ///
+    /// Uses linear trend extrapolation on `pool.delta`; never triggers if delta >= 0.
+    EtaToExhaustion {
+        /// Commodity to monitor.
+        commodity_id: String,
+        /// Alert horizon in colony-sols.
+        sols: u64,
+    },
+    /// True when the commodity had a net-negative delta last turn (production < consumption).
+    ProductionShortfall {
+        /// Commodity to check.
+        commodity_id: String,
+    },
 }
 
 impl Predicate {
     /// Evaluate this predicate against `ctx`.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn evaluate(&self, ctx: &PredicateContext) -> bool {
         match self {
             Self::Always => true,
@@ -135,6 +178,45 @@ impl Predicate {
             Self::And { left, right } => left.evaluate(ctx) && right.evaluate(ctx),
             Self::Or { left, right } => left.evaluate(ctx) || right.evaluate(ctx),
             Self::Not { inner } => !inner.evaluate(ctx),
+            Self::StockpileBelow {
+                commodity_id,
+                threshold,
+            } => {
+                let amount = ctx
+                    .commodities
+                    .get(commodity_id)
+                    .map_or(0.0, |s| s.amount);
+                amount < f64::from(*threshold)
+            }
+            Self::StockpileAbove {
+                commodity_id,
+                threshold,
+            } => {
+                let amount = ctx
+                    .commodities
+                    .get(commodity_id)
+                    .map_or(0.0, |s| s.amount);
+                amount > f64::from(*threshold)
+            }
+            Self::EtaToExhaustion { commodity_id, sols } => {
+                let snap = ctx.commodities.get(commodity_id);
+                let (amount, delta) = snap.map_or((0.0, 0.0), |s| (s.amount, s.delta));
+                // Only fire when actively depleting (delta < 0).
+                if delta >= 0.0 {
+                    return false;
+                }
+                // turns_until_zero = amount / burn_rate
+                let burn_rate = -delta; // positive
+                let turns_until_zero = amount / burn_rate;
+                turns_until_zero < *sols as f64
+            }
+            Self::ProductionShortfall { commodity_id } => {
+                let delta = ctx
+                    .commodities
+                    .get(commodity_id)
+                    .map_or(0.0, |s| s.delta);
+                delta < 0.0
+            }
         }
     }
 
@@ -200,7 +282,17 @@ mod tests {
             system_research: 42.0,
             sol: 10,
             month: 0,
+            commodities: HashMap::new(),
         }
+    }
+
+    fn ctx_with_commodity(id: &str, amount: f64, delta: f64) -> PredicateContext {
+        let mut c = ctx();
+        c.commodities.insert(
+            id.to_owned(),
+            CommoditySnapshot { amount, delta },
+        );
+        c
     }
 
     #[test]
@@ -263,5 +355,180 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         let back: Predicate = serde_json::from_str(&json).unwrap();
         assert_eq!(p, back);
+    }
+
+    // ── StockpileBelow ────────────────────────────────────────────────────
+
+    #[test]
+    fn stockpile_below_fires_when_amount_is_below_threshold() {
+        let ctx = ctx_with_commodity("food", 30.0, -5.0);
+        let pred = Predicate::StockpileBelow {
+            commodity_id: "food".into(),
+            threshold: 50.0,
+        };
+        assert!(pred.evaluate(&ctx));
+    }
+
+    #[test]
+    fn stockpile_below_does_not_fire_when_at_or_above_threshold() {
+        let ctx = ctx_with_commodity("food", 50.0, 0.0);
+        let pred = Predicate::StockpileBelow {
+            commodity_id: "food".into(),
+            threshold: 50.0,
+        };
+        assert!(!pred.evaluate(&ctx)); // strictly below
+
+        let ctx2 = ctx_with_commodity("food", 80.0, 0.0);
+        assert!(!pred.evaluate(&ctx2));
+    }
+
+    #[test]
+    fn stockpile_below_treats_unknown_commodity_as_zero() {
+        let ctx = ctx(); // no commodities
+        let pred = Predicate::StockpileBelow {
+            commodity_id: "water".into(),
+            threshold: 1.0,
+        };
+        assert!(pred.evaluate(&ctx)); // 0 < 1
+    }
+
+    // ── StockpileAbove ────────────────────────────────────────────────────
+
+    #[test]
+    fn stockpile_above_fires_when_amount_exceeds_threshold() {
+        let ctx = ctx_with_commodity("water", 200.0, 10.0);
+        let pred = Predicate::StockpileAbove {
+            commodity_id: "water".into(),
+            threshold: 100.0,
+        };
+        assert!(pred.evaluate(&ctx));
+    }
+
+    #[test]
+    fn stockpile_above_does_not_fire_when_at_or_below_threshold() {
+        let ctx = ctx_with_commodity("water", 100.0, 0.0);
+        let pred = Predicate::StockpileAbove {
+            commodity_id: "water".into(),
+            threshold: 100.0,
+        };
+        assert!(!pred.evaluate(&ctx)); // strictly above
+
+        let ctx2 = ctx_with_commodity("water", 40.0, 0.0);
+        assert!(!pred.evaluate(&ctx2));
+    }
+
+    // ── EtaToExhaustion ───────────────────────────────────────────────────
+
+    #[test]
+    fn eta_fires_when_exhaustion_is_imminent() {
+        // 10 units, burning 5/turn → exhausts in 2 turns; alert at 5 turns → fires
+        let ctx = ctx_with_commodity("food", 10.0, -5.0);
+        let pred = Predicate::EtaToExhaustion {
+            commodity_id: "food".into(),
+            sols: 5,
+        };
+        assert!(pred.evaluate(&ctx));
+    }
+
+    #[test]
+    fn eta_does_not_fire_when_exhaustion_is_far_away() {
+        // 100 units, burning 1/turn → exhausts in 100 turns; alert at 5 turns → no fire
+        let ctx = ctx_with_commodity("food", 100.0, -1.0);
+        let pred = Predicate::EtaToExhaustion {
+            commodity_id: "food".into(),
+            sols: 5,
+        };
+        assert!(!pred.evaluate(&ctx));
+    }
+
+    #[test]
+    fn eta_does_not_fire_when_delta_is_non_negative() {
+        // Surplus or stable — no exhaustion risk
+        let ctx = ctx_with_commodity("food", 10.0, 0.0);
+        let pred = Predicate::EtaToExhaustion {
+            commodity_id: "food".into(),
+            sols: 100,
+        };
+        assert!(!pred.evaluate(&ctx));
+
+        let ctx2 = ctx_with_commodity("food", 10.0, 5.0);
+        assert!(!pred.evaluate(&ctx2));
+    }
+
+    #[test]
+    fn eta_boundary_exactly_at_horizon() {
+        // 5 units, burning 1/turn → exhausts in exactly 5 turns; alert at 5 → fires (< 5 is false)
+        let ctx = ctx_with_commodity("oxygen", 5.0, -1.0);
+        let pred = Predicate::EtaToExhaustion {
+            commodity_id: "oxygen".into(),
+            sols: 5,
+        };
+        // 5.0 / 1.0 = 5.0, 5.0 < 5 is false
+        assert!(!pred.evaluate(&ctx));
+
+        // 4.9 units → 4.9 turns < 5 → fires
+        let ctx2 = ctx_with_commodity("oxygen", 4.9, -1.0);
+        assert!(pred.evaluate(&ctx2));
+    }
+
+    // ── ProductionShortfall ───────────────────────────────────────────────
+
+    #[test]
+    fn shortfall_fires_when_delta_is_negative() {
+        let ctx = ctx_with_commodity("food", 100.0, -3.0);
+        let pred = Predicate::ProductionShortfall {
+            commodity_id: "food".into(),
+        };
+        assert!(pred.evaluate(&ctx));
+    }
+
+    #[test]
+    fn shortfall_does_not_fire_when_balanced_or_surplus() {
+        let pred = Predicate::ProductionShortfall {
+            commodity_id: "food".into(),
+        };
+        let ctx_balanced = ctx_with_commodity("food", 100.0, 0.0);
+        assert!(!pred.evaluate(&ctx_balanced));
+
+        let ctx_surplus = ctx_with_commodity("food", 100.0, 5.0);
+        assert!(!pred.evaluate(&ctx_surplus));
+    }
+
+    #[test]
+    fn shortfall_treats_unknown_commodity_as_zero_delta() {
+        let ctx = ctx(); // no commodities
+        let pred = Predicate::ProductionShortfall {
+            commodity_id: "minerals".into(),
+        };
+        // delta defaults to 0.0, not negative → no shortfall
+        assert!(!pred.evaluate(&ctx));
+    }
+
+    // ── Serde round-trip for new variants ────────────────────────────────
+
+    #[test]
+    fn new_predicate_variants_round_trip_serde() {
+        let variants: Vec<Predicate> = vec![
+            Predicate::StockpileBelow {
+                commodity_id: "food".into(),
+                threshold: 50.0,
+            },
+            Predicate::StockpileAbove {
+                commodity_id: "water".into(),
+                threshold: 200.0,
+            },
+            Predicate::EtaToExhaustion {
+                commodity_id: "oxygen".into(),
+                sols: 3,
+            },
+            Predicate::ProductionShortfall {
+                commodity_id: "energy".into(),
+            },
+        ];
+        for p in variants {
+            let json = serde_json::to_string(&p).unwrap();
+            let back: Predicate = serde_json::from_str(&json).unwrap();
+            assert_eq!(p, back);
+        }
     }
 }
