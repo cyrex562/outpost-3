@@ -58,7 +58,7 @@ impl Directive {
 
 /// Stores all active directives and the manual-override registry.
 ///
-/// Embedded in `GameState`; persisted as part of the SQLite snapshot.
+/// Embedded in `GameState`; persisted as part of the `SQLite` snapshot.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DirectiveStore {
     /// All active directives, ordered by insertion time.

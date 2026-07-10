@@ -557,6 +557,52 @@ impl GameEngine {
                     let fired_events = self.apply(&action)?;
                     events.extend(fired_events);
                 }
+                // ── Step 5: Directive evaluation ───────────────────────────
+                // For each colony not under manual override, evaluate active
+                // directives in descending priority order and fire the best match.
+                let colony_ids: Vec<ColonyId> =
+                    self.state.colonies.iter().map(|c| c.id).collect();
+                let mut to_fire: Vec<(directive::DirectiveId, ColonyId, Command)> = Vec::new();
+                for colony_id in colony_ids {
+                    if self.state.directive_store.manual_override.contains(&colony_id) {
+                        continue;
+                    }
+                    let Some(idx) = self.state.colonies.iter().position(|c| c.id == colony_id)
+                    else {
+                        continue;
+                    };
+                    let pop = &self.state.populations[idx];
+                    let ctx = predicate::PredicateContext {
+                        colony_id,
+                        population: pop.count,
+                        stability: pop.stability,
+                        available_labour: pop.available_labor(),
+                        system_research: self.state.research_pool.total(),
+                        sol: self.state.sol,
+                        month: self.state.month,
+                    };
+                    if let Some((dir_id, action)) = self
+                        .state
+                        .directive_store
+                        .directives
+                        .iter()
+                        .filter(|d| d.colony_id == colony_id)
+                        .filter(|d| d.predicate.evaluate(&ctx))
+                        .max_by_key(|d| d.priority)
+                        .map(|d| (d.id, d.action.clone()))
+                    {
+                        to_fire.push((dir_id, colony_id, action));
+                    }
+                }
+                for (directive_id, colony_id, action) in to_fire {
+                    events.push(Event::DirectiveFired {
+                        colony_id,
+                        directive_id,
+                    });
+                    let fired_events = self.apply(&action)?;
+                    events.extend(fired_events);
+                }
+
                 Ok(events)
             }
 
