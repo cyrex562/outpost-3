@@ -31,7 +31,7 @@ pub mod turn;
 
 use thiserror::Error;
 
-use colony::ColonyId;
+use colony::{ColonyId, ProjectId};
 use turn::{GameState, TurnProcessor};
 
 /// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
@@ -61,12 +61,27 @@ pub enum Command {
     /// Queue a construction project in the named colony.
     ///
     /// The `building_type` key references a record in the loaded content pack.
-    /// This is a stub; detailed building mechanics arrive in later issues.
+    /// Rejects if the colony lacks sufficient build slots.
     QueueConstruction {
         /// Target colony.
         colony_id: ColonyId,
         /// Content-pack key identifying the building type to queue.
         building_type: String,
+        /// Number of build slots the building will consume.
+        slot_cost: u32,
+        /// Labor units consumed from the colony pool each construction turn.
+        labor_per_turn: u32,
+        /// Commodity costs for construction (commodity id, quantity pairs).
+        construction_cost: Vec<(String, f64)>,
+        /// Number of colony-sol turns required to complete construction.
+        construction_turns: u32,
+    },
+    /// Cancel a queued construction project and receive a 50 % partial refund.
+    CancelConstruction {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// Identifier of the construction project to cancel.
+        project_id: ProjectId,
     },
     /// Assign a number of labour units to a named slot in a colony.
     ///
@@ -178,6 +193,24 @@ pub enum Event {
         colony_id: ColonyId,
         /// Content-pack key of the building type queued.
         building_type: String,
+        /// Stable identifier for the new project (for tracking / cancellation).
+        project_id: ProjectId,
+    },
+    /// A construction project was cancelled; refunded commodities are listed.
+    ConstructionCancelled {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// Identifier of the cancelled project.
+        project_id: ProjectId,
+        /// Commodities returned to the colony pool (50 % of spent costs).
+        refund: Vec<(String, f64)>,
+    },
+    /// A construction project completed and the building became operational.
+    BuildingConstructed {
+        /// Colony where construction finished.
+        colony_id: ColonyId,
+        /// Content-pack key of the completed building.
+        building_type: String,
     },
     /// Labour was assigned to a production slot in a colony.
     LabourAssigned {
@@ -205,6 +238,17 @@ pub enum EngineError {
     /// A command argument was out of range or otherwise invalid.
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
+    /// The colony does not have enough build slots for the requested construction.
+    #[error("slot capacity exceeded: need {needed} slots but only {available} available")]
+    SlotCapacityExceeded {
+        /// Slots required by the new building.
+        needed: u32,
+        /// Slots actually available in the colony.
+        available: u32,
+    },
+    /// The referenced construction project does not exist.
+    #[error("project not found: {0}")]
+    ProjectNotFound(ProjectId),
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -248,6 +292,7 @@ impl GameEngine {
     ///
     /// Returns [`EngineError`] when the command cannot be applied in the
     /// current engine state.
+    #[allow(clippy::too_many_lines)]
     pub fn apply(&mut self, cmd: &Command) -> Result<Vec<Event>, EngineError> {
         match cmd {
             Command::AdvanceColonySol => {
@@ -260,6 +305,25 @@ impl GameEngine {
                     events.push(Event::StrategicMonthAdvanced {
                         month: outcome.month,
                     });
+                }
+                // Tick construction for every colony.
+                for colony in &mut self.state.colonies {
+                    // Consume labor for the active project.
+                    if let Some(active) = colony.build_queue.projects.first() {
+                        let labor = f64::from(active.labor_per_turn);
+                        colony.pool.withdraw("labor", labor);
+                    }
+                    if let Some(completed) = colony.build_queue.tick_active() {
+                        let building_type = completed.building_type.clone();
+                        colony.buildings.push(colony::PlacedBuilding::new(
+                            &building_type,
+                            completed.slot_cost,
+                        ));
+                        events.push(Event::BuildingConstructed {
+                            colony_id: colony.id,
+                            building_type,
+                        });
+                    }
                 }
                 Ok(events)
             }
@@ -293,17 +357,59 @@ impl GameEngine {
             Command::QueueConstruction {
                 colony_id,
                 building_type,
+                slot_cost,
+                labor_per_turn,
+                construction_cost,
+                construction_turns,
             } => {
-                // Validate the colony exists.
-                self.find_colony_index(*colony_id)?;
                 if building_type.trim().is_empty() {
                     return Err(EngineError::InvalidArgument(
                         "building_type must not be empty".into(),
                     ));
                 }
+                let idx = self.find_colony_index(*colony_id)?;
+                let available = self.state.colonies[idx].slots_available();
+                if *slot_cost > available {
+                    return Err(EngineError::SlotCapacityExceeded {
+                        needed: *slot_cost,
+                        available,
+                    });
+                }
+                let project = colony::ConstructionProject::new(
+                    building_type.clone(),
+                    *slot_cost,
+                    *labor_per_turn,
+                    construction_cost.clone(),
+                    *construction_turns,
+                );
+                let project_id = project.id;
+                self.state.colonies[idx].build_queue.enqueue(project);
                 Ok(vec![Event::ConstructionQueued {
                     colony_id: *colony_id,
                     building_type: building_type.clone(),
+                    project_id,
+                }])
+            }
+
+            Command::CancelConstruction {
+                colony_id,
+                project_id,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let colony = &mut self.state.colonies[idx];
+                let project = colony
+                    .build_queue
+                    .cancel(*project_id)
+                    .ok_or(EngineError::ProjectNotFound(*project_id))?;
+                let refund = project.cancel_refund();
+                // Return refunded commodities to the pool.
+                for (commodity_id, qty) in &refund {
+                    colony.pool.deposit(commodity_id, *qty);
+                }
+                Ok(vec![Event::ConstructionCancelled {
+                    colony_id: *colony_id,
+                    project_id: *project_id,
+                    refund,
                 }])
             }
 
@@ -529,23 +635,28 @@ mod tests {
 
     // ── QueueConstruction ──
 
+    fn queue_cmd(colony_id: ColonyId, building_type: &str, slot_cost: u32) -> Command {
+        Command::QueueConstruction {
+            colony_id,
+            building_type: building_type.into(),
+            slot_cost,
+            labor_per_turn: 5,
+            construction_cost: vec![],
+            construction_turns: 2,
+        }
+    }
+
     #[test]
     fn queue_construction_unknown_colony_returns_error() {
         let mut engine = GameEngine::new();
         let fake_id = uuid::Uuid::new_v4();
-        let err = engine
-            .apply(&Command::QueueConstruction {
-                colony_id: fake_id,
-                building_type: "mine".into(),
-            })
-            .unwrap_err();
+        let err = engine.apply(&queue_cmd(fake_id, "mine", 1)).unwrap_err();
         assert!(matches!(err, EngineError::ColonyNotFound(_)));
     }
 
     #[test]
     fn queue_construction_emits_event() {
         let mut engine = GameEngine::new();
-        // Found a colony first.
         let events = engine
             .apply(&Command::FoundColony {
                 name: "Beta Station".into(),
@@ -558,15 +669,12 @@ mod tests {
         let colony_id = *colony_id;
 
         let events = engine
-            .apply(&Command::QueueConstruction {
-                colony_id,
-                building_type: "greenhouse".into(),
-            })
+            .apply(&queue_cmd(colony_id, "greenhouse", 1))
             .unwrap();
         assert_eq!(events.len(), 1);
         assert!(matches!(
             &events[0],
-            Event::ConstructionQueued { colony_id: cid, building_type: bt }
+            Event::ConstructionQueued { colony_id: cid, building_type: bt, .. }
             if *cid == colony_id && bt == "greenhouse"
         ));
     }
@@ -587,9 +695,147 @@ mod tests {
             .apply(&Command::QueueConstruction {
                 colony_id: *colony_id,
                 building_type: "".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
             })
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    // ── Building model tests (Done-when bullets for issue #13) ──
+
+    #[test]
+    fn queue_construction_rejected_when_slots_full() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Slot Test".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Fill all 5 base slots.
+        for _ in 0..colony::BASE_SLOT_CAPACITY {
+            engine.apply(&queue_cmd(colony_id, "mine", 1)).unwrap();
+        }
+        // One more should be rejected.
+        let err = engine.apply(&queue_cmd(colony_id, "mine", 1)).unwrap_err();
+        assert!(
+            matches!(err, EngineError::SlotCapacityExceeded { .. }),
+            "expected SlotCapacityExceeded, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn construction_completes_turn_by_turn() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Build Test".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Queue a 3-turn build.
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "greenhouse".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 3,
+            })
+            .unwrap();
+
+        // Turns 1 and 2: not yet complete.
+        for _ in 0..2 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            assert!(!evs
+                .iter()
+                .any(|e| matches!(e, Event::BuildingConstructed { .. })));
+        }
+        // Turn 3: should complete.
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::BuildingConstructed { colony_id: cid, building_type: bt }
+                if *cid == colony_id && bt == "greenhouse"
+            )),
+            "expected BuildingConstructed event"
+        );
+
+        // Colony should now have the building placed.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(engine.state.colonies[idx].buildings.len(), 1);
+        assert_eq!(
+            engine.state.colonies[idx].buildings[0].building_type,
+            "greenhouse"
+        );
+    }
+
+    #[test]
+    fn cancel_construction_returns_50_pct_refund() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Cancel Test".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Queue a 4-turn build with steel cost.
+        let cost = vec![("steel".to_string(), 100.0)];
+        let evs = engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: cost,
+                construction_turns: 4,
+            })
+            .unwrap();
+        let Event::ConstructionQueued { project_id, .. } = &evs[0] else {
+            panic!()
+        };
+        let project_id = *project_id;
+
+        // Advance 2 turns (50 % done).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        // Cancel — expect 25 % refund (50 % spent × 50 % back).
+        let evs = engine
+            .apply(&Command::CancelConstruction {
+                colony_id,
+                project_id,
+            })
+            .unwrap();
+        let Event::ConstructionCancelled { refund, .. } = &evs[0] else {
+            panic!()
+        };
+        let steel_refund = refund.iter().find(|(id, _)| id == "steel").unwrap();
+        assert!(
+            (steel_refund.1 - 25.0).abs() < 1e-9,
+            "expected 25.0 steel refund, got {}",
+            steel_refund.1
+        );
     }
 
     // ── AssignLabour ──
@@ -771,10 +1017,7 @@ mod tests {
 
         // 3. Queue construction via apply().
         engine
-            .apply(&Command::QueueConstruction {
-                colony_id,
-                building_type: "solar_array".into(),
-            })
+            .apply(&queue_cmd(colony_id, "solar_array", 1))
             .unwrap();
 
         // 4. Assign labour via apply().
@@ -829,6 +1072,10 @@ mod tests {
             Command::QueueConstruction {
                 colony_id: uuid::Uuid::new_v4(),
                 building_type: "barracks".into(),
+                slot_cost: 1,
+                labor_per_turn: 5,
+                construction_cost: vec![],
+                construction_turns: 2,
             },
             Command::AssignLabour {
                 colony_id: uuid::Uuid::new_v4(),
