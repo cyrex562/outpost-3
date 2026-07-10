@@ -3947,7 +3947,11 @@ mod tests {
     #[test]
     fn research_tech_sets_current_project_and_emits_event() {
         let mut engine = make_tech_engine();
-        let events = engine.apply(&Command::ResearchTech { tech_id: "alpha".into() }).unwrap();
+        let events = engine
+            .apply(&Command::ResearchTech {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::ResearchStarted { tech_id } if tech_id == "alpha")));
@@ -3961,7 +3965,9 @@ mod tests {
     fn research_tech_rejects_unknown_tech() {
         let mut engine = make_tech_engine();
         let err = engine
-            .apply(&Command::ResearchTech { tech_id: "nonexistent".into() })
+            .apply(&Command::ResearchTech {
+                tech_id: "nonexistent".into(),
+            })
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidArgument(_)));
     }
@@ -3971,7 +3977,9 @@ mod tests {
         let mut engine = make_tech_engine();
         // beta requires alpha, which is not yet researched
         let err = engine
-            .apply(&Command::ResearchTech { tech_id: "beta".into() })
+            .apply(&Command::ResearchTech {
+                tech_id: "beta".into(),
+            })
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidArgument(_)));
     }
@@ -3980,7 +3988,11 @@ mod tests {
     fn research_tech_allows_tech_after_prereq_met() {
         let mut engine = make_tech_engine();
         engine.state.tech_state.researched.insert("alpha".into());
-        let events = engine.apply(&Command::ResearchTech { tech_id: "beta".into() }).unwrap();
+        let events = engine
+            .apply(&Command::ResearchTech {
+                tech_id: "beta".into(),
+            })
+            .unwrap();
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::ResearchStarted { tech_id } if tech_id == "beta")));
@@ -3990,7 +4002,9 @@ mod tests {
     fn enqueue_research_pushes_to_queue_and_emits_event() {
         let mut engine = make_tech_engine();
         let events = engine
-            .apply(&Command::EnqueueResearch { tech_id: "alpha".into() })
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
             .unwrap();
         assert!(events
             .iter()
@@ -4002,7 +4016,9 @@ mod tests {
     fn enqueue_research_rejects_unknown_tech() {
         let mut engine = make_tech_engine();
         let err = engine
-            .apply(&Command::EnqueueResearch { tech_id: "ghost".into() })
+            .apply(&Command::EnqueueResearch {
+                tech_id: "ghost".into(),
+            })
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidArgument(_)));
     }
@@ -4011,10 +4027,14 @@ mod tests {
     fn cancel_research_clears_queue_and_project() {
         let mut engine = make_tech_engine();
         engine
-            .apply(&Command::ResearchTech { tech_id: "alpha".into() })
+            .apply(&Command::ResearchTech {
+                tech_id: "alpha".into(),
+            })
             .unwrap();
         engine
-            .apply(&Command::EnqueueResearch { tech_id: "alpha".into() })
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
             .unwrap();
         let events = engine.apply(&Command::CancelResearch).unwrap();
         assert!(events.iter().any(|e| matches!(e, Event::ResearchCancelled)));
