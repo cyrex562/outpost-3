@@ -320,6 +320,20 @@ pub enum Command {
         /// Conditions to track.
         conditions: Vec<victory::VictoryCondition>,
     },
+
+    // ── M1: Research direction ────────────────────────────────────────────
+    /// Set the active research project, replacing any current one.
+    ResearchTech {
+        /// Tech definition id from the loaded content pack.
+        tech_id: String,
+    },
+    /// Append a tech to the end of the research queue.
+    EnqueueResearch {
+        /// Tech definition id to enqueue.
+        tech_id: String,
+    },
+    /// Clear the research queue and stop the current project.
+    CancelResearch,
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -686,6 +700,20 @@ pub enum Event {
     },
     /// The player chose to continue playing after victory (sandbox continue).
     SandboxContinued,
+
+    // ── M1: Research direction events ─────────────────────────────────────
+    /// A new tech was set as the active research project.
+    ResearchStarted {
+        /// The tech that is now being researched.
+        tech_id: String,
+    },
+    /// A tech was appended to the research queue.
+    ResearchQueued {
+        /// The tech added to the queue.
+        tech_id: String,
+    },
+    /// The research queue and current project were cleared.
+    ResearchCancelled,
 
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
@@ -1589,6 +1617,45 @@ impl GameEngine {
             Command::InitVictoryConditions { conditions } => {
                 self.state.victory_state = victory::VictoryState::new(conditions.clone());
                 Ok(vec![])
+            }
+
+            // ── M1: Research direction ────────────────────────────────────────
+            Command::ResearchTech { tech_id } => {
+                let registry = self.state.tech_registry.as_ref().ok_or_else(|| {
+                    EngineError::InvalidArgument("no tech registry loaded".into())
+                })?;
+                let def = registry.get(tech_id).ok_or_else(|| {
+                    EngineError::InvalidArgument(format!("unknown tech '{tech_id}'"))
+                })?;
+                if !self.state.tech_state.prerequisites_met(def) {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "prerequisites not met for tech '{tech_id}'"
+                    )));
+                }
+                self.state.tech_state.set_current_project(tech_id.clone());
+                Ok(vec![Event::ResearchStarted {
+                    tech_id: tech_id.clone(),
+                }])
+            }
+
+            Command::EnqueueResearch { tech_id } => {
+                let registry = self.state.tech_registry.as_ref().ok_or_else(|| {
+                    EngineError::InvalidArgument("no tech registry loaded".into())
+                })?;
+                let _ = registry.get(tech_id).ok_or_else(|| {
+                    EngineError::InvalidArgument(format!("unknown tech '{tech_id}'"))
+                })?;
+                self.state.tech_state.enqueue(tech_id.clone());
+                Ok(vec![Event::ResearchQueued {
+                    tech_id: tech_id.clone(),
+                }])
+            }
+
+            Command::CancelResearch => {
+                self.state.tech_state.current_project = None;
+                self.state.tech_state.progress = 0.0;
+                self.state.tech_state.research_queue.clear();
+                Ok(vec![Event::ResearchCancelled])
             }
         }
     }
@@ -3864,5 +3931,135 @@ mod tests {
             food_at_b > 0.0,
             "colony B should have received some food via trade; got {food_at_b}"
         );
+    }
+
+    // ── M1: ResearchTech / EnqueueResearch / CancelResearch tests ────────────
+
+    /// Build a minimal TechRegistry with two techs: "alpha" (no prereqs) and
+    /// "beta" (requires alpha).
+    fn make_tech_engine() -> GameEngine {
+        use crate::tech::{TechDef, TechEffect, TechRegistry};
+        let defs = vec![
+            TechDef {
+                id: "alpha".into(),
+                display_name: "Alpha".into(),
+                prerequisites: vec![],
+                research_cost: 10.0,
+                effects: vec![TechEffect::UnlockCapability {
+                    capability_id: "cap_alpha".into(),
+                }],
+            },
+            TechDef {
+                id: "beta".into(),
+                display_name: "Beta".into(),
+                prerequisites: vec!["alpha".into()],
+                research_cost: 20.0,
+                effects: vec![TechEffect::UnlockCapability {
+                    capability_id: "cap_beta".into(),
+                }],
+            },
+        ];
+        let registry = TechRegistry::build(defs).unwrap();
+        let mut engine = GameEngine::new();
+        engine.state.tech_registry = Some(registry);
+        engine
+    }
+
+    #[test]
+    fn research_tech_sets_current_project_and_emits_event() {
+        let mut engine = make_tech_engine();
+        let events = engine
+            .apply(&Command::ResearchTech {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ResearchStarted { tech_id } if tech_id == "alpha")));
+        assert_eq!(
+            engine.state.tech_state.current_project.as_deref(),
+            Some("alpha")
+        );
+    }
+
+    #[test]
+    fn research_tech_rejects_unknown_tech() {
+        let mut engine = make_tech_engine();
+        let err = engine
+            .apply(&Command::ResearchTech {
+                tech_id: "nonexistent".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn research_tech_rejects_unmet_prerequisites() {
+        let mut engine = make_tech_engine();
+        // beta requires alpha, which is not yet researched
+        let err = engine
+            .apply(&Command::ResearchTech {
+                tech_id: "beta".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn research_tech_allows_tech_after_prereq_met() {
+        let mut engine = make_tech_engine();
+        engine.state.tech_state.researched.insert("alpha".into());
+        let events = engine
+            .apply(&Command::ResearchTech {
+                tech_id: "beta".into(),
+            })
+            .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ResearchStarted { tech_id } if tech_id == "beta")));
+    }
+
+    #[test]
+    fn enqueue_research_pushes_to_queue_and_emits_event() {
+        let mut engine = make_tech_engine();
+        let events = engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ResearchQueued { tech_id } if tech_id == "alpha")));
+        assert_eq!(engine.state.tech_state.research_queue.len(), 1);
+    }
+
+    #[test]
+    fn enqueue_research_rejects_unknown_tech() {
+        let mut engine = make_tech_engine();
+        let err = engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "ghost".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn cancel_research_clears_queue_and_project() {
+        let mut engine = make_tech_engine();
+        engine
+            .apply(&Command::ResearchTech {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        let events = engine.apply(&Command::CancelResearch).unwrap();
+        assert!(events.iter().any(|e| matches!(e, Event::ResearchCancelled)));
+        assert!(engine.state.tech_state.current_project.is_none());
+        assert!(engine.state.tech_state.research_queue.is_empty());
     }
 }
