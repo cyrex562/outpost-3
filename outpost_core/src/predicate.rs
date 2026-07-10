@@ -153,11 +153,14 @@ impl Predicate {
     }
 
     /// Shorthand: OR of two predicates.
+    #[must_use]
     pub fn or(left: Self, right: Self) -> Self {
         Self::Or { left: Box::new(left), right: Box::new(right) }
     }
 
     /// Shorthand: NOT of a predicate.
+    #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn not(inner: Self) -> Self {
         Self::Not { inner: Box::new(inner) }
     }
