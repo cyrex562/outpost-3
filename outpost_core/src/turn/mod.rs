@@ -17,10 +17,10 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
-use crate::map::PlanetMap;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
+use crate::map::PlanetMap;
 use crate::menace::MenaceState;
 use crate::migration::{PendingMigration, PopulationTracker};
 use crate::modifier::{

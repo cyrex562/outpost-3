@@ -492,7 +492,8 @@ fn site_id_for_coord(seed: u64, coord: HexCoord) -> SiteId {
     let r = i64::from(coord.r);
     // Mix: combine seed with rotated q/r words.  Sign loss is intentional —
     // we want all bits of q/r to participate in the hash.
-    let high = seed ^ ((q as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+    let high = seed
+        ^ ((q as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
         ^ ((r as u64).wrapping_mul(0x6c62_272e_07bb_0142));
     let low = seed
         .wrapping_add((q as u64).wrapping_mul(0x517c_c1b7_2722_0a95))

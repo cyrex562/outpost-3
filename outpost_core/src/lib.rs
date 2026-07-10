@@ -53,12 +53,12 @@ use thiserror::Error;
 use colony::{ColonyId, ProjectId};
 use directive::DirectiveId;
 use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
+use map::PlanetMap;
 use migration::{
     compute_attractiveness, compute_auto_flows, resolve_arrival, AutoMigrationParams,
     ColonyAttractiveness, PendingMigration,
 };
 use needs::{apply_needs_check, apply_population_dynamics};
-use map::PlanetMap;
 use orbital::{OrbitalError, OrbitalStation, SatelliteConstellation};
 use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
@@ -4301,10 +4301,7 @@ mod tests {
     fn found_colony_at_site_rejects_unknown_site() {
         let mut engine = GameEngine::new();
         engine
-            .apply(&Command::SeedPlanet {
-                seed: 7,
-                radius: 3,
-            })
+            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
             .unwrap();
         let result = engine.apply(&Command::FoundColonyAtSite {
             name: "Beta".into(),
@@ -4329,7 +4326,9 @@ mod tests {
             .unwrap();
         // Pick the best landing site and find its SiteId.
         let pm = engine.state.planet_map.as_ref().unwrap();
-        let best_coord = pm.best_landing_site().expect("map must have habitable cells");
+        let best_coord = pm
+            .best_landing_site()
+            .expect("map must have habitable cells");
         let site_id = *pm
             .sites
             .iter()
@@ -4414,10 +4413,7 @@ mod tests {
         assert!(empty.colony_nodes.is_empty());
 
         engine
-            .apply(&Command::SeedPlanet {
-                seed: 1,
-                radius: 2,
-            })
+            .apply(&Command::SeedPlanet { seed: 1, radius: 2 })
             .unwrap();
 
         let QueryResult::PlanetMap(data) = engine.query(&Query::PlanetMap).unwrap() else {
@@ -4432,10 +4428,7 @@ mod tests {
     fn planet_map_query_includes_colony_node_after_founding() {
         let mut engine = GameEngine::new();
         engine
-            .apply(&Command::SeedPlanet {
-                seed: 2,
-                radius: 3,
-            })
+            .apply(&Command::SeedPlanet { seed: 2, radius: 3 })
             .unwrap();
         let pm = engine.state.planet_map.as_ref().unwrap();
         let coord = pm.best_landing_site().unwrap();
