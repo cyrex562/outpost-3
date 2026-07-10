@@ -57,7 +57,7 @@ use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
 use map::PlanetMap;
 use migration::{
     compute_attractiveness, compute_auto_flows, resolve_arrival, AutoMigrationParams,
-    ColonyAttractiveness, PendingMigration,
+    ColonyAttractiveness, EmigrationGate, PendingMigration,
 };
 use needs::{apply_needs_check, apply_population_dynamics};
 use orbital::{OrbitalError, OrbitalStation, SatelliteConstellation};
@@ -244,6 +244,29 @@ pub enum Command {
         fraction: f32,
         /// Transit time in strategic months.
         transit_turns: u32,
+    },
+    /// Open an emigration gate, enabling a voluntary flow from one colony to another.
+    ///
+    /// Each strategic month the engine will create a [`migration::PendingMigration`]
+    /// batch of `rate * source_population` colonists directed from `from_colony` to
+    /// `to_colony`.  Opening the same pair again replaces the rate.
+    OpenEmigrationGate {
+        /// Colony colonists depart from.
+        from_colony: ColonyId,
+        /// Colony colonists travel toward.
+        to_colony: ColonyId,
+        /// Fraction of `from_colony` population that departs per strategic month (`[0.0, 1.0]`).
+        rate: f32,
+    },
+    /// Close a previously opened emigration gate between two colonies.
+    ///
+    /// Future strategic months will no longer create voluntary batches for this
+    /// route.  Already in-transit batches are unaffected.
+    CloseEmigrationGate {
+        /// Colony the gate departs from.
+        from_colony: ColonyId,
+        /// Colony the gate points toward.
+        to_colony: ColonyId,
     },
     /// Run one strategic-month pass of auto migration between colonies.
     ///
@@ -691,6 +714,38 @@ pub enum Event {
         /// Total colonists in transit across all flows.
         total_in_transit: f32,
     },
+    /// An emigration gate was opened between two colonies.
+    EmigrationGateOpened {
+        /// Colony colonists depart from.
+        from_colony: ColonyId,
+        /// Colony colonists travel toward.
+        to_colony: ColonyId,
+        /// Fraction of source population that departs per strategic month.
+        rate: f32,
+    },
+    /// An emigration gate was closed between two colonies.
+    EmigrationGateClosed {
+        /// Colony the gate departed from.
+        from_colony: ColonyId,
+        /// Colony the gate pointed toward.
+        to_colony: ColonyId,
+    },
+    /// Migration batches were created this strategic month for open emigration gates.
+    GateMigrationQueued {
+        /// Number of migration batches created across all open gates.
+        batch_count: usize,
+        /// Total colonists placed in transit.
+        total_in_transit: f32,
+    },
+    /// Voluntary emigration was auto-triggered due to low stability.
+    VoluntaryEmigrationTriggered {
+        /// Colony that triggered the auto-emigration.
+        from_colony: ColonyId,
+        /// Colony colonists were directed toward (most attractive neighbour).
+        to_colony: ColonyId,
+        /// Number of colonists that departed.
+        count: f32,
+    },
     /// An orbital station was built.
     OrbitalStationBuilt {
         /// Stable identifier of the new station.
@@ -1011,6 +1066,151 @@ impl GameEngine {
                             commodity_id: record.commodity_id,
                             amount: record.amount,
                         });
+                    }
+
+                    // ── Gate migration ────────────────────────────────────────
+                    // For every open emigration gate, compute departures as
+                    // rate * source_population and enqueue a PendingMigration.
+                    {
+                        let gates: Vec<EmigrationGate> = self.state.emigration_gates.clone();
+                        let mut batch_count = 0usize;
+                        let mut total_in_transit = 0.0_f32;
+                        for gate in &gates {
+                            let Ok(from_idx) = self.find_colony_index(gate.from_colony) else {
+                                continue;
+                            };
+                            if self.find_colony_index(gate.to_colony).is_err() {
+                                continue;
+                            }
+                            let src_pop = self.state.populations[from_idx].count;
+                            let movers = (src_pop * gate.rate).floor();
+                            if movers < 1.0 {
+                                continue;
+                            }
+                            self.state.populations[from_idx].count = (src_pop - movers).max(0.0);
+                            let mig = PendingMigration::new(
+                                Some(gate.from_colony),
+                                gate.to_colony,
+                                movers,
+                                1, // 1 strategic month transit
+                                false,
+                                movers * 0.1,
+                            );
+                            self.state.pending_migrations.push(mig);
+                            batch_count += 1;
+                            total_in_transit += movers;
+                        }
+                        if batch_count > 0 {
+                            events.push(Event::GateMigrationQueued {
+                                batch_count,
+                                total_in_transit,
+                            });
+                        }
+                    }
+
+                    // ── Voluntary emigration at low stability ─────────────────
+                    // When stability ≤ emigration_stability_floor auto-trigger
+                    // a small outflow even without an open gate.
+                    if let Some(config) = self.state.needs_config.clone() {
+                        let colony_ids: Vec<ColonyId> =
+                            self.state.colonies.iter().map(|c| c.id).collect();
+                        let attractiveness: Vec<ColonyAttractiveness> = self
+                            .state
+                            .colonies
+                            .iter()
+                            .zip(self.state.populations.iter())
+                            .map(|(colony, pop)| {
+                                #[allow(clippy::cast_possible_truncation)]
+                                let housing = colony.pool.amount("housing") as f32;
+                                compute_attractiveness(
+                                    colony.id,
+                                    pop.stability,
+                                    housing,
+                                    pop.count,
+                                    1.0,
+                                )
+                            })
+                            .collect();
+
+                        for (i, &src_id) in colony_ids.iter().enumerate() {
+                            let stability = self.state.populations[i].stability;
+                            if stability > config.emigration_stability_floor {
+                                continue;
+                            }
+                            let src_pop = self.state.populations[i].count;
+                            if src_pop < 1.0 {
+                                continue;
+                            }
+                            let src_score = attractiveness
+                                .iter()
+                                .find(|a| a.colony_id == src_id)
+                                .map_or(0.0, |a| a.score);
+                            // Find the most attractive other colony.
+                            let best_dst = attractiveness
+                                .iter()
+                                .filter(|a| a.colony_id != src_id && a.score > src_score)
+                                .max_by(|a, b| {
+                                    a.score
+                                        .partial_cmp(&b.score)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                            let Some(dst) = best_dst else { continue };
+                            let movers = (src_pop * config.voluntary_emigration_rate)
+                                .floor()
+                                .max(1.0);
+                            let movers = movers.min(src_pop);
+                            self.state.populations[i].count = (src_pop - movers).max(0.0);
+                            let mig = PendingMigration::new(
+                                Some(src_id),
+                                dst.colony_id,
+                                movers,
+                                1,
+                                false,
+                                movers * 0.1,
+                            );
+                            self.state.pending_migrations.push(mig);
+                            events.push(Event::VoluntaryEmigrationTriggered {
+                                from_colony: src_id,
+                                to_colony: dst.colony_id,
+                                count: movers,
+                            });
+                        }
+                    }
+
+                    // ── Tick and resolve pending migrations ───────────────────
+                    {
+                        let mut arrived: Vec<PendingMigration> = Vec::new();
+                        self.state.pending_migrations.retain_mut(|m| {
+                            if m.tick() {
+                                arrived.push(m.clone());
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                        for mig in &arrived {
+                            let Ok(to_idx) = self.find_colony_index(mig.to_colony) else {
+                                continue;
+                            };
+                            #[allow(clippy::cast_possible_truncation)]
+                            let housing = self.state.colonies[to_idx].pool.amount("housing") as f32;
+                            let current_pop = self.state.populations[to_idx].count;
+                            let outcome = resolve_arrival(mig, housing, current_pop);
+                            self.state.populations[to_idx].count += outcome.arrived;
+                            self.state.populations[to_idx].stability =
+                                (self.state.populations[to_idx].stability
+                                    + outcome.overcrowding_stability_penalty)
+                                    .clamp(0.0, 1.0);
+                            events.push(Event::MigrationArrived {
+                                from_colony: mig.from_colony,
+                                to_colony: mig.to_colony,
+                                count: outcome.arrived,
+                                overcrowding_stability_penalty: outcome
+                                    .overcrowding_stability_penalty,
+                                forced_departure_stability_penalty: outcome
+                                    .forced_departure_stability_penalty,
+                            });
+                        }
                     }
                 }
                 // ── Step 1: Construction ────────────────────────────────────
@@ -1641,6 +1841,49 @@ impl GameEngine {
                     to_colony: *to_colony,
                     count,
                     forced: true,
+                }])
+            }
+
+            Command::OpenEmigrationGate {
+                from_colony,
+                to_colony,
+                rate,
+            } => {
+                self.find_colony_index(*from_colony)?;
+                self.find_colony_index(*to_colony)?;
+                let rate = rate.clamp(0.0, 1.0);
+                // Replace existing gate for this pair, or push a new one.
+                if let Some(gate) = self
+                    .state
+                    .emigration_gates
+                    .iter_mut()
+                    .find(|g| g.from_colony == *from_colony && g.to_colony == *to_colony)
+                {
+                    gate.rate = rate;
+                } else {
+                    self.state.emigration_gates.push(EmigrationGate {
+                        from_colony: *from_colony,
+                        to_colony: *to_colony,
+                        rate,
+                    });
+                }
+                Ok(vec![Event::EmigrationGateOpened {
+                    from_colony: *from_colony,
+                    to_colony: *to_colony,
+                    rate,
+                }])
+            }
+
+            Command::CloseEmigrationGate {
+                from_colony,
+                to_colony,
+            } => {
+                self.state
+                    .emigration_gates
+                    .retain(|g| !(g.from_colony == *from_colony && g.to_colony == *to_colony));
+                Ok(vec![Event::EmigrationGateClosed {
+                    from_colony: *from_colony,
+                    to_colony: *to_colony,
                 }])
             }
 
@@ -4181,6 +4424,8 @@ mod tests {
             growth_rate: 0.005,
             decline_stability_threshold: 0.30,
             decline_rate: 0.001,
+            emigration_stability_floor: 0.25,
+            voluntary_emigration_rate: 0.03,
         });
 
         let idx = engine.find_colony_index(colony_id).unwrap();
@@ -5509,6 +5754,218 @@ mod tests {
             }
         }
         panic!("shipment never arrived after 20 strategic months");
+    }
+
+    // ── Issue #91: emigration gates and voluntary migration ──────────────────
+
+    fn two_colony_engine() -> (GameEngine, ColonyId, ColonyId) {
+        let mut engine = GameEngine::new();
+        let evs_a = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 1000,
+            })
+            .unwrap();
+        let evs_b = engine
+            .apply(&Command::FoundColony {
+                name: "Beta".into(),
+                starting_population: 200,
+            })
+            .unwrap();
+        let id_a = match &evs_a[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!("expected ColonyFounded"),
+        };
+        let id_b = match &evs_b[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!("expected ColonyFounded"),
+        };
+        (engine, id_a, id_b)
+    }
+
+    #[test]
+    fn open_emigration_gate_stored_in_state() {
+        let (mut engine, a, b) = two_colony_engine();
+        let evs = engine
+            .apply(&Command::OpenEmigrationGate {
+                from_colony: a,
+                to_colony: b,
+                rate: 0.10,
+            })
+            .unwrap();
+        assert!(
+            matches!(evs[0], Event::EmigrationGateOpened { .. }),
+            "should emit EmigrationGateOpened"
+        );
+        assert_eq!(
+            engine.state.emigration_gates.len(),
+            1,
+            "gate should be stored in state"
+        );
+        assert_eq!(engine.state.emigration_gates[0].from_colony, a);
+        assert_eq!(engine.state.emigration_gates[0].to_colony, b);
+    }
+
+    #[test]
+    fn close_emigration_gate_removes_from_state() {
+        let (mut engine, a, b) = two_colony_engine();
+        engine
+            .apply(&Command::OpenEmigrationGate {
+                from_colony: a,
+                to_colony: b,
+                rate: 0.05,
+            })
+            .unwrap();
+        assert_eq!(engine.state.emigration_gates.len(), 1);
+        let evs = engine
+            .apply(&Command::CloseEmigrationGate {
+                from_colony: a,
+                to_colony: b,
+            })
+            .unwrap();
+        assert!(
+            matches!(evs[0], Event::EmigrationGateClosed { .. }),
+            "should emit EmigrationGateClosed"
+        );
+        assert!(
+            engine.state.emigration_gates.is_empty(),
+            "gate should be removed from state"
+        );
+    }
+
+    #[test]
+    fn open_gate_creates_batch_on_strategic_month() {
+        let (mut engine, a, b) = two_colony_engine();
+        engine
+            .apply(&Command::OpenEmigrationGate {
+                from_colony: a,
+                to_colony: b,
+                rate: 0.10,
+            })
+            .unwrap();
+
+        let pop_before = engine
+            .state
+            .populations
+            .iter()
+            .find(|_| true)
+            .map(|p| p.count)
+            .unwrap_or(0.0);
+
+        // Advance one strategic month (30 sols by default).
+        let mut gate_queued = false;
+        for _ in 0..30 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if evs
+                .iter()
+                .any(|e| matches!(e, Event::GateMigrationQueued { .. }))
+            {
+                gate_queued = true;
+            }
+        }
+        assert!(
+            gate_queued,
+            "GateMigrationQueued event should fire on strategic month"
+        );
+        // Source pop should have decreased (migrants in transit).
+        let pop_after = engine.state.populations[0].count;
+        assert!(
+            pop_after < pop_before,
+            "source population should decrease when gate batch departs; before={pop_before}, after={pop_after}"
+        );
+    }
+
+    #[test]
+    fn gate_batch_arrives_and_transfers_population() {
+        let (mut engine, a, b) = two_colony_engine();
+        let pop_b_before = engine.state.populations[1].count;
+
+        engine
+            .apply(&Command::OpenEmigrationGate {
+                from_colony: a,
+                to_colony: b,
+                rate: 0.10,
+            })
+            .unwrap();
+
+        // Advance two strategic months so batch from month 1 has time to arrive
+        // (transit = 1 month → arrives on the next strategic month).
+        let mut arrivals = 0usize;
+        for _ in 0..60 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            arrivals += evs
+                .iter()
+                .filter(|e| matches!(e, Event::MigrationArrived { .. }))
+                .count();
+        }
+        let pop_b_after = engine.state.populations[1].count;
+        assert!(
+            arrivals > 0,
+            "at least one MigrationArrived event should have fired"
+        );
+        assert!(
+            pop_b_after > pop_b_before,
+            "destination population should grow after arrival; before={pop_b_before}, after={pop_b_after}"
+        );
+    }
+
+    #[test]
+    fn low_stability_triggers_voluntary_emigration() {
+        let (mut engine, a, b) = two_colony_engine();
+
+        // Set needs config with emigration_stability_floor = 0.5 to make it easy
+        // to trigger.  Disable commodity-based needs so stability doesn't change
+        // during the test (by using an empty needs list).
+        engine.state.needs_config = Some(crate::needs::NeedsConfig {
+            needs: vec![],
+            stability_recovery_rate: 0.0,
+            stability_decay_rate: 0.0,
+            growth_stability_threshold: 0.70,
+            growth_rate: 0.0,
+            decline_stability_threshold: 0.0,
+            decline_rate: 0.0,
+            emigration_stability_floor: 0.5,
+            voluntary_emigration_rate: 0.05,
+        });
+
+        // Force colony A stability below the floor.
+        engine.state.populations[0].stability = 0.2;
+
+        // Give colony B much higher attractiveness via housing and stability.
+        engine.state.populations[1].stability = 0.9;
+        // Add housing to colony B so it has headroom, boosting attractiveness score.
+        let b_idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == b)
+            .unwrap();
+        engine.state.colonies[b_idx].pool.deposit("housing", 1000.0);
+
+        let pop_a_before = engine.state.populations[0].count;
+
+        // Advance one strategic month and collect events.
+        let mut voluntary_triggered = false;
+        for _ in 0..30 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            for e in &evs {
+                if let Event::VoluntaryEmigrationTriggered { from_colony, .. } = e {
+                    if *from_colony == a {
+                        voluntary_triggered = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            voluntary_triggered,
+            "VoluntaryEmigrationTriggered should fire for colony A when stability < floor"
+        );
+        // Population should have decreased due to voluntary departure.
+        let pop_a_after = engine.state.populations[0].count;
+        assert!(
+            pop_a_after < pop_a_before,
+            "colony A population should decrease; before={pop_a_before}, after={pop_a_after}"
+        );
     }
 
     // ── Issue #89: StabilityCritical, TechUnlocked, EventFired interrupt sources ──

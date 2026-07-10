@@ -25,7 +25,7 @@ use crate::hazard::{roll_hazard, HazardConfig, HazardKind};
 use crate::interrupt::StabilityTracker;
 use crate::map::PlanetMap;
 use crate::menace::MenaceState;
-use crate::migration::{PendingMigration, PopulationTracker};
+use crate::migration::{EmigrationGate, PendingMigration, PopulationTracker};
 use crate::modifier::{
     DifficultyScalar, ModifiableQuantity, ModifierAccumulator, ModifierDescriptor,
 };
@@ -118,6 +118,8 @@ pub struct GameState {
     pub stability_trackers: HashMap<ColonyId, StabilityTracker>,
     /// Planetary trade network: infrastructure routes + per-colony overrides.
     pub trade_network: TradeNetwork,
+    /// Active emigration gates: player-defined directed voluntary flow routes.
+    pub emigration_gates: Vec<EmigrationGate>,
     /// In-transit migration batches (voluntary + forced + immigration waves).
     pub pending_migrations: Vec<PendingMigration>,
     /// Per-colony population history for predictive population warnings.
@@ -193,6 +195,7 @@ impl GameState {
             directive_store: DirectiveStore::default(),
             stability_trackers: HashMap::new(),
             trade_network: TradeNetwork::new(),
+            emigration_gates: Vec::new(),
             pending_migrations: Vec::new(),
             population_trackers: HashMap::new(),
             orbital_registry: OrbitalRegistry::new(),

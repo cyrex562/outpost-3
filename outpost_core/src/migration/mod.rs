@@ -26,6 +26,22 @@
 
 use crate::colony::ColonyId;
 
+// ─── Emigration gate ──────────────────────────────────────────────────────────
+
+/// An open emigration gate permitting voluntary flow from one colony to another.
+///
+/// Each strategic month the engine creates a [`PendingMigration`] for every open
+/// gate carrying `rate * source_population` colonists.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EmigrationGate {
+    /// Colony from which colonists depart.
+    pub from_colony: ColonyId,
+    /// Colony toward which colonists are directed.
+    pub to_colony: ColonyId,
+    /// Fraction of source population that departs per strategic month (`[0.0, 1.0]`).
+    pub rate: f32,
+}
+
 // ─── Attractiveness ───────────────────────────────────────────────────────────
 
 /// Attractiveness score for one colony, used to compute auto migration flows.
