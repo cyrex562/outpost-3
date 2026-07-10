@@ -66,7 +66,7 @@ impl ModifierDescriptor {
 /// Descriptors from different categories for the same quantity are also summed
 /// (categories are labels that allow source-tracking; the final tech contribution
 /// is the total additive sum regardless of category).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModifierAccumulator {
     descriptors: Vec<ModifierDescriptor>,
 }
@@ -109,7 +109,7 @@ impl ModifierAccumulator {
 /// Per-quantity outermost difficulty multiplier.
 ///
 /// Applied after all tech bonuses: `effective = base × (1 + tech_sum) × difficulty`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DifficultyScalar {
     scalars: std::collections::HashMap<ModifiableQuantity, f32>,
 }
