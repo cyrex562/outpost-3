@@ -262,8 +262,8 @@ Run the following checks in order. Fix any failures before reporting (up to 3 at
    If so, run: \`cargo run --bin outpost_harness -- check content/checks/ 2>&1\`
    Report harness_applicable and harness_passed.
 
-After all checks pass, stage any fmt fixes and amend the last commit:
-\`git add -A && git commit --amend --no-edit\`
+After all checks pass, stage any fmt fixes with a new commit (do NOT amend):
+\`git add -A && git diff --cached --quiet || git commit -m "chore: apply cargo fmt fixes"\`
 
 If any check cannot be made green after 3 attempts, set all_passed=false and describe the failure in failure_details.
 
