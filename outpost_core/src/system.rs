@@ -261,6 +261,8 @@ pub struct CargoShipment {
     pub hauler_id: Uuid,
     /// Strategic months remaining until arrival.
     pub turns_remaining: u32,
+    /// Colony that should receive this cargo on arrival (if any).
+    pub destination_colony: Option<crate::colony::ColonyId>,
 }
 
 // ─── Megaproject Framework ────────────────────────────────────────────────────
@@ -451,6 +453,8 @@ pub enum SystemCommand {
         to: BodyId,
         /// Commodity and quantity being shipped.
         cargo: Vec<(String, f64)>,
+        /// Colony that should receive the cargo on arrival (optional).
+        destination_colony: Option<crate::colony::ColonyId>,
     },
     /// Advance all in-transit shipments by one strategic month.
     ///
@@ -745,7 +749,7 @@ pub fn apply_system_command(
             }])
         }
 
-        SystemCommand::DispatchShipment { from, to, cargo } => {
+        SystemCommand::DispatchShipment { from, to, cargo, destination_colony } => {
             // Verify bodies exist
             if !state.node_map.bodies.contains_key(from) {
                 return Err(SystemError::BodyNotFound(from.clone()));
@@ -802,6 +806,7 @@ pub fn apply_system_command(
                     cargo: cargo.clone(),
                     hauler_id,
                     turns_remaining: travel_time,
+                    destination_colony: *destination_colony,
                 },
             );
             Ok(vec![SystemEvent::ShipmentDispatched {
@@ -1061,6 +1066,7 @@ mod tests {
                 from: inner_id,
                 to: outer_id,
                 cargo: vec![("iron".into(), 50.0)],
+                destination_colony: None,
             },
         );
         assert!(
@@ -1080,6 +1086,7 @@ mod tests {
                 from: inner_id.clone(),
                 to: outer_id.clone(),
                 cargo: vec![("food".into(), 50.0)],
+                destination_colony: None,
             },
         )
         .unwrap();
@@ -1127,6 +1134,7 @@ mod tests {
                 from: body_a.clone(),
                 to: body_b.clone(),
                 cargo: vec![("iron".into(), 50.0)],
+                destination_colony: None,
             },
         )
         .unwrap();

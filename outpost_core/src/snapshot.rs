@@ -268,6 +268,7 @@ impl Snapshot {
             victory_state: crate::victory::VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
+            system_state: crate::system::SystemState::new(),
         })
     }
 
