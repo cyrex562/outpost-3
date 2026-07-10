@@ -349,6 +349,14 @@ pub enum Command {
         progress: u32,
     },
 
+    // ── M1: System zoom commands ──────────────────────────────────────────
+    /// Issue a command directly to the system zoom layer.
+    ///
+    /// Wraps [`system::SystemCommand`] so all system-scope operations
+    /// (body management, shipping routes, haulers, megaprojects, propulsion)
+    /// are reachable through the main drive API.
+    System(system::SystemCommand),
+
     // ── M1: Research direction ────────────────────────────────────────────
     /// Set the active research project, replacing any current one.
     ResearchTech {
@@ -798,6 +806,12 @@ pub enum Event {
         /// Quantity deposited into the colony pool.
         amount: f64,
     },
+
+    /// An event produced by the system zoom layer.
+    ///
+    /// Wraps [`system::SystemEvent`] so all system-scope events are observable
+    /// through the main event stream.
+    System(system::SystemEvent),
 
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
@@ -1841,6 +1855,49 @@ impl GameEngine {
                         }
                     }
                 }
+
+                if self.state.expedition_launched && self.state.victory.is_none() {
+                    let snap = victory::VictorySnapshot {
+                        expedition_launched: true,
+                        total_output: 0,
+                        total_population: self
+                            .state
+                            .populations
+                            .iter()
+                            .map(|p| {
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                {
+                                    p.count.max(0.0) as u64
+                                }
+                            })
+                            .sum(),
+                        cumulative_research: self.state.cumulative_research,
+                    };
+                    for condition in self.state.victory_state.evaluate(&snap) {
+                        self.state.victory = Some(condition.clone());
+                        events.push(Event::VictoryAchieved { condition });
+                    }
+                }
+
+                Ok(events)
+            }
+
+            // ── M1: System zoom dispatch ──────────────────────────────────────
+            Command::System(sys_cmd) => {
+                let sys_events =
+                    system::apply_system_command(&mut self.state.system_state, sys_cmd)
+                        .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+
+                // Propagate expedition-launch side-effect from system events.
+                for sys_evt in &sys_events {
+                    if let system::SystemEvent::MegaprojectCompleted { kind, .. } = sys_evt {
+                        if *kind == system::MegaprojectKind::InterstellarExpedition {
+                            self.state.expedition_launched = true;
+                        }
+                    }
+                }
+
+                let mut events: Vec<Event> = sys_events.into_iter().map(Event::System).collect();
 
                 if self.state.expedition_launched && self.state.victory.is_none() {
                     let snap = victory::VictorySnapshot {
@@ -5086,5 +5143,261 @@ mod tests {
             infra_type: map::InfraType::Road,
         });
         assert!(matches!(result, Err(EngineError::NoPlanetMap)));
+    }
+
+    // ── M1 #85: Command::System dispatch tests ────────────────────────────
+
+    /// Build a minimal SystemState: two bodies, a route, and a hauler.
+    fn setup_system(engine: &mut GameEngine) -> (system::BodyId, system::BodyId) {
+        let events_a = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Inner".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.0,
+            }))
+            .unwrap();
+        let body_a = events_a.iter().find_map(|e| {
+            if let Event::System(system::SystemEvent::BodyAdded { body_id, .. }) = e {
+                Some(body_id.clone())
+            } else {
+                None
+            }
+        });
+
+        let events_b = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Outer".into(),
+                kind: system::BodyKind::GasGiant,
+                distance_au: 5.0,
+            }))
+            .unwrap();
+        let body_b = events_b.iter().find_map(|e| {
+            if let Event::System(system::SystemEvent::BodyAdded { body_id, .. }) = e {
+                Some(body_id.clone())
+            } else {
+                None
+            }
+        });
+
+        let body_a = body_a.unwrap();
+        let body_b = body_b.unwrap();
+
+        engine
+            .apply(&Command::System(system::SystemCommand::AddShippingRoute {
+                from: body_a.clone(),
+                to: body_b.clone(),
+            }))
+            .unwrap();
+
+        engine
+            .apply(&Command::System(system::SystemCommand::AddHauler {
+                capacity: 1000.0,
+            }))
+            .unwrap();
+
+        (body_a, body_b)
+    }
+
+    #[test]
+    fn system_command_add_body_emits_body_added_event() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "TestBody".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.5,
+            }))
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::System(system::SystemEvent::BodyAdded { .. }))),
+            "expected BodyAdded event"
+        );
+        assert!(!engine.state.system_state.node_map.bodies.is_empty());
+    }
+
+    #[test]
+    fn system_command_add_shipping_route_emits_route_added_event() {
+        let mut engine = GameEngine::new();
+        let (body_a, body_b) = setup_system(&mut engine);
+        // Route was added inside setup_system; verify it is stored.
+        assert!(
+            engine
+                .state
+                .system_state
+                .node_map
+                .routes
+                .values()
+                .any(|r| r.from == body_a && r.to == body_b || r.from == body_b && r.to == body_a),
+            "expected shipping route between the two bodies"
+        );
+    }
+
+    #[test]
+    fn dispatch_cargo_arrives_after_n_months_and_deposits_in_colony_pool() {
+        let mut engine = GameEngine::new();
+        let (body_a, body_b) = setup_system(&mut engine);
+
+        // Found a colony linked to body_b.
+        let col_events = engine
+            .apply(&Command::FoundColony {
+                name: "Outer Colony".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = col_events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Dispatch food cargo destined for the colony.
+        let dispatch_events = engine
+            .apply(&Command::System(system::SystemCommand::DispatchShipment {
+                from: body_a,
+                to: body_b,
+                cargo: vec![("food".into(), 50.0)],
+                destination_colony: Some(colony_id),
+            }))
+            .unwrap();
+        assert!(
+            dispatch_events.iter().any(|e| matches!(
+                e,
+                Event::System(system::SystemEvent::ShipmentDispatched { .. })
+            )),
+            "expected ShipmentDispatched event"
+        );
+
+        // The route travel time is 1 month (inner → outer at 5 AU defaults to
+        // at least 1 month).  Advance enough strategic months for delivery.
+        let food_before = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .unwrap()
+            .pool
+            .amount("food");
+
+        // Advance colony-sols in 30-sol batches (each batch = one strategic month).
+        // After each strategic month, check if food arrived in the colony pool.
+        for _month in 0..20 {
+            for _ in 0..30 {
+                engine.apply(&Command::AdvanceColonySol).unwrap();
+            }
+            let food_now = engine
+                .state
+                .colonies
+                .iter()
+                .find(|c| c.id == colony_id)
+                .unwrap()
+                .pool
+                .amount("food");
+            if food_now > food_before {
+                return; // cargo arrived and was deposited — test passes
+            }
+        }
+        panic!("cargo never arrived in colony pool after 20 strategic months");
+    }
+
+    #[test]
+    fn system_command_register_and_contribute_megaproject_via_apply() {
+        let mut engine = GameEngine::new();
+
+        // Register a generic megaproject.
+        let reg_events = engine
+            .apply(&Command::System(
+                system::SystemCommand::RegisterMegaproject {
+                    name: "Wormhole Gate".into(),
+                    kind: system::MegaprojectKind::Custom("test".into()),
+                    milestones: vec![system::MilestoneSpec {
+                        label: "Phase 1".into(),
+                        resource_cost: vec![],
+                        research_cost: 10.0,
+                    }],
+                },
+            ))
+            .unwrap();
+
+        let project_id = reg_events
+            .iter()
+            .find_map(|e| {
+                if let Event::System(system::SystemEvent::MegaprojectRegistered {
+                    project_id,
+                    ..
+                }) = e
+                {
+                    Some(project_id.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Contribute enough to complete the milestone.
+        let contrib_events = engine
+            .apply(&Command::System(
+                system::SystemCommand::ContributeToMegaproject {
+                    project_id,
+                    resources: vec![],
+                    research: 10.0,
+                },
+            ))
+            .unwrap();
+
+        assert!(
+            contrib_events.iter().any(|e| matches!(
+                e,
+                Event::System(system::SystemEvent::MilestoneCompleted { .. })
+            )),
+            "expected MilestoneCompleted event after contributing full research"
+        );
+        assert!(
+            contrib_events.iter().any(|e| matches!(
+                e,
+                Event::System(system::SystemEvent::MegaprojectCompleted { .. })
+            )),
+            "expected MegaprojectCompleted event"
+        );
+    }
+
+    #[test]
+    fn strategic_month_advances_cargo_shipments_automatically() {
+        let mut engine = GameEngine::new();
+        let (body_a, body_b) = setup_system(&mut engine);
+
+        // Dispatch a shipment (no colony destination — just checking transit).
+        engine
+            .apply(&Command::System(system::SystemCommand::DispatchShipment {
+                from: body_a,
+                to: body_b,
+                cargo: vec![("ore".into(), 100.0)],
+                destination_colony: None,
+            }))
+            .unwrap();
+
+        assert_eq!(
+            engine.state.system_state.shipments.len(),
+            1,
+            "one shipment should be in transit"
+        );
+
+        // Advance colony-sols in 30-sol batches; each batch fires one strategic month.
+        // Shipment should arrive within a few months.
+        for _month in 0..20 {
+            for _ in 0..30 {
+                engine.apply(&Command::AdvanceColonySol).unwrap();
+            }
+            if engine.state.system_state.shipments.is_empty() {
+                return; // arrived — test passes
+            }
+        }
+        panic!("shipment never arrived after 20 strategic months");
     }
 }
