@@ -1,575 +1,229 @@
-//! Condition/predicate language — shared substrate for interrupts and directives.
-//!
-//! One predicate evaluator powers both "stop me when X" (interrupts, §12A) and
-//! "auto-handle when X" (directives, §12). Build once; both systems consume it.
-//!
-//! # Predicate data model
-//!
-//! [`Predicate`] and [`Quantity`] are fully serialisable so they can be authored
-//! in YAML/JSON content packs, persisted in `SQLite` snapshots, and sent over the
-//! web API.
-//!
-//! # Trend / ETA semantics
-//!
-//! The [`Predicate::Declining`] variant extrapolates a **linear trend** from the
-//! `delta` field of the colony's [`ColonyPool`] (net change last turn). That
-//! single-turn rate is cheap to compute and avoids a costly forward-simulation.
-//! The variant fires when the *projected* crossing time to reach zero (or the
-//! supplied `threshold`) is ≤ `eta_turns` turns away.
+//! Predicate language for the directive and interrupt systems.
 
 use crate::colony::ColonyId;
-use crate::turn::GameState;
+use serde::{Deserialize, Serialize};
 
-/// A path into [`GameState`] that resolves to a single `f32` value.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Quantity {
-    /// Stability of the named colony, in `[0.0, 1.0]`.
-    ColonyStability {
-        /// Target colony.
-        colony_id: ColonyId,
-    },
-    /// Current stockpile amount for a commodity in the named colony.
-    Stockpile {
-        /// Target colony.
-        colony_id: ColonyId,
-        /// Commodity identifier (e.g. `"food"`, `"water"`).
-        commodity_id: String,
-    },
-    /// Net per-turn rate of change for a commodity stockpile (positive = growing).
-    StockpileRate {
-        /// Target colony.
-        colony_id: ColonyId,
-        /// Commodity identifier.
-        commodity_id: String,
-    },
-    /// Current head-count (population) of the named colony.
-    ColonyPopulation {
-        /// Target colony.
-        colony_id: ColonyId,
-    },
+/// A snapshot of colony-level observable state for predicate evaluation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PredicateContext {
+    /// Colony this context belongs to.
+    pub colony_id: ColonyId,
+    /// Current population count.
+    pub population: f32,
+    /// Stability in `[0.0, 1.0]`.
+    pub stability: f32,
+    /// Available labour units.
+    pub available_labour: f32,
+    /// System-wide accumulated research total.
+    pub system_research: f32,
+    /// Current colony-sol turn counter.
+    pub sol: u64,
+    /// Current strategic-month counter.
+    pub month: u64,
 }
 
-/// A boolean predicate that can be evaluated against live [`GameState`].
-///
-/// Predicates are pure data and are fully serialisable (YAML/JSON) so they can
-/// be authored in content packs and persisted between sessions.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+/// A measurable quantity that a predicate can test.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "metric")]
+pub enum Metric {
+    /// Colony fractional population count.
+    Population,
+    /// Colony stability in `[0.0, 1.0]`.
+    Stability,
+    /// Colony available labour units.
+    AvailableLabour,
+    /// Current colony-sol counter.
+    Sol,
+    /// System-wide accumulated research total.
+    SystemResearch,
+}
+
+impl Metric {
+    /// Resolve this metric to a concrete `f64` from `ctx`.
+    pub fn resolve(&self, ctx: &PredicateContext) -> f64 {
+        match self {
+            Self::Population => f64::from(ctx.population),
+            Self::Stability => f64::from(ctx.stability),
+            Self::AvailableLabour => f64::from(ctx.available_labour),
+            Self::Sol => ctx.sol as f64,
+            Self::SystemResearch => f64::from(ctx.system_research),
+        }
+    }
+}
+
+/// A comparison operator used in leaf predicates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Cmp {
+    /// Less-than.
+    Lt,
+    /// Less-than-or-equal.
+    Le,
+    /// Greater-than.
+    Gt,
+    /// Greater-than-or-equal.
+    Ge,
+    /// Equal (within 1e-9 epsilon).
+    Eq,
+}
+
+impl Cmp {
+    /// Apply this comparison to two `f64` operands.
+    pub fn apply(&self, lhs: f64, rhs: f64) -> bool {
+        match self {
+            Self::Lt => lhs < rhs,
+            Self::Le => lhs <= rhs,
+            Self::Gt => lhs > rhs,
+            Self::Ge => lhs >= rhs,
+            Self::Eq => (lhs - rhs).abs() < 1e-9,
+        }
+    }
+}
+
+/// A boolean predicate evaluated against a [`PredicateContext`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
 pub enum Predicate {
-    /// True when `quantity < threshold`.
-    LessThan {
-        /// Left-hand quantity path.
-        quantity: Quantity,
-        /// Right-hand scalar threshold.
-        threshold: f32,
+    /// Always true.
+    Always,
+    /// Always false.
+    Never,
+    /// Leaf: `metric cmp threshold`.
+    Threshold {
+        /// Metric to sample from context.
+        metric: Metric,
+        /// Comparison operator.
+        cmp: Cmp,
+        /// Right-hand threshold value.
+        threshold: f64,
     },
-    /// True when `quantity > threshold`.
-    GreaterThan {
-        /// Left-hand quantity path.
-        quantity: Quantity,
-        /// Right-hand scalar threshold.
-        threshold: f32,
-    },
-    /// True when both sub-predicates are true.
+    /// Logical AND.
     And {
-        /// Left-hand sub-predicate.
+        /// Left operand.
         left: Box<Predicate>,
-        /// Right-hand sub-predicate.
+        /// Right operand.
         right: Box<Predicate>,
     },
-    /// True when either sub-predicate is true.
+    /// Logical OR.
     Or {
-        /// Left-hand sub-predicate.
+        /// Left operand.
         left: Box<Predicate>,
-        /// Right-hand sub-predicate.
+        /// Right operand.
         right: Box<Predicate>,
     },
-    /// True when the inner predicate is false.
+    /// Logical NOT.
     Not {
         /// Inner predicate to negate.
         inner: Box<Predicate>,
     },
-    /// True when `quantity` is on a declining trajectory that will cross
-    /// `threshold` within `eta_turns` turns.
-    ///
-    /// Uses the colony pool's single-turn delta as the linear rate of change.
-    /// Returns `false` when the rate is non-negative (quantity not declining).
-    Declining {
-        /// Commodity stockpile to track.
-        commodity_id: String,
-        /// Colony that owns the stockpile.
-        colony_id: ColonyId,
-        /// Value to extrapolate toward; defaults to `0.0` if this is the floor.
-        threshold: f32,
-        /// Maximum turns until the projected crossing for the predicate to fire.
-        eta_turns: f32,
-    },
 }
 
-// ─── Evaluator ───────────────────────────────────────────────────────────────
-
-/// Stateless predicate evaluator.
-///
-/// All methods take `&GameState` and are pure (no side effects, no I/O).
-pub struct PredicateEvaluator;
-
-impl PredicateEvaluator {
-    /// Resolve a [`Quantity`] path to a scalar value.
-    ///
-    /// Returns `None` when the referenced entity (colony, commodity) does not
-    /// exist in the current state.
-    #[must_use]
-    pub fn resolve(quantity: &Quantity, state: &GameState) -> Option<f32> {
-        match quantity {
-            Quantity::ColonyStability { colony_id } => {
-                let idx = colony_index(state, *colony_id)?;
-                Some(state.populations[idx].stability)
-            }
-            Quantity::Stockpile {
-                colony_id,
-                commodity_id,
-            } => {
-                let idx = colony_index(state, *colony_id)?;
-                #[allow(clippy::cast_possible_truncation)]
-                Some(state.colonies[idx].pool.amount(commodity_id) as f32)
-            }
-            Quantity::StockpileRate {
-                colony_id,
-                commodity_id,
-            } => {
-                let idx = colony_index(state, *colony_id)?;
-                #[allow(clippy::cast_possible_truncation)]
-                Some(state.colonies[idx].pool.delta(commodity_id) as f32)
-            }
-            Quantity::ColonyPopulation { colony_id } => {
-                let idx = colony_index(state, *colony_id)?;
-                Some(state.populations[idx].count)
-            }
+impl Predicate {
+    /// Evaluate this predicate against `ctx`.
+    pub fn evaluate(&self, ctx: &PredicateContext) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Threshold { metric, cmp, threshold } => cmp.apply(metric.resolve(ctx), *threshold),
+            Self::And { left, right } => left.evaluate(ctx) && right.evaluate(ctx),
+            Self::Or  { left, right } => left.evaluate(ctx) || right.evaluate(ctx),
+            Self::Not { inner } => !inner.evaluate(ctx),
         }
     }
 
-    /// Evaluate a [`Predicate`] against the supplied state.
-    ///
-    /// Returns `false` (rather than panicking) when a referenced entity is
-    /// missing — unknown colony IDs, commodity IDs that have never been
-    /// deposited. This is intentional: a predicate that references a future
-    /// colony will simply be inactive until that colony is founded.
-    #[must_use]
-    pub fn eval(predicate: &Predicate, state: &GameState) -> bool {
-        match predicate {
-            Predicate::LessThan {
-                quantity,
-                threshold,
-            } => Self::resolve(quantity, state).is_some_and(|v| v < *threshold),
+    /// Shorthand: `metric < threshold`.
+    pub fn lt(metric: Metric, threshold: f64) -> Self {
+        Self::Threshold { metric, cmp: Cmp::Lt, threshold }
+    }
 
-            Predicate::GreaterThan {
-                quantity,
-                threshold,
-            } => Self::resolve(quantity, state).is_some_and(|v| v > *threshold),
+    /// Shorthand: `metric > threshold`.
+    pub fn gt(metric: Metric, threshold: f64) -> Self {
+        Self::Threshold { metric, cmp: Cmp::Gt, threshold }
+    }
 
-            Predicate::And { left, right } => Self::eval(left, state) && Self::eval(right, state),
+    /// Shorthand: AND of two predicates.
+    pub fn and(left: Self, right: Self) -> Self {
+        Self::And { left: Box::new(left), right: Box::new(right) }
+    }
 
-            Predicate::Or { left, right } => Self::eval(left, state) || Self::eval(right, state),
+    /// Shorthand: OR of two predicates.
+    pub fn or(left: Self, right: Self) -> Self {
+        Self::Or { left: Box::new(left), right: Box::new(right) }
+    }
 
-            Predicate::Not { inner } => !Self::eval(inner, state),
-
-            Predicate::Declining {
-                commodity_id,
-                colony_id,
-                threshold,
-                eta_turns,
-            } => {
-                let Some(idx) = colony_index(state, *colony_id) else {
-                    return false;
-                };
-                #[allow(clippy::cast_possible_truncation)]
-                let current = state.colonies[idx].pool.amount(commodity_id) as f32;
-                #[allow(clippy::cast_possible_truncation)]
-                let rate = state.colonies[idx].pool.delta(commodity_id) as f32; // per turn
-
-                // Only fires when actually declining toward the threshold.
-                if rate >= 0.0 {
-                    return false;
-                }
-                let gap = current - threshold;
-                if gap <= 0.0 {
-                    // Already below threshold — fire immediately.
-                    return true;
-                }
-                // Projected turns until crossing = gap / |rate|
-                let turns_to_cross = gap / (-rate);
-                turns_to_cross <= *eta_turns
-            }
-        }
+    /// Shorthand: NOT of a predicate.
+    pub fn not(inner: Self) -> Self {
+        Self::Not { inner: Box::new(inner) }
     }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-fn colony_index(state: &GameState, id: ColonyId) -> Option<usize> {
-    state.colonies.iter().position(|c| c.id == id)
-}
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Command, Event, GameEngine};
+    use uuid::Uuid;
 
-    /// Build an engine with one colony that has a named stockpile at a given level and delta.
-    fn engine_with_stockpile(commodity: &str, amount: f64, delta: f64) -> (GameEngine, ColonyId) {
-        let mut engine = GameEngine::new();
-        let events = engine
-            .apply(&Command::FoundColony {
-                name: "Test Colony".into(),
-                starting_population: 100,
-            })
-            .unwrap();
-        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
-            panic!()
-        };
-        let colony_id = *colony_id;
-        let idx = engine
-            .state
-            .colonies
-            .iter()
-            .position(|c| c.id == colony_id)
-            .unwrap();
-        engine.state.colonies[idx].pool.deposit(commodity, amount);
-        // Manually poke the delta (reset_deltas zeroes it, so inject directly).
-        engine.state.colonies[idx]
-            .pool
-            .set_delta_for_test(commodity, delta);
-        (engine, colony_id)
-    }
-
-    // ── Comparison predicates ──────────────────────────────────────────────────
-
-    #[test]
-    fn less_than_fires_when_below_threshold() {
-        let (engine, colony_id) = engine_with_stockpile("food", 10.0, 0.0);
-        let pred = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "food".into(),
-            },
-            threshold: 20.0,
-        };
-        assert!(PredicateEvaluator::eval(&pred, &engine.state));
+    fn ctx() -> PredicateContext {
+        PredicateContext {
+            colony_id: Uuid::new_v4(),
+            population: 150.0,
+            stability: 0.75,
+            available_labour: 120.0,
+            system_research: 42.0,
+            sol: 10,
+            month: 0,
+        }
     }
 
     #[test]
-    fn less_than_does_not_fire_when_above() {
-        let (engine, colony_id) = engine_with_stockpile("food", 30.0, 0.0);
-        let pred = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "food".into(),
-            },
-            threshold: 20.0,
-        };
-        assert!(!PredicateEvaluator::eval(&pred, &engine.state));
+    fn always_is_true() { assert!(Predicate::Always.evaluate(&ctx())); }
+
+    #[test]
+    fn never_is_false() { assert!(!Predicate::Never.evaluate(&ctx())); }
+
+    #[test]
+    fn threshold_lt() {
+        assert!(Predicate::lt(Metric::Stability, 0.8).evaluate(&ctx()));
+        assert!(!Predicate::lt(Metric::Stability, 0.5).evaluate(&ctx()));
     }
 
     #[test]
-    fn greater_than_fires_when_above_threshold() {
-        let (engine, colony_id) = engine_with_stockpile("water", 50.0, 0.0);
-        let pred = Predicate::GreaterThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "water".into(),
-            },
-            threshold: 30.0,
-        };
-        assert!(PredicateEvaluator::eval(&pred, &engine.state));
+    fn threshold_gt() {
+        assert!(Predicate::gt(Metric::Population, 100.0).evaluate(&ctx()));
+        assert!(!Predicate::gt(Metric::Population, 200.0).evaluate(&ctx()));
     }
 
     #[test]
-    fn stability_less_than_predicate() {
-        let mut engine = GameEngine::new();
-        let events = engine
-            .apply(&Command::FoundColony {
-                name: "Unstable".into(),
-                starting_population: 50,
-            })
-            .unwrap();
-        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
-            panic!()
-        };
-        let colony_id = *colony_id;
-        let idx = engine
-            .state
-            .colonies
-            .iter()
-            .position(|c| c.id == colony_id)
-            .unwrap();
-        // Force stability low.
-        engine.state.populations[idx].stability = 0.15;
-
-        let pred = Predicate::LessThan {
-            quantity: Quantity::ColonyStability { colony_id },
-            threshold: 0.20,
-        };
-        assert!(PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    // ── Boolean composition ────────────────────────────────────────────────────
-
-    #[test]
-    fn and_requires_both_true() {
-        let (engine, colony_id) = engine_with_stockpile("food", 10.0, 0.0);
-        let food_low = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "food".into(),
-            },
-            threshold: 20.0,
-        };
-        let water_low = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "water".into(), // not seeded → 0.0 < 20.0 ✓
-            },
-            threshold: 20.0,
-        };
-        let both = Predicate::And {
-            left: Box::new(food_low.clone()),
-            right: Box::new(water_low.clone()),
-        };
-        assert!(PredicateEvaluator::eval(&both, &engine.state));
-
-        // Now add water so the water_low predicate flips.
-        let mut engine2 = GameEngine::new();
-        let evs = engine2
-            .apply(&Command::FoundColony {
-                name: "C2".into(),
-                starting_population: 10,
-            })
-            .unwrap();
-        let Event::ColonyFounded {
-            colony_id: cid2, ..
-        } = &evs[0]
-        else {
-            panic!()
-        };
-        let cid2 = *cid2;
-        let idx = engine2
-            .state
-            .colonies
-            .iter()
-            .position(|c| c.id == cid2)
-            .unwrap();
-        engine2.state.colonies[idx].pool.deposit("food", 10.0);
-        engine2.state.colonies[idx].pool.deposit("water", 50.0);
-
-        let food_low2 = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id: cid2,
-                commodity_id: "food".into(),
-            },
-            threshold: 20.0,
-        };
-        let water_low2 = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id: cid2,
-                commodity_id: "water".into(),
-            },
-            threshold: 20.0,
-        };
-        let and2 = Predicate::And {
-            left: Box::new(food_low2),
-            right: Box::new(water_low2),
-        };
-        assert!(!PredicateEvaluator::eval(&and2, &engine2.state));
-    }
-
-    #[test]
-    fn or_requires_at_least_one_true() {
-        let (engine, colony_id) = engine_with_stockpile("food", 5.0, 0.0);
-        let food_low = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "food".into(),
-            },
-            threshold: 20.0,
-        };
-        let water_high = Predicate::GreaterThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "water".into(),
-            },
-            threshold: 100.0, // water=0 → false
-        };
-        let or_pred = Predicate::Or {
-            left: Box::new(food_low),
-            right: Box::new(water_high),
-        };
-        assert!(PredicateEvaluator::eval(&or_pred, &engine.state));
-    }
-
-    #[test]
-    fn not_inverts_predicate() {
-        let (engine, colony_id) = engine_with_stockpile("food", 30.0, 0.0);
-        let food_low = Predicate::LessThan {
-            quantity: Quantity::Stockpile {
-                colony_id,
-                commodity_id: "food".into(),
-            },
-            threshold: 20.0,
-        };
-        // food=30 → food_low is false → Not(food_low) is true
-        let not_low = Predicate::Not {
-            inner: Box::new(food_low),
-        };
-        assert!(PredicateEvaluator::eval(&not_low, &engine.state));
-    }
-
-    // ── Trend / ETA predicate ─────────────────────────────────────────────────
-
-    #[test]
-    fn declining_fires_when_crash_within_eta() {
-        // food=50, rate=-5/turn → 10 turns to cross 0; eta_turns=12 → fires
-        let (engine, colony_id) = engine_with_stockpile("food", 50.0, -5.0);
-        let pred = Predicate::Declining {
-            commodity_id: "food".into(),
-            colony_id,
-            threshold: 0.0,
-            eta_turns: 12.0,
-        };
-        assert!(PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    #[test]
-    fn declining_does_not_fire_when_crash_far_away() {
-        // food=200, rate=-2/turn → 100 turns to zero; eta_turns=5 → no fire
-        let (engine, colony_id) = engine_with_stockpile("food", 200.0, -2.0);
-        let pred = Predicate::Declining {
-            commodity_id: "food".into(),
-            colony_id,
-            threshold: 0.0,
-            eta_turns: 5.0,
-        };
-        assert!(!PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    #[test]
-    fn declining_does_not_fire_when_rate_positive() {
-        let (engine, colony_id) = engine_with_stockpile("food", 10.0, 3.0);
-        let pred = Predicate::Declining {
-            commodity_id: "food".into(),
-            colony_id,
-            threshold: 0.0,
-            eta_turns: 100.0,
-        };
-        assert!(!PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    #[test]
-    fn declining_fires_when_already_below_threshold() {
-        // Current amount already below threshold — should fire immediately.
-        let (engine, colony_id) = engine_with_stockpile("food", 0.0, -1.0);
-        let pred = Predicate::Declining {
-            commodity_id: "food".into(),
-            colony_id,
-            threshold: 10.0,
-            eta_turns: 1.0,
-        };
-        assert!(PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    #[test]
-    fn declining_with_custom_threshold() {
-        // food=100, threshold=80, rate=-5/turn → gap=20, 4 turns → eta=5 → fires
-        let (engine, colony_id) = engine_with_stockpile("food", 100.0, -5.0);
-        let pred = Predicate::Declining {
-            commodity_id: "food".into(),
-            colony_id,
-            threshold: 80.0,
-            eta_turns: 5.0,
-        };
-        assert!(PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    // ── Missing entity → false (not panic) ────────────────────────────────────
-
-    #[test]
-    fn missing_colony_resolves_to_false() {
-        let engine = GameEngine::new();
-        let pred = Predicate::LessThan {
-            quantity: Quantity::ColonyStability {
-                colony_id: uuid::Uuid::new_v4(),
-            },
-            threshold: 0.5,
-        };
-        assert!(!PredicateEvaluator::eval(&pred, &engine.state));
-    }
-
-    // ── YAML round-trip ───────────────────────────────────────────────────────
-
-    #[test]
-    fn predicate_yaml_round_trip() {
-        let id = uuid::Uuid::new_v4();
-        let pred = Predicate::And {
-            left: Box::new(Predicate::LessThan {
-                quantity: Quantity::ColonyStability { colony_id: id },
-                threshold: 0.20,
-            }),
-            right: Box::new(Predicate::Declining {
-                commodity_id: "food".into(),
-                colony_id: id,
-                threshold: 0.0,
-                eta_turns: 5.0,
-            }),
-        };
-        let yaml = serde_yaml::to_string(&pred).expect("serialize");
-        let back: Predicate = serde_yaml::from_str(&yaml).expect("deserialize");
-        assert_eq!(pred, back);
-    }
-
-    #[test]
-    fn predicate_json_round_trip() {
-        let id = uuid::Uuid::new_v4();
-        let pred = Predicate::Or {
-            left: Box::new(Predicate::Not {
-                inner: Box::new(Predicate::GreaterThan {
-                    quantity: Quantity::Stockpile {
-                        colony_id: id,
-                        commodity_id: "water".into(),
-                    },
-                    threshold: 50.0,
-                }),
-            }),
-            right: Box::new(Predicate::Declining {
-                commodity_id: "food".into(),
-                colony_id: id,
-                threshold: 10.0,
-                eta_turns: 3.0,
-            }),
-        };
-        let json = serde_json::to_string(&pred).expect("serialize");
-        let back: Predicate = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(pred, back);
-        // Re-evaluate after round-trip — no engine state needed for structural equality check
-        // (evaluation would need an engine, but structural equality proves round-trip fidelity).
-    }
-
-    #[test]
-    fn yaml_round_trip_evaluates_identically() {
-        let (engine, colony_id) = engine_with_stockpile("food", 10.0, -2.0);
-        let pred = Predicate::Declining {
-            commodity_id: "food".into(),
-            colony_id,
-            threshold: 0.0,
-            eta_turns: 8.0,
-        };
-        let yaml = serde_yaml::to_string(&pred).expect("serialize");
-        let back: Predicate = serde_yaml::from_str(&yaml).expect("deserialize");
-        assert_eq!(
-            PredicateEvaluator::eval(&pred, &engine.state),
-            PredicateEvaluator::eval(&back, &engine.state),
-            "predicate must evaluate identically after YAML round-trip"
+    fn and_combinator() {
+        let p = Predicate::and(
+            Predicate::gt(Metric::Population, 100.0),
+            Predicate::lt(Metric::Stability, 0.8),
         );
+        assert!(p.evaluate(&ctx()));
+        assert!(!Predicate::and(
+            Predicate::gt(Metric::Population, 100.0),
+            Predicate::gt(Metric::Stability, 0.9),
+        ).evaluate(&ctx()));
+    }
+
+    #[test]
+    fn or_combinator() {
+        assert!(Predicate::or(Predicate::Never, Predicate::gt(Metric::Population, 100.0)).evaluate(&ctx()));
+        assert!(!Predicate::or(Predicate::Never, Predicate::Never).evaluate(&ctx()));
+    }
+
+    #[test]
+    fn not_combinator() {
+        assert!(Predicate::not(Predicate::Never).evaluate(&ctx()));
+        assert!(!Predicate::not(Predicate::Always).evaluate(&ctx()));
+    }
+
+    #[test]
+    fn predicate_round_trip_serde() {
+        let p = Predicate::and(
+            Predicate::lt(Metric::Stability, 0.5),
+            Predicate::gt(Metric::Population, 50.0),
+        );
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Predicate = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
     }
 }
