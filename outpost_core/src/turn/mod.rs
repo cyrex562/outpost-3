@@ -13,7 +13,9 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::colony::Colony;
+use std::collections::HashSet;
+
+use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
 use crate::directive::DirectiveStore;
 use crate::needs::NeedsConfig;
