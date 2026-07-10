@@ -30,6 +30,7 @@ pub mod content;
 pub mod difficulty;
 pub mod directive;
 pub mod expedition;
+pub mod hazard;
 pub mod interrupt;
 pub mod map;
 pub mod menace;
@@ -848,6 +849,23 @@ pub enum Event {
         /// Stable identifier of the trade route that was removed.
         route_id: uuid::Uuid,
     },
+
+    // ── M2: Environmental hazard events ───────────────────────────────────
+    /// An environmental hazard struck a colony this sol.
+    HazardOccurred {
+        /// Colony that was hit by the hazard.
+        colony_id: ColonyId,
+        /// The type of hazard that occurred.
+        kind: hazard::HazardKind,
+        /// Sampled severity in `[0.0, 1.0]`; higher = more damage.
+        severity: f32,
+        /// Stability change applied (negative).
+        stability_delta: f32,
+        /// Commodity losses: `(commodity_id, amount_lost)`.
+        commodity_losses: Vec<(String, f64)>,
+        /// Population lost this hazard.
+        population_lost: f32,
+    },
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -965,6 +983,7 @@ impl GameEngine {
         match cmd {
             Command::AdvanceColonySol => {
                 let outcome = self.processor.advance(&mut self.state);
+                let hazard_outcomes = outcome.hazard_outcomes.clone();
                 let mut events = vec![Event::ColonySolAdvanced { sol: outcome.sol }];
                 if outcome
                     .cadences_fired
@@ -1096,7 +1115,36 @@ impl GameEngine {
                     }
                 }
 
-                // ── Step 4b: Stability + population tracking ─────────────
+                // ── Step 4b: Hazard effects ───────────────────────────────
+                // Apply stability, commodity, and population damage from hazard
+                // outcomes rolled by the turn processor.
+                for h in &hazard_outcomes {
+                    // Find colony and population by id.
+                    if let Some(idx) = self.state.colonies.iter().position(|c| c.id == h.colony_id)
+                    {
+                        // Apply commodity losses.
+                        for (comm_id, loss) in &h.commodity_losses {
+                            self.state.colonies[idx].pool.withdraw(comm_id, *loss);
+                        }
+                        // Apply stability delta.
+                        self.state.populations[idx].stability =
+                            (self.state.populations[idx].stability + h.stability_delta)
+                                .clamp(0.0, 1.0);
+                        // Apply population loss.
+                        self.state.populations[idx].count =
+                            (self.state.populations[idx].count - h.population_lost).max(0.0);
+                    }
+                    events.push(Event::HazardOccurred {
+                        colony_id: h.colony_id,
+                        kind: h.kind,
+                        severity: h.severity,
+                        stability_delta: h.stability_delta,
+                        commodity_losses: h.commodity_losses.clone(),
+                        population_lost: h.population_lost,
+                    });
+                }
+
+                // ── Step 4d: Stability + population tracking ─────────────
                 // Record samples per colony so predictive warnings can
                 // extrapolate trajectory without full forward simulation.
                 let colony_ids_for_tracking: Vec<ColonyId> =

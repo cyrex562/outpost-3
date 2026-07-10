@@ -42,6 +42,12 @@ pub struct Colony {
     pub build_queue: ConstructionQueue,
     /// Total build-slot capacity (base + tech bonuses).
     pub slot_capacity: u32,
+    /// Optional terrain/biome slug used for hazard probability modifiers.
+    ///
+    /// Set when the colony is founded at a planetary site; `None` for
+    /// colonies created without map context.
+    #[serde(default)]
+    pub terrain_id: Option<String>,
 }
 
 impl Colony {
@@ -55,6 +61,7 @@ impl Colony {
             buildings: Vec::new(),
             build_queue: ConstructionQueue::new(),
             slot_capacity: BASE_SLOT_CAPACITY,
+            terrain_id: None,
         }
     }
 
