@@ -5612,9 +5612,9 @@ mod tests {
         // Tick the menace — should emit MenacePhaseTriggered + HazardFired.
         let tick_events = engine.apply(&Command::TickMenace).unwrap();
         assert!(
-            tick_events
-                .iter()
-                .any(|e| matches!(e, Event::HazardFired { event_id } if event_id == "dust_storm_phase1")),
+            tick_events.iter().any(
+                |e| matches!(e, Event::HazardFired { event_id } if event_id == "dust_storm_phase1")
+            ),
             "TickMenace with hazard_injection must emit HazardFired"
         );
 
