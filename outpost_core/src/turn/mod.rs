@@ -22,6 +22,7 @@ use crate::interrupt::StabilityTracker;
 use crate::needs::NeedsConfig;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
+use crate::tech::{TechRegistry, TechState};
 
 /// Default number of colony-sols that constitute one strategic-month.
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
@@ -73,6 +74,10 @@ pub struct GameState {
     pub needs_config: Option<NeedsConfig>,
     /// System-wide research pool: research drained from all colonies each turn.
     pub research_pool: SystemResearchPool,
+    /// System-wide technology research state.
+    pub tech_state: TechState,
+    /// Optional tech registry (loaded from content pack); enables research-turn processing.
+    pub tech_registry: Option<TechRegistry>,
     /// Directive store: active directives and manual-override registry.
     pub directive_store: DirectiveStore,
     /// Per-colony stability history for predictive warning trajectory.
@@ -91,6 +96,8 @@ impl GameState {
             registry: None,
             needs_config: None,
             research_pool: SystemResearchPool::new(),
+            tech_state: TechState::new(),
+            tech_registry: None,
             directive_store: DirectiveStore::default(),
             stability_trackers: HashMap::new(),
         }
@@ -187,9 +194,18 @@ impl TurnProcessor {
         }
     }
 
-    /// Strategic-month sub-pipeline (placeholder; will be wired in Phase 5+).
-    fn run_strategic_month_pipeline(_state: &mut GameState) {
-        // Phase 1 stub: intentionally empty.
+    /// Strategic-month sub-pipeline.
+    fn run_strategic_month_pipeline(state: &mut GameState) {
+        // Drain research pool into tech progress if a registry is loaded.
+        if let Some(reg) = state.tech_registry.as_ref() {
+            // Clone to avoid borrow conflict; registry is read-only here.
+            let reg_clone = reg.clone();
+            crate::tech::apply_research_turn(
+                &mut state.tech_state,
+                &mut state.research_pool,
+                &reg_clone,
+            );
+        }
     }
 }
 

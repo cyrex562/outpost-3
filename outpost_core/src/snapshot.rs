@@ -253,6 +253,8 @@ impl Snapshot {
             registry: None,
             needs_config: None,
             research_pool: crate::research::SystemResearchPool::new(),
+            tech_state: crate::tech::TechState::new(),
+            tech_registry: None,
             directive_store: crate::directive::DirectiveStore::default(),
             stability_trackers: std::collections::HashMap::new(),
         })

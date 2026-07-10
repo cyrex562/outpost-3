@@ -34,6 +34,7 @@ pub mod population;
 pub mod predicate;
 pub mod research;
 pub mod snapshot;
+pub mod tech;
 pub mod turn;
 
 use thiserror::Error;
