@@ -27,10 +27,12 @@
 pub mod balance;
 pub mod colony;
 pub mod content;
+pub mod difficulty;
 pub mod directive;
 pub mod expedition;
 pub mod interrupt;
 pub mod map;
+pub mod menace;
 pub mod migration;
 pub mod modifier;
 pub mod needs;
@@ -44,6 +46,7 @@ pub mod tech;
 pub mod trade;
 pub mod turn;
 pub mod ui;
+pub mod victory;
 
 use thiserror::Error;
 
@@ -280,6 +283,43 @@ pub enum Command {
         /// Stable identifier of the constellation.
         constellation_id: uuid::Uuid,
     },
+
+    // ── Phase 10: Difficulty / Menace / Victory ───────────────────────────
+    /// Set the active difficulty preset, rebuilding the difficulty scalar from the grade table.
+    SetDifficulty {
+        /// Preset to activate.
+        preset: difficulty::DifficultyPreset,
+    },
+    /// Activate the existential clock with the given authored menace definition.
+    ///
+    /// Clears any previously active menace. Pass `None` to deactivate (sandbox off).
+    ActivateMenace {
+        /// Menace definition to activate, or `None` to deactivate.
+        definition: Option<menace::MenaceDefinition>,
+    },
+    /// Tick the menace clock by one strategic month (called internally by `AdvanceColonySol`
+    /// when a strategic month fires).  Exposed as a command for testing.
+    TickMenace,
+    /// Record that the interstellar expedition megaproject has been launched.
+    ///
+    /// This is the primary victory trigger. The engine evaluates all victory conditions
+    /// and emits [`Event::VictoryAchieved`] for each newly satisfied condition.
+    LaunchExpedition,
+    /// Evaluate all tracked victory conditions against current game metrics.
+    ///
+    /// Emits [`Event::VictoryAchieved`] for newly satisfied conditions.
+    EvaluateVictory,
+    /// Activate sandbox-continue mode after a victory has been achieved.
+    ///
+    /// Suppresses the victory screen and lets the player keep playing.
+    ContinueAfterVictory,
+    /// Initialise victory tracking with a specific set of conditions.
+    ///
+    /// If not called, the engine defaults to tracking the capstone expedition condition only.
+    InitVictoryConditions {
+        /// Conditions to track.
+        conditions: Vec<victory::VictoryCondition>,
+    },
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -321,6 +361,12 @@ pub enum Query {
     InterruptDigest,
     /// Return the current time-control state (sol, month, threshold, max turns).
     TimeControl,
+    /// Return current difficulty preset and the active difficulty scalar.
+    DifficultyStatus,
+    /// Return the current menace state (if any menace is active).
+    MenaceStatus,
+    /// Return victory progress for all tracked conditions.
+    VictoryStatus,
 }
 
 /// The result returned by [`GameEngine::query`].
@@ -346,6 +392,12 @@ pub enum QueryResult {
     InterruptDigest(ui::InterruptDigestData),
     /// Current time-control state.
     TimeControl(ui::TimeControlState),
+    /// Active difficulty preset.
+    DifficultyStatus(difficulty::DifficultyPreset),
+    /// Current menace state snapshot, or `None` if inactive.
+    MenaceStatus(Option<menace::MenaceState>),
+    /// Victory progress for all tracked conditions.
+    VictoryStatus(Vec<victory::VictoryProgress>),
 }
 
 /// Lightweight colony summary returned by [`Query::ListColonies`].
@@ -600,6 +652,36 @@ pub enum Event {
         /// New visibility state.
         visible: bool,
     },
+    // ── Phase 10 events ───────────────────────────────────────────────────
+    /// The difficulty preset was changed.
+    DifficultyChanged {
+        /// The new active preset.
+        preset: difficulty::DifficultyPreset,
+    },
+    /// A menace phase was newly activated this strategic month.
+    MenacePhaseTriggered {
+        /// Content-pack id of the menace definition.
+        menace_id: String,
+        /// Index of the phase that just activated.
+        phase_index: usize,
+        /// Telegraph text for the *next* phase (if any), wired to the interrupt system.
+        telegraph: Option<String>,
+        /// Hazard content-pack key injected on this phase entry, if any.
+        hazard_injection: Option<String>,
+    },
+    /// The menace has reached its final phase; collapse is now emergent.
+    MenaceFinalPhaseReached {
+        /// Content-pack id of the menace.
+        menace_id: String,
+    },
+    /// A victory condition was newly satisfied.
+    VictoryAchieved {
+        /// The condition that was satisfied.
+        condition: victory::VictoryCondition,
+    },
+    /// The player chose to continue playing after victory (sandbox continue).
+    SandboxContinued,
+
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -1405,6 +1487,100 @@ impl GameEngine {
                     visible,
                 }])
             }
+
+            // ── Phase 10: Difficulty / Menace / Victory ───────────────────
+            Command::SetDifficulty { preset } => {
+                self.state.difficulty_preset = *preset;
+                self.state.difficulty_scalar =
+                    self.state.difficulty_grade_table.build_scalar(*preset);
+                Ok(vec![Event::DifficultyChanged { preset: *preset }])
+            }
+
+            Command::ActivateMenace { definition } => {
+                self.state.menace_state = definition
+                    .as_ref()
+                    .map(|d| menace::MenaceState::new(d.clone()));
+                Ok(vec![])
+            }
+
+            Command::TickMenace => {
+                let mut events = Vec::new();
+                if let Some(ms) = &mut self.state.menace_state {
+                    let outcome = ms.tick();
+                    if let Some(phase_index) = outcome.phase_entered {
+                        let menace_id = ms.definition.id.clone();
+                        events.push(Event::MenacePhaseTriggered {
+                            menace_id: menace_id.clone(),
+                            phase_index,
+                            telegraph: outcome.telegraph.clone(),
+                            hazard_injection: outcome.hazard_injection.clone(),
+                        });
+                        if outcome.final_phase_reached {
+                            events.push(Event::MenaceFinalPhaseReached { menace_id });
+                        }
+                    }
+                }
+                Ok(events)
+            }
+
+            Command::LaunchExpedition => {
+                self.state.expedition_launched = true;
+                let snap = victory::VictorySnapshot {
+                    expedition_launched: self.state.expedition_launched,
+                    total_output: 0,
+                    total_population: self
+                        .state
+                        .populations
+                        .iter()
+                        .map(|p| {
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            {
+                                p.count.max(0.0) as u64
+                            }
+                        })
+                        .sum(),
+                    cumulative_research: self.state.cumulative_research,
+                };
+                let mut events = Vec::new();
+                for condition in self.state.victory_state.evaluate(&snap) {
+                    events.push(Event::VictoryAchieved { condition });
+                }
+                Ok(events)
+            }
+
+            Command::EvaluateVictory => {
+                let snap = victory::VictorySnapshot {
+                    expedition_launched: self.state.expedition_launched,
+                    total_output: 0,
+                    total_population: self
+                        .state
+                        .populations
+                        .iter()
+                        .map(|p| {
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            {
+                                p.count.max(0.0) as u64
+                            }
+                        })
+                        .sum(),
+                    cumulative_research: self.state.cumulative_research,
+                };
+                let mut events = Vec::new();
+                for condition in self.state.victory_state.evaluate(&snap) {
+                    events.push(Event::VictoryAchieved { condition });
+                }
+                Ok(events)
+            }
+
+            Command::ContinueAfterVictory => {
+                self.state.victory_state.activate_sandbox_continue();
+                Ok(vec![Event::SandboxContinued])
+            }
+
+            Command::InitVictoryConditions { conditions } => {
+                self.state.victory_state = victory::VictoryState::new(conditions.clone());
+                Ok(vec![])
+            }
         }
     }
 
@@ -1564,6 +1740,16 @@ impl GameEngine {
                 threshold: self.interrupt_threshold,
                 max_advance_turns: self.max_advance_turns,
             })),
+
+            Query::DifficultyStatus => {
+                Ok(QueryResult::DifficultyStatus(self.state.difficulty_preset))
+            }
+
+            Query::MenaceStatus => Ok(QueryResult::MenaceStatus(self.state.menace_state.clone())),
+
+            Query::VictoryStatus => Ok(QueryResult::VictoryStatus(
+                self.state.victory_state.conditions.clone(),
+            )),
         }
     }
 
