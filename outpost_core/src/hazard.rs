@@ -259,9 +259,21 @@ mod tests {
         // Any rng_prob value in [0,1) should never pass the 0.0 probability gate.
         for i in 0..20 {
             let rng_prob = i as f32 / 20.0;
-            let result =
-                roll_hazard(rng_prob, 0.5, 0, HazardKind::DustStorm, id, None, &cfg, 100.0, &pool());
-            assert!(result.is_none(), "expected no trigger at prob=0, rng={rng_prob}");
+            let result = roll_hazard(
+                rng_prob,
+                0.5,
+                0,
+                HazardKind::DustStorm,
+                id,
+                None,
+                &cfg,
+                100.0,
+                &pool(),
+            );
+            assert!(
+                result.is_none(),
+                "expected no trigger at prob=0, rng={rng_prob}"
+            );
         }
     }
 
@@ -272,9 +284,21 @@ mod tests {
         // With probability=1.0 any rng_prob < 1.0 triggers.
         for i in 0..10 {
             let rng_prob = i as f32 / 10.0;
-            let result =
-                roll_hazard(rng_prob, 0.5, 0, HazardKind::DustStorm, id, None, &cfg, 100.0, &pool());
-            assert!(result.is_some(), "expected trigger at prob=1, rng={rng_prob}");
+            let result = roll_hazard(
+                rng_prob,
+                0.5,
+                0,
+                HazardKind::DustStorm,
+                id,
+                None,
+                &cfg,
+                100.0,
+                &pool(),
+            );
+            assert!(
+                result.is_some(),
+                "expected trigger at prob=1, rng={rng_prob}"
+            );
         }
     }
 
@@ -283,10 +307,30 @@ mod tests {
         let cfg = make_config(1.0);
         let id = dummy_id();
 
-        let low = roll_hazard(0.0, 0.0, 0, HazardKind::DustStorm, id, None, &cfg, 200.0, &pool())
-            .unwrap();
-        let high = roll_hazard(0.0, 1.0, 0, HazardKind::DustStorm, id, None, &cfg, 200.0, &pool())
-            .unwrap();
+        let low = roll_hazard(
+            0.0,
+            0.0,
+            0,
+            HazardKind::DustStorm,
+            id,
+            None,
+            &cfg,
+            200.0,
+            &pool(),
+        )
+        .unwrap();
+        let high = roll_hazard(
+            0.0,
+            1.0,
+            0,
+            HazardKind::DustStorm,
+            id,
+            None,
+            &cfg,
+            200.0,
+            &pool(),
+        )
+        .unwrap();
 
         assert!(
             high.stability_delta.abs() >= low.stability_delta.abs(),
@@ -317,12 +361,38 @@ mod tests {
 
         // base 0.5 × 2.0 = 1.0 → any rng_prob < 1.0 fires
         let id = dummy_id();
-        let result = roll_hazard(0.99, 0.5, 0, HazardKind::DustStorm, id, Some("desert"), &cfg, 100.0, &pool());
-        assert!(result.is_some(), "desert terrain should double prob to 1.0 and always fire");
+        let result = roll_hazard(
+            0.99,
+            0.5,
+            0,
+            HazardKind::DustStorm,
+            id,
+            Some("desert"),
+            &cfg,
+            100.0,
+            &pool(),
+        );
+        assert!(
+            result.is_some(),
+            "desert terrain should double prob to 1.0 and always fire"
+        );
 
         // without terrain modifier at rng_prob=0.6 (>0.5) should not fire
-        let result2 = roll_hazard(0.6, 0.5, 0, HazardKind::DustStorm, id, None, &cfg, 100.0, &pool());
-        assert!(result2.is_none(), "without terrain modifier, prob=0.5 should not fire at 0.6");
+        let result2 = roll_hazard(
+            0.6,
+            0.5,
+            0,
+            HazardKind::DustStorm,
+            id,
+            None,
+            &cfg,
+            100.0,
+            &pool(),
+        );
+        assert!(
+            result2.is_none(),
+            "without terrain modifier, prob=0.5 should not fire at 0.6"
+        );
     }
 
     #[test]
@@ -342,12 +412,17 @@ mod tests {
                 terrain_modifiers: Default::default(),
             })
             .collect();
-        let cfg = HazardConfig { kinds: kinds_entries };
+        let cfg = HazardConfig {
+            kinds: kinds_entries,
+        };
         let id = dummy_id();
 
         for kind in HazardKind::ALL {
             let result = roll_hazard(0.0, 0.5, 0, kind, id, None, &cfg, 100.0, &pool());
-            assert!(result.is_some(), "kind {kind:?} should fire with probability=1.0");
+            assert!(
+                result.is_some(),
+                "kind {kind:?} should fire with probability=1.0"
+            );
         }
     }
 
@@ -357,17 +432,23 @@ mod tests {
         let id = dummy_id();
         // pool has 1000 food
         let pool_entries = vec![("food".to_string(), 1000.0_f64)];
-        let result =
-            roll_hazard(0.0, 1.0, 0, HazardKind::DustStorm, id, None, &cfg, 100.0, &pool_entries)
-                .unwrap();
+        let result = roll_hazard(
+            0.0,
+            1.0,
+            0,
+            HazardKind::DustStorm,
+            id,
+            None,
+            &cfg,
+            100.0,
+            &pool_entries,
+        )
+        .unwrap();
         // severity=0.9 (max), commodity_loss_per_severity=0.1
         // loss = 1000 * 0.9 * 0.1 = 90
         assert!(!result.commodity_losses.is_empty());
         let (_id, loss) = &result.commodity_losses[0];
-        assert!(
-            *loss > 0.0,
-            "expected positive commodity loss, got {loss}"
-        );
+        assert!(*loss > 0.0, "expected positive commodity loss, got {loss}");
     }
 
     #[test]

@@ -26,11 +26,11 @@
 
 pub mod balance;
 pub mod colony;
-pub mod hazard;
 pub mod content;
 pub mod difficulty;
 pub mod directive;
 pub mod expedition;
+pub mod hazard;
 pub mod interrupt;
 pub mod map;
 pub mod menace;

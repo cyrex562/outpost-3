@@ -21,6 +21,7 @@ use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
+use crate::hazard::{roll_hazard, HazardConfig, HazardKind};
 use crate::interrupt::StabilityTracker;
 use crate::map::PlanetMap;
 use crate::menace::MenaceState;
@@ -28,7 +29,6 @@ use crate::migration::{PendingMigration, PopulationTracker};
 use crate::modifier::{
     DifficultyScalar, ModifiableQuantity, ModifierAccumulator, ModifierDescriptor,
 };
-use crate::hazard::{roll_hazard, HazardConfig, HazardKind};
 use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
