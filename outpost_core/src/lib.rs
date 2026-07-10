@@ -2296,22 +2296,7 @@ impl GameEngine {
 
             Command::LaunchExpedition => {
                 self.state.expedition_launched = true;
-                let snap = victory::VictorySnapshot {
-                    expedition_launched: self.state.expedition_launched,
-                    total_output: 0,
-                    total_population: self
-                        .state
-                        .populations
-                        .iter()
-                        .map(|p| {
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            {
-                                p.count.max(0.0) as u64
-                            }
-                        })
-                        .sum(),
-                    cumulative_research: self.state.cumulative_research,
-                };
+                let snap = self.build_victory_snapshot();
                 let mut events = Vec::new();
                 for condition in self.state.victory_state.evaluate(&snap) {
                     events.push(Event::VictoryAchieved { condition });
@@ -2320,22 +2305,7 @@ impl GameEngine {
             }
 
             Command::EvaluateVictory => {
-                let snap = victory::VictorySnapshot {
-                    expedition_launched: self.state.expedition_launched,
-                    total_output: 0,
-                    total_population: self
-                        .state
-                        .populations
-                        .iter()
-                        .map(|p| {
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            {
-                                p.count.max(0.0) as u64
-                            }
-                        })
-                        .sum(),
-                    cumulative_research: self.state.cumulative_research,
-                };
+                let snap = self.build_victory_snapshot();
                 let mut events = Vec::new();
                 for condition in self.state.victory_state.evaluate(&snap) {
                     events.push(Event::VictoryAchieved { condition });
@@ -2390,22 +2360,7 @@ impl GameEngine {
                 }
 
                 if self.state.expedition_launched && self.state.victory.is_none() {
-                    let snap = victory::VictorySnapshot {
-                        expedition_launched: true,
-                        total_output: 0,
-                        total_population: self
-                            .state
-                            .populations
-                            .iter()
-                            .map(|p| {
-                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                                {
-                                    p.count.max(0.0) as u64
-                                }
-                            })
-                            .sum(),
-                        cumulative_research: self.state.cumulative_research,
-                    };
+                    let snap = self.build_victory_snapshot();
                     for condition in self.state.victory_state.evaluate(&snap) {
                         self.state.victory = Some(condition.clone());
                         events.push(Event::VictoryAchieved { condition });
@@ -2433,22 +2388,7 @@ impl GameEngine {
                 let mut events: Vec<Event> = sys_events.into_iter().map(Event::System).collect();
 
                 if self.state.expedition_launched && self.state.victory.is_none() {
-                    let snap = victory::VictorySnapshot {
-                        expedition_launched: true,
-                        total_output: 0,
-                        total_population: self
-                            .state
-                            .populations
-                            .iter()
-                            .map(|p| {
-                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                                {
-                                    p.count.max(0.0) as u64
-                                }
-                            })
-                            .sum(),
-                        cumulative_research: self.state.cumulative_research,
-                    };
+                    let snap = self.build_victory_snapshot();
                     for condition in self.state.victory_state.evaluate(&snap) {
                         self.state.victory = Some(condition.clone());
                         events.push(Event::VictoryAchieved { condition });
@@ -2998,6 +2938,55 @@ impl GameEngine {
         }
 
         interrupts
+    }
+
+    /// Build a [`victory::VictorySnapshot`] from the current engine state.
+    ///
+    /// Computes tech-tree completion and trade dominance volumes in addition to
+    /// the basic metrics already tracked on [`GameState`].
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn build_victory_snapshot(&self) -> victory::VictorySnapshot {
+        // Tech tree completion: all techs in registry must be researched.
+        let tech_tree_complete = self.state.tech_registry.as_ref().is_some_and(|reg| {
+            reg.all()
+                .all(|def| self.state.tech_state.is_researched(&def.id))
+        });
+
+        // Trade dominance volumes: every colony is considered player-controlled.
+        // Total traded volume = sum of all TradeTransfer amounts recorded this turn.
+        // We recompute by inspecting trade routes — all colonies are player colonies.
+        // Because we don't store last turn's transfers here, we compute a snapshot
+        // of current pool balances as a proxy: total across all pools per commodity.
+        // The real measure comes from TradeTransfer amounts produced by run_trade_flow;
+        // since we don't persist those, we sum the pool amounts as current holdings.
+        // For the victory check we compute volumes from the live pools:
+        // total_traded_volume tracks total held per commodity system-wide;
+        // player_traded_volume equals total (all colonies are player-owned for now).
+        let mut total_traded: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
+        for colony in &self.state.colonies {
+            for commodity_id in colony.pool.commodity_ids() {
+                let amt = colony.pool.amount(commodity_id);
+                *total_traded.entry(commodity_id.to_owned()).or_insert(0.0) += amt;
+            }
+        }
+        // All colonies are player-controlled — player volume equals total.
+        let player_traded = total_traded.clone();
+
+        victory::VictorySnapshot {
+            expedition_launched: self.state.expedition_launched,
+            total_output: 0,
+            total_population: self
+                .state
+                .populations
+                .iter()
+                .map(|p| p.count.max(0.0) as u64)
+                .sum(),
+            cumulative_research: self.state.cumulative_research,
+            tech_tree_complete,
+            total_traded_volume: total_traded,
+            player_traded_volume: player_traded,
+        }
     }
 
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].

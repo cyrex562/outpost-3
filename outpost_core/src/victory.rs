@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 // ─── VictoryCondition ────────────────────────────────────────────────────────
 
 /// One victory condition that can be satisfied.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VictoryCondition {
     /// Primary capstone: launch the interstellar expedition megaproject.
     InterstellarExpeditionLaunched,
@@ -30,6 +30,15 @@ pub enum VictoryCondition {
     ScienceMilestone {
         /// Cumulative research points target.
         target_research: u64,
+    },
+    /// Alternate: research every non-gated tech node in the tech tree.
+    TechTreeComplete,
+    /// Alternate: control ≥ `share_pct` percent of traded volume for a commodity.
+    TradeDominance {
+        /// Commodity identifier to measure dominance for.
+        commodity_id: String,
+        /// Required share of total traded volume (0.0–100.0).
+        share_pct: f32,
     },
 }
 
@@ -49,6 +58,13 @@ impl VictoryCondition {
             }
             VictoryCondition::ScienceMilestone { target_research } => {
                 format!("Accumulate {target_research} total research points")
+            }
+            VictoryCondition::TechTreeComplete => "Complete the entire tech tree".to_string(),
+            VictoryCondition::TradeDominance {
+                commodity_id,
+                share_pct,
+            } => {
+                format!("Control {share_pct:.0}% of traded {commodity_id} volume")
             }
         }
     }
@@ -168,6 +184,12 @@ pub struct VictorySnapshot {
     pub total_population: u64,
     /// Cumulative research points earned this campaign.
     pub cumulative_research: u64,
+    /// Whether all non-gated tech nodes have been researched.
+    pub tech_tree_complete: bool,
+    /// Total traded volume for each commodity across all routes this turn (commodity id → units).
+    pub total_traded_volume: std::collections::HashMap<String, f64>,
+    /// Volume traded by player-controlled colonies for each commodity (commodity id → units).
+    pub player_traded_volume: std::collections::HashMap<String, f64>,
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -175,14 +197,23 @@ pub struct VictorySnapshot {
 /// Default required value for a condition (used during construction).
 fn required_for(condition: &VictoryCondition) -> u64 {
     match condition {
-        VictoryCondition::InterstellarExpeditionLaunched => 1,
+        // Binary conditions — 0 = not done, 1 = done.
+        VictoryCondition::InterstellarExpeditionLaunched | VictoryCondition::TechTreeComplete => 1,
         VictoryCondition::EconomicMilestone { target_output } => *target_output,
         VictoryCondition::PopulationMilestone { target_population } => *target_population,
         VictoryCondition::ScienceMilestone { target_research } => *target_research,
+        // Percentage stored as integer 0–100.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        VictoryCondition::TradeDominance { share_pct, .. } => *share_pct as u64,
     }
 }
 
 /// Evaluate one condition against a snapshot. Returns `(current, satisfied)`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
 fn evaluate_condition(condition: &VictoryCondition, snapshot: &VictorySnapshot) -> (u64, bool) {
     match condition {
         VictoryCondition::InterstellarExpeditionLaunched => {
@@ -201,7 +232,99 @@ fn evaluate_condition(condition: &VictoryCondition, snapshot: &VictorySnapshot) 
             snapshot.cumulative_research,
             snapshot.cumulative_research >= *target_research,
         ),
+        VictoryCondition::TechTreeComplete => {
+            let v = u64::from(snapshot.tech_tree_complete);
+            (v, snapshot.tech_tree_complete)
+        }
+        VictoryCondition::TradeDominance {
+            commodity_id,
+            share_pct,
+        } => {
+            let total = snapshot
+                .total_traded_volume
+                .get(commodity_id.as_str())
+                .copied()
+                .unwrap_or(0.0);
+            let player = snapshot
+                .player_traded_volume
+                .get(commodity_id.as_str())
+                .copied()
+                .unwrap_or(0.0);
+            let actual_pct = if total > 0.0 {
+                (player / total * 100.0) as u64
+            } else {
+                0
+            };
+            let required_pct = *share_pct as u64;
+            (actual_pct, actual_pct >= required_pct)
+        }
     }
+}
+
+// ─── YAML loading ─────────────────────────────────────────────────────────────
+
+/// Raw YAML schema for a single victory condition entry.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum VictoryConditionYaml {
+    InterstellarExpeditionLaunched,
+    EconomicMilestone {
+        target_output: u64,
+    },
+    PopulationMilestone {
+        target_population: u64,
+    },
+    ScienceMilestone {
+        target_research: u64,
+    },
+    TechTreeComplete,
+    TradeDominance {
+        commodity_id: String,
+        share_pct: f32,
+    },
+}
+
+impl From<VictoryConditionYaml> for VictoryCondition {
+    fn from(y: VictoryConditionYaml) -> Self {
+        match y {
+            VictoryConditionYaml::InterstellarExpeditionLaunched => {
+                Self::InterstellarExpeditionLaunched
+            }
+            VictoryConditionYaml::EconomicMilestone { target_output } => {
+                Self::EconomicMilestone { target_output }
+            }
+            VictoryConditionYaml::PopulationMilestone { target_population } => {
+                Self::PopulationMilestone { target_population }
+            }
+            VictoryConditionYaml::ScienceMilestone { target_research } => {
+                Self::ScienceMilestone { target_research }
+            }
+            VictoryConditionYaml::TechTreeComplete => Self::TechTreeComplete,
+            VictoryConditionYaml::TradeDominance {
+                commodity_id,
+                share_pct,
+            } => Self::TradeDominance {
+                commodity_id,
+                share_pct,
+            },
+        }
+    }
+}
+
+/// Load a list of [`VictoryCondition`]s from YAML text.
+///
+/// The YAML must contain a top-level `conditions:` sequence of tagged objects.
+///
+/// # Errors
+///
+/// Returns a [`serde_yaml::Error`] if the YAML is malformed or has unknown condition types.
+pub fn load_victory_conditions(yaml: &str) -> Result<Vec<VictoryCondition>, serde_yaml::Error> {
+    #[derive(Deserialize)]
+    struct Root {
+        conditions: Vec<VictoryConditionYaml>,
+    }
+    let root: Root = serde_yaml::from_str(yaml)?;
+    Ok(root.conditions.into_iter().map(Into::into).collect())
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -368,9 +491,124 @@ mod tests {
                 target_population: 1,
             },
             VictoryCondition::ScienceMilestone { target_research: 1 },
+            VictoryCondition::TechTreeComplete,
+            VictoryCondition::TradeDominance {
+                commodity_id: "food".into(),
+                share_pct: 51.0,
+            },
         ];
         for c in conditions {
             assert!(!c.description().is_empty());
         }
+    }
+
+    #[test]
+    fn tech_tree_complete_not_achieved_when_incomplete() {
+        let mut vs = VictoryState::new(vec![VictoryCondition::TechTreeComplete]);
+        let snap = VictorySnapshot {
+            tech_tree_complete: false,
+            ..Default::default()
+        };
+        let achieved = vs.evaluate(&snap);
+        assert!(achieved.is_empty());
+        assert!(!vs.any_achieved);
+    }
+
+    #[test]
+    fn tech_tree_complete_achieved_when_all_researched() {
+        let mut vs = VictoryState::new(vec![VictoryCondition::TechTreeComplete]);
+        let snap = VictorySnapshot {
+            tech_tree_complete: true,
+            ..Default::default()
+        };
+        let achieved = vs.evaluate(&snap);
+        assert_eq!(achieved.len(), 1);
+        assert_eq!(achieved[0], VictoryCondition::TechTreeComplete);
+        assert!(vs.any_achieved);
+    }
+
+    #[test]
+    fn trade_dominance_not_achieved_below_threshold() {
+        let mut vs = VictoryState::new(vec![VictoryCondition::TradeDominance {
+            commodity_id: "iron".into(),
+            share_pct: 60.0,
+        }]);
+        let mut total = std::collections::HashMap::new();
+        total.insert("iron".to_string(), 100.0);
+        let mut player = std::collections::HashMap::new();
+        player.insert("iron".to_string(), 50.0); // 50%, below 60%
+        let snap = VictorySnapshot {
+            total_traded_volume: total,
+            player_traded_volume: player,
+            ..Default::default()
+        };
+        let achieved = vs.evaluate(&snap);
+        assert!(achieved.is_empty());
+        assert!(!vs.any_achieved);
+    }
+
+    #[test]
+    fn trade_dominance_achieved_at_threshold() {
+        let mut vs = VictoryState::new(vec![VictoryCondition::TradeDominance {
+            commodity_id: "iron".into(),
+            share_pct: 60.0,
+        }]);
+        let mut total = std::collections::HashMap::new();
+        total.insert("iron".to_string(), 100.0);
+        let mut player = std::collections::HashMap::new();
+        player.insert("iron".to_string(), 60.0); // exactly 60%
+        let snap = VictorySnapshot {
+            total_traded_volume: total,
+            player_traded_volume: player,
+            ..Default::default()
+        };
+        let achieved = vs.evaluate(&snap);
+        assert_eq!(achieved.len(), 1);
+        assert!(matches!(
+            achieved[0],
+            VictoryCondition::TradeDominance { .. }
+        ));
+    }
+
+    #[test]
+    fn trade_dominance_zero_total_volume_not_achieved() {
+        let mut vs = VictoryState::new(vec![VictoryCondition::TradeDominance {
+            commodity_id: "food".into(),
+            share_pct: 51.0,
+        }]);
+        let snap = VictorySnapshot::default();
+        let achieved = vs.evaluate(&snap);
+        assert!(achieved.is_empty());
+    }
+
+    #[test]
+    fn load_victory_conditions_from_yaml() {
+        let yaml = r#"
+conditions:
+  - type: interstellar_expedition_launched
+  - type: population_milestone
+    target_population: 10000
+  - type: tech_tree_complete
+  - type: trade_dominance
+    commodity_id: food
+    share_pct: 51.0
+"#;
+        let conditions = super::load_victory_conditions(yaml).unwrap();
+        assert_eq!(conditions.len(), 4);
+        assert!(matches!(
+            conditions[0],
+            VictoryCondition::InterstellarExpeditionLaunched
+        ));
+        assert!(matches!(
+            conditions[1],
+            VictoryCondition::PopulationMilestone {
+                target_population: 10000
+            }
+        ));
+        assert!(matches!(conditions[2], VictoryCondition::TechTreeComplete));
+        assert!(matches!(
+            conditions[3],
+            VictoryCondition::TradeDominance { .. }
+        ));
     }
 }
