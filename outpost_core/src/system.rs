@@ -387,6 +387,39 @@ impl Megaproject {
     }
 }
 
+// ─── Transport Capacity ───────────────────────────────────────────────────────
+
+/// Passenger-transport capacity for migration batches (§6A / §8.3).
+///
+/// `haulers * colonists_per_hauler` gives the maximum colonists that can move
+/// on a single route in one strategic month.  Excess demand is deferred to the
+/// next batch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransportCapacity {
+    /// Number of passenger haulers in the migration fleet.
+    pub haulers: u32,
+    /// Maximum colonists each hauler can carry per strategic month.
+    pub colonists_per_hauler: u32,
+}
+
+impl TransportCapacity {
+    /// Total colonist slots available per route per strategic month.
+    #[must_use]
+    pub fn total(&self) -> u32 {
+        self.haulers.saturating_mul(self.colonists_per_hauler)
+    }
+}
+
+impl Default for TransportCapacity {
+    fn default() -> Self {
+        // Default: 2 haulers × 50 colonists each = 100 per route per month.
+        Self {
+            haulers: 2,
+            colonists_per_hauler: 50,
+        }
+    }
+}
+
 // ─── System State ─────────────────────────────────────────────────────────────
 
 /// Top-level state container for the system zoom layer.
@@ -400,6 +433,8 @@ pub struct SystemState {
     pub shipments: HashMap<Uuid, CargoShipment>,
     /// All megaprojects (active and completed).
     pub megaprojects: HashMap<MegaprojectId, Megaproject>,
+    /// Passenger-transport capacity for migration batches.
+    pub transport_capacity: TransportCapacity,
 }
 
 impl SystemState {

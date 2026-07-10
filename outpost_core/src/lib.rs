@@ -418,6 +418,22 @@ pub enum Command {
         /// Destination colony endpoint.
         to_colony: ColonyId,
     },
+
+    // ── M3: Transport capacity for migration batches ──────────────────────
+    /// Add passenger haulers to the migration transport fleet.
+    ///
+    /// Increases [`system::TransportCapacity::haulers`] by `count`.
+    AddHauler {
+        /// Number of haulers to add.
+        count: u32,
+    },
+    /// Remove passenger haulers from the migration transport fleet.
+    ///
+    /// Clamps at zero — you cannot remove more haulers than exist.
+    RemoveHauler {
+        /// Number of haulers to remove.
+        count: u32,
+    },
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -713,6 +729,16 @@ pub enum Event {
         flow_count: usize,
         /// Total colonists in transit across all flows.
         total_in_transit: f32,
+    },
+    /// A migration batch was capped by transport capacity; excess demand is deferred.
+    ///
+    /// Emitted when `DirectMigration` or `EvacuateColony` demand exceeds
+    /// `haulers × colonists_per_hauler` for the route this month.
+    MigrationQueued {
+        /// Stable identifier of the pending migration batch that was dispatched.
+        batch_id: uuid::Uuid,
+        /// Number of colonists whose departure was deferred to the next month.
+        deferred_count: f32,
     },
     /// An emigration gate was opened between two colonies.
     EmigrationGateOpened {
@@ -1787,23 +1813,36 @@ impl GameEngine {
                         "requested {count} migrants but only {available:.0} available"
                     )));
                 }
+                // Cap the batch by transport capacity; defer the remainder.
+                #[allow(clippy::cast_precision_loss)]
+                let capacity = self.state.system_state.transport_capacity.total() as f32;
+                let dispatched = count.min(capacity);
+                let deferred = count - dispatched;
                 // Deduct from source immediately (they are in transit).
-                self.state.populations[from_idx].count -= count;
+                self.state.populations[from_idx].count -= dispatched;
                 let mig = PendingMigration::new(
                     Some(*from_colony),
                     *to_colony,
-                    *count,
+                    dispatched,
                     *transit_turns,
                     false,
-                    count * 0.1,
+                    dispatched * 0.1,
                 );
+                let batch_id = mig.id;
                 self.state.pending_migrations.push(mig);
-                Ok(vec![Event::MigrationDeparted {
+                let mut events = vec![Event::MigrationDeparted {
                     from_colony: *from_colony,
                     to_colony: *to_colony,
-                    count: *count,
+                    count: dispatched,
                     forced: false,
-                }])
+                }];
+                if deferred > 0.0 {
+                    events.push(Event::MigrationQueued {
+                        batch_id,
+                        deferred_count: deferred,
+                    });
+                }
+                Ok(events)
             }
 
             Command::EvacuateColony {
@@ -1821,8 +1860,13 @@ impl GameEngine {
                         "evacuation fraction too small to move any colonists".into(),
                     ));
                 }
+                // Cap the batch by transport capacity; defer the remainder.
+                #[allow(clippy::cast_precision_loss)]
+                let capacity = self.state.system_state.transport_capacity.total() as f32;
+                let dispatched = count.min(capacity);
+                let deferred = count - dispatched;
                 // Deduct from source; apply forced-move stability penalty.
-                self.state.populations[from_idx].count -= count;
+                self.state.populations[from_idx].count -= dispatched;
                 self.state.populations[from_idx].stability = (self.state.populations[from_idx]
                     .stability
                     - migration::FORCED_MOVE_STABILITY_COST)
@@ -1830,18 +1874,46 @@ impl GameEngine {
                 let mig = PendingMigration::new(
                     Some(*from_colony),
                     *to_colony,
-                    count,
+                    dispatched,
                     *transit_turns,
                     true,
-                    count * 0.2,
+                    dispatched * 0.2,
                 );
+                let batch_id = mig.id;
                 self.state.pending_migrations.push(mig);
-                Ok(vec![Event::MigrationDeparted {
+                let mut events = vec![Event::MigrationDeparted {
                     from_colony: *from_colony,
                     to_colony: *to_colony,
-                    count,
+                    count: dispatched,
                     forced: true,
-                }])
+                }];
+                if deferred > 0.0 {
+                    events.push(Event::MigrationQueued {
+                        batch_id,
+                        deferred_count: deferred,
+                    });
+                }
+                Ok(events)
+            }
+
+            Command::AddHauler { count } => {
+                self.state.system_state.transport_capacity.haulers = self
+                    .state
+                    .system_state
+                    .transport_capacity
+                    .haulers
+                    .saturating_add(*count);
+                Ok(vec![])
+            }
+
+            Command::RemoveHauler { count } => {
+                self.state.system_state.transport_capacity.haulers = self
+                    .state
+                    .system_state
+                    .transport_capacity
+                    .haulers
+                    .saturating_sub(*count);
+                Ok(vec![])
             }
 
             Command::OpenEmigrationGate {
@@ -6098,6 +6170,212 @@ mod tests {
                 .iter()
                 .any(|i| matches!(&i.source, InterruptSource::EventFired(id) if id == "dust_storm_phase1")),
             "collect_turn_interrupts must surface EventFired for HazardFired events; interrupts: {interrupts:?}"
+        );
+    }
+
+    // ── M3: Transport capacity for migration batches ──────────────────────────
+
+    /// Helper: found two colonies with custom populations, return (engine, colony_a_id, colony_b_id).
+    fn two_colony_engine_with_pop(pop_a: u64, pop_b: u64) -> (GameEngine, ColonyId, ColonyId) {
+        let mut engine = GameEngine::with_seed(0);
+        let ev_a = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: pop_a,
+            })
+            .unwrap();
+        let id_a = match &ev_a[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!("unexpected event"),
+        };
+        let ev_b = engine
+            .apply(&Command::FoundColony {
+                name: "Beta".into(),
+                starting_population: pop_b,
+            })
+            .unwrap();
+        let id_b = match &ev_b[0] {
+            Event::ColonyFounded { colony_id, .. } => *colony_id,
+            _ => panic!("unexpected event"),
+        };
+        (engine, id_a, id_b)
+    }
+
+    #[test]
+    fn transport_capacity_default_is_nonzero() {
+        let engine = GameEngine::new();
+        let cap = engine.state.system_state.transport_capacity.total();
+        assert!(cap > 0, "default transport capacity should be > 0");
+    }
+
+    #[test]
+    fn add_hauler_increases_capacity() {
+        let mut engine = GameEngine::new();
+        let before = engine.state.system_state.transport_capacity.haulers;
+        engine.apply(&Command::AddHauler { count: 3 }).unwrap();
+        let after = engine.state.system_state.transport_capacity.haulers;
+        assert_eq!(
+            after,
+            before + 3,
+            "AddHauler should increase fleet by count"
+        );
+    }
+
+    #[test]
+    fn remove_hauler_decreases_capacity() {
+        let mut engine = GameEngine::new();
+        engine.apply(&Command::AddHauler { count: 5 }).unwrap();
+        let before = engine.state.system_state.transport_capacity.haulers;
+        engine.apply(&Command::RemoveHauler { count: 2 }).unwrap();
+        let after = engine.state.system_state.transport_capacity.haulers;
+        assert_eq!(
+            after,
+            before - 2,
+            "RemoveHauler should decrease fleet by count"
+        );
+    }
+
+    #[test]
+    fn remove_hauler_clamps_at_zero() {
+        let mut engine = GameEngine::new();
+        // Remove more haulers than exist — should not underflow.
+        let current = engine.state.system_state.transport_capacity.haulers;
+        engine
+            .apply(&Command::RemoveHauler {
+                count: current + 100,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.state.system_state.transport_capacity.haulers, 0,
+            "RemoveHauler must clamp at zero"
+        );
+    }
+
+    /// Acceptance criterion: capacity=10 with demand=25 → batch of 10, remainder queued.
+    #[test]
+    fn direct_migration_capped_by_transport_capacity() {
+        let (mut engine, id_a, id_b) = two_colony_engine_with_pop(100, 50);
+
+        // Set capacity = 1 hauler × 10 colonists = 10 total.
+        engine.state.system_state.transport_capacity.haulers = 1;
+        engine
+            .state
+            .system_state
+            .transport_capacity
+            .colonists_per_hauler = 10;
+
+        // Try to move 25 colonists — only 10 fit.
+        let events = engine
+            .apply(&Command::DirectMigration {
+                from_colony: id_a,
+                to_colony: id_b,
+                count: 25.0,
+                transit_turns: 1,
+            })
+            .unwrap();
+
+        // Should emit MigrationDeparted for 10 and MigrationQueued for 15.
+        let departed = events
+            .iter()
+            .find_map(|e| {
+                if let Event::MigrationDeparted { count, .. } = e {
+                    Some(*count)
+                } else {
+                    None
+                }
+            })
+            .expect("MigrationDeparted event expected");
+        assert!(
+            (departed - 10.0).abs() < 1e-3,
+            "dispatched count should be 10, got {departed}"
+        );
+
+        let queued = events
+            .iter()
+            .find_map(|e| {
+                if let Event::MigrationQueued { deferred_count, .. } = e {
+                    Some(*deferred_count)
+                } else {
+                    None
+                }
+            })
+            .expect("MigrationQueued event expected for overflow");
+        assert!(
+            (queued - 15.0).abs() < 1e-3,
+            "deferred count should be 15, got {queued}"
+        );
+
+        // Exactly one pending migration should be in the queue (the dispatched batch).
+        assert_eq!(
+            engine.state.pending_migrations.len(),
+            1,
+            "only the dispatched batch enters pending_migrations"
+        );
+    }
+
+    #[test]
+    fn direct_migration_within_capacity_emits_no_queued_event() {
+        let (mut engine, id_a, id_b) = two_colony_engine_with_pop(100, 50);
+        // Capacity 100 — enough for 10 colonists.
+        engine.state.system_state.transport_capacity.haulers = 10;
+        engine
+            .state
+            .system_state
+            .transport_capacity
+            .colonists_per_hauler = 10;
+
+        let events = engine
+            .apply(&Command::DirectMigration {
+                from_colony: id_a,
+                to_colony: id_b,
+                count: 10.0,
+                transit_turns: 1,
+            })
+            .unwrap();
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::MigrationQueued { .. })),
+            "no MigrationQueued when demand fits within capacity"
+        );
+    }
+
+    #[test]
+    fn evacuate_colony_capped_by_transport_capacity() {
+        let (mut engine, id_a, id_b) = two_colony_engine_with_pop(100, 10);
+
+        // 1 hauler × 10 per hauler = capacity 10.
+        engine.state.system_state.transport_capacity.haulers = 1;
+        engine
+            .state
+            .system_state
+            .transport_capacity
+            .colonists_per_hauler = 10;
+
+        // Evacuate 50 % of 100 = 50 colonists; only 10 fit.
+        let events = engine
+            .apply(&Command::EvacuateColony {
+                from_colony: id_a,
+                to_colony: id_b,
+                fraction: 0.5,
+                transit_turns: 1,
+            })
+            .unwrap();
+
+        let queued = events
+            .iter()
+            .find_map(|e| {
+                if let Event::MigrationQueued { deferred_count, .. } = e {
+                    Some(*deferred_count)
+                } else {
+                    None
+                }
+            })
+            .expect("MigrationQueued expected for overflow evacuation");
+        assert!(
+            queued > 0.0,
+            "deferred count should be > 0 for capped evacuation, got {queued}"
         );
     }
 }
