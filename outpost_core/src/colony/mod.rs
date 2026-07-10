@@ -71,6 +71,18 @@ impl Colony {
     pub fn slots_available(&self) -> u32 {
         self.slot_capacity.saturating_sub(self.slots_used())
     }
+
+    /// Return the subset of `all_buildings` constructable in this colony.
+    ///
+    /// A building is available if it has no `tech_prerequisite`, or its
+    /// prerequisite ID is present in `unlocked_buildings`.
+    #[must_use]
+    pub fn available_buildings<'a>(
+        all_buildings: impl Iterator<Item = &'a crate::content::types::BuildingDef>,
+        unlocked_buildings: &std::collections::HashSet<String>,
+    ) -> Vec<&'a crate::content::types::BuildingDef> {
+        crate::tech::unlocked_buildings(all_buildings, unlocked_buildings)
+    }
 }
 
 #[cfg(test)]

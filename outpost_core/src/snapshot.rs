@@ -268,6 +268,10 @@ impl Snapshot {
             victory_state: crate::victory::VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
+            unlocked_buildings: std::collections::HashSet::new(),
+            unlocked_capabilities: std::collections::HashSet::new(),
+            unlocked_commodities: std::collections::HashSet::new(),
+            modifier_accumulator: crate::modifier::ModifierAccumulator::new(),
         })
     }
 

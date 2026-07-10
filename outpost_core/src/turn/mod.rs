@@ -10,7 +10,7 @@
 //! sub-pipeline every `sols_per_month` sols (default 30). RNG is injected as a
 //! seeded [`rand_chacha::ChaCha8Rng`] stream so turn resolution is deterministic.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -22,7 +22,8 @@ use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
 use crate::menace::MenaceState;
 use crate::migration::{PendingMigration, PopulationTracker};
-use crate::modifier::DifficultyScalar;
+use crate::modifier::{DifficultyScalar, ModifierAccumulator, ModifierDescriptor, ModifiableQuantity};
+use crate::tech::TechEffect;
 use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
@@ -52,6 +53,8 @@ pub struct TurnOutcome {
     pub sol: u64,
     /// Strategic-month counter after this advance (if a month just fired).
     pub month: u64,
+    /// Tech IDs that completed during this strategic month (empty if no month fired).
+    pub completed_techs: Vec<String>,
 }
 
 /// Top-level in-memory game state.
@@ -115,6 +118,16 @@ pub struct GameState {
     pub cumulative_research: u64,
     /// Whether the interstellar expedition has been launched (primary victory trigger).
     pub expedition_launched: bool,
+
+    // ── Phase M1: Tech effects wired to live state ────────────────────────
+    /// Building IDs unlocked by completed tech nodes.
+    pub unlocked_buildings: HashSet<String>,
+    /// Capability slugs unlocked by completed tech nodes.
+    pub unlocked_capabilities: HashSet<String>,
+    /// Commodity IDs unlocked by completed tech nodes.
+    pub unlocked_commodities: HashSet<String>,
+    /// Accumulated numeric tech bonuses (additive, per category).
+    pub modifier_accumulator: ModifierAccumulator,
 }
 
 impl GameState {
@@ -144,6 +157,10 @@ impl GameState {
             victory_state: VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
+            unlocked_buildings: HashSet::new(),
+            unlocked_capabilities: HashSet::new(),
+            unlocked_commodities: HashSet::new(),
+            modifier_accumulator: ModifierAccumulator::new(),
         }
     }
 
@@ -214,16 +231,18 @@ impl TurnProcessor {
 
         self.run_colony_sol_pipeline(state);
 
+        let mut completed_techs = Vec::new();
         if state.sol.is_multiple_of(self.sols_per_month) {
             state.month += 1;
             cadences_fired.push(TurnCadence::StrategicMonth);
-            Self::run_strategic_month_pipeline(state);
+            completed_techs = Self::run_strategic_month_pipeline(state);
         }
 
         TurnOutcome {
             cadences_fired,
             sol: state.sol,
             month: state.month,
+            completed_techs,
         }
     }
 
@@ -238,17 +257,54 @@ impl TurnProcessor {
         }
     }
 
+    /// Apply a flat list of [`TechEffect`]s to live [`GameState`].
+    ///
+    /// Called after each research-turn completion to wire unlocks and bonuses.
+    pub fn apply_tech_effects(state: &mut GameState, effects: &[TechEffect]) {
+        for effect in effects {
+            match effect {
+                TechEffect::UnlockBuilding { building_id } => {
+                    state.unlocked_buildings.insert(building_id.clone());
+                }
+                TechEffect::UnlockCapability { capability_id } => {
+                    state.unlocked_capabilities.insert(capability_id.clone());
+                }
+                TechEffect::UnlockCommodity { commodity_id } => {
+                    state.unlocked_commodities.insert(commodity_id.clone());
+                }
+                TechEffect::Bonus { category, value } => {
+                    // Map the generic category string to a ModifiableQuantity.
+                    // For now we use ProductionRate with the category string as the
+                    // building-id key — a future pass can refine the mapping.
+                    let quantity = ModifiableQuantity::ProductionRate(category.clone());
+                    state
+                        .modifier_accumulator
+                        .add(ModifierDescriptor::new(quantity, category.clone(), *value));
+                }
+            }
+        }
+    }
+
     /// Strategic-month sub-pipeline.
-    fn run_strategic_month_pipeline(state: &mut GameState) {
+    ///
+    /// Returns the IDs of techs completed this month (may be empty).
+    fn run_strategic_month_pipeline(state: &mut GameState) -> Vec<String> {
+        let mut completed_techs = Vec::new();
+
         // Drain research pool into tech progress if a registry is loaded.
         if let Some(reg) = state.tech_registry.as_ref() {
             // Clone to avoid borrow conflict; registry is read-only here.
             let reg_clone = reg.clone();
-            crate::tech::apply_research_turn(
+            let result = crate::tech::apply_research_turn(
                 &mut state.tech_state,
                 &mut state.research_pool,
                 &reg_clone,
             );
+            // Wire completed tech effects into live state.
+            for effects in &result.new_effects {
+                Self::apply_tech_effects(state, effects);
+            }
+            completed_techs = result.completed;
         }
 
         // ── Auto trade flow ───────────────────────────────────────────────
@@ -276,6 +332,8 @@ impl TurnProcessor {
                 colony.pool = new_pool;
             }
         }
+
+        completed_techs
     }
 }
 
@@ -389,5 +447,150 @@ mod tests {
         let state = GameState::new();
         assert!(state.directive_store.directives.is_empty());
         assert!(state.directive_store.manual_override.is_empty());
+    }
+
+    // ── Tech effects wiring tests (issue #81) ────────────────────────────────
+
+    use crate::tech::{TechDef, TechEffect, TechRegistry};
+    use crate::modifier::ModifiableQuantity;
+
+    fn make_tech_registry_with_unlock(
+        building_id: &str,
+        cost: f32,
+    ) -> (TechRegistry, String) {
+        let tech_id = "unlock_test".to_string();
+        let defs = vec![TechDef {
+            id: tech_id.clone(),
+            display_name: "Unlock Test".to_string(),
+            prerequisites: vec![],
+            research_cost: cost,
+            effects: vec![TechEffect::UnlockBuilding {
+                building_id: building_id.to_string(),
+            }],
+        }];
+        (TechRegistry::build(defs).unwrap(), tech_id)
+    }
+
+    #[test]
+    fn unlock_building_applied_after_research_completes() {
+        let mut state = make_state();
+        let (reg, tech_id) = make_tech_registry_with_unlock("adv_lab", 10.0);
+        state.tech_state.set_current_project(tech_id.clone());
+        state.tech_registry = Some(reg);
+        state.research_pool.deposit(20.0);
+
+        // Advance until a strategic month fires (cadence 1 sol for speed).
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        assert!(
+            state.unlocked_buildings.contains("adv_lab"),
+            "building should be unlocked after tech completes"
+        );
+        assert!(
+            state.tech_state.is_researched(&tech_id),
+            "tech should be marked as researched"
+        );
+    }
+
+    #[test]
+    fn unlock_capability_applied_after_research_completes() {
+        let mut state = make_state();
+        let tech_id = "warp_tech".to_string();
+        let defs = vec![TechDef {
+            id: tech_id.clone(),
+            display_name: "Warp".to_string(),
+            prerequisites: vec![],
+            research_cost: 5.0,
+            effects: vec![TechEffect::UnlockCapability {
+                capability_id: "warp_drive".to_string(),
+            }],
+        }];
+        state.tech_state.set_current_project(tech_id);
+        state.tech_registry = Some(TechRegistry::build(defs).unwrap());
+        state.research_pool.deposit(10.0);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        assert!(state.unlocked_capabilities.contains("warp_drive"));
+    }
+
+    #[test]
+    fn bonus_accumulates_in_modifier_accumulator() {
+        let mut state = make_state();
+        let tech_id = "efficiency_tech".to_string();
+        let defs = vec![TechDef {
+            id: tech_id.clone(),
+            display_name: "Efficiency".to_string(),
+            prerequisites: vec![],
+            research_cost: 5.0,
+            effects: vec![TechEffect::Bonus {
+                category: "production_efficiency".to_string(),
+                value: 0.20,
+            }],
+        }];
+        state.tech_state.set_current_project(tech_id);
+        state.tech_registry = Some(TechRegistry::build(defs).unwrap());
+        state.research_pool.deposit(10.0);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        let qty = ModifiableQuantity::ProductionRate("production_efficiency".to_string());
+        let sum = state.modifier_accumulator.total_sum(&qty);
+        assert!(
+            (sum - 0.20).abs() < 1e-4,
+            "expected 0.20 bonus in accumulator, got {sum}"
+        );
+    }
+
+    #[test]
+    fn unavailable_building_excluded_before_unlock() {
+        use crate::content::types::{BuildingCategory, BuildingDef};
+        use std::collections::HashSet;
+
+        let buildings = vec![BuildingDef {
+            id: "adv_lab".to_string(),
+            name: "Advanced Lab".to_string(),
+            description: String::new(),
+            category: BuildingCategory::Research,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 2,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 3,
+            tech_prerequisite: Some("adv_lab_tech".to_string()),
+        }];
+
+        let empty: HashSet<String> = HashSet::new();
+        let available_before = Colony::available_buildings(buildings.iter(), &empty);
+        assert!(
+            available_before.is_empty(),
+            "building should not be available before tech unlock"
+        );
+
+        let mut unlocked = HashSet::new();
+        unlocked.insert("adv_lab_tech".to_string());
+        let available_after = Colony::available_buildings(buildings.iter(), &unlocked);
+        assert_eq!(available_after.len(), 1, "building should be available after unlock");
+    }
+
+    #[test]
+    fn completed_techs_returned_in_turn_outcome() {
+        let mut state = make_state();
+        let (reg, tech_id) = make_tech_registry_with_unlock("shelter", 5.0);
+        state.tech_state.set_current_project(tech_id.clone());
+        state.tech_registry = Some(reg);
+        state.research_pool.deposit(10.0);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        let outcome = proc.advance(&mut state);
+
+        assert!(
+            outcome.completed_techs.contains(&tech_id),
+            "outcome should list completed tech id"
+        );
     }
 }
