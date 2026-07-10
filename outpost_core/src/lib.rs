@@ -26,6 +26,7 @@
 pub mod colony;
 pub mod content;
 pub mod population;
+pub mod snapshot;
 pub mod turn;
 
 use thiserror::Error;
