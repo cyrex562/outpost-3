@@ -17,19 +17,35 @@
 //! [`SnapshotError::SchemaMismatch`] so callers get a clear error rather than
 //! silent corruption.
 
-use rusqlite::{params, Connection};
+use std::collections::{HashMap, HashSet};
 
-use crate::colony::Colony;
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+
+use crate::colony::{Colony, ColonyId};
+use crate::difficulty::{DifficultyGradeTable, DifficultyPreset};
+use crate::directive::DirectiveStore;
+use crate::interrupt::StabilityTracker;
+use crate::map::PlanetMap;
+use crate::menace::MenaceState;
+use crate::migration::{EmigrationGate, PendingMigration, PopulationTracker};
+use crate::modifier::{DifficultyScalar, ModifierAccumulator};
+use crate::orbital::{OrbitalConstructionProject, OrbitalRegistry};
 use crate::population::Population;
+use crate::research::SystemResearchPool;
+use crate::system::SystemState;
+use crate::tech::TechState;
+use crate::trade::TradeNetwork;
 use crate::turn::GameState;
+use crate::victory::{VictoryCondition, VictoryState};
 
 /// Monotonically increasing schema version.
 ///
 /// Increment this whenever the on-disk layout changes.  Forward-migration
 /// documentation must accompany each bump.
-/// Schema version 2: `populations.count` changed from INTEGER to REAL to support
-/// fractional population growth (Phase 2 — issue #15).
-pub const SCHEMA_VERSION: u32 = 2;
+/// Schema version 2: `populations.count` changed from INTEGER to REAL.
+/// Schema version 3: full `GameState` blob added (`state_json` column).
+pub const SCHEMA_VERSION: u32 = 3;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -41,23 +57,159 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 CREATE TABLE IF NOT EXISTS game_state (
-    id       INTEGER PRIMARY KEY CHECK (id = 1),
-    sol      INTEGER NOT NULL,
-    month    INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS colonies (
-    idx         INTEGER NOT NULL,
-    id          TEXT    NOT NULL,
-    name        TEXT    NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS populations (
-    idx         INTEGER NOT NULL,
-    count       REAL    NOT NULL,
-    stability   REAL    NOT NULL
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    sol        INTEGER NOT NULL,
+    month      INTEGER NOT NULL,
+    state_json TEXT    NOT NULL DEFAULT '{}'
 );
 ";
+
+// ─── Full-state blob ─────────────────────────────────────────────────────────────────
+
+/// Serialisable mirror of [`GameState`] for `SQLite` persistence.
+///
+/// Fields that cannot be serialised (content registries, hazard config loaded
+/// from YAML at runtime) are excluded; the caller must reload them after
+/// [`Snapshot::load`] returns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FullStateBlob {
+    // ── Turn counters ────────────────────────────────────────────────────────
+    sol: u64,
+    month: u64,
+
+    // ── Colonies + populations ───────────────────────────────────────────────
+    colonies: Vec<Colony>,
+    populations: Vec<Population>,
+
+    // ── Tech ────────────────────────────────────────────────────────────────
+    tech_state: TechState,
+    research_pool: SystemResearchPool,
+    cumulative_research: u64,
+
+    // ── Trade ────────────────────────────────────────────────────────────────
+    trade_network: TradeNetwork,
+    #[serde(default)]
+    infra_routes: Vec<((ColonyId, ColonyId), uuid::Uuid)>,
+
+    // ── Directives ───────────────────────────────────────────────────────────
+    directive_store: DirectiveStore,
+
+    // ── Orbital ──────────────────────────────────────────────────────────────
+    orbital_registry: OrbitalRegistry,
+    #[serde(default)]
+    orbital_construction_queue: Vec<OrbitalConstructionProject>,
+
+    // ── System state ─────────────────────────────────────────────────────────
+    system_state: SystemState,
+
+    // ── Migration ────────────────────────────────────────────────────────────
+    emigration_gates: Vec<EmigrationGate>,
+    pending_migrations: Vec<PendingMigration>,
+
+    // ── Trackers ─────────────────────────────────────────────────────────────
+    stability_trackers: HashMap<ColonyId, StabilityTracker>,
+    population_trackers: HashMap<ColonyId, PopulationTracker>,
+
+    // ── Difficulty / Menace / Victory ────────────────────────────────────────
+    difficulty_preset: DifficultyPreset,
+    difficulty_grade_table: DifficultyGradeTable,
+    difficulty_scalar: DifficultyScalar,
+    menace_state: Option<MenaceState>,
+    victory_state: VictoryState,
+    expedition_launched: bool,
+    victory: Option<VictoryCondition>,
+
+    // ── Tech-derived unlocks + modifiers ─────────────────────────────────────
+    unlocked_buildings: HashSet<String>,
+    unlocked_capabilities: HashSet<String>,
+    unlocked_commodities: HashSet<String>,
+    modifier_accumulator: ModifierAccumulator,
+
+    // ── Planet map ────────────────────────────────────────────────────────────
+    #[serde(default)]
+    planet_map: Option<PlanetMap>,
+}
+
+impl FullStateBlob {
+    fn from_game_state(state: &GameState) -> Self {
+        // HashMap<(ColonyId, ColonyId), Uuid> → Vec for JSON (tuple keys not supported directly).
+        let infra_routes: Vec<_> = state.infra_routes.iter().map(|(k, v)| (*k, *v)).collect();
+
+        Self {
+            sol: state.sol,
+            month: state.month,
+            colonies: state.colonies.clone(),
+            populations: state.populations.clone(),
+            tech_state: state.tech_state.clone(),
+            research_pool: state.research_pool.clone(),
+            cumulative_research: state.cumulative_research,
+            trade_network: state.trade_network.clone(),
+            infra_routes,
+            directive_store: state.directive_store.clone(),
+            orbital_registry: state.orbital_registry.clone(),
+            orbital_construction_queue: state.orbital_construction_queue.clone(),
+            system_state: state.system_state.clone(),
+            emigration_gates: state.emigration_gates.clone(),
+            pending_migrations: state.pending_migrations.clone(),
+            stability_trackers: state.stability_trackers.clone(),
+            population_trackers: state.population_trackers.clone(),
+            difficulty_preset: state.difficulty_preset,
+            difficulty_grade_table: state.difficulty_grade_table.clone(),
+            difficulty_scalar: state.difficulty_scalar.clone(),
+            menace_state: state.menace_state.clone(),
+            victory_state: state.victory_state.clone(),
+            expedition_launched: state.expedition_launched,
+            victory: state.victory.clone(),
+            unlocked_buildings: state.unlocked_buildings.clone(),
+            unlocked_capabilities: state.unlocked_capabilities.clone(),
+            unlocked_commodities: state.unlocked_commodities.clone(),
+            modifier_accumulator: state.modifier_accumulator.clone(),
+            planet_map: state.planet_map.clone(),
+        }
+    }
+
+    fn into_game_state(self) -> GameState {
+        let infra_routes: HashMap<(ColonyId, ColonyId), uuid::Uuid> =
+            self.infra_routes.into_iter().collect();
+
+        GameState {
+            sol: self.sol,
+            month: self.month,
+            colonies: self.colonies,
+            populations: self.populations,
+            tech_state: self.tech_state,
+            research_pool: self.research_pool,
+            cumulative_research: self.cumulative_research,
+            trade_network: self.trade_network,
+            infra_routes,
+            directive_store: self.directive_store,
+            orbital_registry: self.orbital_registry,
+            orbital_construction_queue: self.orbital_construction_queue,
+            system_state: self.system_state,
+            emigration_gates: self.emigration_gates,
+            pending_migrations: self.pending_migrations,
+            stability_trackers: self.stability_trackers,
+            population_trackers: self.population_trackers,
+            difficulty_preset: self.difficulty_preset,
+            difficulty_grade_table: self.difficulty_grade_table,
+            difficulty_scalar: self.difficulty_scalar,
+            menace_state: self.menace_state,
+            victory_state: self.victory_state,
+            expedition_launched: self.expedition_launched,
+            victory: self.victory,
+            unlocked_buildings: self.unlocked_buildings,
+            unlocked_capabilities: self.unlocked_capabilities,
+            unlocked_commodities: self.unlocked_commodities,
+            modifier_accumulator: self.modifier_accumulator,
+            planet_map: self.planet_map,
+            // Runtime-only fields that are reloaded from content packs after load:
+            registry: None,
+            needs_config: None,
+            tech_registry: None,
+            hazard_config: None,
+        }
+    }
+}
 
 // ─── Errors ───────────────────────────────────────────────────────────────────────
 
@@ -67,6 +219,9 @@ pub enum SnapshotError {
     /// `SQLite` operation failed.
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    /// JSON serialisation or deserialisation failed.
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
     /// The on-disk schema version does not match [`SCHEMA_VERSION`].
     #[error("schema version mismatch: file has v{found}, code expects v{expected}")]
     SchemaMismatch {
@@ -133,37 +288,19 @@ impl Snapshot {
     /// # Errors
     ///
     /// Returns [`SnapshotError::Sqlite`] on any database error.
+    /// Returns [`SnapshotError::Json`] if state serialisation fails.
     pub fn save(&mut self, state: &GameState) -> Result<(), SnapshotError> {
+        let blob = FullStateBlob::from_game_state(state);
+        let state_json = serde_json::to_string(&blob)?;
+
         let tx = self.conn.transaction()?;
 
-        // Wipe previous snapshot data.
-        tx.execute_batch(
-            "DELETE FROM game_state;
-             DELETE FROM colonies;
-             DELETE FROM populations;",
-        )?;
+        tx.execute_batch("DELETE FROM game_state;")?;
 
-        // Singleton turn counters.
         tx.execute(
-            "INSERT INTO game_state (id, sol, month) VALUES (1, ?1, ?2)",
-            params![state.sol, state.month],
+            "INSERT INTO game_state (id, sol, month, state_json) VALUES (1, ?1, ?2, ?3)",
+            params![state.sol, state.month, state_json],
         )?;
-
-        // Colonies and populations in parallel index order.
-        for (idx, colony) in state.colonies.iter().enumerate() {
-            #[allow(clippy::cast_possible_wrap)]
-            tx.execute(
-                "INSERT INTO colonies (idx, id, name) VALUES (?1, ?2, ?3)",
-                params![idx as i64, colony.id.to_string(), &colony.name],
-            )?;
-        }
-        for (idx, pop) in state.populations.iter().enumerate() {
-            #[allow(clippy::cast_possible_wrap)]
-            tx.execute(
-                "INSERT INTO populations (idx, count, stability) VALUES (?1, ?2, ?3)",
-                params![idx as i64, pop.count, pop.stability],
-            )?;
-        }
 
         tx.commit()?;
         Ok(())
@@ -179,6 +316,7 @@ impl Snapshot {
     ///   different version of the code.
     /// - [`SnapshotError::MissingGameState`] if the snapshot has no turn data.
     /// - [`SnapshotError::Sqlite`] on any other database error.
+    /// - [`SnapshotError::Json`] if the stored JSON cannot be deserialised.
     pub fn load(&self) -> Result<GameState, SnapshotError> {
         // Version check first.
         let found: u32 =
@@ -193,100 +331,22 @@ impl Snapshot {
             });
         }
 
-        // Turn counters.
-        let (sol, month): (u64, u64) = self
+        let state_json: String = self
             .conn
             .query_row(
-                "SELECT sol, month FROM game_state WHERE id = 1",
+                "SELECT state_json FROM game_state WHERE id = 1",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .map_err(|_| SnapshotError::MissingGameState)?;
 
-        // Colonies (ordered by idx).
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name FROM colonies ORDER BY idx")?;
-        let colonies: Vec<Colony> = stmt
-            .query_map([], |row| {
-                let id_str: String = row.get(0)?;
-                let name: String = row.get(1)?;
-                Ok((id_str, name))
-            })?
-            .map(|r| {
-                let (id_str, name) = r?;
-                let id = uuid::Uuid::parse_str(&id_str)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                Ok(Colony {
-                    id,
-                    name,
-                    pool: crate::colony::ColonyPool::new(),
-                    buildings: Vec::new(),
-                    build_queue: crate::colony::ConstructionQueue::new(),
-                    slot_capacity: crate::colony::BASE_SLOT_CAPACITY,
-                    terrain_id: None,
-                })
-            })
-            .collect::<Result<_, rusqlite::Error>>()?;
-
-        // Populations (ordered by idx).
-        let mut stmt = self
-            .conn
-            .prepare("SELECT count, stability FROM populations ORDER BY idx")?;
-        let populations: Vec<Population> = stmt
-            .query_map([], |row| {
-                let count: f64 = row.get(0)?;
-                let stability: f64 = row.get(1)?;
-                #[allow(clippy::cast_possible_truncation)]
-                Ok(Population::with_skills(
-                    count as f32,
-                    stability as f32,
-                    crate::population::default_skill_distribution_pub(),
-                ))
-            })?
-            .collect::<Result<_, _>>()?;
-
-        Ok(GameState {
-            colonies,
-            populations,
-            sol,
-            month,
-            registry: None,
-            needs_config: None,
-            research_pool: crate::research::SystemResearchPool::new(),
-            tech_state: crate::tech::TechState::new(),
-            tech_registry: None,
-            directive_store: crate::directive::DirectiveStore::default(),
-            stability_trackers: std::collections::HashMap::new(),
-            trade_network: crate::trade::TradeNetwork::new(),
-            emigration_gates: Vec::new(),
-            pending_migrations: Vec::new(),
-            population_trackers: std::collections::HashMap::new(),
-            orbital_registry: crate::orbital::OrbitalRegistry::new(),
-            difficulty_preset: crate::difficulty::DifficultyPreset::Normal,
-            difficulty_grade_table: crate::difficulty::default_grade_table(),
-            difficulty_scalar: crate::modifier::DifficultyScalar::new(),
-            menace_state: None,
-            victory_state: crate::victory::VictoryState::capstone_only(),
-            cumulative_research: 0,
-            expedition_launched: false,
-            planet_map: None,
-            victory: None,
-            unlocked_buildings: std::collections::HashSet::new(),
-            unlocked_capabilities: std::collections::HashSet::new(),
-            unlocked_commodities: std::collections::HashSet::new(),
-            modifier_accumulator: crate::modifier::ModifierAccumulator::new(),
-            hazard_config: None,
-            system_state: crate::system::SystemState::new(),
-            infra_routes: std::collections::HashMap::new(),
-            orbital_construction_queue: Vec::new(),
-        })
+        let blob: FullStateBlob = serde_json::from_str(&state_json)?;
+        Ok(blob.into_game_state())
     }
 
     /// Apply the DDL and initialise the `schema_version` row if absent.
     fn apply_schema(&self) -> Result<(), SnapshotError> {
         self.conn.execute_batch(SCHEMA_SQL)?;
-        // Insert schema version only if not already present.
         self.conn.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (?1)",
             params![SCHEMA_VERSION],
@@ -368,7 +428,6 @@ mod tests {
     #[test]
     fn version_mismatch_returns_clear_error() {
         let mut snap = Snapshot::open_in_memory().unwrap();
-        // Corrupt the stored version to a future value.
         snap.conn
             .execute("UPDATE schema_version SET version = 999", [])
             .unwrap();
@@ -408,13 +467,231 @@ mod tests {
         );
     }
 
+    // ── full state round-trip (complex state) ─────────────────────────────────
+
+    #[test]
+    fn round_trip_tech_state() {
+        use crate::tech::{TechDef, TechEffect, TechRegistry};
+
+        let mut state = make_state_with_colonies();
+        // Mark a tech as researched.
+        let tech_id = "power_grid_v2".to_string();
+        let defs = vec![TechDef {
+            id: tech_id.clone(),
+            display_name: "Power Grid v2".to_string(),
+            prerequisites: vec![],
+            research_cost: 10.0,
+            effects: vec![TechEffect::UnlockBuilding {
+                building_id: "adv_reactor".to_string(),
+            }],
+        }];
+        state.tech_registry = Some(TechRegistry::build(defs).unwrap());
+        state.tech_state.set_current_project(tech_id.clone());
+        state.research_pool.deposit(50.0);
+        state.cumulative_research = 100;
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.cumulative_research, 100);
+        // research_pool available should round-trip.
+        assert!((restored.research_pool.total() - state.research_pool.total()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn round_trip_trade_network() {
+        use crate::trade::TradeRoute;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Alpha"), 100);
+        state.add_colony(Colony::new("Beta"), 200);
+        let id_a = state.colonies[0].id;
+        let id_b = state.colonies[1].id;
+
+        let route = TradeRoute::new(id_a, id_b, 50.0);
+        let route_id = route.id;
+        state.trade_network.routes.push(route);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.trade_network.routes.len(), 1);
+        assert_eq!(restored.trade_network.routes[0].id, route_id);
+        assert!((restored.trade_network.routes[0].throughput_cap - 50.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn round_trip_directive_store() {
+        use crate::directive::Directive;
+        use crate::predicate::Predicate;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Alpha"), 100);
+        let colony_id = state.colonies[0].id;
+
+        let directive = Directive::new(colony_id, Predicate::Always, Command::AdvanceColonySol, 10);
+        let directive_id = directive.id;
+        state.directive_store.directives.push(directive);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.directive_store.directives.len(), 1);
+        assert_eq!(restored.directive_store.directives[0].id, directive_id);
+    }
+
+    #[test]
+    fn round_trip_orbital_registry() {
+        use crate::orbital::{OrbitType, OrbitalStation, StationType};
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Alpha"), 100);
+        let colony_id = state.colonies[0].id;
+
+        let station = OrbitalStation::new(StationType::Habitat, OrbitType::Low, colony_id);
+        let station_id = station.id;
+        state.orbital_registry.stations.push(station);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.orbital_registry.stations.len(), 1);
+        assert_eq!(restored.orbital_registry.stations[0].id, station_id);
+        assert_eq!(
+            restored.orbital_registry.stations[0].orbit_type,
+            OrbitType::Low
+        );
+    }
+
+    #[test]
+    fn round_trip_pending_migrations() {
+        use crate::migration::PendingMigration;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Origin"), 500);
+        state.add_colony(Colony::new("Destination"), 100);
+        let from = state.colonies[0].id;
+        let to = state.colonies[1].id;
+
+        let migration = PendingMigration::new(Some(from), to, 50.0, 10, false, 5.0);
+        let migration_id = migration.id;
+        state.pending_migrations.push(migration);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.pending_migrations.len(), 1);
+        assert_eq!(restored.pending_migrations[0].id, migration_id);
+        assert_eq!(restored.pending_migrations[0].turns_remaining, 10);
+        assert!((restored.pending_migrations[0].count - 50.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn round_trip_stability_and_population_trackers() {
+        use crate::interrupt::StabilityTracker;
+        use crate::migration::PopulationTracker;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Alpha"), 100);
+        let colony_id = state.colonies[0].id;
+
+        let mut st = StabilityTracker::default();
+        st.push(0.8);
+        st.push(0.75);
+        state.stability_trackers.insert(colony_id, st);
+
+        let mut pt = PopulationTracker::default();
+        pt.push(100.0);
+        pt.push(105.0);
+        state.population_trackers.insert(colony_id, pt);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert!(restored.stability_trackers.contains_key(&colony_id));
+        assert!(restored.population_trackers.contains_key(&colony_id));
+    }
+
+    #[test]
+    fn round_trip_system_state() {
+        use crate::system::{apply_system_command, BodyKind, SystemCommand};
+
+        let mut state = GameState::new();
+        apply_system_command(
+            &mut state.system_state,
+            &SystemCommand::AddBody {
+                name: "Mars".into(),
+                kind: BodyKind::InnerPlanet,
+                distance_au: 1.52,
+            },
+        )
+        .unwrap();
+        apply_system_command(
+            &mut state.system_state,
+            &SystemCommand::AddHauler { capacity: 200.0 },
+        )
+        .unwrap();
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(
+            restored.system_state.node_map.bodies.len(),
+            state.system_state.node_map.bodies.len()
+        );
+        assert_eq!(
+            restored.system_state.hauler_fleet.haulers.len(),
+            state.system_state.hauler_fleet.haulers.len()
+        );
+    }
+
+    #[test]
+    fn round_trip_unlocks_and_modifiers() {
+        let mut state = GameState::new();
+        state.unlocked_buildings.insert("advanced_lab".to_string());
+        state.unlocked_capabilities.insert("warp_drive".to_string());
+        state.unlocked_commodities.insert("antimatter".to_string());
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert!(restored.unlocked_buildings.contains("advanced_lab"));
+        assert!(restored.unlocked_capabilities.contains("warp_drive"));
+        assert!(restored.unlocked_commodities.contains("antimatter"));
+    }
+
+    #[test]
+    fn round_trip_difficulty_and_victory() {
+        use crate::difficulty::DifficultyPreset;
+
+        let mut state = GameState::new();
+        state.difficulty_preset = DifficultyPreset::Hard;
+        state.expedition_launched = true;
+        state.cumulative_research = 9999;
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.difficulty_preset, DifficultyPreset::Hard);
+        assert!(restored.expedition_launched);
+        assert_eq!(restored.cumulative_research, 9999);
+    }
+
     // ── save → load → continue reproduces identical subsequent turns ─────────
 
     #[test]
     fn save_load_continue_identical_turns() {
         const SEED: u64 = 42;
 
-        // Run engine A for 10 turns, snapshot, restore into engine B.
         let mut engine_a = GameEngine::with_seed(SEED);
         engine_a
             .apply(&Command::FoundColony {
@@ -426,16 +703,13 @@ mod tests {
             engine_a.apply(&Command::AdvanceColonySol).unwrap();
         }
 
-        // Save snapshot.
         let mut snap = Snapshot::open_in_memory().unwrap();
         snap.save(&engine_a.state).unwrap();
 
-        // Restore into a fresh engine with the same seed.
         let restored_state = snap.load().unwrap();
         let mut engine_b = GameEngine::with_seed(SEED);
         engine_b.state = restored_state;
 
-        // Both engines should be at the same turn counters.
         assert_eq!(engine_a.sol(), engine_b.sol());
         assert_eq!(engine_a.month(), engine_b.month());
         assert_eq!(engine_a.state.colonies.len(), engine_b.state.colonies.len());
@@ -445,11 +719,9 @@ mod tests {
             engine_b.state.populations[0].count
         );
 
-        // Advance both engines one more turn — outcomes must match.
         let events_a = engine_a.apply(&Command::AdvanceColonySol).unwrap();
         let events_b = engine_b.apply(&Command::AdvanceColonySol).unwrap();
         assert_eq!(engine_a.sol(), engine_b.sol());
-        // Both emit the same event type.
         assert_eq!(events_a.len(), events_b.len());
         if let (
             Command::AdvanceColonySol,
@@ -503,5 +775,19 @@ mod tests {
             assert_eq!(restored.colonies.len(), 1);
             assert_eq!(restored.colonies[0].name, "Disk Colony");
         }
+    }
+
+    // ── schema version is stored and checked ──────────────────────────────
+
+    #[test]
+    fn schema_version_is_current() {
+        let snap = Snapshot::open_in_memory().unwrap();
+        let ver: u32 = snap
+            .conn
+            .query_row("SELECT version FROM schema_version LIMIT 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(ver, SCHEMA_VERSION);
     }
 }
