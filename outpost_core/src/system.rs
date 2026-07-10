@@ -156,6 +156,11 @@ impl SystemNodeMap {
         let a = self.bodies.get(from)?;
         let b = self.bodies.get(to)?;
         let dist = (a.distance_au - b.distance_au).abs();
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
         let months = (dist / self.propulsion_level as f32).ceil() as u32;
         Some(months.max(1))
     }
@@ -654,6 +659,11 @@ pub enum SystemError {
 /// # Errors
 ///
 /// Returns [`SystemError`] when the command cannot be applied.
+///
+/// # Panics
+///
+/// Panics if capacity-check logic is inconsistent and no hauler is assigned despite availability.
+#[allow(clippy::too_many_lines)]
 pub fn apply_system_command(
     state: &mut SystemState,
     cmd: &SystemCommand,
@@ -848,6 +858,7 @@ pub fn apply_system_command(
                 .iter()
                 .enumerate()
                 .map(|(i, spec)| MegaprojectMilestone {
+                    #[allow(clippy::cast_possible_truncation)]
                     index: i as u32,
                     label: spec.label.clone(),
                     resource_cost: spec.resource_cost.clone(),
@@ -906,9 +917,11 @@ pub fn apply_system_command(
                 }
             }
 
+            #[allow(clippy::cast_possible_truncation)]
+            let milestone_idx_u32 = milestone_idx as u32;
             let mut events = vec![SystemEvent::MegaprojectContribution {
                 project_id: project_id.clone(),
-                milestone_index: milestone_idx as u32,
+                milestone_index: milestone_idx_u32,
                 resources: resources.clone(),
                 research: *research,
             }];
@@ -919,7 +932,7 @@ pub fn apply_system_command(
                 let label = milestone.label.clone();
                 events.push(SystemEvent::MilestoneCompleted {
                     project_id: project_id.clone(),
-                    milestone_index: milestone_idx as u32,
+                    milestone_index: milestone_idx_u32,
                     label,
                 });
                 // Check if entire project is now complete
@@ -1019,10 +1032,7 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(
-            state.node_map.bodies[&inner_id].role,
-            SystemRole::Industry
-        );
+        assert_eq!(state.node_map.bodies[&inner_id].role, SystemRole::Industry);
     }
 
     #[test]
@@ -1124,13 +1134,17 @@ mod tests {
         assert_eq!(state.hauler_fleet.available_capacity(), 0.0);
         assert_eq!(state.shipments.len(), 1);
         // Verify travel time is 1 for bodies 1 AU apart with propulsion_level=1
-        let travel_time = state.node_map.compute_travel_time(&body_a, &body_b).unwrap();
+        let travel_time = state
+            .node_map
+            .compute_travel_time(&body_a, &body_b)
+            .unwrap();
         assert_eq!(travel_time, 1, "expected travel time of 1 month");
         // After 1 advance the shipment (travel_time=1) should arrive
         let arrival_events =
             apply_system_command(&mut state, &SystemCommand::AdvanceShipments).unwrap();
         assert_eq!(
-            state.shipments.len(), 0,
+            state.shipments.len(),
+            0,
             "shipment should be removed after arriving"
         );
         assert!(
@@ -1184,9 +1198,13 @@ mod tests {
         )
         .unwrap();
         // Should get Contribution + MilestoneCompleted (but not MegaprojectCompleted yet)
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, SystemEvent::MilestoneCompleted { milestone_index: 0, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            SystemEvent::MilestoneCompleted {
+                milestone_index: 0,
+                ..
+            }
+        )));
         assert!(!events
             .iter()
             .any(|e| matches!(e, SystemEvent::MegaprojectCompleted { .. })));
@@ -1206,9 +1224,13 @@ mod tests {
         )
         .unwrap();
         // Now both MilestoneCompleted and MegaprojectCompleted should fire
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, SystemEvent::MilestoneCompleted { milestone_index: 1, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            SystemEvent::MilestoneCompleted {
+                milestone_index: 1,
+                ..
+            }
+        )));
         assert!(events
             .iter()
             .any(|e| matches!(e, SystemEvent::MegaprojectCompleted { .. })));
@@ -1276,7 +1298,10 @@ mod tests {
             .node_map
             .compute_travel_time(&inner_id, &outer_id)
             .unwrap();
-        assert!(t2 <= t1, "upgraded propulsion should reduce or equal travel time");
+        assert!(
+            t2 <= t1,
+            "upgraded propulsion should reduce or equal travel time"
+        );
     }
 
     #[test]
