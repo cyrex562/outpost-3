@@ -197,12 +197,17 @@ pub fn compute_auto_flows(
                     && colony_ids[*j] != src_id
                     && a.score - src_score >= params.min_attractiveness_delta
             })
-            .max_by(|(_, a), (_, b)| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+            .max_by(|(_, a), (_, b)| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
         if let Some((_, dst_attr)) = best {
             // Flow proportional to attractiveness gap, capped at max_outflow_fraction.
             let delta = (dst_attr.score - src_score).clamp(0.0, 1.0);
-            let fraction = (delta * params.max_outflow_fraction).clamp(0.0, params.max_outflow_fraction);
+            let fraction =
+                (delta * params.max_outflow_fraction).clamp(0.0, params.max_outflow_fraction);
             let movers = (src_pop * fraction).floor();
             if movers < 1.0 {
                 continue;
@@ -387,8 +392,14 @@ mod tests {
         let id_src = id();
         let id_dst = id();
         let attractiveness = vec![
-            ColonyAttractiveness { colony_id: id_src, score: 0.2 },
-            ColonyAttractiveness { colony_id: id_dst, score: 0.8 },
+            ColonyAttractiveness {
+                colony_id: id_src,
+                score: 0.2,
+            },
+            ColonyAttractiveness {
+                colony_id: id_dst,
+                score: 0.8,
+            },
         ];
         let populations = vec![500.0_f32, 300.0_f32];
         let colony_ids = vec![id_src, id_dst];
@@ -396,7 +407,10 @@ mod tests {
 
         let flows = compute_auto_flows(&attractiveness, &populations, &colony_ids, &params);
 
-        assert!(!flows.is_empty(), "should generate at least one migration flow");
+        assert!(
+            !flows.is_empty(),
+            "should generate at least one migration flow"
+        );
         let flow = &flows[0];
         assert_eq!(flow.from_colony, Some(id_src));
         assert_eq!(flow.to_colony, id_dst);
@@ -409,8 +423,14 @@ mod tests {
         let id_b = id();
         // Only 0.05 difference, below default min delta of 0.10
         let attractiveness = vec![
-            ColonyAttractiveness { colony_id: id_a, score: 0.50 },
-            ColonyAttractiveness { colony_id: id_b, score: 0.55 },
+            ColonyAttractiveness {
+                colony_id: id_a,
+                score: 0.50,
+            },
+            ColonyAttractiveness {
+                colony_id: id_b,
+                score: 0.55,
+            },
         ];
         let params = AutoMigrationParams::default();
         let flows = compute_auto_flows(&attractiveness, &[200.0, 200.0], &[id_a, id_b], &params);
@@ -425,11 +445,20 @@ mod tests {
         let id_src = id();
         let id_dst = id();
         let attractiveness = vec![
-            ColonyAttractiveness { colony_id: id_src, score: 0.0 },
-            ColonyAttractiveness { colony_id: id_dst, score: 1.0 },
+            ColonyAttractiveness {
+                colony_id: id_src,
+                score: 0.0,
+            },
+            ColonyAttractiveness {
+                colony_id: id_dst,
+                score: 1.0,
+            },
         ];
         let pop = 1000.0_f32;
-        let params = AutoMigrationParams { max_outflow_fraction: 0.05, ..Default::default() };
+        let params = AutoMigrationParams {
+            max_outflow_fraction: 0.05,
+            ..Default::default()
+        };
         let flows = compute_auto_flows(&attractiveness, &[pop, 100.0], &[id_src, id_dst], &params);
         assert!(!flows.is_empty());
         let moved = flows.iter().map(|f| f.count).sum::<f32>();
@@ -508,7 +537,11 @@ mod tests {
         t.push(500.0);
         let eta = t.eta_to_floor(0.0);
         assert!(eta.is_some());
-        assert_eq!(eta.unwrap(), 1, "eta should be 1 turn from 500 to 0 at -500/turn");
+        assert_eq!(
+            eta.unwrap(),
+            1,
+            "eta should be 1 turn from 500 to 0 at -500/turn"
+        );
     }
 
     #[test]
@@ -534,7 +567,10 @@ mod tests {
         let gateway = id();
         // An immigration wave is a PendingMigration with from_colony=None
         let wave = PendingMigration::new(None, gateway, 200.0, 2, false, 0.0);
-        assert!(wave.from_colony.is_none(), "immigration wave has no source colony");
+        assert!(
+            wave.from_colony.is_none(),
+            "immigration wave has no source colony"
+        );
         assert_eq!(wave.to_colony, gateway);
         assert_eq!(wave.count, 200.0);
         assert_eq!(wave.turns_remaining, 2);

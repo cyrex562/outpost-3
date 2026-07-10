@@ -47,8 +47,8 @@ use colony::{ColonyId, ProjectId};
 use directive::DirectiveId;
 use interrupt::{AdvanceResult, Interrupt, InterruptSource, Tier};
 use migration::{
-    AutoMigrationParams, ColonyAttractiveness, PendingMigration,
-    compute_attractiveness, compute_auto_flows, resolve_arrival,
+    compute_attractiveness, compute_auto_flows, resolve_arrival, AutoMigrationParams,
+    ColonyAttractiveness, PendingMigration,
 };
 use needs::{apply_needs_check, apply_population_dynamics};
 use trade::{SiteId, TradeOverride, TradeRoute};
@@ -1063,14 +1063,8 @@ impl GameEngine {
                         "immigration wave count must be > 0".into(),
                     ));
                 }
-                let wave = PendingMigration::new(
-                    None,
-                    *colony_id,
-                    *count,
-                    *transit_turns,
-                    false,
-                    0.0,
-                );
+                let wave =
+                    PendingMigration::new(None, *colony_id, *count, *transit_turns, false, 0.0);
                 self.state.pending_migrations.push(wave);
                 Ok(vec![Event::ImmigrationWaveScheduled {
                     colony_id: *colony_id,
@@ -1175,7 +1169,8 @@ impl GameEngine {
                     })
                     .collect();
 
-                let populations: Vec<f32> = self.state.populations.iter().map(|p| p.count).collect();
+                let populations: Vec<f32> =
+                    self.state.populations.iter().map(|p| p.count).collect();
                 let colony_ids: Vec<ColonyId> = self.state.colonies.iter().map(|c| c.id).collect();
                 let params = AutoMigrationParams::default();
 
@@ -2886,7 +2881,7 @@ mod tests {
     /// Done-when: growth under good conditions (needs fully met, high stability).
     #[test]
     fn growth_under_good_conditions() {
-        use crate::needs::{NeedDef, NeedsConfig, NeedScaling};
+        use crate::needs::{NeedDef, NeedScaling, NeedsConfig};
 
         let mut engine = GameEngine::with_seed(42);
         let events = engine
@@ -3137,10 +3132,19 @@ mod tests {
 
         // One tick of resolve — wave arrives.
         let arrive_events = engine.apply(&Command::ResolvePendingMigrations).unwrap();
-        let arrived = arrive_events
-            .iter()
-            .find(|e| matches!(e, Event::MigrationArrived { from_colony: None, .. }));
-        assert!(arrived.is_some(), "immigration wave should produce MigrationArrived with from_colony=None");
+        let arrived = arrive_events.iter().find(|e| {
+            matches!(
+                e,
+                Event::MigrationArrived {
+                    from_colony: None,
+                    ..
+                }
+            )
+        });
+        assert!(
+            arrived.is_some(),
+            "immigration wave should produce MigrationArrived with from_colony=None"
+        );
 
         let pop_after = engine.state.populations[idx].count;
         assert!(
