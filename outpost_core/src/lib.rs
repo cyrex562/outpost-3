@@ -28,6 +28,7 @@ pub mod colony;
 pub mod content;
 pub mod needs;
 pub mod population;
+pub mod research;
 pub mod snapshot;
 pub mod turn;
 
@@ -123,6 +124,8 @@ pub enum Query {
         /// Target colony.
         colony_id: ColonyId,
     },
+    /// Return the current system-wide accumulated research total.
+    SystemResearchTotal,
 }
 
 /// The result returned by [`GameEngine::query`].
@@ -138,6 +141,8 @@ pub enum QueryResult {
     /// Available labour units for a colony.
     /// Available labour (f32 since population count is now fractional).
     Labour(f32),
+    /// Total accumulated research in the system-wide pool.
+    ResearchTotal(f32),
 }
 
 /// Lightweight colony summary returned by [`Query::ListColonies`].
@@ -235,6 +240,13 @@ pub enum Event {
         stability_delta: f32,
         /// Population change applied this sol (positive = growth, negative = loss).
         population_delta: f32,
+    },
+    /// Research was produced by a colony and drained into the system-wide pool.
+    ResearchProduced {
+        /// Colony that contributed research this sol.
+        colony_id: colony::ColonyId,
+        /// Amount of research drained from the colony pool into the system pool.
+        amount: f32,
     },
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
@@ -423,6 +435,24 @@ impl GameEngine {
                     }
                 }
 
+                // ── Step 4: Research aggregation ────────────────────────────
+                // Drain `research` from every colony pool into the system pool.
+                // This happens after production so that labs which ran this turn
+                // contribute their output immediately.
+                for colony in &mut self.state.colonies {
+                    let produced = colony.pool.amount("research");
+                    if produced > 0.0 {
+                        colony.pool.withdraw("research", produced);
+                        #[allow(clippy::cast_possible_truncation)]
+                        let produced_f32 = produced as f32;
+                        self.state.research_pool.deposit(produced_f32);
+                        events.push(Event::ResearchProduced {
+                            colony_id: colony.id,
+                            amount: produced_f32,
+                        });
+                    }
+                }
+
                 Ok(events)
             }
 
@@ -582,6 +612,10 @@ impl GameEngine {
                 Ok(QueryResult::Labour(
                     self.state.populations[idx].available_labor(),
                 ))
+            }
+
+            Query::SystemResearchTotal => {
+                Ok(QueryResult::ResearchTotal(self.state.research_pool.total()))
             }
         }
     }
@@ -1154,6 +1188,252 @@ mod tests {
         };
         assert_eq!(cols.len(), 1);
         assert_eq!(cols[0].id, colony_id);
+    }
+
+    // ── Research: Done-when tests for issue #17 ──────────────────────────────
+
+    /// Build a minimal `ContentRegistry` with `research_lab` and the `conduct_research` recipe.
+    fn research_registry() -> crate::content::ContentRegistry {
+        use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+        let mut reg = crate::content::ContentRegistry::default();
+
+        // A trivial power source so the research lab doesn't brown out.
+        reg.insert_building(BuildingDef {
+            id: "solar_array".into(),
+            name: "Solar Array".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: -100.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+        });
+
+        // Research lab: consumes 1 water, produces 5 research per sol.
+        reg.insert_building(BuildingDef {
+            id: "research_lab".into(),
+            name: "Research Lab".into(),
+            description: String::new(),
+            category: BuildingCategory::Research,
+            construction_cost: vec![],
+            power_delta: 8.0, // draws 8 kW
+            worker_slots: 3,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 4,
+            tech_prerequisite: None,
+        });
+
+        reg.insert_building(BuildingDef {
+            id: "water_source".into(),
+            name: "Water Source".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+        });
+
+        reg.insert_commodity(crate::content::types::CommodityDef {
+            id: "water".into(),
+            name: "Water".into(),
+            description: String::new(),
+            category: "consumable".into(),
+            phase: crate::content::types::Phase::Liquid,
+            base_value: 5.0,
+            tradeable: true,
+            tier: crate::content::types::CommodityTier::Basic,
+            weight: 1.0,
+        });
+
+        reg.insert_commodity(crate::content::types::CommodityDef {
+            id: "research".into(),
+            name: "Research".into(),
+            description: String::new(),
+            category: "virtual".into(),
+            phase: crate::content::types::Phase::Solid,
+            base_value: 0.0,
+            tradeable: false,
+            tier: crate::content::types::CommodityTier::Advanced,
+            weight: 0.0,
+        });
+
+        reg.insert_recipe(RecipeDef {
+            id: "conduct_research".into(),
+            name: "Conduct Research".into(),
+            building: "research_lab".into(),
+            inputs: vec![Ingredient {
+                id: "water".into(),
+                quantity: 1.0,
+            }],
+            outputs: vec![Ingredient {
+                id: "research".into(),
+                quantity: 5.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 8.0,
+        });
+
+        reg
+    }
+
+    /// Found a colony, set up the registry, seed water, place a research_lab + solar_array.
+    fn setup_science_colony(engine: &mut GameEngine) -> colony::ColonyId {
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Science Base".into(),
+                starting_population: 200,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        engine.state.registry = Some(research_registry());
+
+        // Seed water so the recipe can run.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("water", 1000.0);
+
+        // Place buildings directly (bypasses construction queue for test simplicity).
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("solar_array", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("research_lab", 1));
+
+        colony_id
+    }
+
+    #[test]
+    fn research_lab_produces_research_each_turn() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        // A ResearchProduced event should have been emitted.
+        let research_event = events.iter().find(
+            |e| matches!(e, Event::ResearchProduced { colony_id: cid, .. } if *cid == colony_id),
+        );
+        assert!(research_event.is_some(), "expected ResearchProduced event");
+
+        let Event::ResearchProduced { amount, .. } = research_event.unwrap() else {
+            panic!()
+        };
+        assert!(
+            *amount > 0.0,
+            "research amount should be positive, got {amount}"
+        );
+
+        // After draining, colony's research pool should be 0.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("research") < 1e-6,
+            "colony research pool should be drained after aggregation"
+        );
+
+        // System pool should have the same amount.
+        let QueryResult::ResearchTotal(total) = engine.query(&Query::SystemResearchTotal).unwrap()
+        else {
+            panic!()
+        };
+        assert!(
+            (total - amount).abs() < 1e-4,
+            "system pool {total} should match produced {amount}"
+        );
+    }
+
+    #[test]
+    fn research_drains_from_colony_into_system_pool_correctly() {
+        let mut engine = GameEngine::with_seed(1);
+        let _colony_id = setup_science_colony(&mut engine);
+
+        // Advance 3 turns; expect system pool to grow each time.
+        let mut prev_total = 0.0f32;
+        for turn in 1..=3 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            let QueryResult::ResearchTotal(total) =
+                engine.query(&Query::SystemResearchTotal).unwrap()
+            else {
+                panic!()
+            };
+            assert!(
+                total > prev_total,
+                "system research pool should grow each turn; turn {turn}: {total} <= {prev_total}"
+            );
+            prev_total = total;
+        }
+    }
+
+    #[test]
+    fn multi_colony_research_accumulates_into_system_pool() {
+        let mut engine = GameEngine::with_seed(7);
+        let reg = research_registry();
+        engine.state.registry = Some(reg);
+
+        // Found two colonies, each with a research lab.
+        for name in &["Alpha Science", "Beta Science"] {
+            let events = engine
+                .apply(&Command::FoundColony {
+                    name: (*name).into(),
+                    starting_population: 200,
+                })
+                .unwrap();
+            let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+                panic!()
+            };
+            let idx = engine.find_colony_index(*colony_id).unwrap();
+            engine.state.colonies[idx].pool.deposit("water", 1000.0);
+            engine.state.colonies[idx]
+                .buildings
+                .push(colony::PlacedBuilding::new("solar_array", 1));
+            engine.state.colonies[idx]
+                .buildings
+                .push(colony::PlacedBuilding::new("research_lab", 1));
+        }
+
+        // Advance one turn — both colonies should contribute.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let research_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, Event::ResearchProduced { .. }))
+            .collect();
+        assert_eq!(
+            research_events.len(),
+            2,
+            "expected ResearchProduced event from each of the 2 colonies"
+        );
+
+        let total_produced: f32 = research_events
+            .iter()
+            .map(|e| {
+                let Event::ResearchProduced { amount, .. } = e else {
+                    panic!()
+                };
+                *amount
+            })
+            .sum();
+
+        let QueryResult::ResearchTotal(system_total) =
+            engine.query(&Query::SystemResearchTotal).unwrap()
+        else {
+            panic!()
+        };
+        assert!(
+            (system_total - total_produced).abs() < 1e-4,
+            "system total {system_total} should equal sum of colony contributions {total_produced}"
+        );
+        assert!(system_total > 0.0, "system total must be positive");
     }
 
     // ── command round-trip (serde) ──

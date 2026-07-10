@@ -10,6 +10,21 @@
     - id: iron_plate
       quantity: 20.0
 
+- id: research_lab
+  name: Research Lab
+  description: >
+    Employs scientists to produce research output each sol,
+    consuming labor and power.  Science is pooled system-wide
+    and spent to unlock technologies (Phase 4b).
+  category: research
+  power_delta: -8.0
+  worker_slots: 3
+  slot_cost: 1
+  construction_turns: 4
+  construction_cost:
+    - id: iron_plate
+      quantity: 30.0
+
 - id: hydroponic_bay
   name: Hydroponic Bay
   description: >

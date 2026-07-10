@@ -46,3 +46,16 @@
   phase: solid
   base_value: 20.0
   tradeable: true
+
+- id: research
+  name: Research
+  description: >
+    Abstract unit of scientific output produced by research labs.
+    Pooled system-wide and spent to unlock technologies.
+    No weight, no storage cap — a virtual flow commodity.
+  category: virtual
+  phase: solid
+  base_value: 0.0
+  tradeable: false
+  tier: advanced
+  weight: 0.0

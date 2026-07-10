@@ -17,6 +17,7 @@ use crate::colony::Colony;
 use crate::content::ContentRegistry;
 use crate::needs::NeedsConfig;
 use crate::population::Population;
+use crate::research::SystemResearchPool;
 
 /// Default number of colony-sols that constitute one strategic-month.
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
@@ -66,6 +67,8 @@ pub struct GameState {
     /// When `None`, the needs step is skipped. Set via [`GameState::with_needs`]
     /// to enable stability dynamics.
     pub needs_config: Option<NeedsConfig>,
+    /// System-wide research pool: research drained from all colonies each turn.
+    pub research_pool: SystemResearchPool,
 }
 
 impl GameState {
@@ -79,6 +82,7 @@ impl GameState {
             month: 0,
             registry: None,
             needs_config: None,
+            research_pool: SystemResearchPool::new(),
         }
     }
 
