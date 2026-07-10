@@ -1065,8 +1065,7 @@ impl GameEngine {
                     // For every open emigration gate, compute departures as
                     // rate * source_population and enqueue a PendingMigration.
                     {
-                        let gates: Vec<EmigrationGate> =
-                            self.state.emigration_gates.clone();
+                        let gates: Vec<EmigrationGate> = self.state.emigration_gates.clone();
                         let mut batch_count = 0usize;
                         let mut total_in_transit = 0.0_f32;
                         for gate in &gates {
@@ -1081,8 +1080,7 @@ impl GameEngine {
                             if movers < 1.0 {
                                 continue;
                             }
-                            self.state.populations[from_idx].count =
-                                (src_pop - movers).max(0.0);
+                            self.state.populations[from_idx].count = (src_pop - movers).max(0.0);
                             let mig = PendingMigration::new(
                                 Some(gate.from_colony),
                                 gate.to_colony,
@@ -1150,11 +1148,11 @@ impl GameEngine {
                                         .unwrap_or(std::cmp::Ordering::Equal)
                                 });
                             let Some(dst) = best_dst else { continue };
-                            let movers =
-                                (src_pop * config.voluntary_emigration_rate).floor().max(1.0);
+                            let movers = (src_pop * config.voluntary_emigration_rate)
+                                .floor()
+                                .max(1.0);
                             let movers = movers.min(src_pop);
-                            self.state.populations[i].count =
-                                (src_pop - movers).max(0.0);
+                            self.state.populations[i].count = (src_pop - movers).max(0.0);
                             let mig = PendingMigration::new(
                                 Some(src_id),
                                 dst.colony_id,
@@ -1192,11 +1190,10 @@ impl GameEngine {
                             let current_pop = self.state.populations[to_idx].count;
                             let outcome = resolve_arrival(mig, housing, current_pop);
                             self.state.populations[to_idx].count += outcome.arrived;
-                            self.state.populations[to_idx].stability = (self.state.populations
-                                [to_idx]
-                                .stability
-                                + outcome.overcrowding_stability_penalty)
-                                .clamp(0.0, 1.0);
+                            self.state.populations[to_idx].stability =
+                                (self.state.populations[to_idx].stability
+                                    + outcome.overcrowding_stability_penalty)
+                                    .clamp(0.0, 1.0);
                             events.push(Event::MigrationArrived {
                                 from_colony: mig.from_colony,
                                 to_colony: mig.to_colony,
@@ -5804,7 +5801,10 @@ mod tests {
                 gate_queued = true;
             }
         }
-        assert!(gate_queued, "GateMigrationQueued event should fire on strategic month");
+        assert!(
+            gate_queued,
+            "GateMigrationQueued event should fire on strategic month"
+        );
         // Source pop should have decreased (migrants in transit).
         let pop_after = engine.state.populations[0].count;
         assert!(
@@ -5872,7 +5872,12 @@ mod tests {
         // Give colony B much higher attractiveness via housing and stability.
         engine.state.populations[1].stability = 0.9;
         // Add housing to colony B so it has headroom, boosting attractiveness score.
-        let b_idx = engine.state.colonies.iter().position(|c| c.id == b).unwrap();
+        let b_idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == b)
+            .unwrap();
         engine.state.colonies[b_idx].pool.deposit("housing", 1000.0);
 
         let pop_a_before = engine.state.populations[0].count;
