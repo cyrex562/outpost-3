@@ -10,6 +10,8 @@
 //! sub-pipeline every `sols_per_month` sols (default 30). RNG is injected as a
 //! seeded [`rand_chacha::ChaCha8Rng`] stream so turn resolution is deterministic.
 
+use std::collections::HashMap;
+
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
