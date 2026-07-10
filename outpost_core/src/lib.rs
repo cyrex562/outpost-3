@@ -24,6 +24,7 @@
 
 #![warn(missing_docs)]
 
+pub mod balance;
 pub mod colony;
 pub mod content;
 pub mod needs;
