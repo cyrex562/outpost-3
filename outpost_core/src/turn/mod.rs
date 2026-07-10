@@ -72,10 +72,8 @@ pub struct GameState {
     pub needs_config: Option<NeedsConfig>,
     /// System-wide research pool: research drained from all colonies each turn.
     pub research_pool: SystemResearchPool,
-    /// Active directives for all colonies.
-    pub directives: Vec<Directive>,
-    /// Colonies where manual override is active — directive evaluation is skipped.
-    pub manual_override: HashSet<ColonyId>,
+    /// Directive store: active directives and manual-override registry.
+    pub directive_store: DirectiveStore,
 }
 
 impl GameState {
@@ -90,8 +88,7 @@ impl GameState {
             registry: None,
             needs_config: None,
             research_pool: SystemResearchPool::new(),
-            directives: Vec::new(),
-            manual_override: HashSet::new(),
+            directive_store: DirectiveStore::default(),
         }
     }
 
@@ -195,9 +192,8 @@ impl TurnProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
 
-    use crate::colony::{Colony, ColonyId};
+    use crate::colony::Colony;
 
     fn make_state() -> GameState {
         let mut state = GameState::new();
@@ -301,7 +297,7 @@ mod tests {
     #[test]
     fn game_state_directives_and_manual_override_start_empty() {
         let state = GameState::new();
-        assert!(state.directives.is_empty());
-        assert!(state.manual_override.is_empty());
+        assert!(state.directive_store.directives.is_empty());
+        assert!(state.directive_store.manual_override.is_empty());
     }
 }

@@ -1,10 +1,4 @@
 //! Predicate language for the directive and interrupt systems.
-//!
-//! A [`Predicate`] is a boolean expression that can be evaluated against
-//! a [`PredicateContext`] (a snapshot of colony state for one turn).
-//!
-//! Both the directive system ("auto-handle when X") and the interrupt system
-//! ("stop me when X") share this single evaluator — build once, reuse widely.
 
 use crate::colony::ColonyId;
 use serde::{Deserialize, Serialize};
@@ -46,6 +40,8 @@ pub enum Metric {
 
 impl Metric {
     /// Resolve this metric to a concrete `f64` from `ctx`.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn resolve(&self, ctx: &PredicateContext) -> f64 {
         match self {
             Self::Population => f64::from(ctx.population),
@@ -60,13 +56,13 @@ impl Metric {
 /// A comparison operator used in leaf predicates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Cmp {
-    /// Less-than (`<`).
+    /// Less-than.
     Lt,
-    /// Less-than-or-equal (`<=`).
+    /// Less-than-or-equal.
     Le,
-    /// Greater-than (`>`).
+    /// Greater-than.
     Gt,
-    /// Greater-than-or-equal (`>=`).
+    /// Greater-than-or-equal.
     Ge,
     /// Equal (within 1e-9 epsilon).
     Eq,
@@ -74,6 +70,7 @@ pub enum Cmp {
 
 impl Cmp {
     /// Apply this comparison to two `f64` operands.
+    #[must_use]
     pub fn apply(&self, lhs: f64, rhs: f64) -> bool {
         match self {
             Self::Lt => lhs < rhs,
@@ -86,16 +83,12 @@ impl Cmp {
 }
 
 /// A boolean predicate evaluated against a [`PredicateContext`].
-///
-/// Predicates compose via `And` / `Or` / `Not`.  Leaves test a [`Metric`]
-/// against a literal threshold.  Shared between the directive system and the
-/// interrupt/exception system.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Predicate {
-    /// Always true — sentinel directive that fires every turn.
+    /// Always true.
     Always,
-    /// Always false — disables a directive without removing it.
+    /// Always false.
     Never,
     /// Leaf: `metric cmp threshold`.
     Threshold {
@@ -106,21 +99,21 @@ pub enum Predicate {
         /// Right-hand threshold value.
         threshold: f64,
     },
-    /// Logical AND (both sub-predicates must be true).
+    /// Logical AND.
     And {
         /// Left operand.
         left: Box<Predicate>,
         /// Right operand.
         right: Box<Predicate>,
     },
-    /// Logical OR (at least one sub-predicate must be true).
+    /// Logical OR.
     Or {
         /// Left operand.
         left: Box<Predicate>,
         /// Right operand.
         right: Box<Predicate>,
     },
-    /// Logical NOT — inverts the inner predicate.
+    /// Logical NOT.
     Not {
         /// Inner predicate to negate.
         inner: Box<Predicate>,
@@ -129,6 +122,7 @@ pub enum Predicate {
 
 impl Predicate {
     /// Evaluate this predicate against `ctx`.
+    #[must_use]
     pub fn evaluate(&self, ctx: &PredicateContext) -> bool {
         match self {
             Self::Always => true,
@@ -145,6 +139,7 @@ impl Predicate {
     }
 
     /// Shorthand: `metric < threshold`.
+    #[must_use]
     pub fn lt(metric: Metric, threshold: f64) -> Self {
         Self::Threshold {
             metric,
@@ -154,6 +149,7 @@ impl Predicate {
     }
 
     /// Shorthand: `metric > threshold`.
+    #[must_use]
     pub fn gt(metric: Metric, threshold: f64) -> Self {
         Self::Threshold {
             metric,
@@ -163,6 +159,7 @@ impl Predicate {
     }
 
     /// Shorthand: AND of two predicates.
+    #[must_use]
     pub fn and(left: Self, right: Self) -> Self {
         Self::And {
             left: Box::new(left),
@@ -171,6 +168,7 @@ impl Predicate {
     }
 
     /// Shorthand: OR of two predicates.
+    #[must_use]
     pub fn or(left: Self, right: Self) -> Self {
         Self::Or {
             left: Box::new(left),
@@ -179,6 +177,8 @@ impl Predicate {
     }
 
     /// Shorthand: NOT of a predicate.
+    #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn not(inner: Self) -> Self {
         Self::Not {
             inner: Box::new(inner),
@@ -232,17 +232,19 @@ mod tests {
             Predicate::lt(Metric::Stability, 0.8),
         );
         assert!(p.evaluate(&ctx()));
-        let p2 = Predicate::and(
+        assert!(!Predicate::and(
             Predicate::gt(Metric::Population, 100.0),
             Predicate::gt(Metric::Stability, 0.9),
-        );
-        assert!(!p2.evaluate(&ctx()));
+        )
+        .evaluate(&ctx()));
     }
 
     #[test]
     fn or_combinator() {
-        let p = Predicate::or(Predicate::Never, Predicate::gt(Metric::Population, 100.0));
-        assert!(p.evaluate(&ctx()));
+        assert!(
+            Predicate::or(Predicate::Never, Predicate::gt(Metric::Population, 100.0))
+                .evaluate(&ctx())
+        );
         assert!(!Predicate::or(Predicate::Never, Predicate::Never).evaluate(&ctx()));
     }
 

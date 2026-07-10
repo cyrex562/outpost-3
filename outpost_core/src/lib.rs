@@ -553,6 +553,7 @@ impl GameEngine {
                     let fired_events = self.apply(&action)?;
                     events.extend(fired_events);
                 }
+
                 Ok(events)
             }
 

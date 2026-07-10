@@ -53,7 +53,7 @@ impl Directive {
 
 /// Stores all active directives and the manual-override registry.
 ///
-/// Embedded in `GameState`; persisted as part of the SQLite snapshot.
+/// Embedded in `GameState`; persisted as part of the `SQLite` snapshot.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DirectiveStore {
     /// All active directives, ordered by insertion time.
@@ -250,7 +250,7 @@ mod tests {
         store.set_directive(d);
 
         // stability = 0.8 → no fire
-        let ctx_high = make_ctx(col); // stability = 0.8
+        let ctx_high = make_ctx(col);
         assert!(store.evaluate_for_colony(col, &ctx_high).is_none());
 
         // stability = 0.3 → fires
