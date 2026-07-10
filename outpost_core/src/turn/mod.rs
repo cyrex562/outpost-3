@@ -197,7 +197,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-use crate::colony::{Colony, ColonyId};
+    use crate::colony::{Colony, ColonyId};
 
     fn make_state() -> GameState {
         let mut state = GameState::new();

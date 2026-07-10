@@ -506,7 +506,7 @@ impl GameEngine {
                     }
                 }
 
-          // ── Step 5: Directive evaluation ──────────────────────────
+                // ── Step 5: Directive evaluation ──────────────────────────
                 // Two-pass: collect (id, col_id, action) while holding immutable
                 // borrows, then fire via self.apply (needs &mut self).
                 let mut to_fire: Vec<(DirectiveId, ColonyId, Command)> = Vec::new();
@@ -517,11 +517,7 @@ impl GameEngine {
                         if self.state.directive_store.is_manual_override(colony_id) {
                             continue;
                         }
-                        let Some(idx) = self
-                            .state
-                            .colonies
-                            .iter()
-                            .position(|c| c.id == colony_id)
+                        let Some(idx) = self.state.colonies.iter().position(|c| c.id == colony_id)
                         else {
                             continue;
                         };
@@ -674,30 +670,56 @@ impl GameEngine {
                 self.find_colony_index(colony_id)?;
                 let directive_id = directive.id;
                 let d = *directive.clone();
-                if let Some(existing) = self.state.directive_store.directives.iter_mut().find(|x| x.id == d.id) {
+                if let Some(existing) = self
+                    .state
+                    .directive_store
+                    .directives
+                    .iter_mut()
+                    .find(|x| x.id == d.id)
+                {
                     *existing = d;
                 } else {
                     self.state.directive_store.directives.push(d);
                 }
-                Ok(vec![Event::DirectiveSet { colony_id, directive_id }])
+                Ok(vec![Event::DirectiveSet {
+                    colony_id,
+                    directive_id,
+                }])
             }
 
             Command::RemoveDirective { directive_id } => {
-                if !self.state.directive_store.directives.iter().any(|d| d.id == *directive_id) {
+                if !self
+                    .state
+                    .directive_store
+                    .directives
+                    .iter()
+                    .any(|d| d.id == *directive_id)
+                {
                     return Err(EngineError::DirectiveNotFound(*directive_id));
                 }
-                self.state.directive_store.directives.retain(|d| d.id != *directive_id);
-                Ok(vec![Event::DirectiveRemoved { directive_id: *directive_id }])
+                self.state
+                    .directive_store
+                    .directives
+                    .retain(|d| d.id != *directive_id);
+                Ok(vec![Event::DirectiveRemoved {
+                    directive_id: *directive_id,
+                }])
             }
 
             Command::SetManualOverride { colony_id, enabled } => {
                 self.find_colony_index(*colony_id)?;
                 if *enabled {
-                    self.state.directive_store.manual_override.insert(*colony_id);
+                    self.state
+                        .directive_store
+                        .manual_override
+                        .insert(*colony_id);
                 } else {
                     self.state.directive_store.manual_override.remove(colony_id);
                 }
-                Ok(vec![Event::ManualOverrideChanged { colony_id: *colony_id, enabled: *enabled }])
+                Ok(vec![Event::ManualOverrideChanged {
+                    colony_id: *colony_id,
+                    enabled: *enabled,
+                }])
             }
         }
     }
@@ -1721,9 +1743,9 @@ mod tests {
 
         // First turn: stability = 1.0, predicate is false — no firing.
         let events = engine.apply(&Command::AdvanceColonySol).unwrap();
-        let fired = events
-            .iter()
-            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
+        let fired = events.iter().any(
+            |e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id),
+        );
         assert!(!fired, "directive must not fire when stability is 1.0");
 
         // Artificially drop stability below threshold.
@@ -1732,9 +1754,9 @@ mod tests {
 
         // Next turn: predicate is now true — directive must fire.
         let events = engine.apply(&Command::AdvanceColonySol).unwrap();
-        let fired = events
-            .iter()
-            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
+        let fired = events.iter().any(
+            |e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id),
+        );
         assert!(fired, "directive must fire when stability falls below 0.5");
     }
 
@@ -1784,12 +1806,20 @@ mod tests {
         let events = engine.apply(&Command::AdvanceColonySol).unwrap();
         let fired_events: Vec<_> = events
             .iter()
-            .filter(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id))
+            .filter(
+                |e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id),
+            )
             .collect();
-        assert_eq!(fired_events.len(), 1, "only the highest-priority directive should fire");
+        assert_eq!(
+            fired_events.len(),
+            1,
+            "only the highest-priority directive should fire"
+        );
 
         // The LabourAssigned that follows must be for the high-priority slot.
-        let labour_event = events.iter().find(|e| matches!(e, Event::LabourAssigned { .. }));
+        let labour_event = events
+            .iter()
+            .find(|e| matches!(e, Event::LabourAssigned { .. }));
         assert!(
             matches!(
                 labour_event,
@@ -1835,10 +1865,13 @@ mod tests {
 
         // Advance: directive must NOT fire while manual override is active.
         let events = engine.apply(&Command::AdvanceColonySol).unwrap();
-        let fired = events
-            .iter()
-            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
-        assert!(!fired, "directive must not fire while manual override is active");
+        let fired = events.iter().any(
+            |e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id),
+        );
+        assert!(
+            !fired,
+            "directive must not fire while manual override is active"
+        );
 
         // Disable manual override — automation resumes.
         engine
@@ -1850,10 +1883,13 @@ mod tests {
 
         // Advance: directive must fire now.
         let events = engine.apply(&Command::AdvanceColonySol).unwrap();
-        let fired = events
-            .iter()
-            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
-        assert!(fired, "directive must fire after manual override is disabled");
+        let fired = events.iter().any(
+            |e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id),
+        );
+        assert!(
+            fired,
+            "directive must fire after manual override is disabled"
+        );
     }
 
     /// Done-when: `set_directive` / `remove_directive` API.

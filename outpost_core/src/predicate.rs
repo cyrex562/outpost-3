@@ -133,36 +133,56 @@ impl Predicate {
         match self {
             Self::Always => true,
             Self::Never => false,
-            Self::Threshold { metric, cmp, threshold } => cmp.apply(metric.resolve(ctx), *threshold),
+            Self::Threshold {
+                metric,
+                cmp,
+                threshold,
+            } => cmp.apply(metric.resolve(ctx), *threshold),
             Self::And { left, right } => left.evaluate(ctx) && right.evaluate(ctx),
-            Self::Or  { left, right } => left.evaluate(ctx) || right.evaluate(ctx),
+            Self::Or { left, right } => left.evaluate(ctx) || right.evaluate(ctx),
             Self::Not { inner } => !inner.evaluate(ctx),
         }
     }
 
     /// Shorthand: `metric < threshold`.
     pub fn lt(metric: Metric, threshold: f64) -> Self {
-        Self::Threshold { metric, cmp: Cmp::Lt, threshold }
+        Self::Threshold {
+            metric,
+            cmp: Cmp::Lt,
+            threshold,
+        }
     }
 
     /// Shorthand: `metric > threshold`.
     pub fn gt(metric: Metric, threshold: f64) -> Self {
-        Self::Threshold { metric, cmp: Cmp::Gt, threshold }
+        Self::Threshold {
+            metric,
+            cmp: Cmp::Gt,
+            threshold,
+        }
     }
 
     /// Shorthand: AND of two predicates.
     pub fn and(left: Self, right: Self) -> Self {
-        Self::And { left: Box::new(left), right: Box::new(right) }
+        Self::And {
+            left: Box::new(left),
+            right: Box::new(right),
+        }
     }
 
     /// Shorthand: OR of two predicates.
     pub fn or(left: Self, right: Self) -> Self {
-        Self::Or { left: Box::new(left), right: Box::new(right) }
+        Self::Or {
+            left: Box::new(left),
+            right: Box::new(right),
+        }
     }
 
     /// Shorthand: NOT of a predicate.
     pub fn not(inner: Self) -> Self {
-        Self::Not { inner: Box::new(inner) }
+        Self::Not {
+            inner: Box::new(inner),
+        }
     }
 }
 
@@ -184,10 +204,14 @@ mod tests {
     }
 
     #[test]
-    fn always_is_true() { assert!(Predicate::Always.evaluate(&ctx())); }
+    fn always_is_true() {
+        assert!(Predicate::Always.evaluate(&ctx()));
+    }
 
     #[test]
-    fn never_is_false() { assert!(!Predicate::Never.evaluate(&ctx())); }
+    fn never_is_false() {
+        assert!(!Predicate::Never.evaluate(&ctx()));
+    }
 
     #[test]
     fn threshold_lt() {
