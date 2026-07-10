@@ -104,9 +104,8 @@ impl StationType {
     #[must_use]
     pub fn slot_cost(self) -> u32 {
         match self {
-            StationType::Habitat => 2,
             StationType::Industrial => 3,
-            StationType::Logistics => 2,
+            StationType::Habitat | StationType::Logistics => 2,
         }
     }
 
@@ -207,8 +206,13 @@ pub fn coverage_for(satellite: SatelliteType, orbit: OrbitType) -> CoverageFootp
 ///
 /// Coverage caps at `1.0` — redundant satellites don't exceed full coverage.
 #[must_use]
-pub fn aggregate_coverage(satellite: SatelliteType, orbit: OrbitType, count: u32) -> CoverageFootprint {
+pub fn aggregate_coverage(
+    satellite: SatelliteType,
+    orbit: OrbitType,
+    count: u32,
+) -> CoverageFootprint {
     let unit = coverage_for(satellite, orbit);
+    #[allow(clippy::cast_precision_loss)]
     let factor = (count as f32).min(1.0 / unit.local_coverage.max(f32::EPSILON));
     CoverageFootprint {
         local_coverage: (unit.local_coverage * factor).min(1.0),
@@ -504,14 +508,13 @@ mod tests {
         ))
         .unwrap();
         // Now only 1 slot left; Habitat costs 2 → blocked.
-        assert!(
-            reg.add_station(OrbitalStation::new(
+        assert!(reg
+            .add_station(OrbitalStation::new(
                 StationType::Habitat,
                 OrbitType::Lagrange,
                 colony,
             ))
-            .is_err()
-        );
+            .is_err());
 
         // Low orbit can still accept many more.
         for _ in 0..4 {
@@ -537,10 +540,7 @@ mod tests {
 
         reg.remove_station(id).unwrap();
         assert_eq!(reg.slots_used(OrbitType::Lagrange), 0);
-        assert_eq!(
-            reg.slots_available(OrbitType::Lagrange),
-            LAGRANGE_SLOTS
-        );
+        assert_eq!(reg.slots_available(OrbitType::Lagrange), LAGRANGE_SLOTS);
     }
 
     // ── coverage computation ─────────────────────────────────────────────────
@@ -633,8 +633,13 @@ mod tests {
 
     #[test]
     fn low_orbit_cheapest_surface_access() {
-        assert!(OrbitType::Low.surface_access_cost() < OrbitType::Geostationary.surface_access_cost());
-        assert!(OrbitType::Geostationary.surface_access_cost() < OrbitType::Lagrange.surface_access_cost());
+        assert!(
+            OrbitType::Low.surface_access_cost() < OrbitType::Geostationary.surface_access_cost()
+        );
+        assert!(
+            OrbitType::Geostationary.surface_access_cost()
+                < OrbitType::Lagrange.surface_access_cost()
+        );
     }
 
     #[test]
@@ -652,7 +657,11 @@ mod tests {
 
     #[test]
     fn station_types_have_positive_construction_turns() {
-        for st in [StationType::Habitat, StationType::Industrial, StationType::Logistics] {
+        for st in [
+            StationType::Habitat,
+            StationType::Industrial,
+            StationType::Logistics,
+        ] {
             assert!(st.base_construction_turns() > 0);
         }
     }
@@ -661,7 +670,11 @@ mod tests {
 
     #[test]
     fn orbit_type_serde_round_trip() {
-        for orbit in [OrbitType::Low, OrbitType::Geostationary, OrbitType::Lagrange] {
+        for orbit in [
+            OrbitType::Low,
+            OrbitType::Geostationary,
+            OrbitType::Lagrange,
+        ] {
             let json = serde_json::to_string(&orbit).unwrap();
             let back: OrbitType = serde_json::from_str(&json).unwrap();
             assert_eq!(orbit, back);

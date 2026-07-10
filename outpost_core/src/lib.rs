@@ -1382,7 +1382,9 @@ impl GameEngine {
                 let constellation =
                     SatelliteConstellation::new(*satellite_type, *orbit_type, *count);
                 let constellation_id = constellation.id;
-                self.state.orbital_registry.deploy_constellation(constellation);
+                self.state
+                    .orbital_registry
+                    .deploy_constellation(constellation);
                 Ok(vec![Event::ConstellationDeployed {
                     constellation_id,
                     satellite_type: *satellite_type,
