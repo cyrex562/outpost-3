@@ -27,8 +27,10 @@
 pub mod balance;
 pub mod colony;
 pub mod content;
+pub mod directive;
 pub mod needs;
 pub mod population;
+pub mod predicate;
 pub mod research;
 pub mod snapshot;
 pub mod turn;
@@ -36,6 +38,7 @@ pub mod turn;
 use thiserror::Error;
 
 use colony::{ColonyId, ProjectId};
+use directive::DirectiveId;
 use needs::{apply_needs_check, apply_population_dynamics};
 use turn::{GameState, TurnProcessor};
 
@@ -98,6 +101,26 @@ pub enum Command {
         slot: String,
         /// Number of labour units to assign.
         labour: u64,
+    },
+    /// Register or replace a directive for a colony.
+    SetDirective {
+        /// The directive to register.
+        directive: Box<directive::Directive>,
+    },
+    /// Remove a directive by its stable ID.
+    RemoveDirective {
+        /// ID of the directive to remove.
+        directive_id: directive::DirectiveId,
+    },
+    /// Enable or disable manual override for a colony.
+    ///
+    /// When `enabled` is `true`, directive evaluation is suppressed for the
+    /// colony.  When `false`, automation resumes.
+    SetManualOverride {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// `true` to enable manual override; `false` to resume automation.
+        enabled: bool,
     },
 }
 
@@ -249,6 +272,32 @@ pub enum Event {
         /// Amount of research drained from the colony pool into the system pool.
         amount: f32,
     },
+    /// A directive was registered (or replaced) for a colony.
+    DirectiveSet {
+        /// Colony the directive governs.
+        colony_id: ColonyId,
+        /// Stable identifier of the directive.
+        directive_id: DirectiveId,
+    },
+    /// A directive was removed.
+    DirectiveRemoved {
+        /// Stable identifier of the removed directive.
+        directive_id: DirectiveId,
+    },
+    /// Manual override state changed for a colony.
+    ManualOverrideChanged {
+        /// Affected colony.
+        colony_id: ColonyId,
+        /// New override state.
+        enabled: bool,
+    },
+    /// A directive fired its action this turn.
+    DirectiveFired {
+        /// Colony on which the directive fired.
+        colony_id: ColonyId,
+        /// Identifier of the directive that fired.
+        directive_id: DirectiveId,
+    },
     /// A building ran at less than full capacity due to a resource shortfall.
     ProductionShortfall {
         /// Colony where the shortfall occurred.
@@ -288,6 +337,9 @@ pub enum EngineError {
     /// The referenced construction project does not exist.
     #[error("project not found: {0}")]
     ProjectNotFound(ProjectId),
+    /// The referenced directive does not exist.
+    #[error("directive not found: {0}")]
+    DirectiveNotFound(directive::DirectiveId),
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -413,7 +465,7 @@ impl GameEngine {
                         .iter_mut()
                         .zip(self.state.populations.iter())
                     {
-                        let labor = pop.available_labor();
+                        let labor: f32 = pop.available_labor();
                         let placed: Vec<(String, u32)> = colony
                             .buildings
                             .iter()
@@ -454,6 +506,57 @@ impl GameEngine {
                     }
                 }
 
+          // ── Step 5: Directive evaluation ──────────────────────────
+                // Two-pass: collect (id, col_id, action) while holding immutable
+                // borrows, then fire via self.apply (needs &mut self).
+                let mut to_fire: Vec<(DirectiveId, ColonyId, Command)> = Vec::new();
+                {
+                    let colony_ids: Vec<ColonyId> =
+                        self.state.colonies.iter().map(|c| c.id).collect();
+                    for colony_id in colony_ids {
+                        if self.state.directive_store.is_manual_override(colony_id) {
+                            continue;
+                        }
+                        let Some(idx) = self
+                            .state
+                            .colonies
+                            .iter()
+                            .position(|c| c.id == colony_id)
+                        else {
+                            continue;
+                        };
+                        let pop = &self.state.populations[idx];
+                        let ctx = predicate::PredicateContext {
+                            colony_id,
+                            population: pop.count,
+                            stability: pop.stability,
+                            available_labour: pop.available_labor(),
+                            system_research: self.state.research_pool.total(),
+                            sol: self.state.sol,
+                            month: self.state.month,
+                        };
+                        if let Some((dir_id, action)) = self
+                            .state
+                            .directive_store
+                            .directives
+                            .iter()
+                            .filter(|d| d.colony_id == colony_id)
+                            .filter(|d| d.predicate.evaluate(&ctx))
+                            .max_by_key(|d| d.priority)
+                            .map(|d| (d.id, d.action.clone()))
+                        {
+                            to_fire.push((dir_id, colony_id, action));
+                        }
+                    }
+                }
+                for (directive_id, colony_id, action) in to_fire {
+                    events.push(Event::DirectiveFired {
+                        colony_id,
+                        directive_id,
+                    });
+                    let fired_events = self.apply(&action)?;
+                    events.extend(fired_events);
+                }
                 Ok(events)
             }
 
@@ -564,6 +667,37 @@ impl GameEngine {
                     slot: slot.clone(),
                     labour: *labour,
                 }])
+            }
+
+            Command::SetDirective { directive } => {
+                let colony_id = directive.colony_id;
+                self.find_colony_index(colony_id)?;
+                let directive_id = directive.id;
+                let d = *directive.clone();
+                if let Some(existing) = self.state.directive_store.directives.iter_mut().find(|x| x.id == d.id) {
+                    *existing = d;
+                } else {
+                    self.state.directive_store.directives.push(d);
+                }
+                Ok(vec![Event::DirectiveSet { colony_id, directive_id }])
+            }
+
+            Command::RemoveDirective { directive_id } => {
+                if !self.state.directive_store.directives.iter().any(|d| d.id == *directive_id) {
+                    return Err(EngineError::DirectiveNotFound(*directive_id));
+                }
+                self.state.directive_store.directives.retain(|d| d.id != *directive_id);
+                Ok(vec![Event::DirectiveRemoved { directive_id: *directive_id }])
+            }
+
+            Command::SetManualOverride { colony_id, enabled } => {
+                self.find_colony_index(*colony_id)?;
+                if *enabled {
+                    self.state.directive_store.manual_override.insert(*colony_id);
+                } else {
+                    self.state.directive_store.manual_override.remove(colony_id);
+                }
+                Ok(vec![Event::ManualOverrideChanged { colony_id: *colony_id, enabled: *enabled }])
             }
         }
     }
@@ -1487,5 +1621,291 @@ mod tests {
             let json2 = serde_json::to_string(&back).expect("re-serialize");
             assert_eq!(json, json2);
         }
+    }
+
+    // ── Directive system (Done-when tests for issue #22) ─────────────────────
+
+    /// Helper: found a colony and return its `ColonyId`.
+    fn found_colony_id(engine: &mut GameEngine, name: &str, pop: u64) -> colony::ColonyId {
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: name.into(),
+                starting_population: pop,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        *colony_id
+    }
+
+    /// Done-when: a colony runs unattended across 50 turns under a directive;
+    /// actions fire when the predicate is true.
+    ///
+    /// We set `Predicate::Always` so the directive fires every turn.
+    /// After 50 advances, the labour-assignment directive must have fired at
+    /// least once (all 50 times, actually).
+    #[test]
+    fn directive_fires_across_50_unattended_turns() {
+        use crate::directive::Directive;
+        use crate::predicate::Predicate;
+
+        let mut engine = GameEngine::with_seed(1);
+        let colony_id = found_colony_id(&mut engine, "Automation Base", 200);
+
+        // Directive: always assign labour to "mining".
+        let directive = Directive::new(
+            colony_id,
+            Predicate::Always,
+            Command::AssignLabour {
+                colony_id,
+                slot: "mining".into(),
+                labour: 10,
+            },
+            5,
+        );
+        engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(directive),
+            })
+            .unwrap();
+
+        // Advance 50 turns unattended; count how many DirectiveFired events occur.
+        let mut fired_count = 0usize;
+        for _ in 0..50 {
+            let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+            fired_count += events
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id
+                    )
+                })
+                .count();
+        }
+        assert_eq!(
+            fired_count, 50,
+            "directive should fire every turn when predicate is Always; got {fired_count}"
+        );
+    }
+
+    /// Done-when: directive fires on predicate (conditional).
+    ///
+    /// Use `Predicate::lt(Stability, 0.5)`.  With stability starting at 1.0 the
+    /// directive must NOT fire on the first turn.  We then lower stability
+    /// directly and verify it fires on the next turn.
+    #[test]
+    fn directive_fires_only_when_predicate_matches() {
+        use crate::directive::Directive;
+        use crate::predicate::{Metric, Predicate};
+
+        let mut engine = GameEngine::with_seed(2);
+        let colony_id = found_colony_id(&mut engine, "Conditional Base", 100);
+
+        let directive = Directive::new(
+            colony_id,
+            Predicate::lt(Metric::Stability, 0.5),
+            Command::AssignLabour {
+                colony_id,
+                slot: "repair".into(),
+                labour: 5,
+            },
+            1,
+        );
+        engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(directive),
+            })
+            .unwrap();
+
+        // First turn: stability = 1.0, predicate is false — no firing.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let fired = events
+            .iter()
+            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
+        assert!(!fired, "directive must not fire when stability is 1.0");
+
+        // Artificially drop stability below threshold.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].stability = 0.3;
+
+        // Next turn: predicate is now true — directive must fire.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let fired = events
+            .iter()
+            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
+        assert!(fired, "directive must fire when stability falls below 0.5");
+    }
+
+    /// Done-when: priority ordering — highest-priority directive fires first.
+    #[test]
+    fn directive_priority_ordering_highest_fires() {
+        use crate::directive::Directive;
+        use crate::predicate::Predicate;
+
+        let mut engine = GameEngine::with_seed(3);
+        let colony_id = found_colony_id(&mut engine, "Priority Base", 200);
+
+        // Low priority: assigns 1 labour unit.
+        let low = Directive::new(
+            colony_id,
+            Predicate::Always,
+            Command::AssignLabour {
+                colony_id,
+                slot: "low_priority_slot".into(),
+                labour: 1,
+            },
+            1,
+        );
+        // High priority: assigns 5 labour units.
+        let high = Directive::new(
+            colony_id,
+            Predicate::Always,
+            Command::AssignLabour {
+                colony_id,
+                slot: "high_priority_slot".into(),
+                labour: 5,
+            },
+            10,
+        );
+        engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(low),
+            })
+            .unwrap();
+        engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(high),
+            })
+            .unwrap();
+
+        // Advance one turn; exactly one DirectiveFired event should occur.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let fired_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id))
+            .collect();
+        assert_eq!(fired_events.len(), 1, "only the highest-priority directive should fire");
+
+        // The LabourAssigned that follows must be for the high-priority slot.
+        let labour_event = events.iter().find(|e| matches!(e, Event::LabourAssigned { .. }));
+        assert!(
+            matches!(
+                labour_event,
+                Some(Event::LabourAssigned { slot, labour: 5, .. }) if slot == "high_priority_slot"
+            ),
+            "expected high-priority slot to receive labour; got {labour_event:?}"
+        );
+    }
+
+    /// Done-when: manual override suppresses directive evaluation; re-enabling
+    /// resumes automation.
+    #[test]
+    fn manual_override_suppresses_and_resumes_directives() {
+        use crate::directive::Directive;
+        use crate::predicate::Predicate;
+
+        let mut engine = GameEngine::with_seed(4);
+        let colony_id = found_colony_id(&mut engine, "Override Base", 200);
+
+        let directive = Directive::new(
+            colony_id,
+            Predicate::Always,
+            Command::AssignLabour {
+                colony_id,
+                slot: "auto_slot".into(),
+                labour: 5,
+            },
+            5,
+        );
+        engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(directive),
+            })
+            .unwrap();
+
+        // Enable manual override.
+        engine
+            .apply(&Command::SetManualOverride {
+                colony_id,
+                enabled: true,
+            })
+            .unwrap();
+
+        // Advance: directive must NOT fire while manual override is active.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let fired = events
+            .iter()
+            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
+        assert!(!fired, "directive must not fire while manual override is active");
+
+        // Disable manual override — automation resumes.
+        engine
+            .apply(&Command::SetManualOverride {
+                colony_id,
+                enabled: false,
+            })
+            .unwrap();
+
+        // Advance: directive must fire now.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let fired = events
+            .iter()
+            .any(|e| matches!(e, Event::DirectiveFired { colony_id: cid, .. } if *cid == colony_id));
+        assert!(fired, "directive must fire after manual override is disabled");
+    }
+
+    /// Done-when: `set_directive` / `remove_directive` API.
+    #[test]
+    fn set_and_remove_directive_api() {
+        use crate::directive::Directive;
+        use crate::predicate::Predicate;
+
+        let mut engine = GameEngine::with_seed(5);
+        let colony_id = found_colony_id(&mut engine, "API Base", 100);
+
+        let directive = Directive::new(
+            colony_id,
+            Predicate::Always,
+            Command::AssignLabour {
+                colony_id,
+                slot: "managed_slot".into(),
+                labour: 1,
+            },
+            1,
+        );
+        let directive_id = directive.id;
+
+        // Register.
+        let events = engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(directive),
+            })
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::DirectiveSet { directive_id: did, .. } if *did == directive_id)),
+            "SetDirective must emit DirectiveSet event"
+        );
+
+        // Remove.
+        let events = engine
+            .apply(&Command::RemoveDirective { directive_id })
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::DirectiveRemoved { directive_id: did } if *did == directive_id)),
+            "RemoveDirective must emit DirectiveRemoved event"
+        );
+
+        // After removal, directive must not fire.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let fired = events
+            .iter()
+            .any(|e| matches!(e, Event::DirectiveFired { .. }));
+        assert!(!fired, "directive must not fire after removal");
     }
 }

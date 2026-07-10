@@ -253,6 +253,7 @@ impl Snapshot {
             registry: None,
             needs_config: None,
             research_pool: crate::research::SystemResearchPool::new(),
+            directive_store: crate::directive::DirectiveStore::default(),
         })
     }
 
