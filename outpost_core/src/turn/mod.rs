@@ -33,7 +33,7 @@ use crate::system::SystemState;
 use crate::tech::TechEffect;
 use crate::tech::{TechRegistry, TechState};
 use crate::trade::TradeNetwork;
-use crate::victory::VictoryState;
+use crate::victory::{VictoryCondition, VictoryState};
 
 /// Default number of colony-sols that constitute one strategic-month.
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
@@ -136,6 +136,14 @@ pub struct GameState {
     pub cumulative_research: u64,
     /// Whether the interstellar expedition has been launched (primary victory trigger).
     pub expedition_launched: bool,
+    /// The victory condition that has been achieved, if any (set on first win).
+    ///
+    /// `None` until a victory condition is satisfied.  After it is set the engine
+    /// blocks further commands and returns [`EngineError::GameOver`] unless the
+    /// player activates sandbox-continue mode.
+    pub victory: Option<VictoryCondition>,
+    /// System-zoom state: megaprojects, celestial bodies, hauler fleet.
+    pub system_state: SystemState,
 
     // ── Phase M1: Tech effects wired to live state ────────────────────────
     /// Building IDs unlocked by completed tech nodes.
@@ -177,6 +185,8 @@ impl GameState {
             victory_state: VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
+            victory: None,
+            system_state: SystemState::new(),
             unlocked_buildings: HashSet::new(),
             unlocked_capabilities: HashSet::new(),
             unlocked_commodities: HashSet::new(),
