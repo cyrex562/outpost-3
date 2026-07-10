@@ -224,6 +224,7 @@ impl Snapshot {
                     buildings: Vec::new(),
                     build_queue: crate::colony::ConstructionQueue::new(),
                     slot_capacity: crate::colony::BASE_SLOT_CAPACITY,
+                    terrain_id: None,
                 })
             })
             .collect::<Result<_, rusqlite::Error>>()?;
@@ -274,6 +275,7 @@ impl Snapshot {
             unlocked_capabilities: std::collections::HashSet::new(),
             unlocked_commodities: std::collections::HashSet::new(),
             modifier_accumulator: crate::modifier::ModifierAccumulator::new(),
+            hazard_config: None,
             system_state: crate::system::SystemState::new(),
             infra_routes: std::collections::HashMap::new(),
         })

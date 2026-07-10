@@ -1,0 +1,69 @@
+# Outpost 3 — Environmental Hazard Configuration
+# Loaded at runtime. Probabilities are per colony-sol; severity in [0, 1].
+# terrain_modifiers: map of terrain slug → probability multiplier.
+
+kinds:
+  - kind: dust_storm
+    base_probability: 0.02
+    severity_min: 0.1
+    severity_max: 0.7
+    stability_damage_per_severity: 0.25
+    commodity_loss_per_severity: 0.08
+    population_damage_per_severity: 0.005
+    terrain_modifiers:
+      desert: 2.5
+      arid: 1.8
+      tundra: 0.4
+
+  - kind: seismic_event
+    base_probability: 0.005
+    severity_min: 0.2
+    severity_max: 0.9
+    stability_damage_per_severity: 0.40
+    commodity_loss_per_severity: 0.12
+    population_damage_per_severity: 0.015
+    terrain_modifiers:
+      volcanic: 3.0
+      rocky: 1.5
+      plains: 0.6
+
+  - kind: meteor_impact
+    base_probability: 0.001
+    severity_min: 0.5
+    severity_max: 1.0
+    stability_damage_per_severity: 0.60
+    commodity_loss_per_severity: 0.20
+    population_damage_per_severity: 0.040
+    terrain_modifiers:
+      exposed: 1.5
+
+  - kind: equipment_failure
+    base_probability: 0.015
+    severity_min: 0.1
+    severity_max: 0.6
+    stability_damage_per_severity: 0.15
+    commodity_loss_per_severity: 0.05
+    population_damage_per_severity: 0.002
+    terrain_modifiers: {}
+
+  - kind: disease_outbreak
+    base_probability: 0.008
+    severity_min: 0.1
+    severity_max: 0.8
+    stability_damage_per_severity: 0.30
+    commodity_loss_per_severity: 0.04
+    population_damage_per_severity: 0.025
+    terrain_modifiers:
+      humid: 2.0
+      tropical: 1.8
+
+  - kind: radiation_leak
+    base_probability: 0.003
+    severity_min: 0.2
+    severity_max: 0.7
+    stability_damage_per_severity: 0.35
+    commodity_loss_per_severity: 0.06
+    population_damage_per_severity: 0.030
+    terrain_modifiers:
+      irradiated: 3.0
+      polar: 1.4

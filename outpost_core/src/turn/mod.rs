@@ -28,6 +28,7 @@ use crate::migration::{PendingMigration, PopulationTracker};
 use crate::modifier::{
     DifficultyScalar, ModifiableQuantity, ModifierAccumulator, ModifierDescriptor,
 };
+use crate::hazard::{roll_hazard, HazardConfig, HazardKind};
 use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
@@ -63,6 +64,8 @@ pub struct TurnOutcome {
     pub completed_techs: Vec<String>,
     /// Cargo delivery events produced during the strategic-month pipeline (empty on colony-sol-only turns).
     pub cargo_delivered: Vec<CargoDeliveryRecord>,
+    /// Environmental hazard outcomes rolled this colony-sol (empty when no hazards triggered).
+    pub hazard_outcomes: Vec<crate::hazard::HazardOutcome>,
 }
 
 /// A record of one commodity quantity delivered to a colony pool during a strategic month.
@@ -158,6 +161,12 @@ pub struct GameState {
     pub unlocked_commodities: HashSet<String>,
     /// Accumulated numeric tech bonuses (additive, per category).
     pub modifier_accumulator: ModifierAccumulator,
+    /// Environmental hazard configuration loaded from content YAML.
+    ///
+    /// When `None`, hazard rolling is skipped.  Populate via the content pack
+    /// loader and assign before calling [`TurnProcessor::advance`].
+    pub hazard_config: Option<HazardConfig>,
+
     /// System-zoom layer state: node map, hauler fleet, in-transit shipments, megaprojects.
     pub system_state: SystemState,
     /// Maps `(from_colony, to_colony)` pairs to the trade route UUID created by
@@ -200,6 +209,7 @@ impl GameState {
             unlocked_capabilities: HashSet::new(),
             unlocked_commodities: HashSet::new(),
             modifier_accumulator: ModifierAccumulator::new(),
+            hazard_config: None,
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
         }
@@ -269,7 +279,7 @@ impl TurnProcessor {
     pub fn advance(&mut self, state: &mut GameState) -> TurnOutcome {
         state.sol += 1;
         let mut cadences_fired = vec![TurnCadence::ColonySol];
-        self.run_colony_sol_pipeline(state);
+        let hazard_outcomes = self.run_colony_sol_pipeline(state);
 
         let mut completed_techs = Vec::new();
         let mut cargo_delivered = Vec::new();
@@ -287,11 +297,18 @@ impl TurnProcessor {
             month: state.month,
             completed_techs,
             cargo_delivered,
+            hazard_outcomes,
         }
     }
 
-    /// Colony-sol sub-pipeline (cadence bookkeeping and RNG advancement).
-    fn run_colony_sol_pipeline(&mut self, state: &mut GameState) {
+    /// Colony-sol sub-pipeline: RNG advancement, growth, and hazard rolling.
+    ///
+    /// Returns hazard outcomes for colonies hit this sol. Effects (stability,
+    /// commodity pool, population) are applied by the caller (`GameEngine::apply`).
+    fn run_colony_sol_pipeline(
+        &mut self,
+        state: &mut GameState,
+    ) -> Vec<crate::hazard::HazardOutcome> {
         let _tick: u64 = rand::RngCore::next_u64(&mut self.rng);
 
         if state.needs_config.is_none() {
@@ -299,6 +316,43 @@ impl TurnProcessor {
                 pop.apply_growth_tick();
             }
         }
+
+        // ── Environmental hazard rolls ────────────────────────────────────
+        let mut hazard_outcomes = Vec::new();
+        if let Some(hazard_cfg) = &state.hazard_config.clone() {
+            use rand::Rng as _;
+            for (colony, pop) in state.colonies.iter().zip(state.populations.iter()) {
+                let terrain: Option<String> = colony.terrain_id.clone();
+                let pool_entries: Vec<(String, f64)> = colony
+                    .pool
+                    .commodity_ids()
+                    .map(|id| (id.to_owned(), colony.pool.amount(id)))
+                    .collect();
+
+                for kind in HazardKind::ALL {
+                    let rng_prob: f32 = self.rng.gen();
+                    let rng_sev: f32 = self.rng.gen();
+                    // Use lower 32 bits for commodity index selection (safe on all targets).
+                    #[allow(clippy::cast_possible_truncation)]
+                    let rng_comm: usize = (rand::RngCore::next_u64(&mut self.rng) as u32) as usize;
+
+                    if let Some(outcome) = roll_hazard(
+                        rng_prob,
+                        rng_sev,
+                        rng_comm,
+                        kind,
+                        colony.id,
+                        terrain.as_deref(),
+                        hazard_cfg,
+                        pop.count,
+                        &pool_entries,
+                    ) {
+                        hazard_outcomes.push(outcome);
+                    }
+                }
+            }
+        }
+        hazard_outcomes
     }
 
     /// Apply a flat list of [`TechEffect`]s to live [`GameState`].
@@ -779,5 +833,66 @@ mod tests {
         assert_eq!(delivery_records[0].colony_id, colony_id);
         assert_eq!(delivery_records[0].commodity_id, "iron");
         assert!((delivery_records[0].amount - 50.0).abs() < f64::EPSILON);
+    }
+
+    // ── Hazard pipeline integration tests ────────────────────────────────────
+
+    use crate::hazard::{HazardConfig, HazardEntry, HazardKind, HazardKindConfig};
+
+    fn all_kinds_config(probability: f32) -> HazardConfig {
+        let kinds = HazardKind::ALL
+            .iter()
+            .map(|&kind| HazardEntry {
+                kind,
+                config: HazardKindConfig {
+                    base_probability: probability,
+                    severity_min: 0.5,
+                    severity_max: 0.5,
+                    stability_damage_per_severity: 0.1,
+                    commodity_loss_per_severity: 0.05,
+                    population_damage_per_severity: 0.01,
+                },
+                terrain_modifiers: Default::default(),
+            })
+            .collect();
+        HazardConfig { kinds }
+    }
+
+    #[test]
+    fn zero_probability_hazards_never_appear_in_turn_outcome() {
+        let mut state = make_state();
+        state.hazard_config = Some(all_kinds_config(0.0));
+        let mut proc = TurnProcessor::new(42);
+        let outcome = proc.advance(&mut state);
+        assert!(
+            outcome.hazard_outcomes.is_empty(),
+            "no hazards should trigger at probability=0"
+        );
+    }
+
+    #[test]
+    fn probability_one_hazards_always_appear_in_turn_outcome() {
+        let mut state = make_state();
+        state.hazard_config = Some(all_kinds_config(1.0));
+        let mut proc = TurnProcessor::new(0);
+        let outcome = proc.advance(&mut state);
+        // Each of the 6 kinds should fire for the 1 colony → 6 outcomes.
+        assert_eq!(
+            outcome.hazard_outcomes.len(),
+            HazardKind::ALL.len(),
+            "all 6 hazard kinds should trigger with probability=1.0"
+        );
+    }
+
+    #[test]
+    fn hazard_config_none_skips_hazard_rolling() {
+        let mut state = make_state();
+        // hazard_config is None by default — no rolling should occur.
+        let mut proc = TurnProcessor::new(0);
+        let outcome = proc.advance(&mut state);
+        assert!(
+            outcome.hazard_outcomes.is_empty(),
+            "hazard rolling should be skipped when config is None"
+        );
     }
 }
