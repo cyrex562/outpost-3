@@ -13,8 +13,8 @@
 
 use std::collections::HashMap;
 
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -68,21 +68,14 @@ impl HexCoord {
     /// All six direct neighbours of this hex cell.
     #[must_use]
     pub fn neighbours(self) -> [HexCoord; 6] {
-        const DIRECTIONS: [(i32, i32); 6] = [
-            (1, 0),
-            (1, -1),
-            (0, -1),
-            (-1, 0),
-            (-1, 1),
-            (0, 1),
-        ];
+        const DIRECTIONS: [(i32, i32); 6] = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
         DIRECTIONS.map(|(dq, dr)| HexCoord::new(self.q + dq, self.r + dr))
     }
 
     /// Return all cells within `radius` steps of this cell (inclusive of center).
     #[must_use]
     pub fn within_radius(self, radius: u32) -> Vec<HexCoord> {
-        let r = radius as i32;
+        let r = radius.cast_signed();
         let mut cells = Vec::new();
         for q in -r..=r {
             let r_min = (-r).max(-q - r);
@@ -294,7 +287,11 @@ impl PlanetMap {
     pub fn best_landing_site(&self) -> Option<HexCoord> {
         self.cells
             .values()
-            .max_by(|a, b| a.suitability().partial_cmp(&b.suitability()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.suitability()
+                    .partial_cmp(&b.suitability())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .filter(|c| c.is_habitable())
             .map(|c| c.coord)
     }
@@ -306,12 +303,11 @@ impl PlanetMap {
     /// Returns [`MapError::CellNotFound`] if the coordinate is not in this map.
     /// Returns [`MapError::CellNotHabitable`] if the terrain is ocean.
     /// Returns [`MapError::CellOccupied`] if a colony already exists at that coordinate.
-    pub fn place_colony(
-        &mut self,
-        colony_id: ColonyId,
-        coord: HexCoord,
-    ) -> Result<(), MapError> {
-        let cell = self.cells.get(&coord).ok_or(MapError::CellNotFound(coord))?;
+    pub fn place_colony(&mut self, colony_id: ColonyId, coord: HexCoord) -> Result<(), MapError> {
+        let cell = self
+            .cells
+            .get(&coord)
+            .ok_or(MapError::CellNotFound(coord))?;
         if !cell.is_habitable() {
             return Err(MapError::CellNotHabitable(coord));
         }
@@ -476,7 +472,10 @@ fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell 
     let dist_frac = if radius == 0 {
         0.0
     } else {
-        HexCoord::origin().distance(coord) as f32 / radius as f32
+        #[allow(clippy::cast_precision_loss)]
+        {
+            HexCoord::origin().distance(coord) as f32 / radius as f32
+        }
     };
 
     // Pick terrain based on position noise.
@@ -526,13 +525,13 @@ fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell 
     if !matches!(terrain, Terrain::Ocean) {
         if rng.gen::<f32>() < 0.25 {
             let richness: f32 = rng.gen::<f32>() * 0.9 + 0.1;
-            let commodity = pick_deposit_commodity(rng, &biome);
+            let commodity = pick_deposit_commodity(rng, biome);
             cell.deposits.push(Deposit::new(commodity, richness));
         }
         // Rare second deposit.
         if rng.gen::<f32>() < 0.06 {
             let richness: f32 = rng.gen::<f32>() * 0.5 + 0.05;
-            let commodity = pick_deposit_commodity(rng, &biome);
+            let commodity = pick_deposit_commodity(rng, biome);
             cell.deposits.push(Deposit::new(commodity, richness));
         }
     }
@@ -541,20 +540,44 @@ fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell 
 }
 
 /// Choose a deposit commodity influenced by biome.
-fn pick_deposit_commodity(rng: &mut ChaCha8Rng, biome: &Biome) -> &'static str {
+fn pick_deposit_commodity(rng: &mut ChaCha8Rng, biome: Biome) -> &'static str {
     let roll: f32 = rng.gen();
     match biome {
         Biome::Desert | Biome::Barren => {
-            if roll < 0.4 { "iron" } else if roll < 0.7 { "silicates" } else { "rare_metals" }
+            if roll < 0.4 {
+                "iron"
+            } else if roll < 0.7 {
+                "silicates"
+            } else {
+                "rare_metals"
+            }
         }
         Biome::Tundra | Biome::Polar => {
-            if roll < 0.5 { "water_ice" } else if roll < 0.75 { "methane" } else { "iron" }
+            if roll < 0.5 {
+                "water_ice"
+            } else if roll < 0.75 {
+                "methane"
+            } else {
+                "iron"
+            }
         }
         Biome::Geothermal => {
-            if roll < 0.5 { "sulfur" } else { "geothermal_energy" }
+            if roll < 0.5 {
+                "sulfur"
+            } else {
+                "geothermal_energy"
+            }
         }
         _ => {
-            if roll < 0.35 { "iron" } else if roll < 0.60 { "water" } else if roll < 0.80 { "organics" } else { "rare_metals" }
+            if roll < 0.35 {
+                "iron"
+            } else if roll < 0.60 {
+                "water"
+            } else if roll < 0.80 {
+                "organics"
+            } else {
+                "rare_metals"
+            }
         }
     }
 }
@@ -566,20 +589,17 @@ fn pick_deposit_commodity(rng: &mut ChaCha8Rng, biome: &Biome) -> &'static str {
 /// Path is approximated as the hex-line from `from` to `to`; cells not in the
 /// map contribute a difficulty of 2.0 (unknown / unexplored).
 #[must_use]
-pub fn edge_cost(
+#[allow(clippy::cast_precision_loss)]
+pub fn edge_cost<S: ::std::hash::BuildHasher>(
     from: HexCoord,
     to: HexCoord,
-    cells: &HashMap<HexCoord, HexCell>,
+    cells: &HashMap<HexCoord, HexCell, S>,
     infra_type: InfraType,
 ) -> f32 {
     let path = hex_line(from, to);
     let total_difficulty: f32 = path
         .iter()
-        .map(|c| {
-            cells
-                .get(c)
-                .map_or(2.0, |cell| cell.terrain.difficulty())
-        })
+        .map(|c| cells.get(c).map_or(2.0, |cell| cell.terrain.difficulty()))
         .sum();
     let distance = from.distance(to) as f32;
     let difficulty_per_cell = if path.is_empty() {
@@ -594,6 +614,7 @@ pub fn edge_cost(
 ///
 /// Uses linear interpolation through cube coordinates, rounded to the nearest hex.
 #[must_use]
+#[allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
 pub fn hex_line(a: HexCoord, b: HexCoord) -> Vec<HexCoord> {
     let dist = a.distance(b) as usize;
     if dist == 0 {
@@ -615,6 +636,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 /// Round floating-point cube coordinates to the nearest integer hex.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn cube_round(fq: f32, fr: f32, fs: f32) -> HexCoord {
     let mut rq = fq.round() as i32;
     let mut rr = fr.round() as i32;
@@ -710,7 +732,10 @@ mod tests {
         for n in 0u32..=5 {
             let expected = 3 * n * n + 3 * n + 1;
             let actual = HexCoord::origin().within_radius(n).len() as u32;
-            assert_eq!(actual, expected, "radius {n}: expected {expected} cells, got {actual}");
+            assert_eq!(
+                actual, expected,
+                "radius {n}: expected {expected} cells, got {actual}"
+            );
         }
     }
 
@@ -748,9 +773,20 @@ mod tests {
         let map2 = PlanetMap::generate(42, 5);
         // Compare cell count and one stable property (number of ocean cells).
         assert_eq!(map1.cells.len(), map2.cells.len());
-        let oceans1 = map1.cells.values().filter(|c| matches!(c.terrain, Terrain::Ocean)).count();
-        let oceans2 = map2.cells.values().filter(|c| matches!(c.terrain, Terrain::Ocean)).count();
-        assert_eq!(oceans1, oceans2, "ocean count must be deterministic for same seed");
+        let oceans1 = map1
+            .cells
+            .values()
+            .filter(|c| matches!(c.terrain, Terrain::Ocean))
+            .count();
+        let oceans2 = map2
+            .cells
+            .values()
+            .filter(|c| matches!(c.terrain, Terrain::Ocean))
+            .count();
+        assert_eq!(
+            oceans1, oceans2,
+            "ocean count must be deterministic for same seed"
+        );
     }
 
     #[test]
@@ -760,7 +796,11 @@ mod tests {
         let deposits_a: usize = map_a.cells.values().map(|c| c.deposits.len()).sum();
         let deposits_b: usize = map_b.cells.values().map(|c| c.deposits.len()).sum();
         // Very unlikely (but not impossible) to be identical — assert on cell count always.
-        assert_eq!(map_a.cells.len(), map_b.cells.len(), "both maps must have same cell count for radius 5");
+        assert_eq!(
+            map_a.cells.len(),
+            map_b.cells.len(),
+            "both maps must have same cell count for radius 5"
+        );
         // At least one property must differ (deposits total OR terrain distribution).
         // This is a statistical assertion; different seeds routinely produce different results.
         let terrains_a: Vec<_> = {

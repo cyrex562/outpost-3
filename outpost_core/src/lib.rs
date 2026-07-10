@@ -27,9 +27,9 @@
 pub mod balance;
 pub mod colony;
 pub mod content;
-pub mod map;
 pub mod directive;
 pub mod interrupt;
+pub mod map;
 pub mod needs;
 pub mod population;
 pub mod predicate;
