@@ -182,20 +182,14 @@ impl Predicate {
                 commodity_id,
                 threshold,
             } => {
-                let amount = ctx
-                    .commodities
-                    .get(commodity_id)
-                    .map_or(0.0, |s| s.amount);
+                let amount = ctx.commodities.get(commodity_id).map_or(0.0, |s| s.amount);
                 amount < f64::from(*threshold)
             }
             Self::StockpileAbove {
                 commodity_id,
                 threshold,
             } => {
-                let amount = ctx
-                    .commodities
-                    .get(commodity_id)
-                    .map_or(0.0, |s| s.amount);
+                let amount = ctx.commodities.get(commodity_id).map_or(0.0, |s| s.amount);
                 amount > f64::from(*threshold)
             }
             Self::EtaToExhaustion { commodity_id, sols } => {
@@ -211,10 +205,7 @@ impl Predicate {
                 turns_until_zero < *sols as f64
             }
             Self::ProductionShortfall { commodity_id } => {
-                let delta = ctx
-                    .commodities
-                    .get(commodity_id)
-                    .map_or(0.0, |s| s.delta);
+                let delta = ctx.commodities.get(commodity_id).map_or(0.0, |s| s.delta);
                 delta < 0.0
             }
         }
@@ -288,10 +279,8 @@ mod tests {
 
     fn ctx_with_commodity(id: &str, amount: f64, delta: f64) -> PredicateContext {
         let mut c = ctx();
-        c.commodities.insert(
-            id.to_owned(),
-            CommoditySnapshot { amount, delta },
-        );
+        c.commodities
+            .insert(id.to_owned(), CommoditySnapshot { amount, delta });
         c
     }
 
