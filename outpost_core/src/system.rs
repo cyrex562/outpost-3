@@ -749,7 +749,12 @@ pub fn apply_system_command(
             }])
         }
 
-        SystemCommand::DispatchShipment { from, to, cargo, destination_colony } => {
+        SystemCommand::DispatchShipment {
+            from,
+            to,
+            cargo,
+            destination_colony,
+        } => {
             // Verify bodies exist
             if !state.node_map.bodies.contains_key(from) {
                 return Err(SystemError::BodyNotFound(from.clone()));

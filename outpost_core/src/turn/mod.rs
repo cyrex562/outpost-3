@@ -17,7 +17,6 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::colony::{Colony, ColonyId};
 use crate::content::ContentRegistry;
-use crate::system::SystemState;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
 use crate::interrupt::StabilityTracker;
@@ -28,6 +27,7 @@ use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
+use crate::system::SystemState;
 use crate::tech::{TechRegistry, TechState};
 use crate::trade::TradeNetwork;
 use crate::victory::VictoryState;
@@ -318,7 +318,12 @@ impl TurnProcessor {
             let arrived = state.system_state.shipments.remove(&id).unwrap();
 
             // Release hauler.
-            if let Some(hauler) = state.system_state.hauler_fleet.haulers.get_mut(&arrived.hauler_id) {
+            if let Some(hauler) = state
+                .system_state
+                .hauler_fleet
+                .haulers
+                .get_mut(&arrived.hauler_id)
+            {
                 hauler.in_transit = false;
             }
 
@@ -457,7 +462,7 @@ mod tests {
     /// Issue #86: a shipment with ETA=1 strategic month delivers to colony pool.
     #[test]
     fn cargo_shipment_delivered_to_colony_pool_after_one_month() {
-        use crate::system::{BodyKind, SystemCommand, apply_system_command};
+        use crate::system::{apply_system_command, BodyKind, SystemCommand};
 
         let mut state = GameState::new();
         let colony = Colony::new("Depot");
@@ -492,7 +497,14 @@ mod tests {
             crate::system::SystemEvent::BodyAdded { body_id, .. } => body_id.clone(),
             _ => panic!("expected BodyAdded"),
         };
-        apply_system_command(sys, &SystemCommand::AddShippingRoute { from: body_a.clone(), to: body_b.clone() }).unwrap();
+        apply_system_command(
+            sys,
+            &SystemCommand::AddShippingRoute {
+                from: body_a.clone(),
+                to: body_b.clone(),
+            },
+        )
+        .unwrap();
         apply_system_command(sys, &SystemCommand::AddHauler { capacity: 100.0 }).unwrap();
 
         // Dispatch a shipment of 50 iron destined for the colony pool.
@@ -508,7 +520,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(state.system_state.shipments.len(), 1, "shipment should be in-transit");
+        assert_eq!(
+            state.system_state.shipments.len(),
+            1,
+            "shipment should be in-transit"
+        );
 
         // Advance 30 sols (1 strategic month). Delivery fires on the strategic-month pipeline.
         let mut proc = TurnProcessor::new(0);
@@ -519,7 +535,10 @@ mod tests {
         }
 
         // Shipment should have been removed.
-        assert!(state.system_state.shipments.is_empty(), "shipment should be removed after delivery");
+        assert!(
+            state.system_state.shipments.is_empty(),
+            "shipment should be removed after delivery"
+        );
 
         // Colony pool should have been credited.
         let amount = state.colonies[0].pool.amount("iron");
