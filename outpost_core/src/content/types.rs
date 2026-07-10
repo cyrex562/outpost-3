@@ -31,6 +31,17 @@ pub enum Phase {
     Plasma,
 }
 
+/// Production tier: distinguishes survival basics from advanced growth chains.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CommodityTier {
+    /// Cheap, soloable; required for colony survival.
+    #[default]
+    Basic,
+    /// Competes for slots and labour; drives growth chains.
+    Advanced,
+}
+
 /// A tradeable / produceable commodity authored in a content pack.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommodityDef {
@@ -51,6 +62,16 @@ pub struct CommodityDef {
     /// Whether this commodity can be bought/sold on the market.
     #[serde(default = "bool_true")]
     pub tradeable: bool,
+    /// Production tier: basic (survival) or advanced (growth).
+    #[serde(default)]
+    pub tier: CommodityTier,
+    /// Storage weight per unit (arbitrary units; used for capacity planning).
+    #[serde(default = "default_weight")]
+    pub weight: f64,
+}
+
+fn default_weight() -> f64 {
+    1.0
 }
 
 impl Phase {
@@ -88,6 +109,9 @@ pub struct RecipeDef {
     /// Duration in colony-sols per production cycle.
     #[serde(default = "default_cycle_sols")]
     pub cycle_sols: u32,
+    /// Power consumed per cycle (kW); zero means no power requirement.
+    #[serde(default)]
+    pub power_draw: f64,
 }
 
 fn default_cycle_sols() -> u32 {

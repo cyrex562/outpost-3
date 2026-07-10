@@ -215,7 +215,11 @@ impl Snapshot {
                 let (id_str, name) = r?;
                 let id = uuid::Uuid::parse_str(&id_str)
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                Ok(Colony { id, name })
+                Ok(Colony {
+                    id,
+                    name,
+                    pool: crate::colony::ColonyPool::new(),
+                })
             })
             .collect::<Result<_, rusqlite::Error>>()?;
 
