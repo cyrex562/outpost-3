@@ -26,6 +26,7 @@
 
 pub mod balance;
 pub mod colony;
+pub mod modifier;
 pub mod content;
 pub mod directive;
 pub mod interrupt;
