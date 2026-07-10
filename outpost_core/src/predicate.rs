@@ -40,6 +40,8 @@ pub enum Metric {
 
 impl Metric {
     /// Resolve this metric to a concrete `f64` from `ctx`.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn resolve(&self, ctx: &PredicateContext) -> f64 {
         match self {
             Self::Population => f64::from(ctx.population),
@@ -68,6 +70,7 @@ pub enum Cmp {
 
 impl Cmp {
     /// Apply this comparison to two `f64` operands.
+    #[must_use]
     pub fn apply(&self, lhs: f64, rhs: f64) -> bool {
         match self {
             Self::Lt => lhs < rhs,
@@ -119,6 +122,7 @@ pub enum Predicate {
 
 impl Predicate {
     /// Evaluate this predicate against `ctx`.
+    #[must_use]
     pub fn evaluate(&self, ctx: &PredicateContext) -> bool {
         match self {
             Self::Always => true,
