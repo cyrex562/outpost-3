@@ -96,7 +96,9 @@ impl TechState {
     /// Returns `true` if all prerequisites for `def` are satisfied.
     #[must_use]
     pub fn prerequisites_met(&self, def: &TechDef) -> bool {
-        def.prerequisites.iter().all(|p| self.researched.contains(p))
+        def.prerequisites
+            .iter()
+            .all(|p| self.researched.contains(p))
     }
 
     /// Start researching `tech_id`, replacing any current project.
@@ -139,7 +141,10 @@ pub fn apply_research_turn(
     // Drain all available research this turn toward the current project.
     let available = pool.total();
     if available <= 0.0 {
-        return ResearchTurnResult { completed, new_effects };
+        return ResearchTurnResult {
+            completed,
+            new_effects,
+        };
     }
 
     let mut remaining = available;
@@ -160,9 +165,8 @@ pub fn apply_research_turn(
             }
         };
 
-        let def = match registry.get(&project_id) {
-            Some(d) => d,
-            None => break, // Unknown tech — stop silently.
+        let Some(def) = registry.get(&project_id) else {
+            break; // Unknown tech — stop silently.
         };
 
         let needed = (def.research_cost - state.progress).max(0.0);
@@ -193,7 +197,10 @@ pub fn apply_research_turn(
         pool.total -= spent;
     }
 
-    ResearchTurnResult { completed, new_effects }
+    ResearchTurnResult {
+        completed,
+        new_effects,
+    }
 }
 
 // ─── Tech registry (validated in-memory index) ───────────────────────────────
@@ -233,9 +240,13 @@ impl TechRegistry {
     /// Returns [`TechRegistryError::UnknownPrerequisite`] if a referenced
     /// prerequisite is not found, or [`TechRegistryError::CycleDetected`] if
     /// the prerequisite graph contains a cycle.
+    ///
+    /// # Panics
+    ///
+    /// Panics if internal state is inconsistent (should not occur if the
+    /// prerequisite validation above passes).
     pub fn build(defs: Vec<TechDef>) -> Result<Self, TechRegistryError> {
-        let techs: HashMap<TechId, TechDef> =
-            defs.into_iter().map(|d| (d.id.clone(), d)).collect();
+        let techs: HashMap<TechId, TechDef> = defs.into_iter().map(|d| (d.id.clone(), d)).collect();
 
         // Validate all prerequisites exist.
         for def in techs.values() {
@@ -250,10 +261,7 @@ impl TechRegistry {
         }
 
         // Cycle detection via Kahn's algorithm (topological sort).
-        let mut in_degree: HashMap<&str, usize> = techs
-            .keys()
-            .map(|id| (id.as_str(), 0))
-            .collect();
+        let mut in_degree: HashMap<&str, usize> = techs.keys().map(|id| (id.as_str(), 0)).collect();
 
         for def in techs.values() {
             for _prereq in &def.prerequisites {
@@ -322,10 +330,7 @@ impl TechRegistry {
 
     /// Returns the set of tech IDs whose prerequisites are all in `researched`.
     #[must_use]
-    pub fn available_techs<'a>(
-        &'a self,
-        researched: &'a HashSet<TechId>,
-    ) -> Vec<&'a TechDef> {
+    pub fn available_techs<'a>(&'a self, researched: &'a HashSet<TechId>) -> Vec<&'a TechDef> {
         self.techs
             .values()
             .filter(|def| {
@@ -343,9 +348,9 @@ impl TechRegistry {
 /// A building is available if it has no `tech_prerequisite` OR its prerequisite
 /// is in `researched`.
 #[must_use]
-pub fn unlocked_buildings<'a>(
+pub fn unlocked_buildings<'a, S: ::std::hash::BuildHasher>(
     all_buildings: impl Iterator<Item = &'a crate::content::types::BuildingDef>,
-    researched: &HashSet<TechId>,
+    researched: &HashSet<TechId, S>,
 ) -> Vec<&'a crate::content::types::BuildingDef> {
     all_buildings
         .filter(|b| match &b.tech_prerequisite {
@@ -544,8 +549,12 @@ mod tests {
             prerequisites: vec![],
             research_cost: 5.0,
             effects: vec![
-                TechEffect::UnlockBuilding { building_id: "lab".to_string() },
-                TechEffect::UnlockCapability { capability_id: "warp".to_string() },
+                TechEffect::UnlockBuilding {
+                    building_id: "lab".to_string(),
+                },
+                TechEffect::UnlockCapability {
+                    capability_id: "warp".to_string(),
+                },
             ],
         }];
         let reg = TechRegistry::build(defs).unwrap();
