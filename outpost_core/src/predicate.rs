@@ -161,22 +161,16 @@ impl PredicateEvaluator {
             Predicate::LessThan {
                 quantity,
                 threshold,
-            } => Self::resolve(quantity, state)
-                .is_some_and(|v| v < *threshold),
+            } => Self::resolve(quantity, state).is_some_and(|v| v < *threshold),
 
             Predicate::GreaterThan {
                 quantity,
                 threshold,
-            } => Self::resolve(quantity, state)
-                .is_some_and(|v| v > *threshold),
+            } => Self::resolve(quantity, state).is_some_and(|v| v > *threshold),
 
-            Predicate::And { left, right } => {
-                Self::eval(left, state) && Self::eval(right, state)
-            }
+            Predicate::And { left, right } => Self::eval(left, state) && Self::eval(right, state),
 
-            Predicate::Or { left, right } => {
-                Self::eval(left, state) || Self::eval(right, state)
-            }
+            Predicate::Or { left, right } => Self::eval(left, state) || Self::eval(right, state),
 
             Predicate::Not { inner } => !Self::eval(inner, state),
 
@@ -361,7 +355,12 @@ mod tests {
             panic!()
         };
         let cid2 = *cid2;
-        let idx = engine2.state.colonies.iter().position(|c| c.id == cid2).unwrap();
+        let idx = engine2
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == cid2)
+            .unwrap();
         engine2.state.colonies[idx].pool.deposit("food", 10.0);
         engine2.state.colonies[idx].pool.deposit("water", 50.0);
 
