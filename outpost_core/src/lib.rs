@@ -221,6 +221,17 @@ pub enum Event {
         /// Number of labour units assigned.
         labour: u64,
     },
+    /// A building ran at less than full capacity due to a resource shortfall.
+    ProductionShortfall {
+        /// Colony where the shortfall occurred.
+        colony_id: ColonyId,
+        /// Building type that was affected.
+        building_type: String,
+        /// Effective production scale applied this turn, in `[0.0, 1.0]`.
+        scale: f64,
+        /// Category of shortfall that caused the reduction.
+        reason: colony::ShortfallReason,
+    },
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -306,7 +317,7 @@ impl GameEngine {
                         month: outcome.month,
                     });
                 }
-                // Tick construction for every colony.
+                // ── Step 1: Construction ────────────────────────────────────
                 for colony in &mut self.state.colonies {
                     // Consume labor for the active project.
                     if let Some(active) = colony.build_queue.projects.first() {
@@ -325,6 +336,40 @@ impl GameEngine {
                         });
                     }
                 }
+
+                // ── Step 2: Production ──────────────────────────────────────
+                // Only runs when a content registry is loaded. Shortfalls are
+                // emitted as `ProductionShortfall` events; no crash on partial.
+                if let Some(registry) = &self.state.registry.clone() {
+                    for (colony, pop) in self
+                        .state
+                        .colonies
+                        .iter_mut()
+                        .zip(self.state.populations.iter())
+                    {
+                        let labor = pop.available_labour();
+                        let placed: Vec<(String, u32)> = colony
+                            .buildings
+                            .iter()
+                            .map(|b| (b.building_type.clone(), b.slot_cost))
+                            .collect();
+                        colony.pool.reset_deltas();
+                        let prod_outcome =
+                            colony::process_production(&mut colony.pool, &placed, labor, registry);
+                        // Emit events for every shortfall so callers can log or react.
+                        for result in &prod_outcome.building_results {
+                            for shortfall in &result.shortfalls {
+                                events.push(Event::ProductionShortfall {
+                                    colony_id: colony.id,
+                                    building_type: result.building_type.clone(),
+                                    scale: result.scale,
+                                    reason: shortfall.reason.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+
                 Ok(events)
             }
 
