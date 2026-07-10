@@ -362,8 +362,7 @@ impl GameEngine {
                         .zip(self.state.populations.iter_mut())
                     {
                         let population_count = f64::from(pop.count);
-                        let report =
-                            apply_needs_check(&mut colony.pool, population_count, &config);
+                        let report = apply_needs_check(&mut colony.pool, population_count, &config);
 
                         let housing_sat = report
                             .needs
@@ -379,8 +378,7 @@ impl GameEngine {
                         );
 
                         // Apply stability and population changes.
-                        pop.stability =
-                            (pop.stability + report.stability_delta).clamp(0.0, 1.0);
+                        pop.stability = (pop.stability + report.stability_delta).clamp(0.0, 1.0);
                         pop.count = (pop.count + pop_delta).max(0.0);
 
                         events.push(Event::NeedsResolved {

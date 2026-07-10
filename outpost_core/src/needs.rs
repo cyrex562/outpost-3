@@ -350,7 +350,10 @@ mod tests {
         let stability = 0.90_f32;
         let housing_sat = 1.0_f32;
         let delta = apply_population_dynamics(pop, stability, housing_sat, &cfg);
-        assert!(delta > 0.0, "well-supplied colony should grow, delta={delta}");
+        assert!(
+            delta > 0.0,
+            "well-supplied colony should grow, delta={delta}"
+        );
     }
 
     // ── Starvation → decline ────────────────────────────────────────────────
@@ -437,7 +440,10 @@ mod tests {
         let recovery = 0.05_f32;
         let decay = 0.10_f32;
         let d = stability_delta_from_satisfaction(0.0, recovery, decay);
-        assert!((d - (-decay)).abs() < 1e-5, "delta at composite=0 should be -decay_rate, got {d}");
+        assert!(
+            (d - (-decay)).abs() < 1e-5,
+            "delta at composite=0 should be -decay_rate, got {d}"
+        );
     }
 
     #[test]
@@ -445,14 +451,25 @@ mod tests {
         let recovery = 0.05_f32;
         let decay = 0.10_f32;
         let d = stability_delta_from_satisfaction(1.0, recovery, decay);
-        assert!((d - recovery).abs() < 1e-5, "delta at composite=1 should be recovery_rate, got {d}");
+        assert!(
+            (d - recovery).abs() < 1e-5,
+            "delta at composite=1 should be recovery_rate, got {d}"
+        );
     }
 
     #[test]
     fn higher_satisfaction_gives_higher_stability_delta() {
         let cfg = NeedsConfig::default_survival();
-        let d_low = stability_delta_from_satisfaction(0.2, cfg.stability_recovery_rate, cfg.stability_decay_rate);
-        let d_high = stability_delta_from_satisfaction(0.8, cfg.stability_recovery_rate, cfg.stability_decay_rate);
+        let d_low = stability_delta_from_satisfaction(
+            0.2,
+            cfg.stability_recovery_rate,
+            cfg.stability_decay_rate,
+        );
+        let d_high = stability_delta_from_satisfaction(
+            0.8,
+            cfg.stability_recovery_rate,
+            cfg.stability_decay_rate,
+        );
         assert!(
             d_high > d_low,
             "80% satisfaction should give higher stability_delta than 20%"
@@ -498,8 +515,14 @@ mod tests {
             pop = (pop + pop_delta as f64).max(0.0);
         }
 
-        assert!(pop > 100.0, "well-supplied colony should grow over 50 turns, pop={pop}");
-        assert!(stability > 0.5, "stability should have improved from starting 0.5, stability={stability}");
+        assert!(
+            pop > 100.0,
+            "well-supplied colony should grow over 50 turns, pop={pop}"
+        );
+        assert!(
+            stability > 0.5,
+            "stability should have improved from starting 0.5, stability={stability}"
+        );
     }
 
     #[test]
@@ -569,11 +592,27 @@ mod tests {
         let report_low = apply_needs_check(&mut pool_low, pop, &cfg);
         let report_full = apply_needs_check(&mut pool_full, pop, &cfg);
 
-        let housing_low = report_low.needs.iter().find(|n| n.commodity_id == "housing").unwrap().satisfaction;
-        let housing_full = report_full.needs.iter().find(|n| n.commodity_id == "housing").unwrap().satisfaction;
+        let housing_low = report_low
+            .needs
+            .iter()
+            .find(|n| n.commodity_id == "housing")
+            .unwrap()
+            .satisfaction;
+        let housing_full = report_full
+            .needs
+            .iter()
+            .find(|n| n.commodity_id == "housing")
+            .unwrap()
+            .satisfaction;
 
-        assert!(housing_low < housing_full, "insufficient housing should lower satisfaction");
-        assert!((housing_full - 1.0).abs() < 0.01, "full housing should give sat≈1.0");
+        assert!(
+            housing_low < housing_full,
+            "insufficient housing should lower satisfaction"
+        );
+        assert!(
+            (housing_full - 1.0).abs() < 0.01,
+            "full housing should give sat≈1.0"
+        );
     }
 
     // ── No growth without housing ────────────────────────────────────────────
