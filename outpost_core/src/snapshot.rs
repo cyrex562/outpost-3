@@ -252,6 +252,7 @@ impl Snapshot {
             month,
             registry: None,
             needs_config: None,
+            research_pool: crate::research::SystemResearchPool::new(),
         })
     }
 

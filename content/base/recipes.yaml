@@ -11,6 +11,17 @@
     - id: iron_plate
       quantity: 1.0
 
+- id: conduct_research
+  name: Conduct Research
+  building: research_lab
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 1.0
+  outputs:
+    - id: research
+      quantity: 5.0
+
 - id: grow_rations
   name: Grow Rations
   building: hydroponic_bay
