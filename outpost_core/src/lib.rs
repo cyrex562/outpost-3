@@ -1189,6 +1189,21 @@ impl GameEngine {
                             continue;
                         };
                         let pop = &self.state.populations[idx];
+                        // Build per-commodity snapshot for commodity predicates.
+                        let commodities = self.state.colonies[idx]
+                            .pool
+                            .commodity_ids()
+                            .map(|id| {
+                                let pool = &self.state.colonies[idx].pool;
+                                (
+                                    id.to_owned(),
+                                    predicate::CommoditySnapshot {
+                                        amount: pool.amount(id),
+                                        delta: pool.delta(id),
+                                    },
+                                )
+                            })
+                            .collect();
                         let ctx = predicate::PredicateContext {
                             colony_id,
                             population: pop.count,
@@ -1197,6 +1212,7 @@ impl GameEngine {
                             system_research: self.state.research_pool.total(),
                             sol: self.state.sol,
                             month: self.state.month,
+                            commodities,
                         };
                         if let Some((dir_id, action)) = self
                             .state

@@ -129,6 +129,7 @@ mod tests {
             system_research: 0.0,
             sol: 1,
             month: 0,
+            commodities: std::collections::HashMap::new(),
         }
     }
 
