@@ -767,7 +767,10 @@ mod tests {
         assert!(!state.sandbox_mode);
         snap.save(&state).unwrap();
         let restored = snap.load().unwrap();
-        assert!(!restored.sandbox_mode, "sandbox_mode should survive as false");
+        assert!(
+            !restored.sandbox_mode,
+            "sandbox_mode should survive as false"
+        );
     }
 
     #[test]

@@ -1120,7 +1120,10 @@ impl GameEngine {
         // Block all commands once victory is recorded, unless sandbox-continue is active.
         if self.state.victory.is_some()
             && !self.state.victory_state.sandbox_continue
-            && !matches!(cmd, Command::ContinueAfterVictory | Command::ContinueSandbox)
+            && !matches!(
+                cmd,
+                Command::ContinueAfterVictory | Command::ContinueSandbox
+            )
         {
             return Err(EngineError::GameOver);
         }
@@ -5425,7 +5428,10 @@ mod tests {
 
         // Engine blocks commands before sandbox mode.
         let err = engine.apply(&Command::AdvanceColonySol).unwrap_err();
-        assert!(matches!(err, EngineError::GameOver), "expected GameOver before sandbox");
+        assert!(
+            matches!(err, EngineError::GameOver),
+            "expected GameOver before sandbox"
+        );
 
         // Activate via the issue-#96 canonical command name.
         let events = engine.apply(&Command::ContinueSandbox).unwrap();
@@ -5435,7 +5441,10 @@ mod tests {
         );
 
         // sandbox_mode top-level flag must be set.
-        assert!(engine.state.sandbox_mode, "GameState::sandbox_mode should be true");
+        assert!(
+            engine.state.sandbox_mode,
+            "GameState::sandbox_mode should be true"
+        );
 
         // Commands now succeed without GameOver.
         let result = engine.apply(&Command::AdvanceColonySol);
