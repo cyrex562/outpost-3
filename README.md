@@ -1,3 +1,11 @@
+[![CI](https://github.com/cyrex562/outpost-3/actions/workflows/ci.yml/badge.svg)](https://github.com/cyrex562/outpost-3/actions/workflows/ci.yml)
+
+# Outpost 3
+
+Turn-based grand-strategy colony game, star-system scale.
+
+---
+
 Option A — wasm-server-runner (simple):
 ```
 $env:CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER = "wasm-server-runner"    # PowerShell
