@@ -1,0 +1,24 @@
+# Assertions for the bootstrap balance check bundle.
+#
+# Schema: list of assertion objects with fields:
+#   commodity: string | null   # commodity id, or omit for overall verdict
+#   expect: "closed" | "bottleneck" | "impossible"
+#   min_net: float             # optional minimum net rate (units/sol); only for expect: closed
+#   label: string              # optional human-readable label for output
+#
+# This bundle should always exit 0 (all pass).
+
+# The overall chain must close (iron_ore import covers consumption exactly).
+- expect: closed
+  label: overall-chain-closes
+
+# Iron plate is produced with a positive net surplus.
+- commodity: iron_plate
+  expect: closed
+  min_net: 0.4
+  label: iron-plate-surplus-at-least-0.4-per-sol
+
+# Iron ore must not be in deficit (import covers consumption exactly).
+- commodity: iron_ore
+  expect: closed
+  label: iron-ore-not-in-deficit

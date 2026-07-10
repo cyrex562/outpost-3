@@ -1,0 +1,11 @@
+# Recipes used in the bootstrap balance check.
+- id: smelt_iron
+  name: Smelt Iron
+  building: smelter
+  cycle_sols: 2
+  inputs:
+    - id: iron_ore
+      quantity: 2.0
+  outputs:
+    - id: iron_plate
+      quantity: 1.0

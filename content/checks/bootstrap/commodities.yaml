@@ -1,0 +1,10 @@
+# Commodities used in the bootstrap balance check.
+- id: iron_ore
+  name: Iron Ore
+  category: ore
+  base_value: 1.0
+
+- id: iron_plate
+  name: Iron Plate
+  category: metal
+  base_value: 3.0
