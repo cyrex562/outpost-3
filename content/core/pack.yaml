@@ -1,0 +1,6 @@
+id: core
+name: Core Content Pack
+version: "0.1.0"
+description: >
+  Canonical commodity definitions and baseline production recipes for
+  Outpost 3.  All other packs build on top of these definitions.

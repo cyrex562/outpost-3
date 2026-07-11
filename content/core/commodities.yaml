@@ -1,0 +1,69 @@
+# Core commodity definitions for Outpost 3.
+# Design §7: survival basics (tier: basic) vs growth chains (tier: advanced).
+# Unit field is informational; base_value is in standard credits per unit.
+
+- id: water
+  name: Water
+  description: >
+    Potable water extracted from ice deposits or atmospheric condensers.
+    The most fundamental survival resource — all life processes require it.
+  category: consumable
+  phase: liquid
+  base_value: 5.0
+  tradeable: true
+  tier: basic
+
+- id: food
+  name: Food Rations
+  description: >
+    Compressed nutrient rations produced by hydroponics bays.
+    Distributed to the colony population each sol to maintain morale and health.
+  category: consumable
+  phase: solid
+  base_value: 8.0
+  tradeable: true
+  tier: basic
+
+- id: power
+  name: Electrical Power
+  description: >
+    Colony electrical grid output measured in kilowatt-hours per sol.
+    Required by almost every facility; deficit triggers rolling blackouts.
+  category: energy
+  phase: gas
+  base_value: 3.0
+  tradeable: false
+  tier: basic
+
+- id: metals
+  name: Refined Metals
+  description: >
+    Smelted and refined metal stock suitable for construction and fabrication.
+    Produced from raw ore or bio-matter reduction in the smelter.
+  category: industrial
+  phase: solid
+  base_value: 25.0
+  tradeable: true
+  tier: basic
+
+- id: rare_earth
+  name: Rare-Earth Elements
+  description: >
+    Concentrated rare-earth oxides essential for advanced electronics,
+    sensors, and propulsion components.  Scarce and high-value.
+  category: industrial
+  phase: solid
+  base_value: 120.0
+  tradeable: true
+  tier: advanced
+
+- id: bio_matter
+  name: Bio-Matter
+  description: >
+    Organic biomass harvested from hydroponics waste streams or surface
+    organisms.  Feedstock for smelting, pharmaceuticals, and fuel synthesis.
+  category: biological
+  phase: solid
+  base_value: 4.0
+  tradeable: true
+  tier: basic

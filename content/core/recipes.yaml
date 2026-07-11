@@ -1,0 +1,54 @@
+# Core production recipes for Outpost 3.
+# Design §7: extract → refine → manufacture chains.
+# Each recipe references commodity IDs defined in commodities.yaml.
+
+# Water Extraction: power → water
+# A pump station draws electrical power to pull water from ice deposits
+# or run atmospheric condensers.  The bedrock of colony survival.
+- id: water_extraction
+  name: Water Extraction
+  building: pump_station
+  cycle_sols: 1
+  power_draw: 5.0
+  inputs:
+    - id: power
+      quantity: 5.0
+  outputs:
+    - id: water
+      quantity: 10.0
+
+# Hydroponics: water + power → food (+ bio_matter byproduct)
+# Sealed growth chambers convert water and power into food rations.
+# Bio-matter is harvested from pruning and waste streams each cycle.
+- id: hydroponics
+  name: Hydroponics
+  building: hydroponics_bay
+  cycle_sols: 2
+  power_draw: 8.0
+  inputs:
+    - id: water
+      quantity: 4.0
+    - id: power
+      quantity: 8.0
+  outputs:
+    - id: food
+      quantity: 6.0
+    - id: bio_matter
+      quantity: 1.0
+
+# Smelting: bio_matter + power → metals
+# Thermochemical reduction converts organic feedstock into refined metal.
+# Less efficient than ore smelting but viable without a metal deposit.
+- id: bio_smelting
+  name: Bio-Matter Smelting
+  building: smelter
+  cycle_sols: 3
+  power_draw: 20.0
+  inputs:
+    - id: bio_matter
+      quantity: 5.0
+    - id: power
+      quantity: 20.0
+  outputs:
+    - id: metals
+      quantity: 2.0
