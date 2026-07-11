@@ -258,8 +258,7 @@ impl MenaceState {
         let was_below_critical = self.level < self.critical_threshold;
         self.level += self.escalation_rate;
 
-        let just_went_critical =
-            was_below_critical && self.level >= self.critical_threshold;
+        let just_went_critical = was_below_critical && self.level >= self.critical_threshold;
 
         if just_went_critical && self.countdown.is_none() {
             self.countdown = Some(Self::DEFAULT_COUNTDOWN);
@@ -537,7 +536,7 @@ mod tests {
         let mut state = level_menace();
         state.tick(); // level 5
         state.tick(); // level 10, critical — countdown set to DEFAULT
-        // Drain countdown.
+                      // Drain countdown.
         let mut saw_game_over = false;
         for _ in 0..=MenaceState::DEFAULT_COUNTDOWN {
             let out = state.tick();
@@ -546,7 +545,10 @@ mod tests {
                 break;
             }
         }
-        assert!(saw_game_over, "GameOver should fire when countdown reaches zero");
+        assert!(
+            saw_game_over,
+            "GameOver should fire when countdown reaches zero"
+        );
     }
 
     #[test]
@@ -565,7 +567,10 @@ mod tests {
         assert!(state.countdown.is_some());
         // Reduce level below threshold.
         state.mitigate(5.0); // level = 5.0 < 10.0 threshold
-        assert!(state.countdown.is_none(), "countdown should clear when level drops below critical");
+        assert!(
+            state.countdown.is_none(),
+            "countdown should clear when level drops below critical"
+        );
     }
 
     #[test]
@@ -578,12 +583,8 @@ mod tests {
 
     #[test]
     fn kind_preserved_in_outcome() {
-        let mut state = MenaceState::new_with_level(
-            sample_menace(),
-            MenaceKind::RivalFaction,
-            5.0,
-            10.0,
-        );
+        let mut state =
+            MenaceState::new_with_level(sample_menace(), MenaceKind::RivalFaction, 5.0, 10.0);
         let out = state.tick();
         assert_eq!(out.kind, MenaceKind::RivalFaction);
     }
