@@ -16,6 +16,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::modifier::ModifierDescriptor;
 
+// ─── MenaceKind ──────────────────────────────────────────────────────────────
+
+/// Categorises the nature of the existential threat driving the menace clock.
+///
+/// Used by [`Event::MenaceCritical`] and [`Event::GameOver`] so callers can
+/// distinguish which menace line fired without inspecting the full definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MenaceKind {
+    /// Environmental systems are failing (atmosphere, ecology, climate).
+    EnvironmentalCollapse,
+    /// A rival faction is overwhelming the colony network.
+    RivalFaction,
+    /// Critical resource stockpiles are approaching zero.
+    ResourceDepletion,
+}
+
 // ─── MenacePhase ─────────────────────────────────────────────────────────────
 
 /// One escalation phase of a menace.
@@ -118,6 +134,9 @@ impl MenaceDefinition {
 /// Runtime state of the active menace clock.
 ///
 /// Stored in [`crate::turn::GameState`]; `None` when sandbox mode is active.
+/// Combines the authored phase-based definition with a continuous pressure level
+/// that escalates each strategic month and fires critical/game-over signals when
+/// thresholds are crossed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MenaceState {
     /// The authored menace driving this clock.
@@ -128,6 +147,22 @@ pub struct MenaceState {
     pub last_phase_index: Option<usize>,
     /// Whether the menace is currently active (can be paused for sandbox revert).
     pub active: bool,
+
+    // ── Continuous-level pressure layer ──────────────────────────────────────
+    /// Broad category of this menace (for event emission).
+    pub kind: MenaceKind,
+    /// Current continuous pressure level; starts at `0.0` and climbs each tick.
+    pub level: f32,
+    /// Amount added to `level` per strategic month.
+    pub escalation_rate: f32,
+    /// When `level` reaches this value a `MenaceCritical` event fires and the
+    /// countdown begins.
+    pub critical_threshold: f32,
+    /// Remaining strategic months before game-over once the clock goes critical.
+    ///
+    /// `None` until `level >= critical_threshold`; counts down to zero, at which
+    /// point `GameOver` fires.  Player mitigation resets or pauses this.
+    pub countdown: Option<u32>,
 }
 
 impl MenaceState {
@@ -139,19 +174,61 @@ impl MenaceState {
             elapsed_months: 0,
             last_phase_index: None,
             active: true,
+            kind: MenaceKind::EnvironmentalCollapse,
+            level: 0.0,
+            escalation_rate: 1.0,
+            critical_threshold: 10.0,
+            countdown: None,
         }
     }
 
+    /// Construct a new menace state with explicit continuous-level parameters.
+    #[must_use]
+    pub fn new_with_level(
+        definition: MenaceDefinition,
+        kind: MenaceKind,
+        escalation_rate: f32,
+        critical_threshold: f32,
+    ) -> Self {
+        Self {
+            definition,
+            elapsed_months: 0,
+            last_phase_index: None,
+            active: true,
+            kind,
+            level: 0.0,
+            escalation_rate,
+            critical_threshold,
+            countdown: None,
+        }
+    }
+
+    /// Reduce the pressure level by `amount`.
+    ///
+    /// Clamps to `[0.0, ∞)`.  If level drops below `critical_threshold` the
+    /// countdown is cancelled (player bought themselves more time).
+    pub fn mitigate(&mut self, amount: f32) {
+        self.level = (self.level - amount).max(0.0);
+        if self.level < self.critical_threshold {
+            self.countdown = None;
+        }
+    }
+
+    /// Default countdown length (strategic months) once critical threshold is crossed.
+    pub const DEFAULT_COUNTDOWN: u32 = 12;
+
     /// Advance the menace by one strategic month.
     ///
-    /// Returns the [`MenaceTickOutcome`] describing any phase transitions or
-    /// telegraphs that occurred.
+    /// Returns the [`MenaceTickOutcome`] describing any phase transitions,
+    /// telegraphs, and continuous-level signals.
     pub fn tick(&mut self) -> MenaceTickOutcome {
         if !self.active {
             return MenaceTickOutcome::default();
         }
 
         self.elapsed_months += 1;
+
+        // ── Phase-based escalation ────────────────────────────────────────────
         let new_phase = self.definition.active_phase_index(self.elapsed_months);
 
         let phase_entered = match (self.last_phase_index, new_phase) {
@@ -177,18 +254,47 @@ impl MenaceState {
 
         self.last_phase_index = new_phase;
 
+        // ── Continuous-level escalation ───────────────────────────────────────
+        let was_below_critical = self.level < self.critical_threshold;
+        self.level += self.escalation_rate;
+
+        let just_went_critical =
+            was_below_critical && self.level >= self.critical_threshold;
+
+        if just_went_critical && self.countdown.is_none() {
+            self.countdown = Some(Self::DEFAULT_COUNTDOWN);
+        }
+
+        let game_over = if let Some(ref mut cd) = self.countdown {
+            if *cd == 0 {
+                true
+            } else {
+                *cd -= 1;
+                false
+            }
+        } else {
+            false
+        };
+
+        if game_over {
+            self.countdown = Some(0);
+        }
+
         MenaceTickOutcome {
             phase_entered,
             active_effects: effects,
             telegraph,
             hazard_injection,
             final_phase_reached,
+            just_went_critical,
+            game_over,
+            kind: self.kind,
         }
     }
 }
 
 /// Outcome of advancing the menace clock by one strategic month.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MenaceTickOutcome {
     /// Index of the phase just entered, if a transition occurred this tick.
     pub phase_entered: Option<usize>,
@@ -200,6 +306,27 @@ pub struct MenaceTickOutcome {
     pub hazard_injection: Option<String>,
     /// Whether the final phase was just reached this tick.
     pub final_phase_reached: bool,
+    /// Whether the continuous level just crossed `critical_threshold` this tick.
+    pub just_went_critical: bool,
+    /// Whether the countdown reached zero this tick, triggering game-over.
+    pub game_over: bool,
+    /// Kind of menace (copied for convenience so callers do not need the full state).
+    pub kind: MenaceKind,
+}
+
+impl Default for MenaceTickOutcome {
+    fn default() -> Self {
+        Self {
+            phase_entered: None,
+            active_effects: Vec::new(),
+            telegraph: None,
+            hazard_injection: None,
+            final_phase_reached: false,
+            just_went_critical: false,
+            game_over: false,
+            kind: MenaceKind::EnvironmentalCollapse,
+        }
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -358,5 +485,106 @@ mod tests {
             }
         }
         assert_eq!(injection, Some("radiation_storm".into()));
+    }
+
+    // ── Continuous-level pressure tests ──────────────────────────────────────
+
+    fn level_menace() -> MenaceState {
+        // escalation_rate = 5.0, critical_threshold = 10.0 → critical at tick 2
+        MenaceState::new_with_level(
+            sample_menace(),
+            MenaceKind::EnvironmentalCollapse,
+            5.0,
+            10.0,
+        )
+    }
+
+    #[test]
+    fn level_escalates_each_tick() {
+        let mut state = level_menace();
+        assert_eq!(state.level, 0.0);
+        state.tick();
+        assert!((state.level - 5.0).abs() < f32::EPSILON);
+        state.tick();
+        assert!((state.level - 10.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn critical_fires_when_threshold_crossed() {
+        let mut state = level_menace();
+        // Tick 1: level = 5.0, below threshold
+        let out1 = state.tick();
+        assert!(!out1.just_went_critical);
+        // Tick 2: level = 10.0, exactly at threshold
+        let out2 = state.tick();
+        assert!(out2.just_went_critical);
+        assert!(state.countdown.is_some());
+    }
+
+    #[test]
+    fn countdown_decrements_each_tick() {
+        let mut state = level_menace();
+        // Advance to critical.
+        state.tick();
+        state.tick(); // now critical, countdown = DEFAULT_COUNTDOWN
+        let initial = state.countdown.unwrap();
+        state.tick();
+        assert_eq!(state.countdown.unwrap(), initial - 1);
+    }
+
+    #[test]
+    fn game_over_fires_when_countdown_reaches_zero() {
+        let mut state = level_menace();
+        state.tick(); // level 5
+        state.tick(); // level 10, critical — countdown set to DEFAULT
+        // Drain countdown.
+        let mut saw_game_over = false;
+        for _ in 0..=MenaceState::DEFAULT_COUNTDOWN {
+            let out = state.tick();
+            if out.game_over {
+                saw_game_over = true;
+                break;
+            }
+        }
+        assert!(saw_game_over, "GameOver should fire when countdown reaches zero");
+    }
+
+    #[test]
+    fn mitigate_reduces_level() {
+        let mut state = level_menace();
+        state.tick(); // level = 5.0
+        state.mitigate(3.0);
+        assert!((state.level - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mitigate_cancels_countdown_when_drops_below_threshold() {
+        let mut state = level_menace();
+        state.tick();
+        state.tick(); // critical, countdown started
+        assert!(state.countdown.is_some());
+        // Reduce level below threshold.
+        state.mitigate(5.0); // level = 5.0 < 10.0 threshold
+        assert!(state.countdown.is_none(), "countdown should clear when level drops below critical");
+    }
+
+    #[test]
+    fn mitigate_clamps_level_at_zero() {
+        let mut state = level_menace();
+        state.tick(); // level = 5.0
+        state.mitigate(100.0);
+        assert_eq!(state.level, 0.0);
+    }
+
+    #[test]
+    fn kind_preserved_in_outcome() {
+        let mut state = MenaceState::new_with_level(
+            sample_menace(),
+            MenaceKind::RivalFaction,
+            5.0,
+            10.0,
+        );
+        let out = state.tick();
+        assert_eq!(out.kind, MenaceKind::RivalFaction);
     }
 }

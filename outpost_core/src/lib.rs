@@ -340,6 +340,21 @@ pub enum Command {
     /// Tick the menace clock by one strategic month (called internally by `AdvanceColonySol`
     /// when a strategic month fires).  Exposed as a command for testing.
     TickMenace,
+    /// Apply player mitigation to reduce the menace pressure level.
+    ///
+    /// Deducts `resource_cost` units of `resource_id` from the specified colony pool,
+    /// then reduces `menace.level` by `amount`.  Fails if the colony pool cannot cover
+    /// the resource cost.
+    MitigateMenace {
+        /// Colony whose resource pool pays the mitigation cost.
+        colony_id: ColonyId,
+        /// Commodity to spend (e.g. `"energy"`, `"materials"`).
+        resource_id: String,
+        /// Amount of `resource_id` consumed.
+        resource_cost: f64,
+        /// How much menace level to remove.
+        amount: f32,
+    },
     /// Record that the interstellar expedition megaproject has been launched.
     ///
     /// This is the primary victory trigger. The engine evaluates all victory conditions
@@ -868,6 +883,20 @@ pub enum Event {
     MenaceFinalPhaseReached {
         /// Content-pack id of the menace.
         menace_id: String,
+    },
+    /// The menace level crossed its critical threshold; a countdown to game-over has begun.
+    MenaceCritical {
+        /// Category of the menace that went critical.
+        kind: menace::MenaceKind,
+        /// Current level at the moment it went critical.
+        level: f32,
+        /// Strategic months remaining before game-over if left unmitigated.
+        countdown_months: u32,
+    },
+    /// The menace countdown reached zero; the colony network collapses.
+    GameOver {
+        /// The menace kind that caused the collapse.
+        reason: menace::MenaceKind,
     },
     /// A technology node completed research and its effects were applied.
     TechUnlocked {
@@ -2272,6 +2301,8 @@ impl GameEngine {
                 let mut events = Vec::new();
                 if let Some(ms) = &mut self.state.menace_state {
                     let outcome = ms.tick();
+
+                    // ── Phase-based events ────────────────────────────────────
                     if let Some(phase_index) = outcome.phase_entered {
                         let menace_id = ms.definition.id.clone();
                         events.push(Event::MenacePhaseTriggered {
@@ -2290,8 +2321,50 @@ impl GameEngine {
                             events.push(Event::MenaceFinalPhaseReached { menace_id });
                         }
                     }
+
+                    // ── Continuous-level events ───────────────────────────────
+                    if outcome.just_went_critical {
+                        let countdown_months = ms
+                            .countdown
+                            .unwrap_or(menace::MenaceState::DEFAULT_COUNTDOWN);
+                        events.push(Event::MenaceCritical {
+                            kind: outcome.kind,
+                            level: ms.level,
+                            countdown_months,
+                        });
+                    }
+                    if outcome.game_over {
+                        events.push(Event::GameOver {
+                            reason: outcome.kind,
+                        });
+                    }
                 }
                 Ok(events)
+            }
+
+            Command::MitigateMenace {
+                colony_id,
+                resource_id,
+                resource_cost,
+                amount,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let available = self.state.colonies[idx].pool.amount(resource_id);
+                if available < *resource_cost {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "insufficient {resource_id}: need {resource_cost} but have {available:.2}"
+                    )));
+                }
+                self.state.colonies[idx]
+                    .pool
+                    .withdraw(resource_id, *resource_cost);
+                let Some(ms) = &mut self.state.menace_state else {
+                    return Err(EngineError::InvalidState(
+                        "no active menace to mitigate".into(),
+                    ));
+                };
+                ms.mitigate(*amount);
+                Ok(vec![])
             }
 
             Command::LaunchExpedition => {
