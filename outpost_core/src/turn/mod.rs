@@ -352,8 +352,7 @@ impl TurnProcessor {
                     // Dividing rng_prob by hazard_prob_scalar is equivalent to scaling
                     // the effective probability: `rng_prob / s < p` ⟺ `rng_prob < p × s`.
                     // Clamped at a minimum to avoid division by zero.
-                    let adjusted_rng_prob =
-                        rng_prob / hazard_prob_scalar.max(f32::EPSILON);
+                    let adjusted_rng_prob = rng_prob / hazard_prob_scalar.max(f32::EPSILON);
 
                     if let Some(outcome) = roll_hazard(
                         adjusted_rng_prob,

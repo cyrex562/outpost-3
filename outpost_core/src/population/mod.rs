@@ -158,7 +158,8 @@ impl PopulationPool {
     pub fn apply_growth_tick_with_scalar(&mut self, growth_scalar: f32) {
         const GROWTH_RATE_PER_SOL: f32 = 0.001; // 0.1 % per sol at full stability
         if self.stability >= 0.8 {
-            self.count += self.count * GROWTH_RATE_PER_SOL * growth_scalar * (self.stability - 0.79);
+            self.count +=
+                self.count * GROWTH_RATE_PER_SOL * growth_scalar * (self.stability - 0.79);
         }
     }
 }

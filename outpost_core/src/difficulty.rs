@@ -351,7 +351,9 @@ mod tests {
                 terrain_modifiers: Default::default(),
             })
             .collect();
-        let hazard_cfg = HazardConfig { kinds: kinds_entries };
+        let hazard_cfg = HazardConfig {
+            kinds: kinds_entries,
+        };
 
         // Run many sols on Hard and count hazard occurrences.
         let count_hazards = |preset: DifficultyPreset| -> usize {
@@ -437,8 +439,7 @@ mod tests {
     #[test]
     fn yaml_grade_table_roundtrip() {
         let yaml = serde_yaml::to_string(&default_grade_table()).expect("should serialise");
-        let back: DifficultyGradeTable =
-            serde_yaml::from_str(&yaml).expect("should deserialise");
+        let back: DifficultyGradeTable = serde_yaml::from_str(&yaml).expect("should deserialise");
         assert_eq!(back.rows.len(), default_grade_table().rows.len());
     }
 }

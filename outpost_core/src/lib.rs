@@ -1380,13 +1380,11 @@ impl GameEngine {
 
                         // Apply difficulty scalars: stability_decay is scaled by StabilityRate,
                         // population growth/decline is scaled by PopulationGrowth.
-                        let scaled_stability_delta =
-                            report.stability_delta * stability_scalar;
+                        let scaled_stability_delta = report.stability_delta * stability_scalar;
                         let scaled_pop_delta = pop_delta * growth_scalar;
 
                         // Apply stability and population changes.
-                        pop.stability =
-                            (pop.stability + scaled_stability_delta).clamp(0.0, 1.0);
+                        pop.stability = (pop.stability + scaled_stability_delta).clamp(0.0, 1.0);
                         pop.count = (pop.count + scaled_pop_delta).max(0.0);
 
                         events.push(Event::NeedsResolved {
