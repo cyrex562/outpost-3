@@ -172,6 +172,19 @@ impl ServerEvent {
                 name: name.clone(),
                 starting_population: *starting_population,
             },
+            // Semantically equivalent for UI purposes — surface the same
+            // `colony_founded` wire shape so the frontend reducer + wizard
+            // handler don't need a parallel code path.
+            Event::ColonyFoundedAtSite {
+                colony_id,
+                name,
+                starting_population,
+                ..
+            } => Self::ColonyFounded {
+                colony_id: colony_id.to_string(),
+                name: name.clone(),
+                starting_population: *starting_population,
+            },
             Event::ConstructionQueued {
                 colony_id,
                 building_type,

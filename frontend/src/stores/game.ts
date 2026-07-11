@@ -7,7 +7,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Command } from '@/types/commands'
 import type { GameEvent } from '@/types/gameEvents'
 import type { ColonyScreenData } from '@/types/screen'
@@ -57,11 +57,43 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * Fetch fresh `colony_screen` data for the given colony (or the currently
+   * selected one) and store it on `colonyScreen`. No-op in browser mode.
+   *
+   * Errors are swallowed on purpose — a missing colony_screen shouldn't crash
+   * the UI (may happen briefly after founding while the engine catches up).
+   */
+  async function refreshColonyScreen(colonyId?: string | null): Promise<void> {
+    if (!isTauri) return
+    const id = colonyId ?? selectedColonyId.value
+    if (!id) return
+    try {
+      const q = await tauriQuery({ kind: 'colony_screen', colony_id: id })
+      if (q.kind === 'colony_screen' && q.data) {
+        colonyScreen.value = q.data as ColonyScreenData
+      }
+    } catch {
+      // ignore — see doc comment
+    }
+  }
+
+  // Auto-refresh whenever the selection changes in Tauri mode. This covers
+  // tab clicks in ColonyView and the wizard's `selectedColonyId = founded.id`
+  // handoff, so consumers never have to remember to fetch.
+  if (isTauri) {
+    watch(selectedColonyId, (next) => {
+      if (next) void refreshColonyScreen(next)
+    })
+  }
+
+  /**
    * Enqueue a command and dispatch it.
    *
    * In Tauri mode this goes over IPC; the returned events are pushed straight
    * into the world store via `applyEvent` so state stays in sync without
-   * needing a WebSocket round-trip.
+   * needing a WebSocket round-trip. After every command we also refresh the
+   * currently-selected colony's screen so per-turn state (commodity net,
+   * new buildings, etc.) shows without a manual refetch.
    */
   async function sendCommand(cmd: Command): Promise<GameEvent[]> {
     const worldStore = useWorldStore()
@@ -78,16 +110,10 @@ export const useGameStore = defineStore('game', () => {
         for (const ev of events) {
           worldStore.handleServerMessage({ type: 'event', event: ev as unknown as import('@/types/events').ServerEvent })
         }
-        // Refresh colony screen if a colony is selected (so tables repopulate).
+        // Post-command refresh: even if selection didn't change, this catches
+        // per-turn commodity movement, construction progress, etc.
         if (selectedColonyId.value) {
-          try {
-            const q = await tauriQuery({ kind: 'colony_screen', colony_id: selectedColonyId.value })
-            if (q.kind === 'colony_screen' && q.data) {
-              colonyScreen.value = q.data as ColonyScreenData
-            }
-          } catch {
-            // colony_screen may not be available for every colony; ignore.
-          }
+          await refreshColonyScreen(selectedColonyId.value)
         }
       } else {
         if (sessionId.value === null) await openSession()
@@ -131,6 +157,7 @@ export const useGameStore = defineStore('game', () => {
     sendCommand,
     dismissToast,
     setColonyScreen,
+    refreshColonyScreen,
   }
 })
 

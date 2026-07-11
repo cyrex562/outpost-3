@@ -28,9 +28,18 @@ const selectedColony = computed((): ColonyState | null => {
 })
 
 onMounted(() => {
-  // Auto-select first colony if none is selected.
+  // Auto-select first colony if none is selected. The `watch` on
+  // `selectedColonyId` in the game store will fetch the colony_screen in
+  // Tauri mode; nothing else to do here.
   if (!gameStore.selectedColonyId && colonies.value.length > 0) {
     gameStore.selectedColonyId = colonies.value[0].id
+    return
+  }
+  // Selection was already set (e.g. after founding, then navigating back).
+  // Ensure the screen is populated for the current selection.
+  const id = gameStore.selectedColonyId
+  if (id && (!gameStore.colonyScreen || gameStore.colonyScreen.colony_id !== id)) {
+    void gameStore.refreshColonyScreen(id)
   }
 })
 
