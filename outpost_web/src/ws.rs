@@ -129,6 +129,7 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
 }
 
 /// Convert a [`ClientCommand`] into a core [`Command`].
+#[allow(clippy::too_many_lines)]
 fn client_command_to_core(cmd: ClientCommand, _state: &AppState) -> Result<Command, String> {
     use outpost_core::colony::ColonyId;
     use outpost_core::difficulty::DifficultyPreset;

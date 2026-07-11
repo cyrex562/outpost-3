@@ -144,9 +144,9 @@ pub enum ClientCommand {
     },
     /// Activate sandbox-continue mode after a victory.
     ContinueSandbox,
-    /// Snapshot current engine state to the configured SQLite database.
+    /// Snapshot current engine state to the configured `SQLite` database.
     SaveGame,
-    /// Restore engine state from the configured SQLite database.
+    /// Restore engine state from the configured `SQLite` database.
     LoadGame,
     /// Register or replace a directive for a colony.
     SetDirective {
@@ -567,7 +567,8 @@ mod tests {
 
     #[test]
     fn client_command_set_difficulty_deserialises() {
-        let raw = r#"{"type":"command","seq":3,"command":{"kind":"set_difficulty","grade":"hard"}}"#;
+        let raw =
+            r#"{"type":"command","seq":3,"command":{"kind":"set_difficulty","grade":"hard"}}"#;
         let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
         match msg {
             ClientMessage::Command {
@@ -783,7 +784,11 @@ mod tests {
         match msg {
             ClientMessage::Command {
                 seq,
-                command: ClientCommand::SetManualOverride { colony_id: _, enabled },
+                command:
+                    ClientCommand::SetManualOverride {
+                        colony_id: _,
+                        enabled,
+                    },
             } => {
                 assert_eq!(seq, 15);
                 assert!(enabled);
