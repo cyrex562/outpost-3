@@ -834,7 +834,11 @@ mod tests {
         snap.save(&state).unwrap();
         let restored = snap.load().unwrap();
 
-        assert_eq!(restored.expeditions.len(), 1, "expedition count must survive round-trip");
+        assert_eq!(
+            restored.expeditions.len(),
+            1,
+            "expedition count must survive round-trip"
+        );
         let r = &restored.expeditions[0];
         assert_eq!(r.id, exp_id, "expedition id must be stable");
         assert_eq!(r.origin_colony, colony_id);
