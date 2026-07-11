@@ -117,10 +117,7 @@ async fn apply_command(
 }
 
 /// `GET /sessions/{id}/state` — return a JSON snapshot of the session state.
-async fn get_state(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> impl IntoResponse {
+async fn get_state(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
     use outpost_core::Query;
 
     let Some(session) = state.sessions.get(&id) else {
@@ -150,10 +147,7 @@ async fn get_state(
 }
 
 /// `DELETE /sessions/{id}` — tear down a session.
-async fn delete_session(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> impl IntoResponse {
+async fn delete_session(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
     if state.sessions.remove(&id) {
         StatusCode::NO_CONTENT
     } else {
