@@ -156,3 +156,25 @@ export interface BuildingOption {
 export async function listBuildings(): Promise<BuildingOption[]> {
   return invoke<BuildingOption[]>('list_buildings')
 }
+
+export interface PlanetHex {
+  q: number
+  r: number
+  site_id: string
+  terrain: string
+  biome: string
+  deposits: { commodity_id: string; richness: number }[]
+  habitable: boolean
+  suitability: number
+  occupied_by: string | null
+}
+
+export interface PlanetMap {
+  seed: number
+  radius: number
+  hexes: PlanetHex[]
+}
+
+export async function getPlanetMap(): Promise<PlanetMap> {
+  return invoke<PlanetMap>('get_planet_map')
+}
