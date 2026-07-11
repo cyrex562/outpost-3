@@ -3319,8 +3319,11 @@ mod tests {
     fraction: 0.1
   priority: 60
 "#;
-        PackLoader::load(&[("pack.yaml", MANIFEST), ("default_directives.yaml", DIRECTIVES)])
-            .expect("test registry loads")
+        PackLoader::load(&[
+            ("pack.yaml", MANIFEST),
+            ("default_directives.yaml", DIRECTIVES),
+        ])
+        .expect("test registry loads")
     }
 
     #[test]
@@ -3382,7 +3385,10 @@ mod tests {
         let mut commodities = std::collections::HashMap::new();
         commodities.insert(
             "water".to_string(),
-            crate::predicate::CommoditySnapshot { amount: 5.0, delta: 0.0 },
+            crate::predicate::CommoditySnapshot {
+                amount: 5.0,
+                delta: 0.0,
+            },
         );
         let ctx = PredicateContext {
             colony_id,
@@ -3398,7 +3404,10 @@ mod tests {
             .state
             .directive_store
             .evaluate_for_colony(colony_id, &ctx);
-        assert!(action.is_some(), "expected a directive to fire when water is below threshold");
+        assert!(
+            action.is_some(),
+            "expected a directive to fire when water is below threshold"
+        );
     }
 
     #[test]
@@ -3424,7 +3433,9 @@ mod tests {
             .map(|d| d.id)
             .expect("at least one directive exists");
         engine
-            .apply(&Command::RemoveDirective { directive_id: dir_id })
+            .apply(&Command::RemoveDirective {
+                directive_id: dir_id,
+            })
             .unwrap();
         assert!(
             engine
