@@ -5866,6 +5866,7 @@ mod tests {
                 effects: vec![TechEffect::UnlockCapability {
                     capability_id: "cap_alpha".into(),
                 }],
+                ..TechDef::default()
             },
             TechDef {
                 id: "beta".into(),
@@ -5875,6 +5876,7 @@ mod tests {
                 effects: vec![TechEffect::UnlockCapability {
                     capability_id: "cap_beta".into(),
                 }],
+                ..TechDef::default()
             },
         ];
         let registry = TechRegistry::build(defs).unwrap();

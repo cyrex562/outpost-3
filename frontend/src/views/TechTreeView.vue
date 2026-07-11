@@ -208,8 +208,12 @@ async function research(node: TechNode): Promise<void> {
 
     <aside v-if="selected" class="detail" data-testid="tech-detail">
       <h3>{{ selected.name }}</h3>
-      <div class="status" :class="nodeClass(selected.state)">
-        {{ selected.state.replace('_', ' ') }}
+      <div class="badges">
+        <span class="status" :class="nodeClass(selected.state)">
+          {{ selected.state.replace('_', ' ') }}
+        </span>
+        <span v-if="selected.category" class="badge category">{{ selected.category }}</span>
+        <span class="badge tier">tier {{ selected.tier }}</span>
       </div>
       <p class="desc">{{ selected.description || '—' }}</p>
       <dl class="stats">
@@ -295,6 +299,20 @@ async function research(node: TechNode): Promise<void> {
 .status.state-in_progress { color: #8cf; border: 1px solid #468; }
 .status.state-available { color: #ac6; border: 1px solid #574; }
 .status.state-locked { color: #557; border: 1px solid #334; }
+
+.badges { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  border: 1px solid #334;
+  color: #778;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge.category { color: #a8c; border-color: #547; }
+.badge.tier { color: #ac9; border-color: #575; }
 
 .desc { color: #aab; margin-bottom: 0.5rem; font-size: 0.85rem; }
 .stats { display: grid; grid-template-columns: 120px 1fr; gap: 0.3rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.75rem; }

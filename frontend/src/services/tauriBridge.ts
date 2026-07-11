@@ -120,6 +120,7 @@ export interface TechNode {
   name: string
   category: string
   description: string
+  tier: number
   cost: number
   prerequisites: string[]
   state: 'researched' | 'in_progress' | 'available' | 'locked'
