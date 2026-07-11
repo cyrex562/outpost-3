@@ -4482,8 +4482,12 @@ mod tests {
             .interrupt_configs
             .get(&colony_id)
             .expect("config must be stored");
-        assert!(cfg.sources.contains(&InterruptSourceKind::StabilityCritical));
-        assert!(!cfg.sources.contains(&InterruptSourceKind::PredictiveWarning));
+        assert!(cfg
+            .sources
+            .contains(&InterruptSourceKind::StabilityCritical));
+        assert!(!cfg
+            .sources
+            .contains(&InterruptSourceKind::PredictiveWarning));
     }
 
     /// A colony with an empty mask never causes an interrupt halt.
@@ -4535,7 +4539,7 @@ mod tests {
     #[test]
     fn colony_stability_critical_only_config_filters_predictive_warning() {
         use crate::interrupt::{
-            AdvanceResult, InterruptConfig, InterruptSourceKind, InterruptSource, Tier,
+            AdvanceResult, InterruptConfig, InterruptSource, InterruptSourceKind, Tier,
         };
 
         let mut engine = GameEngine::with_seed(2);
@@ -4602,17 +4606,17 @@ mod tests {
                 starting_population: 100,
             })
             .unwrap();
-        let Event::ColonyFounded { colony_id: colony_a, .. } = &events[0] else {
+        let Event::ColonyFounded {
+            colony_id: colony_a,
+            ..
+        } = &events[0]
+        else {
             panic!()
         };
         let colony_a = *colony_a;
 
         // Pre-load steep declining stability for colony A.
-        let tracker = engine
-            .state
-            .stability_trackers
-            .entry(colony_a)
-            .or_default();
+        let tracker = engine.state.stability_trackers.entry(colony_a).or_default();
         for s in [1.0f32, 0.7, 0.4, 0.2, 0.1] {
             tracker.push(s);
         }
