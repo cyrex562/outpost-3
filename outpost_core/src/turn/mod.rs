@@ -22,7 +22,7 @@ use crate::content::ContentRegistry;
 use crate::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
 use crate::hazard::{roll_hazard, HazardConfig, HazardKind};
-use crate::interrupt::StabilityTracker;
+use crate::interrupt::{InterruptConfig, StabilityTracker};
 use crate::map::PlanetMap;
 use crate::menace::MenaceState;
 use crate::migration::{EmigrationGate, PendingMigration, PopulationTracker};
@@ -116,6 +116,10 @@ pub struct GameState {
     pub directive_store: DirectiveStore,
     /// Per-colony stability history for predictive warning trajectory.
     pub stability_trackers: HashMap<ColonyId, StabilityTracker>,
+    /// Per-colony interrupt sensitivity configuration.
+    ///
+    /// Absent entries default to [`InterruptConfig::all_enabled`] (all sources on).
+    pub interrupt_configs: HashMap<ColonyId, InterruptConfig>,
     /// Planetary trade network: infrastructure routes + per-colony overrides.
     pub trade_network: TradeNetwork,
     /// Active emigration gates: player-defined directed voluntary flow routes.
@@ -201,6 +205,7 @@ impl GameState {
             tech_registry: None,
             directive_store: DirectiveStore::default(),
             stability_trackers: HashMap::new(),
+            interrupt_configs: HashMap::new(),
             trade_network: TradeNetwork::new(),
             emigration_gates: Vec::new(),
             pending_migrations: Vec::new(),
