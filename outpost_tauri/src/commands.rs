@@ -13,7 +13,9 @@ use outpost_core::needs::NeedsConfig;
 use outpost_core::snapshot::Snapshot as SnapshotDb;
 use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
 use outpost_core::tech::{TechDef, TechRegistry};
+use outpost_core::trade::SiteId;
 use outpost_core::{Command, Event, GameEngine, Query, QueryResult};
+use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::str::FromStr;
@@ -77,6 +79,12 @@ pub enum ClientCommand {
     },
     EnqueueResearch {
         tech_id: String,
+    },
+    FoundColonyAtSite {
+        name: String,
+        starting_population: u64,
+        site_id: String,
+        focus: Option<String>,
     },
 }
 
@@ -475,6 +483,21 @@ pub fn apply_command(
         },
         ClientCommand::ResearchTech { tech_id } => Command::ResearchTech { tech_id },
         ClientCommand::EnqueueResearch { tech_id } => Command::EnqueueResearch { tech_id },
+        ClientCommand::FoundColonyAtSite {
+            name,
+            starting_population,
+            site_id,
+            focus,
+        } => {
+            let uuid = Uuid::parse_str(&site_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad site_id: {site_id}")))?;
+            Command::FoundColonyAtSite {
+                name,
+                starting_population,
+                site_id: SiteId(uuid),
+                focus,
+            }
+        }
     };
 
     let events = engine.apply(&core_cmd).map_err(CmdError::from)?;
@@ -735,6 +758,108 @@ pub fn list_buildings(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Bui
         .collect();
     out.sort_by(|a, b| a.category.cmp(&b.category).then_with(|| a.name.cmp(&b.name)));
     Ok(out)
+}
+
+/// One hex on the planet surface, enriched with UI-relevant fields.
+#[derive(Debug, Serialize)]
+pub struct PlanetHexWire {
+    pub q: i32,
+    pub r: i32,
+    pub site_id: String,
+    pub terrain: String,
+    pub biome: String,
+    pub deposits: Vec<DepositWire>,
+    pub habitable: bool,
+    pub suitability: f32,
+    pub occupied_by: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DepositWire {
+    pub commodity_id: String,
+    pub richness: f32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlanetMapWire {
+    pub seed: u64,
+    pub radius: u32,
+    pub hexes: Vec<PlanetHexWire>,
+}
+
+/// Return the current planet hex map with per-cell metadata.
+#[tauri::command]
+pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetMapWire> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+
+    let pm = engine
+        .state
+        .planet_map
+        .as_ref()
+        .ok_or_else(|| CmdError::Engine("no planet map — bootstrap first".into()))?;
+
+    // Build reverse coord → site_id lookup so hex rows carry a site_id.
+    let coord_to_site: std::collections::HashMap<_, _> = pm
+        .sites
+        .iter()
+        .map(|(sid, coord)| (*coord, *sid))
+        .collect();
+
+    // Reverse coord → colony_name lookup for the `occupied_by` field.
+    let colony_names: std::collections::HashMap<_, _> = engine
+        .state
+        .colonies
+        .iter()
+        .map(|c| (c.id, c.name.clone()))
+        .collect();
+    let coord_to_colony: std::collections::HashMap<_, _> = pm
+        .colonies
+        .iter()
+        .filter_map(|node| {
+            colony_names
+                .get(&node.colony_id)
+                .map(|name| (node.coord, name.clone()))
+        })
+        .collect();
+
+    let mut hexes: Vec<PlanetHexWire> = pm
+        .cells
+        .values()
+        .map(|cell| {
+            let site_id = coord_to_site
+                .get(&cell.coord)
+                .map(|sid| sid.0.to_string())
+                .unwrap_or_default();
+            PlanetHexWire {
+                q: cell.coord.q,
+                r: cell.coord.r,
+                site_id,
+                terrain: format!("{:?}", cell.terrain),
+                biome: format!("{:?}", cell.biome),
+                deposits: cell
+                    .deposits
+                    .iter()
+                    .map(|d| DepositWire {
+                        commodity_id: d.commodity_id.clone(),
+                        richness: d.richness,
+                    })
+                    .collect(),
+                habitable: cell.is_habitable(),
+                suitability: cell.suitability(),
+                occupied_by: coord_to_colony.get(&cell.coord).cloned(),
+            }
+        })
+        .collect();
+
+    // Stable ordering so the frontend doesn't churn cell z-order between calls.
+    hexes.sort_by_key(|h| (h.r, h.q));
+
+    Ok(PlanetMapWire {
+        seed: pm.seed,
+        radius: pm.radius,
+        hexes,
+    })
 }
 
 /// List `*.o3save` files in the given directory. Returns filenames only.

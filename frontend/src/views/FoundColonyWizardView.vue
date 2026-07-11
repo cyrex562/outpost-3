@@ -3,10 +3,14 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getColonizeTargets,
+  getPlanetMap,
   listBuildings,
   type ColonizeTarget,
   type BuildingOption,
+  type PlanetHex,
+  type PlanetMap,
 } from '@/services/tauriBridge'
+import PlanetHexMap from '@/components/PlanetHexMap.vue'
 import { useGameStore } from '@/stores/game'
 
 const router = useRouter()
@@ -19,8 +23,9 @@ const error = ref<string | null>(null)
 const bodies = ref<ColonizeTarget[]>([])
 const chosenBody = ref<ColonizeTarget | null>(null)
 
-// Step 2: pick a landing site (placeholder: 5 site slots per body)
-const chosenSite = ref<number | null>(null)
+// Step 2: pick a landing site on the planet map
+const planetMap = ref<PlanetMap | null>(null)
+const chosenHex = ref<PlanetHex | null>(null)
 
 // Step 3: choose starting buildings
 const buildings = ref<BuildingOption[]>([])
@@ -35,6 +40,7 @@ onMounted(async () => {
   try {
     bodies.value = await getColonizeTargets()
     buildings.value = await listBuildings()
+    planetMap.value = await getPlanetMap()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -45,7 +51,7 @@ const canAdvance = computed(() => {
     case 1:
       return chosenBody.value !== null
     case 2:
-      return chosenSite.value !== null
+      return chosenHex.value !== null && chosenHex.value.habitable
     case 3:
       return chosenBuildings.value.size > 0
     case 4:
@@ -54,6 +60,10 @@ const canAdvance = computed(() => {
       return false
   }
 })
+
+function pickHex(hex: PlanetHex): void {
+  chosenHex.value = hex
+}
 
 function next(): void {
   if (!canAdvance.value) return
@@ -74,11 +84,22 @@ function toggleBuilding(id: string): void {
 
 async function finish(): Promise<void> {
   error.value = null
-  const events = await gameStore.sendCommand({
-    kind: 'found_colony',
-    name: colonyName.value.trim(),
-    starting_population: startingPop.value,
-  })
+  const site = chosenHex.value?.site_id ?? ''
+  const events = await gameStore.sendCommand(
+    site
+      ? {
+          kind: 'found_colony_at_site',
+          name: colonyName.value.trim(),
+          starting_population: startingPop.value,
+          site_id: site,
+          focus: null,
+        }
+      : {
+          kind: 'found_colony',
+          name: colonyName.value.trim(),
+          starting_population: startingPop.value,
+        },
+  )
   if (events.length === 0) {
     error.value = 'Colony founding rejected — check engine state.'
     return
@@ -136,25 +157,52 @@ async function finish(): Promise<void> {
       <p v-if="bodies.length === 0" class="hint">No colonizable bodies detected.</p>
     </section>
 
-    <!-- Step 2: site placeholder -->
+    <!-- Step 2: planet hex map -->
     <section v-else-if="step === 2" class="panel">
       <p class="hint">
         Choose a landing site on <strong>{{ chosenBody?.body_name }}</strong>.
-        (Placeholder — real surface-hex selection comes with the planet-map view.)
+        Ocean cells are impassable; dashed rings mark the top-3 suitability scores;
+        stars mark occupied hexes.
       </p>
-      <div class="site-grid">
-        <button
-          v-for="i in 6"
-          :key="`site-${i}`"
-          class="site-card"
-          :class="{ selected: chosenSite === i }"
-          @click="chosenSite = i"
-        >
-          Site {{ i }}
-          <span class="site-meta">
-            biome: {{ ['tundra','desert','ocean','plains','highland','crater'][i - 1] }}
-          </span>
-        </button>
+      <div class="map-layout">
+        <div class="map-wrap">
+          <PlanetHexMap
+            v-if="planetMap"
+            :map="planetMap"
+            :selected-site="chosenHex?.site_id ?? null"
+            :highlight-top-n="3"
+            @select="pickHex"
+          />
+          <p v-else class="hint">Loading map…</p>
+        </div>
+        <aside class="site-details">
+          <template v-if="chosenHex">
+            <h4>Selected site</h4>
+            <dl class="stats">
+              <dt>Coord</dt>
+              <dd>({{ chosenHex.q }}, {{ chosenHex.r }})</dd>
+              <dt>Terrain</dt>
+              <dd>{{ chosenHex.terrain }}</dd>
+              <dt>Biome</dt>
+              <dd>{{ chosenHex.biome }}</dd>
+              <dt>Habitable</dt>
+              <dd>{{ chosenHex.habitable ? 'yes' : 'no' }}</dd>
+              <dt>Suitability</dt>
+              <dd>{{ chosenHex.suitability.toFixed(1) }}</dd>
+              <dt v-if="chosenHex.deposits.length">Deposits</dt>
+              <dd v-if="chosenHex.deposits.length">
+                <span
+                  v-for="d in chosenHex.deposits"
+                  :key="d.commodity_id"
+                  class="deposit-chip"
+                >
+                  {{ d.commodity_id }} ({{ (d.richness * 100).toFixed(0) }}%)
+                </span>
+              </dd>
+            </dl>
+          </template>
+          <p v-else class="hint">Click a habitable hex to select it.</p>
+        </aside>
       </div>
     </section>
 
@@ -226,7 +274,12 @@ async function finish(): Promise<void> {
       </label>
       <div class="summary">
         <div>Body: <strong>{{ chosenBody?.body_name }}</strong></div>
-        <div>Site: <strong>{{ chosenSite }}</strong></div>
+        <div v-if="chosenHex">
+          Site:
+          <strong>
+            {{ chosenHex.biome }} · {{ chosenHex.terrain }} ({{ chosenHex.q }}, {{ chosenHex.r }})
+          </strong>
+        </div>
         <div>Supply: <strong>{{ supplyLevel }}</strong></div>
         <div>Buildings: <strong>{{ chosenBuildings.size }}</strong></div>
       </div>
@@ -291,8 +344,8 @@ async function finish(): Promise<void> {
 }
 .hint { color: #667; font-size: 0.85rem; }
 
-.body-grid, .site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; }
-.body-card, .site-card {
+.body-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; }
+.body-card {
   background: #14141e;
   border: 1px solid #334;
   border-radius: 4px;
@@ -305,10 +358,42 @@ async function finish(): Promise<void> {
   flex-direction: column;
   gap: 0.15rem;
 }
-.body-card:hover, .site-card:hover { background: #1a1a2a; }
-.body-card.selected, .site-card.selected { border-color: #468; background: #182030; color: #8cf; }
+.body-card:hover { background: #1a1a2a; }
+.body-card.selected { border-color: #468; background: #182030; color: #8cf; }
 .body-name { font-weight: bold; }
-.body-meta, .site-meta { font-size: 0.75rem; color: #667; }
+.body-meta { font-size: 0.75rem; color: #667; }
+
+/* Step 2 layout */
+.map-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) 220px;
+  gap: 0.75rem;
+  align-items: stretch;
+  min-height: 480px;
+}
+.map-wrap { min-width: 0; }
+.site-details {
+  background: #14141e;
+  border: 1px solid #223;
+  border-radius: 4px;
+  padding: 0.75rem;
+  color: #aab;
+}
+.site-details h4 { color: #8cf; margin-bottom: 0.5rem; }
+.stats { display: grid; grid-template-columns: 80px 1fr; gap: 0.3rem 0.5rem; font-size: 0.8rem; }
+.stats dt { color: #668; }
+.stats dd { color: #aab; }
+.deposit-chip {
+  display: inline-block;
+  background: #1a1a2a;
+  border: 1px solid #443;
+  border-radius: 2px;
+  padding: 0.05rem 0.3rem;
+  color: #ca8;
+  font-size: 0.72rem;
+  margin-right: 0.25rem;
+  margin-top: 0.15rem;
+}
 
 .supply-row { display: flex; gap: 1rem; font-size: 0.85rem; color: #aab; }
 .supply-row label { display: flex; gap: 0.3rem; align-items: center; }
