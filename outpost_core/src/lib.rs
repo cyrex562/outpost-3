@@ -353,6 +353,12 @@ pub enum Command {
     ///
     /// Suppresses the victory screen and lets the player keep playing.
     ContinueAfterVictory,
+    /// Activate sandbox-continue mode after a victory (canonical issue-#96 name).
+    ///
+    /// Equivalent to [`Command::ContinueAfterVictory`].  Sets
+    /// `GameState::sandbox_mode = true` so further commands are accepted
+    /// without `VictoryAchieved` events being re-fired.
+    ContinueSandbox,
     /// Initialise victory tracking with a specific set of conditions.
     ///
     /// If not called, the engine defaults to tracking the capstone expedition condition only.
@@ -1114,7 +1120,10 @@ impl GameEngine {
         // Block all commands once victory is recorded, unless sandbox-continue is active.
         if self.state.victory.is_some()
             && !self.state.victory_state.sandbox_continue
-            && !matches!(cmd, Command::ContinueAfterVictory)
+            && !matches!(
+                cmd,
+                Command::ContinueAfterVictory | Command::ContinueSandbox
+            )
         {
             return Err(EngineError::GameOver);
         }
@@ -2313,8 +2322,9 @@ impl GameEngine {
                 Ok(events)
             }
 
-            Command::ContinueAfterVictory => {
+            Command::ContinueAfterVictory | Command::ContinueSandbox => {
                 self.state.victory_state.activate_sandbox_continue();
+                self.state.sandbox_mode = true;
                 Ok(vec![Event::SandboxContinued])
             }
 
@@ -5400,6 +5410,53 @@ mod tests {
         assert!(
             result.is_ok(),
             "should be able to advance after sandbox continue"
+        );
+    }
+
+    #[test]
+    fn continue_sandbox_command_allows_commands_after_victory() {
+        // Issue #96: Command::ContinueSandbox is the canonical name; verify it works.
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 10.0);
+
+        engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id,
+                progress: 100,
+            })
+            .unwrap();
+
+        // Engine blocks commands before sandbox mode.
+        let err = engine.apply(&Command::AdvanceColonySol).unwrap_err();
+        assert!(
+            matches!(err, EngineError::GameOver),
+            "expected GameOver before sandbox"
+        );
+
+        // Activate via the issue-#96 canonical command name.
+        let events = engine.apply(&Command::ContinueSandbox).unwrap();
+        assert!(
+            events.iter().any(|e| matches!(e, Event::SandboxContinued)),
+            "expected SandboxContinued event"
+        );
+
+        // sandbox_mode top-level flag must be set.
+        assert!(
+            engine.state.sandbox_mode,
+            "GameState::sandbox_mode should be true"
+        );
+
+        // Commands now succeed without GameOver.
+        let result = engine.apply(&Command::AdvanceColonySol);
+        assert!(result.is_ok(), "commands should succeed in sandbox mode");
+
+        // No further VictoryAchieved events emitted in sandbox mode.
+        let advance_events = result.unwrap();
+        assert!(
+            !advance_events
+                .iter()
+                .any(|e| matches!(e, Event::VictoryAchieved { .. })),
+            "VictoryAchieved must not be re-fired in sandbox mode"
         );
     }
 
