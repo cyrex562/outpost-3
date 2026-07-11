@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use super::types::{BuildingDef, CommodityDef, OrbitalStationBlueprint, PackManifest, RecipeDef};
+use super::types::{
+    BuildingDef, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint, PackManifest,
+    RecipeDef,
+};
 
 /// In-memory registry produced by loading one or more content packs.
 ///
@@ -20,6 +23,8 @@ pub struct ContentRegistry {
     pub(super) buildings: HashMap<String, BuildingDef>,
     /// All orbital station blueprints, keyed by id.
     pub orbital_blueprints: HashMap<String, OrbitalStationBlueprint>,
+    /// Default directives inserted into every newly-founded colony.
+    pub default_directives: Vec<DefaultDirectiveDef>,
 }
 
 impl ContentRegistry {
@@ -30,6 +35,7 @@ impl ContentRegistry {
         self.recipes.extend(other.recipes);
         self.buildings.extend(other.buildings);
         self.orbital_blueprints.extend(other.orbital_blueprints);
+        self.default_directives.extend(other.default_directives);
     }
 
     /// The manifest of the most-recently loaded pack.
@@ -89,6 +95,12 @@ impl ContentRegistry {
     /// Insert or replace an orbital station blueprint (used in tests and harness tooling).
     pub fn insert_orbital_blueprint(&mut self, def: OrbitalStationBlueprint) {
         self.orbital_blueprints.insert(def.id.clone(), def);
+    }
+
+    /// All default directives for newly-founded colonies.
+    #[must_use]
+    pub fn default_directives(&self) -> &[DefaultDirectiveDef] {
+        &self.default_directives
     }
 }
 

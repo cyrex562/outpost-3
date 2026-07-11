@@ -209,3 +209,37 @@ pub struct OrbitalStationBlueprint {
 fn default_build_months() -> u32 {
     3
 }
+
+/// Action template for a default directive — a subset of [`crate::Command`]
+/// variants that make sense as colony-automation actions and can be represented
+/// without a specific colony ID (which is filled in at founding time).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind")]
+pub enum DefaultAction {
+    /// Run the colony-sol advance as the automated action.
+    AdvanceColonySol,
+    /// Assign labour to a named slot (fraction of available labour).
+    AssignLabourFraction {
+        /// Production slot name (e.g. `"life_support"`).
+        slot: String,
+        /// Fraction of available labour to allocate, in `[0.0, 1.0]`.
+        fraction: f32,
+    },
+}
+
+/// Template for a default directive inserted into every newly-founded colony.
+///
+/// The `predicate` and `action` are instantiated with the new colony's ID when
+/// `Command::FoundColony` is processed.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DefaultDirectiveDef {
+    /// Human-readable label / intent description for this directive.
+    pub label: String,
+    /// Condition that must hold for the action to fire each sol.
+    pub predicate: crate::predicate::Predicate,
+    /// Action template to execute when the predicate matches.
+    pub action: DefaultAction,
+    /// Evaluation priority — higher = checked first.
+    #[serde(default)]
+    pub priority: u8,
+}

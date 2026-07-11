@@ -1,0 +1,40 @@
+# Default directives inserted into every newly-founded colony.
+#
+# These provide sensible operational baselines so a fresh colony can run
+# autonomously from sol 1 without manual intervention (management-by-exception).
+#
+# Fields:
+#   label     - Human-readable intent description.
+#   predicate - Condition that triggers the action (uses the shared predicate
+#               language from outpost_core::predicate).
+#   action    - Command template to fire when the predicate holds.
+#               "kind: AdvanceColonySol" means "continue running the colony sol".
+#               "kind: AssignLabourFraction" assigns a fraction of available labour.
+#   priority  - Higher value = evaluated first; 0–255.
+
+- label: maintain_water_stockpile
+  predicate:
+    kind: StockpileBelow
+    commodity_id: water
+    threshold: 10.0
+  action:
+    kind: AdvanceColonySol
+  priority: 80
+
+- label: prioritise_food_production
+  predicate:
+    kind: StockpileBelow
+    commodity_id: food
+    threshold: 20.0
+  action:
+    kind: AdvanceColonySol
+  priority: 70
+
+- label: allocate_life_support_labour
+  predicate:
+    kind: Always
+  action:
+    kind: AssignLabourFraction
+    slot: life_support
+    fraction: 0.1
+  priority: 60

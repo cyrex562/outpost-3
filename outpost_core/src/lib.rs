@@ -1622,6 +1622,8 @@ impl GameEngine {
                 let colony = colony::Colony::new(name.clone());
                 let id = colony.id;
                 self.state.add_colony(colony, *starting_population);
+                // Insert default directives from the loaded content registry.
+                self.insert_default_directives(id);
                 Ok(vec![Event::ColonyFounded {
                     colony_id: id,
                     name: name.clone(),
@@ -1811,6 +1813,8 @@ impl GameEngine {
                 let colony = colony::Colony::new(name.clone());
                 let colony_id = colony.id;
                 self.state.add_colony(colony, *starting_population);
+                // Insert default directives from the loaded content registry.
+                self.insert_default_directives(colony_id);
                 // Place colony node on the map.
                 let pm_mut = self
                     .state
@@ -3098,6 +3102,51 @@ impl GameEngine {
             .position(|c| c.id == id)
             .ok_or(EngineError::ColonyNotFound(id))
     }
+
+    /// Instantiate default directives from the loaded content registry and
+    /// insert them into the `DirectiveStore` keyed by `colony_id`.
+    ///
+    /// No-op when no content registry is loaded.
+    fn insert_default_directives(&mut self, colony_id: ColonyId) {
+        use content::types::DefaultAction;
+
+        let Some(registry) = &self.state.registry else {
+            return;
+        };
+        let templates: Vec<_> = registry.default_directives().to_vec();
+        for def in templates {
+            let action = match def.action {
+                DefaultAction::AdvanceColonySol => Command::AdvanceColonySol,
+                DefaultAction::AssignLabourFraction { slot, fraction } => {
+                    // Snapshot available labour at founding (may be 0 until first sol).
+                    let labour = self
+                        .state
+                        .populations
+                        .iter()
+                        .zip(self.state.colonies.iter())
+                        .find(|(_, c)| c.id == colony_id)
+                        .map_or(0, |(pop, _)| {
+                            #[allow(
+                                clippy::cast_possible_truncation,
+                                clippy::cast_sign_loss,
+                                clippy::cast_precision_loss
+                            )]
+                            let units =
+                                ((pop.available_labour() as f64) * f64::from(fraction)) as u64;
+                            units
+                        });
+                    Command::AssignLabour {
+                        colony_id,
+                        slot,
+                        labour,
+                    }
+                }
+            };
+            let directive =
+                directive::Directive::new(colony_id, def.predicate, action, def.priority);
+            self.state.directive_store.set_directive(directive);
+        }
+    }
 }
 
 /// Return a canonical `(from, to)` key for the infra-route map.
@@ -3233,6 +3282,205 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    // ── Default directives ────────────────────────────────────────────────
+
+    /// Build a minimal content registry that includes all three default directives
+    /// from the embedded YAML string (mirrors `content/core/default_directives.yaml`).
+    fn registry_with_defaults() -> crate::content::ContentRegistry {
+        use crate::content::PackLoader;
+        const MANIFEST: &str = "id: test\nname: Test\nversion: \"0.1.0\"";
+        const DIRECTIVES: &str = r#"
+- label: maintain_water_stockpile
+  predicate:
+    kind: StockpileBelow
+    commodity_id: water
+    threshold: 10.0
+  action:
+    kind: AdvanceColonySol
+  priority: 80
+
+- label: prioritise_food_production
+  predicate:
+    kind: StockpileBelow
+    commodity_id: food
+    threshold: 20.0
+  action:
+    kind: AdvanceColonySol
+  priority: 70
+
+- label: allocate_life_support_labour
+  predicate:
+    kind: Always
+  action:
+    kind: AssignLabourFraction
+    slot: life_support
+    fraction: 0.1
+  priority: 60
+"#;
+        PackLoader::load(&[
+            ("pack.yaml", MANIFEST),
+            ("default_directives.yaml", DIRECTIVES),
+        ])
+        .expect("test registry loads")
+    }
+
+    #[test]
+    fn found_colony_with_registry_populates_directive_store() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_defaults());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "New Haven".into(),
+                starting_population: 200,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded");
+        };
+        let directives: Vec<_> = engine
+            .state
+            .directive_store
+            .directives
+            .iter()
+            .filter(|d| d.colony_id == *colony_id)
+            .collect();
+        assert!(
+            directives.len() >= 3,
+            "expected at least 3 default directives, got {}",
+            directives.len()
+        );
+    }
+
+    #[test]
+    fn found_colony_without_registry_has_empty_directive_store() {
+        let mut engine = GameEngine::new();
+        // No registry loaded — directive store should remain empty.
+        engine
+            .apply(&Command::FoundColony {
+                name: "Ghost Colony".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        assert!(engine.state.directive_store.directives.is_empty());
+    }
+
+    #[test]
+    fn default_directives_evaluate_correctly_on_first_sol() {
+        use crate::predicate::PredicateContext;
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_defaults());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Eden".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded");
+        };
+        let colony_id = *colony_id;
+        // Build a context with water = 5 (below 10 threshold) — water directive should fire.
+        let mut commodities = std::collections::HashMap::new();
+        commodities.insert(
+            "water".to_string(),
+            crate::predicate::CommoditySnapshot {
+                amount: 5.0,
+                delta: 0.0,
+            },
+        );
+        let ctx = PredicateContext {
+            colony_id,
+            population: 100.0,
+            stability: 0.8,
+            available_labour: 80.0,
+            system_research: 0.0,
+            sol: 1,
+            month: 0,
+            commodities,
+        };
+        let action = engine
+            .state
+            .directive_store
+            .evaluate_for_colony(colony_id, &ctx);
+        assert!(
+            action.is_some(),
+            "expected a directive to fire when water is below threshold"
+        );
+    }
+
+    #[test]
+    fn player_can_remove_default_directive() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_defaults());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Outpost Alpha".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded");
+        };
+        let colony_id = *colony_id;
+        let dir_id = engine
+            .state
+            .directive_store
+            .directives
+            .iter()
+            .find(|d| d.colony_id == colony_id)
+            .map(|d| d.id)
+            .expect("at least one directive exists");
+        engine
+            .apply(&Command::RemoveDirective {
+                directive_id: dir_id,
+            })
+            .unwrap();
+        assert!(
+            engine
+                .state
+                .directive_store
+                .directives
+                .iter()
+                .all(|d| d.id != dir_id),
+            "removed directive should be gone"
+        );
+    }
+
+    #[test]
+    fn player_can_override_default_directive() {
+        use crate::directive::Directive;
+        use crate::predicate::Predicate;
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_defaults());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Outpost Beta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded");
+        };
+        let colony_id = *colony_id;
+        // Replace any existing directive with a custom one.
+        let custom = Directive::new(colony_id, Predicate::Never, Command::AdvanceColonySol, 255);
+        let custom_id = custom.id;
+        engine
+            .apply(&Command::SetDirective {
+                directive: Box::new(custom),
+            })
+            .unwrap();
+        assert!(
+            engine
+                .state
+                .directive_store
+                .directives
+                .iter()
+                .any(|d| d.id == custom_id && d.priority == 255),
+            "custom override directive should be present with priority 255"
+        );
     }
 
     // ── QueueConstruction ──
