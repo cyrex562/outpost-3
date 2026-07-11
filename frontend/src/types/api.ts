@@ -15,6 +15,12 @@ export interface ColonySummary {
   id: string
   name: string
   population: number
+  stability: number
+  available_labour: number
+  /** Commodity pool snapshot: [commodity_id, amount] pairs. */
+  commodity_pool: [string, number][]
+  buildings: string[]
+  active_construction: string[]
 }
 
 /** Detailed colony status returned by ColonyStatus query. */

@@ -602,6 +602,16 @@ pub struct ColonySummary {
     pub name: String,
     /// Current colonist head-count (fractional for growth modelling).
     pub population: f32,
+    /// Stability scalar in `[0.0, 1.0]`.
+    pub stability: f32,
+    /// Labour units available this turn.
+    pub available_labour: f32,
+    /// Commodity pool snapshot: `(commodity_id, amount)` pairs.
+    pub commodity_pool: Vec<(String, f32)>,
+    /// Placed building type identifiers.
+    pub buildings: Vec<String>,
+    /// Active construction project identifiers (building_type).
+    pub active_construction: Vec<String>,
 }
 
 /// Detailed colony status returned by [`Query::ColonyStatus`].
@@ -2895,10 +2905,33 @@ impl GameEngine {
                     .colonies
                     .iter()
                     .zip(self.state.populations.iter())
-                    .map(|(c, p)| ColonySummary {
-                        id: c.id,
-                        name: c.name.clone(),
-                        population: p.count,
+                    .map(|(c, p)| {
+                        let commodity_pool = c
+                            .pool
+                            .commodity_ids()
+                            .map(|cid| (cid.to_string(), c.pool.amount(cid) as f32))
+                            .collect();
+                        let buildings = c
+                            .buildings
+                            .iter()
+                            .map(|b| b.building_type.clone())
+                            .collect();
+                        let active_construction = c
+                            .build_queue
+                            .projects
+                            .iter()
+                            .map(|proj| proj.building_type.clone())
+                            .collect();
+                        ColonySummary {
+                            id: c.id,
+                            name: c.name.clone(),
+                            population: p.count,
+                            stability: p.stability,
+                            available_labour: p.available_labor(),
+                            commodity_pool,
+                            buildings,
+                            active_construction,
+                        }
                     })
                     .collect();
                 Ok(QueryResult::Colonies(summaries))
