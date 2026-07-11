@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::colony::{Colony, ColonyId};
 use crate::difficulty::{DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
+use crate::expedition::Expedition;
 use crate::interrupt::{InterruptConfig, StabilityTracker};
 use crate::map::PlanetMap;
 use crate::menace::MenaceState;
@@ -45,7 +46,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// documentation must accompany each bump.
 /// Schema version 2: `populations.count` changed from INTEGER to REAL.
 /// Schema version 3: full `GameState` blob added (`state_json` column); `sandbox_mode` stored in blob.
-pub const SCHEMA_VERSION: u32 = 3;
+/// Schema version 4: `expeditions` field added to `FullStateBlob`.
+pub const SCHEMA_VERSION: u32 = 4;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -136,6 +138,10 @@ struct FullStateBlob {
     // ── Sandbox mode (issue #96) ──────────────────────────────────────────────
     #[serde(default)]
     sandbox_mode: bool,
+
+    // ── In-progress expeditions (issue #139) ─────────────────────────────────
+    #[serde(default)]
+    expeditions: Vec<Expedition>,
 }
 
 impl FullStateBlob {
@@ -175,6 +181,7 @@ impl FullStateBlob {
             modifier_accumulator: state.modifier_accumulator.clone(),
             planet_map: state.planet_map.clone(),
             sandbox_mode: state.sandbox_mode,
+            expeditions: state.expeditions.clone(),
         }
     }
 
@@ -214,12 +221,12 @@ impl FullStateBlob {
             modifier_accumulator: self.modifier_accumulator,
             planet_map: self.planet_map,
             sandbox_mode: self.sandbox_mode,
+            expeditions: self.expeditions,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
             tech_registry: None,
             hazard_config: None,
-            expeditions: Vec::new(),
         }
     }
 }
@@ -793,6 +800,48 @@ mod tests {
             restored.victory_state.sandbox_continue,
             "victory_state.sandbox_continue must mirror sandbox_mode on load"
         );
+    }
+
+    // ── expeditions round-trip (issue #139) ──────────────────────────────
+
+    #[test]
+    fn round_trip_preserves_in_transit_expedition() {
+        use crate::expedition::{Expedition, ExpeditionStatus};
+        use crate::map::HexCoord;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Launch Base"), 500);
+        let colony_id = state.colonies[0].id;
+
+        let exp = Expedition {
+            id: crate::expedition::FieldExpeditionId::new(),
+            origin_colony: colony_id,
+            target_hex: HexCoord { q: 3, r: -1 },
+            crew_count: 8,
+            supply_consumed_per_sol: 2.5,
+            sol_launched: 10,
+            eta_sol: 25,
+            status: ExpeditionStatus::InTransit,
+            supplies_remaining: 87.5,
+            sol_arrived: None,
+            discovered_resources: vec![],
+            is_deep_space: false,
+        };
+        let exp_id = exp.id;
+        state.expeditions.push(exp);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.expeditions.len(), 1, "expedition count must survive round-trip");
+        let r = &restored.expeditions[0];
+        assert_eq!(r.id, exp_id, "expedition id must be stable");
+        assert_eq!(r.origin_colony, colony_id);
+        assert_eq!(r.crew_count, 8);
+        assert_eq!(r.eta_sol, 25);
+        assert_eq!(r.status, ExpeditionStatus::InTransit);
+        assert!((r.supplies_remaining - 87.5).abs() < 1e-4);
     }
 
     // ── on-disk file round-trip ───────────────────────────────────────────
