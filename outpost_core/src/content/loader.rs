@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use super::{
     error::ContentError,
     registry::ContentRegistry,
-    types::{BuildingDef, CommodityDef, PackManifest, RecipeDef},
+    types::{BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef},
 };
 
 /// Named raw file: a `(filename, yaml_text)` pair.
@@ -46,6 +46,8 @@ impl PackLoader {
             collect_table::<CommodityDef>(files, &["commodities.yaml", "resources.yaml"])?;
         let recipes = collect_table::<RecipeDef>(files, &["recipes.yaml"])?;
         let buildings = collect_table::<BuildingDef>(files, &["buildings.yaml"])?;
+        let default_directives =
+            collect_list::<DefaultDirectiveDef>(files, &["default_directives.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
         let commodity_ids: std::collections::HashSet<&str> =
@@ -70,6 +72,7 @@ impl PackLoader {
             recipes,
             buildings,
             orbital_blueprints: std::collections::HashMap::new(),
+            default_directives,
         })
     }
 }
@@ -148,4 +151,21 @@ impl HasId for BuildingDef {
     fn id(&self) -> &str {
         &self.id
     }
+}
+
+/// Collect records from all matching file names into a plain `Vec`.
+///
+/// Unlike [`collect_table`], no deduplication is performed — order is preserved.
+fn collect_list<T>(files: &[RawFile<'_>], names: &[&str]) -> Result<Vec<T>, ContentError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let mut out = Vec::new();
+    for (file_name, text) in files {
+        if names.contains(file_name) {
+            let records: Vec<T> = parse_list(file_name, text)?;
+            out.extend(records);
+        }
+    }
+    Ok(out)
 }
