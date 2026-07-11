@@ -81,3 +81,60 @@ export function buildColonyScreenQuery(
 }
 
 export type { ColonyScreenData }
+
+// ─── Snapshot type (shared with Tauri IPC) ───────────────────────────────────
+
+export interface ColonySummary {
+  id: string
+  name: string
+  sol: number
+  population: number
+  stability: number
+  commodities: Record<string, number>
+}
+
+export interface Snapshot {
+  sol: number
+  month: number
+  colonies: ColonySummary[]
+  events: string[]
+}
+
+// ─── httpApi adapter (mirrors tauriApi shape) ─────────────────────────────────
+
+export const httpApi = {
+  isTauri: false as const,
+
+  async newGame(): Promise<Snapshot> {
+    const sessionId = await createSession()
+    sessionStorage.setItem('session_id', sessionId)
+    return { sol: 0, month: 0, colonies: [], events: [] }
+  },
+
+  async advanceSol(): Promise<Snapshot> {
+    const sessionId = sessionStorage.getItem('session_id') ?? ''
+    const events = await applyCommand(sessionId, { type: 'AdvanceColonySol' } as never)
+    const state = (await getSessionState(sessionId)) as Snapshot | null
+    return state ?? { sol: 0, month: 0, colonies: [], events: events.map((e) => JSON.stringify(e)) }
+  },
+
+  async getSnapshot(): Promise<Snapshot> {
+    const sessionId = sessionStorage.getItem('session_id') ?? ''
+    const state = (await getSessionState(sessionId)) as Snapshot | null
+    return state ?? { sol: 0, month: 0, colonies: [], events: [] }
+  },
+
+  async saveGame(path: string): Promise<void> {
+    const sessionId = sessionStorage.getItem('session_id') ?? ''
+    await request<void>(`/sessions/${sessionId}/save`, { method: 'POST', body: JSON.stringify({ path }) })
+  },
+
+  async loadGame(path: string): Promise<Snapshot> {
+    const sessionId = sessionStorage.getItem('session_id') ?? ''
+    const state = (await request<Snapshot>(`/sessions/${sessionId}/load`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }))
+    return state
+  },
+}
