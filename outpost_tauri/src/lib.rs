@@ -19,15 +19,19 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::new_game,
-            commands::advance_sol,
-            commands::found_colony,
-            commands::queue_construction,
-            commands::assign_labour,
-            commands::enqueue_research,
-            commands::get_snapshot,
+            commands::bootstrap,
+            commands::is_ready,
+            commands::snapshot,
+            commands::apply_command,
+            commands::run_query,
+            commands::reset_engine,
             commands::save_game,
             commands::load_game,
+            commands::list_saves,
+            commands::get_system_bodies,
+            commands::get_tech_tree,
+            commands::get_colonize_targets,
+            commands::list_buildings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Outpost 3");

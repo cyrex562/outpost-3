@@ -23,6 +23,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Outpost 3",
         "width": 1280,
         "height": 800,
@@ -38,15 +39,7 @@
   },
   "plugins": {
     "shell": {
-      "all": false,
       "open": "https?://.+"
-    },
-    "fs": {
-      "all": false,
-      "readFile": true,
-      "writeFile": true,
-      "readDir": true,
-      "scope": ["$APPDATA/*", "$DOCUMENT/*"]
     }
   }
 }
