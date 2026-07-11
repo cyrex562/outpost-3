@@ -148,9 +148,18 @@ impl PopulationPool {
     /// per sol. This is a deliberately simple placeholder; the full demographic
     /// model (immigration waves, fluid migration) ships in Phase 7.
     pub fn apply_growth_tick(&mut self) {
+        self.apply_growth_tick_with_scalar(1.0);
+    }
+
+    /// Apply one turn of population growth with a difficulty scalar.
+    ///
+    /// The `growth_scalar` is the outermost difficulty multiplier applied to the
+    /// growth rate: `effective_rate = base_rate × growth_scalar`.
+    pub fn apply_growth_tick_with_scalar(&mut self, growth_scalar: f32) {
         const GROWTH_RATE_PER_SOL: f32 = 0.001; // 0.1 % per sol at full stability
         if self.stability >= 0.8 {
-            self.count += self.count * GROWTH_RATE_PER_SOL * (self.stability - 0.79);
+            self.count +=
+                self.count * GROWTH_RATE_PER_SOL * growth_scalar * (self.stability - 0.79);
         }
     }
 }

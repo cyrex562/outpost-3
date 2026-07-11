@@ -324,8 +324,11 @@ impl TurnProcessor {
         let _tick: u64 = rand::RngCore::next_u64(&mut self.rng);
 
         if state.needs_config.is_none() {
+            let growth_scalar = state
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::PopulationGrowth);
             for pop in &mut state.populations {
-                pop.apply_growth_tick();
+                pop.apply_growth_tick_with_scalar(growth_scalar);
             }
         }
 
@@ -333,6 +336,9 @@ impl TurnProcessor {
         let mut hazard_outcomes = Vec::new();
         if let Some(hazard_cfg) = &state.hazard_config.clone() {
             use rand::Rng as _;
+            let hazard_prob_scalar = state
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::HazardProbability);
             for (colony, pop) in state.colonies.iter().zip(state.populations.iter()) {
                 let terrain: Option<String> = colony.terrain_id.clone();
                 let pool_entries: Vec<(String, f64)> = colony
@@ -348,8 +354,14 @@ impl TurnProcessor {
                     #[allow(clippy::cast_possible_truncation)]
                     let rng_comm: usize = (rand::RngCore::next_u64(&mut self.rng) as u32) as usize;
 
+                    // Apply difficulty scalar to hazard probability.
+                    // Dividing rng_prob by hazard_prob_scalar is equivalent to scaling
+                    // the effective probability: `rng_prob / s < p` ⟺ `rng_prob < p × s`.
+                    // Clamped at a minimum to avoid division by zero.
+                    let adjusted_rng_prob = rng_prob / hazard_prob_scalar.max(f32::EPSILON);
+
                     if let Some(outcome) = roll_hazard(
-                        rng_prob,
+                        adjusted_rng_prob,
                         rng_sev,
                         rng_comm,
                         kind,
