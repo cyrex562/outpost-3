@@ -224,6 +224,19 @@ fn print_check_human(results: &[AssertionResult], all_passed: bool) {
 }
 
 /// Load and parse a content pack from the given directory path.
+/// Load a content pack from a directory on disk.
+///
+/// Reads `pack.yaml`, `commodities.yaml`, `buildings.yaml`, and `recipes.yaml`
+/// from `pack_dir` (any that are present), then delegates to [`PackLoader::load`].
+///
+/// # Errors
+///
+/// Returns an error string if the directory is missing, any file cannot be read,
+/// or the pack fails to parse or cross-reference validate.
+pub fn load_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegistry, String> {
+    load_pack(pack_dir.to_str().unwrap_or("(invalid utf-8 path)"))
+}
+
 fn load_pack(pack_dir: &str) -> Result<ContentRegistry, String> {
     let dir = std::path::Path::new(pack_dir);
     if !dir.is_dir() {
@@ -745,5 +758,76 @@ imports:
         assert!(cfg.buildings[1].recipe_id.is_none());
         assert_eq!(cfg.imports.len(), 1);
         assert!((cfg.imports[0].rate - 5.0).abs() < 1e-9);
+    }
+
+    // ── Integration tests: core content pack ─────────────────────────────
+
+    /// Resolve the repo-root `content/core` directory relative to this crate's
+    /// manifest, so the test works regardless of the working directory at
+    /// invocation time.
+    fn core_content_dir() -> std::path::PathBuf {
+        // CARGO_MANIFEST_DIR is the directory containing outpost_harness/Cargo.toml
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        manifest.parent().unwrap().join("content").join("core")
+    }
+
+    #[test]
+    fn core_pack_loads_successfully() {
+        let dir = core_content_dir();
+        let registry = load_from_dir(&dir).expect("core content pack should load without error");
+        assert_eq!(registry.manifest().id, "core");
+    }
+
+    #[test]
+    fn core_pack_has_at_least_six_commodities() {
+        let dir = core_content_dir();
+        let registry = load_from_dir(&dir).unwrap();
+        let count = registry.commodities().count();
+        assert!(
+            count >= 6,
+            "expected ≥ 6 commodities in core pack, found {count}"
+        );
+    }
+
+    #[test]
+    fn core_pack_has_at_least_three_recipes() {
+        let dir = core_content_dir();
+        let registry = load_from_dir(&dir).unwrap();
+        let count = registry.recipes().count();
+        assert!(
+            count >= 3,
+            "expected ≥ 3 recipes in core pack, found {count}"
+        );
+    }
+
+    #[test]
+    fn core_pack_defines_required_commodity_ids() {
+        let dir = core_content_dir();
+        let registry = load_from_dir(&dir).unwrap();
+        for id in &[
+            "water",
+            "food",
+            "power",
+            "metals",
+            "rare_earth",
+            "bio_matter",
+        ] {
+            assert!(
+                registry.commodity(id).is_some(),
+                "core pack missing required commodity '{id}'"
+            );
+        }
+    }
+
+    #[test]
+    fn core_pack_defines_required_recipes() {
+        let dir = core_content_dir();
+        let registry = load_from_dir(&dir).unwrap();
+        for id in &["water_extraction", "hydroponics", "bio_smelting"] {
+            assert!(
+                registry.recipe(id).is_some(),
+                "core pack missing required recipe '{id}'"
+            );
+        }
     }
 }
