@@ -16,6 +16,7 @@
 
 pub mod config;
 pub mod routes;
+pub mod sessions;
 pub mod state;
 pub mod ws;
 pub mod wsmsg;

@@ -6,6 +6,7 @@ use outpost_core::{Event, GameEngine};
 use tokio::sync::broadcast;
 
 use crate::config::RuntimeConfig;
+use crate::sessions::SessionRegistry;
 
 /// Capacity of the broadcast channel that distributes engine events to WebSocket clients.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -18,6 +19,8 @@ pub struct AppStateInner {
     pub engine: Mutex<GameEngine>,
     /// Broadcast sender — every `apply` call fans events out to all connected clients.
     pub events: broadcast::Sender<Event>,
+    /// Registry of named game sessions (one engine each).
+    pub sessions: SessionRegistry,
 }
 
 /// Cheaply-cloneable handle to the application state.
@@ -31,5 +34,6 @@ pub fn new_state(config: RuntimeConfig) -> AppState {
         config,
         engine: Mutex::new(GameEngine::new()),
         events: tx,
+        sessions: SessionRegistry::new(),
     })
 }
