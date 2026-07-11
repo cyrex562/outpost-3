@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameSocket } from '@/composables/useGameSocket'
 import { useWorldStore } from '@/stores/worldStore'
-import { isTauri, resetEngine, saveGame, listSaves, loadGame } from '@/services/tauriBridge'
+import { exitApp as tauriExit, isTauri, resetEngine, saveGame, listSaves, loadGame } from '@/services/tauriBridge'
 import { useGameStore } from '@/stores/game'
 
 useGameSocket()
@@ -67,11 +67,9 @@ async function goToMainMenu(): Promise<void> {
   router.push('/')
 }
 
-function exitApp(): void {
+async function exitApp(): Promise<void> {
   if (isTauri) {
-    import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
-      getCurrentWebviewWindow().close()
-    })
+    await tauriExit()
   } else {
     window.close()
   }

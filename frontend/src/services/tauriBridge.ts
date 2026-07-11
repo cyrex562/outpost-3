@@ -88,6 +88,12 @@ export async function resetEngine(): Promise<void> {
   return invoke<void>('reset_engine')
 }
 
+/** Terminate the desktop process. No-op in browser mode. */
+export async function exitApp(): Promise<void> {
+  if (!isTauri) return
+  return invoke<void>('exit_app')
+}
+
 export async function saveGame(path: string): Promise<void> {
   return invoke<void>('save_game', { path })
 }
