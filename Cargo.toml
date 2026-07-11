@@ -3,6 +3,9 @@ members = [
     "outpost_core",
     "outpost_harness",
     "outpost_web",
+    # outpost_tauri is excluded from CI builds — requires WebKit2GTK system libs
+    # that may not be present in the CI environment. Build locally with:
+    #   cargo tauri dev  (inside outpost_tauri/)
 ]
 resolver = "2"
 
