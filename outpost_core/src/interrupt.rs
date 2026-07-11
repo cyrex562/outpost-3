@@ -11,6 +11,8 @@
 //! - [`Tier::Notable`]  — logged in digest; does not stop fast-forward.
 //! - [`Tier::Ambient`]  — background; visible only in the event log.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::colony::ColonyId;
@@ -55,6 +57,102 @@ pub enum InterruptSource {
     TechUnlocked,
     /// The colony's stability dropped below the critical floor.
     StabilityCritical(ColonyId),
+}
+
+/// Discriminant tag for [`InterruptSource`] used in [`InterruptSourceMask`].
+///
+/// One variant per [`InterruptSource`] variant; used to build a per-colony
+/// set of enabled interrupt sources without carrying source payload data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum InterruptSourceKind {
+    /// Matches [`InterruptSource::PredictiveWarning`].
+    PredictiveWarning,
+    /// Matches [`InterruptSource::EventFired`].
+    EventFired,
+    /// Matches [`InterruptSource::ConstructionComplete`].
+    ConstructionComplete,
+    /// Matches [`InterruptSource::TechUnlocked`].
+    TechUnlocked,
+    /// Matches [`InterruptSource::StabilityCritical`].
+    StabilityCritical,
+}
+
+impl InterruptSourceKind {
+    /// Return a set containing every [`InterruptSourceKind`] variant.
+    #[must_use]
+    pub fn all() -> HashSet<Self> {
+        [
+            Self::PredictiveWarning,
+            Self::EventFired,
+            Self::ConstructionComplete,
+            Self::TechUnlocked,
+            Self::StabilityCritical,
+        ]
+        .into_iter()
+        .collect()
+    }
+}
+
+impl From<&InterruptSource> for InterruptSourceKind {
+    fn from(src: &InterruptSource) -> Self {
+        match src {
+            InterruptSource::PredictiveWarning { .. } => Self::PredictiveWarning,
+            InterruptSource::EventFired(_) => Self::EventFired,
+            InterruptSource::ConstructionComplete => Self::ConstructionComplete,
+            InterruptSource::TechUnlocked => Self::TechUnlocked,
+            InterruptSource::StabilityCritical(_) => Self::StabilityCritical,
+        }
+    }
+}
+
+/// Set of interrupt source kinds that will be surfaced for a colony.
+///
+/// An empty set means the colony never causes an interrupt halt.
+pub type InterruptSourceMask = HashSet<InterruptSourceKind>;
+
+/// Per-colony interrupt sensitivity configuration.
+///
+/// Controls which interrupt sources are surfaced when
+/// `advance_until_interrupted` runs.  The default (all sources enabled)
+/// preserves existing behaviour.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterruptConfig {
+    /// The set of source kinds that will be surfaced for this colony.
+    ///
+    /// Interrupts whose source kind is absent from `sources` are silently
+    /// dropped — they neither halt fast-forward nor appear in the digest.
+    pub sources: InterruptSourceMask,
+}
+
+impl InterruptConfig {
+    /// Create a config with every interrupt source enabled (default behaviour).
+    #[must_use]
+    pub fn all_enabled() -> Self {
+        Self {
+            sources: InterruptSourceKind::all(),
+        }
+    }
+
+    /// Create a config that suppresses all interrupts (silent colony).
+    #[must_use]
+    pub fn silent() -> Self {
+        Self {
+            sources: HashSet::new(),
+        }
+    }
+
+    /// Return `true` if the given interrupt source is enabled by this config.
+    #[must_use]
+    pub fn allows(&self, source: &InterruptSource) -> bool {
+        self.sources.contains(&InterruptSourceKind::from(source))
+    }
+}
+
+impl Default for InterruptConfig {
+    fn default() -> Self {
+        Self::all_enabled()
+    }
 }
 
 /// A single interrupt emitted during turn processing.

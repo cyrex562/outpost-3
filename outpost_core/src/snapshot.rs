@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::colony::{Colony, ColonyId};
 use crate::difficulty::{DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
-use crate::interrupt::StabilityTracker;
+use crate::interrupt::{InterruptConfig, StabilityTracker};
 use crate::map::PlanetMap;
 use crate::menace::MenaceState;
 use crate::migration::{EmigrationGate, PendingMigration, PopulationTracker};
@@ -110,6 +110,10 @@ struct FullStateBlob {
     stability_trackers: HashMap<ColonyId, StabilityTracker>,
     population_trackers: HashMap<ColonyId, PopulationTracker>,
 
+    // ── M7: Per-colony interrupt config ──────────────────────────────────────
+    #[serde(default)]
+    interrupt_configs: HashMap<ColonyId, InterruptConfig>,
+
     // ── Difficulty / Menace / Victory ────────────────────────────────────────
     difficulty_preset: DifficultyPreset,
     difficulty_grade_table: DifficultyGradeTable,
@@ -157,6 +161,7 @@ impl FullStateBlob {
             pending_migrations: state.pending_migrations.clone(),
             stability_trackers: state.stability_trackers.clone(),
             population_trackers: state.population_trackers.clone(),
+            interrupt_configs: state.interrupt_configs.clone(),
             difficulty_preset: state.difficulty_preset,
             difficulty_grade_table: state.difficulty_grade_table.clone(),
             difficulty_scalar: state.difficulty_scalar.clone(),
@@ -195,6 +200,7 @@ impl FullStateBlob {
             pending_migrations: self.pending_migrations,
             stability_trackers: self.stability_trackers,
             population_trackers: self.population_trackers,
+            interrupt_configs: self.interrupt_configs,
             difficulty_preset: self.difficulty_preset,
             difficulty_grade_table: self.difficulty_grade_table,
             difficulty_scalar: self.difficulty_scalar,

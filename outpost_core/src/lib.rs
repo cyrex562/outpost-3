@@ -470,6 +470,20 @@ pub enum Command {
         /// Number of haulers to remove.
         count: u32,
     },
+
+    // ── M7: Per-colony interrupt configuration ────────────────────────────
+    /// Set the interrupt sensitivity configuration for a colony.
+    ///
+    /// Replaces any existing config for `colony_id`.  Use
+    /// [`interrupt::InterruptConfig::silent`] to suppress all interrupts from
+    /// a colony, or [`interrupt::InterruptConfig::all_enabled`] to restore the
+    /// default.
+    SetColonyInterruptConfig {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// New interrupt sensitivity config for this colony.
+        config: interrupt::InterruptConfig,
+    },
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -2053,6 +2067,14 @@ impl GameEngine {
                 Ok(vec![])
             }
 
+            Command::SetColonyInterruptConfig { colony_id, config } => {
+                self.find_colony_index(*colony_id)?;
+                self.state
+                    .interrupt_configs
+                    .insert(*colony_id, config.clone());
+                Ok(vec![])
+            }
+
             Command::OpenEmigrationGate {
                 from_colony,
                 to_colony,
@@ -2873,6 +2895,18 @@ impl GameEngine {
             let turn_interrupts = self.collect_turn_interrupts(&events);
 
             for irq in turn_interrupts {
+                // Per-colony config filtering: if the interrupt is scoped to a
+                // colony that has a non-default config, drop sources not in the
+                // mask.  System-wide interrupts (colony_id == None) are always
+                // surfaced.
+                if let Some(cid) = irq.colony_id {
+                    if let Some(cfg) = self.state.interrupt_configs.get(&cid) {
+                        if !cfg.allows(&irq.source) {
+                            continue;
+                        }
+                    }
+                }
+
                 if irq.tier >= threshold {
                     let digest_items: Vec<ui::DigestItem> = digest
                         .iter()
@@ -4411,6 +4445,192 @@ mod tests {
         assert!(
             !digest.is_empty(),
             "digest should contain accumulated Urgent interrupts"
+        );
+    }
+
+    // ── M7: Per-colony interrupt config (issue #102) ─────────────────────────
+
+    /// SetColonyInterruptConfig is handled by the engine and stored.
+    #[test]
+    fn set_colony_interrupt_config_stored() {
+        use crate::interrupt::{InterruptConfig, InterruptSourceKind};
+
+        let mut engine = GameEngine::with_seed(0);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Config Colony".into(),
+                starting_population: 10,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Set to only StabilityCritical.
+        let mut sources = std::collections::HashSet::new();
+        sources.insert(InterruptSourceKind::StabilityCritical);
+        engine
+            .apply(&Command::SetColonyInterruptConfig {
+                colony_id,
+                config: InterruptConfig { sources },
+            })
+            .unwrap();
+
+        let cfg = engine
+            .state
+            .interrupt_configs
+            .get(&colony_id)
+            .expect("config must be stored");
+        assert!(cfg.sources.contains(&InterruptSourceKind::StabilityCritical));
+        assert!(!cfg.sources.contains(&InterruptSourceKind::PredictiveWarning));
+    }
+
+    /// A colony with an empty mask never causes an interrupt halt.
+    #[test]
+    fn colony_with_empty_mask_never_halts() {
+        use crate::interrupt::{AdvanceResult, InterruptConfig, Tier};
+
+        let mut engine = GameEngine::with_seed(1);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Silent Colony".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Pre-load a steep declining stability trajectory that would normally
+        // fire an Urgent PredictiveWarning.
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
+        for s in [1.0f32, 0.7, 0.5, 0.3, 0.22] {
+            tracker.push(s);
+        }
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].stability = 0.22;
+
+        // Disable all interrupts for this colony.
+        engine
+            .apply(&Command::SetColonyInterruptConfig {
+                colony_id,
+                config: InterruptConfig::silent(),
+            })
+            .unwrap();
+
+        let result = engine.advance_until_interrupted(20, Tier::Urgent).unwrap();
+        assert!(
+            matches!(result, AdvanceResult::Completed { .. }),
+            "colony with empty mask must never cause halt; got {result:?}"
+        );
+    }
+
+    /// A colony with only StabilityCritical only halts on that source.
+    #[test]
+    fn colony_stability_critical_only_config_filters_predictive_warning() {
+        use crate::interrupt::{
+            AdvanceResult, InterruptConfig, InterruptSourceKind, InterruptSource, Tier,
+        };
+
+        let mut engine = GameEngine::with_seed(2);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Critical-Only Colony".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // Steep declining trajectory → would fire PredictiveWarning (Urgent).
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
+        for s in [1.0f32, 0.7, 0.5, 0.3, 0.22] {
+            tracker.push(s);
+        }
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].stability = 0.22;
+
+        // Only allow StabilityCritical interrupts.
+        let mut sources = std::collections::HashSet::new();
+        sources.insert(InterruptSourceKind::StabilityCritical);
+        engine
+            .apply(&Command::SetColonyInterruptConfig {
+                colony_id,
+                config: InterruptConfig { sources },
+            })
+            .unwrap();
+
+        // PredictiveWarning is suppressed, so advance should complete without halt
+        // (unless a StabilityCritical fires, which requires stability ≤ the floor).
+        let result = engine.advance_until_interrupted(5, Tier::Urgent).unwrap();
+        match result {
+            AdvanceResult::Halted { interrupt, .. } => {
+                // If it did halt, it must be StabilityCritical, not PredictiveWarning.
+                assert!(
+                    matches!(interrupt.source, InterruptSource::StabilityCritical(_)),
+                    "only StabilityCritical should be able to halt; got {:?}",
+                    interrupt.source
+                );
+            }
+            AdvanceResult::Completed { .. } => {
+                // Completed is also valid — PredictiveWarning was filtered.
+            }
+        }
+    }
+
+    /// Disable all interrupts for colony A; verify it never halts on stability drop.
+    #[test]
+    fn disable_all_interrupts_for_colony_a_never_halts_on_stability() {
+        use crate::interrupt::{AdvanceResult, InterruptConfig, Tier};
+
+        let mut engine = GameEngine::with_seed(3);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Colony A".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id: colony_a, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_a = *colony_a;
+
+        // Pre-load steep declining stability for colony A.
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_a)
+            .or_default();
+        for s in [1.0f32, 0.7, 0.4, 0.2, 0.1] {
+            tracker.push(s);
+        }
+        let idx = engine.find_colony_index(colony_a).unwrap();
+        engine.state.populations[idx].stability = 0.1;
+
+        // Disable all interrupts for colony A.
+        engine
+            .apply(&Command::SetColonyInterruptConfig {
+                colony_id: colony_a,
+                config: InterruptConfig::silent(),
+            })
+            .unwrap();
+
+        let result = engine.advance_until_interrupted(10, Tier::Urgent).unwrap();
+        assert!(
+            matches!(result, AdvanceResult::Completed { .. }),
+            "colony A with all interrupts disabled must never halt on stability drop; got {result:?}"
         );
     }
 
