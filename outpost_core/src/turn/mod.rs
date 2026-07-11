@@ -643,6 +643,7 @@ mod tests {
             effects: vec![TechEffect::UnlockBuilding {
                 building_id: building_id.to_string(),
             }],
+            ..TechDef::default()
         }];
         (TechRegistry::build(defs).unwrap(), tech_id)
     }
@@ -681,6 +682,7 @@ mod tests {
             effects: vec![TechEffect::UnlockCapability {
                 capability_id: "warp_drive".to_string(),
             }],
+            ..TechDef::default()
         }];
         state.tech_state.set_current_project(tech_id);
         state.tech_registry = Some(TechRegistry::build(defs).unwrap());
@@ -705,6 +707,7 @@ mod tests {
                 category: "production_efficiency".to_string(),
                 value: 0.20,
             }],
+            ..TechDef::default()
         }];
         state.tech_state.set_current_project(tech_id);
         state.tech_registry = Some(TechRegistry::build(defs).unwrap());

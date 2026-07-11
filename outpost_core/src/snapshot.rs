@@ -504,6 +504,7 @@ mod tests {
             effects: vec![TechEffect::UnlockBuilding {
                 building_id: "adv_reactor".to_string(),
             }],
+            ..TechDef::default()
         }];
         state.tech_registry = Some(TechRegistry::build(defs).unwrap());
         state.tech_state.set_current_project(tech_id.clone());

@@ -12,7 +12,7 @@ use outpost_core::difficulty::DifficultyPreset;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::snapshot::Snapshot as SnapshotDb;
 use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
-use outpost_core::tech::{TechDef, TechRegistry};
+use outpost_core::tech::load_tech_registry;
 use outpost_core::trade::SiteId;
 use outpost_core::{Command, Event, GameEngine, Query, QueryResult};
 use uuid::Uuid;
@@ -371,39 +371,21 @@ pub fn bootstrap(
     // Seed a placeholder star system. Content-driven system generation is a
     // future refinement; this gives the UI something to render immediately.
     seed_default_system(&mut engine);
-    seed_default_tech_tree(&mut engine);
+    load_embedded_tech(&mut engine);
 
     let snap = build_snapshot(&engine);
     *engine_state.engine.lock().unwrap() = Some(engine);
     Ok(snap)
 }
 
-fn seed_default_tech_tree(engine: &mut GameEngine) {
-    fn tech(id: &str, name: &str, cost: f32, prereqs: &[&str]) -> TechDef {
-        TechDef {
-            id: id.to_owned(),
-            display_name: name.to_owned(),
-            prerequisites: prereqs.iter().map(|s| (*s).to_owned()).collect(),
-            research_cost: cost,
-            effects: Vec::new(),
-        }
-    }
-    let defs = vec![
-        tech("basic_construction", "Basic Construction", 100.0, &[]),
-        tech("basic_agriculture", "Basic Agriculture", 100.0, &[]),
-        tech("basic_extraction", "Basic Extraction", 100.0, &[]),
-        tech("improved_construction", "Improved Construction", 200.0, &["basic_construction"]),
-        tech("hydroponics", "Hydroponics", 200.0, &["basic_agriculture"]),
-        tech("smelting", "Smelting", 200.0, &["basic_extraction"]),
-        tech("power_grids", "Power Grids", 300.0, &["improved_construction"]),
-        tech("advanced_hydroponics", "Advanced Hydroponics", 300.0, &["hydroponics"]),
-        tech("advanced_smelting", "Advanced Smelting", 300.0, &["smelting"]),
-        tech("orbital_mechanics", "Orbital Mechanics", 500.0, &["power_grids"]),
-        tech("industrial_ecology", "Industrial Ecology", 500.0, &["advanced_hydroponics", "advanced_smelting"]),
-        tech("propulsion_theory", "Propulsion Theory", 800.0, &["orbital_mechanics"]),
-        tech("interstellar_engineering", "Interstellar Engineering", 1600.0, &["propulsion_theory", "industrial_ecology"]),
-    ];
-    if let Ok(registry) = TechRegistry::build(defs) {
+fn load_embedded_tech(engine: &mut GameEngine) {
+    let Some(tech_file) = EMBEDDED_PACK.get_file("tech.yaml") else {
+        return;
+    };
+    let Some(yaml) = tech_file.contents_utf8() else {
+        return;
+    };
+    if let Ok(registry) = load_tech_registry(yaml) {
         engine.state.tech_registry = Some(registry);
     }
 }
@@ -622,6 +604,7 @@ pub struct TechNodeWire {
     pub name: String,
     pub category: String,
     pub description: String,
+    pub tier: u32,
     pub cost: f32,
     pub prerequisites: Vec<String>,
     pub state: String, // researched | in_progress | available | locked
@@ -667,15 +650,21 @@ pub fn get_tech_tree(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Tech
         nodes.push(TechNodeWire {
             id: tech.id.clone(),
             name: tech.display_name.clone(),
-            category: String::new(),
-            description: String::new(),
+            category: tech.category.clone(),
+            description: tech.description.clone(),
+            tier: tech.tier,
             cost: tech.research_cost,
             prerequisites: tech.prerequisites.clone(),
             state: state.to_owned(),
             progress,
         });
     }
-    nodes.sort_by(|a, b| a.name.cmp(&b.name));
+    nodes.sort_by(|a, b| {
+        a.tier
+            .cmp(&b.tier)
+            .then_with(|| a.category.cmp(&b.category))
+            .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(nodes)
 }
 

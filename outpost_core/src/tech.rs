@@ -49,12 +49,31 @@ pub enum TechEffect {
 }
 
 /// Authored technology definition — stored in content pack files.
+///
+/// The YAML schema also accepts a nested `unlocks: { buildings: [...],
+/// resources: [...], bonuses: [...], events: [...] }` block; `buildings` and
+/// `resources` are translated into [`TechEffect::UnlockBuilding`] /
+/// [`TechEffect::UnlockCommodity`] entries when the registry loads. Bonus
+/// and event unlocks are accepted but not yet mapped to core effects.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TechDef {
     /// Unique identifier across all packs.
     pub id: TechId,
-    /// Human-readable name.
+    /// Human-readable name. Also accepts the YAML field `name`.
+    #[serde(alias = "name")]
     pub display_name: String,
+    /// Optional short description shown in the tech tree UI.
+    #[serde(default)]
+    pub description: String,
+    /// Optional category tag used for UI grouping (e.g. `"engineering"`).
+    #[serde(default)]
+    pub category: String,
+    /// Optional tier used purely for UI presentation. Defaults to 1.
+    ///
+    /// The engine derives dependency depth from the prerequisite DAG; `tier`
+    /// is a hint for grouping, not a gate.
+    #[serde(default = "default_tier")]
+    pub tier: u32,
     /// IDs of techs that must be researched before this one is available.
     #[serde(default)]
     pub prerequisites: Vec<TechId>,
@@ -63,6 +82,52 @@ pub struct TechDef {
     /// Effects applied when this tech is completed.
     #[serde(default)]
     pub effects: Vec<TechEffect>,
+    /// Authored unlock spec sugar. Merged into `effects` by
+    /// [`load_tech_registry`]; consumers should read `effects`.
+    #[serde(default)]
+    pub unlocks: TechUnlocks,
+}
+
+fn default_tier() -> u32 {
+    1
+}
+
+impl Default for TechDef {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            display_name: String::new(),
+            description: String::new(),
+            category: String::new(),
+            tier: default_tier(),
+            prerequisites: Vec::new(),
+            research_cost: 0.0,
+            effects: Vec::new(),
+            unlocks: TechUnlocks::default(),
+        }
+    }
+}
+
+/// Authored unlock groupings used by the YAML schema.
+///
+/// `buildings` and `resources` are converted into concrete [`TechEffect`]
+/// entries by [`load_tech_registry`]. `bonuses` (e.g.
+/// `"construction_speed_10_percent"`) and `events` are accepted so authored
+/// content parses cleanly, but they are not yet mapped to engine effects.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TechUnlocks {
+    /// Building ids this tech makes constructable.
+    #[serde(default)]
+    pub buildings: Vec<String>,
+    /// Commodity ids this tech makes produceable / tradeable.
+    #[serde(default)]
+    pub resources: Vec<String>,
+    /// Named bonus slugs. Reserved for future mapping.
+    #[serde(default)]
+    pub bonuses: Vec<String>,
+    /// Event ids surfaced by this tech. Reserved for future mapping.
+    #[serde(default)]
+    pub events: Vec<String>,
 }
 
 // ─── Runtime state ────────────────────────────────────────────────────────────
@@ -372,8 +437,22 @@ pub fn unlocked_buildings<'a, S: ::std::hash::BuildHasher>(
 /// Returns a [`TechRegistryError`] if the YAML is malformed, prerequisites
 /// are unknown, or the DAG contains a cycle.
 pub fn load_tech_registry(yaml: &str) -> Result<TechRegistry, TechLoadError> {
-    let defs: Vec<TechDef> =
+    let mut defs: Vec<TechDef> =
         serde_yaml::from_str(yaml).map_err(|e| TechLoadError::Parse(e.to_string()))?;
+
+    // Translate the YAML `unlocks` sugar into concrete `TechEffect` entries.
+    // `bonuses` and `events` are accepted by the parser but not yet mapped;
+    // the fields remain on `unlocks` so downstream tooling can surface them.
+    for def in &mut defs {
+        for building_id in def.unlocks.buildings.drain(..) {
+            def.effects.push(TechEffect::UnlockBuilding { building_id });
+        }
+        for commodity_id in def.unlocks.resources.drain(..) {
+            def.effects
+                .push(TechEffect::UnlockCommodity { commodity_id });
+        }
+    }
+
     TechRegistry::build(defs).map_err(TechLoadError::Registry)
 }
 
@@ -403,6 +482,7 @@ mod tests {
             effects: vec![TechEffect::UnlockBuilding {
                 building_id: format!("{id}_building"),
             }],
+            ..TechDef::default()
         }
     }
 
@@ -542,6 +622,53 @@ mod tests {
     }
 
     #[test]
+    fn load_tech_registry_parses_placeholder_yaml_schema() {
+        // Sanity check the alias + unlocks-translation path used by the base
+        // pack. Fields the loader has to tolerate: `name` (alias for
+        // display_name), `description`, `category`, `tier`, `research_time_ticks`
+        // (unknown), `resource_costs` (unknown), `unlocks` sugar.
+        let yaml = "\
+- id: basic_construction
+  name: Basic Construction
+  description: Foundational construction techniques.
+  category: engineering
+  tier: 1
+  research_cost: 100.0
+  research_time_ticks: 50
+  prerequisites: []
+  unlocks:
+    buildings:
+      - basic_habitat
+      - warehouse
+    resources:
+      - concrete
+    bonuses:
+      - construction_speed_10_percent
+";
+        let reg = load_tech_registry(yaml).expect("yaml must parse");
+        let def = reg.get("basic_construction").unwrap();
+        assert_eq!(def.display_name, "Basic Construction");
+        assert_eq!(def.description, "Foundational construction techniques.");
+        assert_eq!(def.category, "engineering");
+        assert_eq!(def.tier, 1);
+        // buildings + resources unlocks should have been rewritten as effects.
+        let has_building = def
+            .effects
+            .iter()
+            .any(|e| matches!(e, TechEffect::UnlockBuilding { building_id } if building_id == "basic_habitat"));
+        let has_commodity = def
+            .effects
+            .iter()
+            .any(|e| matches!(e, TechEffect::UnlockCommodity { commodity_id } if commodity_id == "concrete"));
+        assert!(has_building, "expected UnlockBuilding for basic_habitat");
+        assert!(has_commodity, "expected UnlockCommodity for concrete");
+        // buildings should have been drained into effects.
+        assert!(def.unlocks.buildings.is_empty());
+        // bonuses are accepted but preserved on unlocks (not yet mapped).
+        assert_eq!(def.unlocks.bonuses.len(), 1);
+    }
+
+    #[test]
     fn unlock_effects_returned_on_completion() {
         let defs = vec![TechDef {
             id: "alpha".to_string(),
@@ -556,6 +683,7 @@ mod tests {
                     capability_id: "warp".to_string(),
                 },
             ],
+            ..TechDef::default()
         }];
         let reg = TechRegistry::build(defs).unwrap();
         let mut state = TechState::new();
