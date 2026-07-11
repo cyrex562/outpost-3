@@ -1,0 +1,60 @@
+# Difficulty grade table — scalar modifiers per difficulty preset (§7A, §10).
+#
+# Five presets: Sandbox → Easy → Normal → Hard → Brutal.
+# Applied as the outermost multiplier:
+#   effective = base × (1 + Σ tech_bonuses) × difficulty_scalar
+#
+# Normal preset (scalar = 1.0) is the balanced baseline.
+# Values above 1.0 increase the quantity; below 1.0 reduce it.
+
+rows:
+  - quantity: !ProductionRate "*"
+    sandbox: 1.20
+    easy: 1.10
+    normal: 1.00
+    hard: 0.85
+    brutal: 0.70
+
+  - quantity: LaborEfficiency
+    sandbox: 1.20
+    easy: 1.10
+    normal: 1.00
+    hard: 0.85
+    brutal: 0.70
+
+  - quantity: ResearchRate
+    sandbox: 1.50
+    easy: 1.20
+    normal: 1.00
+    hard: 0.80
+    brutal: 0.60
+
+  - quantity: PopulationGrowth
+    sandbox: 1.50
+    easy: 1.20
+    normal: 1.00
+    hard: 0.80
+    brutal: 0.60
+
+  # StabilityRate > 1.0 means faster stability decay on harder difficulty.
+  - quantity: StabilityRate
+    sandbox: 0.50
+    easy: 0.75
+    normal: 1.00
+    hard: 1.30
+    brutal: 1.60
+
+  - quantity: StorageCapacity
+    sandbox: 1.50
+    easy: 1.20
+    normal: 1.00
+    hard: 0.85
+    brutal: 0.70
+
+  # HazardProbability > 1.0 means more frequent environmental hazards.
+  - quantity: HazardProbability
+    sandbox: 0.50
+    easy: 0.75
+    normal: 1.00
+    hard: 1.40
+    brutal: 2.00

@@ -29,6 +29,8 @@ pub enum ModifiableQuantity {
     PopulationGrowth,
     /// Stability change rate.
     StabilityRate,
+    /// Environmental hazard trigger probability.
+    HazardProbability,
 }
 
 // ─── ModifierDescriptor ───────────────────────────────────────────────────────

@@ -1348,6 +1348,14 @@ impl GameEngine {
                 // ── Step 2: Needs resolution ────────────────────────────────
                 // Consume bulk commodities, update stability and population.
                 if let Some(config) = self.state.needs_config.clone() {
+                    let stability_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::StabilityRate);
+                    let growth_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::PopulationGrowth);
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -1370,15 +1378,22 @@ impl GameEngine {
                             &config,
                         );
 
+                        // Apply difficulty scalars: stability_decay is scaled by StabilityRate,
+                        // population growth/decline is scaled by PopulationGrowth.
+                        let scaled_stability_delta =
+                            report.stability_delta * stability_scalar;
+                        let scaled_pop_delta = pop_delta * growth_scalar;
+
                         // Apply stability and population changes.
-                        pop.stability = (pop.stability + report.stability_delta).clamp(0.0, 1.0);
-                        pop.count = (pop.count + pop_delta).max(0.0);
+                        pop.stability =
+                            (pop.stability + scaled_stability_delta).clamp(0.0, 1.0);
+                        pop.count = (pop.count + scaled_pop_delta).max(0.0);
 
                         events.push(Event::NeedsResolved {
                             colony_id: colony.id,
                             composite_satisfaction: report.composite_satisfaction,
-                            stability_delta: report.stability_delta,
-                            population_delta: pop_delta,
+                            stability_delta: scaled_stability_delta,
+                            population_delta: scaled_pop_delta,
                         });
                     }
                 }
@@ -2255,6 +2270,11 @@ impl GameEngine {
 
             // ── Phase 10: Difficulty / Menace / Victory ───────────────────
             Command::SetDifficulty { preset } => {
+                if self.state.sol > 0 {
+                    return Err(EngineError::InvalidState(
+                        "difficulty can only be set before the first turn (sol must be 0)".into(),
+                    ));
+                }
                 self.state.difficulty_preset = *preset;
                 self.state.difficulty_scalar =
                     self.state.difficulty_grade_table.build_scalar(*preset);

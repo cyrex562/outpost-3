@@ -185,6 +185,16 @@ pub fn default_grade_table() -> DifficultyGradeTable {
         brutal: 0.70,
     });
 
+    // Hazard trigger probability — harder difficulty raises hazard frequency
+    table.add_row(DifficultyGradeRow {
+        quantity: ModifiableQuantity::HazardProbability,
+        sandbox: 0.50,
+        easy: 0.75,
+        normal: 1.00,
+        hard: 1.40,
+        brutal: 2.00,
+    });
+
     table
 }
 
@@ -288,5 +298,147 @@ mod tests {
         for p in presets {
             assert!(!p.label().is_empty());
         }
+    }
+
+    #[test]
+    fn default_grade_table_includes_hazard_probability() {
+        let table = default_grade_table();
+        let q = ModifiableQuantity::HazardProbability;
+        let hard = table.build_scalar(DifficultyPreset::Hard);
+        let easy = table.build_scalar(DifficultyPreset::Easy);
+        // Hard difficulty should have a higher hazard probability scalar than Easy.
+        assert!(
+            hard.scalar_for(&q) > easy.scalar_for(&q),
+            "Hard hazard probability scalar ({}) should exceed Easy ({})",
+            hard.scalar_for(&q),
+            easy.scalar_for(&q)
+        );
+    }
+
+    #[test]
+    fn hard_has_lower_growth_scalar_than_easy() {
+        let table = default_grade_table();
+        let q = ModifiableQuantity::PopulationGrowth;
+        let hard = table.build_scalar(DifficultyPreset::Hard);
+        let easy = table.build_scalar(DifficultyPreset::Easy);
+        assert!(
+            easy.scalar_for(&q) > hard.scalar_for(&q),
+            "Easy growth scalar ({}) should exceed Hard ({})",
+            easy.scalar_for(&q),
+            hard.scalar_for(&q)
+        );
+    }
+
+    #[test]
+    fn hard_difficulty_increases_hazard_rate_in_pipeline() {
+        use crate::colony::Colony;
+        use crate::hazard::{HazardConfig, HazardEntry, HazardKindConfig};
+        use crate::turn::{GameState, TurnProcessor};
+
+        let base_prob = 0.3_f32;
+        let kinds_entries: Vec<HazardEntry> = crate::hazard::HazardKind::ALL
+            .iter()
+            .map(|&kind| HazardEntry {
+                kind,
+                config: HazardKindConfig {
+                    base_probability: base_prob,
+                    severity_min: 0.5,
+                    severity_max: 0.5,
+                    stability_damage_per_severity: 0.01,
+                    commodity_loss_per_severity: 0.0,
+                    population_damage_per_severity: 0.0,
+                },
+                terrain_modifiers: Default::default(),
+            })
+            .collect();
+        let hazard_cfg = HazardConfig { kinds: kinds_entries };
+
+        // Run many sols on Hard and count hazard occurrences.
+        let count_hazards = |preset: DifficultyPreset| -> usize {
+            let mut state = GameState::new();
+            state.add_colony(Colony::new("Test"), 1000);
+            state.hazard_config = Some(hazard_cfg.clone());
+            let table = default_grade_table();
+            state.difficulty_preset = preset;
+            state.difficulty_scalar = table.build_scalar(preset);
+            let mut proc = TurnProcessor::new(12345);
+            let mut total = 0usize;
+            for _ in 0..200 {
+                let out = proc.advance(&mut state);
+                total += out.hazard_outcomes.len();
+            }
+            total
+        };
+
+        let hard_count = count_hazards(DifficultyPreset::Hard);
+        let easy_count = count_hazards(DifficultyPreset::Easy);
+        assert!(
+            hard_count > easy_count,
+            "Hard difficulty should produce more hazards than Easy (hard={hard_count}, easy={easy_count})"
+        );
+    }
+
+    #[test]
+    fn easy_difficulty_produces_faster_growth() {
+        use crate::population::PopulationPool;
+
+        let table = default_grade_table();
+        let easy_scalar = table
+            .build_scalar(DifficultyPreset::Easy)
+            .scalar_for(&ModifiableQuantity::PopulationGrowth);
+        let hard_scalar = table
+            .build_scalar(DifficultyPreset::Hard)
+            .scalar_for(&ModifiableQuantity::PopulationGrowth);
+
+        let mut easy_pop = PopulationPool::new(1000.0);
+        let mut hard_pop = PopulationPool::new(1000.0);
+
+        for _ in 0..10 {
+            easy_pop.apply_growth_tick_with_scalar(easy_scalar);
+            hard_pop.apply_growth_tick_with_scalar(hard_scalar);
+        }
+
+        assert!(
+            easy_pop.count > hard_pop.count,
+            "Easy difficulty should produce faster growth (easy={}, hard={})",
+            easy_pop.count,
+            hard_pop.count
+        );
+    }
+
+    #[test]
+    fn set_difficulty_rejected_after_first_turn() {
+        use crate::{Command, GameEngine};
+
+        let mut engine = GameEngine::new();
+        // SetDifficulty is allowed before sol > 0.
+        assert!(
+            engine
+                .apply(&Command::SetDifficulty {
+                    preset: DifficultyPreset::Hard
+                })
+                .is_ok(),
+            "SetDifficulty should be accepted at sol=0"
+        );
+        // Advance one turn.
+        engine
+            .apply(&Command::AdvanceColonySol)
+            .expect("first turn should advance");
+        // Now SetDifficulty should be rejected.
+        let result = engine.apply(&Command::SetDifficulty {
+            preset: DifficultyPreset::Easy,
+        });
+        assert!(
+            result.is_err(),
+            "SetDifficulty should be rejected after sol > 0"
+        );
+    }
+
+    #[test]
+    fn yaml_grade_table_roundtrip() {
+        let yaml = serde_yaml::to_string(&default_grade_table()).expect("should serialise");
+        let back: DifficultyGradeTable =
+            serde_yaml::from_str(&yaml).expect("should deserialise");
+        assert_eq!(back.rows.len(), default_grade_table().rows.len());
     }
 }
