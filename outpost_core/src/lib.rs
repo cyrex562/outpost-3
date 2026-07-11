@@ -360,6 +360,36 @@ pub enum Command {
     /// This is the primary victory trigger. The engine evaluates all victory conditions
     /// and emits [`Event::VictoryAchieved`] for each newly satisfied condition.
     LaunchExpedition,
+
+    // ── M8: Field Expeditions (issue #103) ────────────────────────────────
+
+    /// Launch a field expedition from a colony to explore a hex tile.
+    ///
+    /// Creates an [`expedition::Expedition`] in `InTransit` status and emits
+    /// [`Event::ExpeditionLaunched`].  The expedition advances each colony-sol.
+    LaunchFieldExpedition {
+        /// Colony launching the expedition.
+        colony_id: ColonyId,
+        /// Hex tile target for exploration.
+        target_hex: map::HexCoord,
+        /// Number of crew assigned to the mission.
+        crew_count: u32,
+        /// Supplies loaded for the mission.
+        supplies: f32,
+        /// Sols required to travel from the colony to the target hex.
+        transit_sols: u64,
+        /// Whether this is a deep-space expedition (contributes to interstellar megaproject).
+        is_deep_space: bool,
+    },
+
+    /// Recall an active field expedition back to its origin colony.
+    ///
+    /// Sets the expedition status to `Returning` if it is currently `OnSite`.
+    /// Emits no event if the expedition is already returning or terminal.
+    RecallExpedition {
+        /// Stable identifier of the expedition to recall.
+        expedition_id: expedition::FieldExpeditionId,
+    },
     /// Evaluate all tracked victory conditions against current game metrics.
     ///
     /// Emits [`Event::VictoryAchieved`] for newly satisfied conditions.
@@ -1028,6 +1058,52 @@ pub enum Event {
         /// Content-pack identifier of the event that fired.
         event_id: interrupt::EventId,
     },
+
+    // ── M8: Field expedition events (issue #103) ──────────────────────────
+
+    /// A field expedition was launched from a colony.
+    ExpeditionLaunched {
+        /// Identifier of the new expedition.
+        expedition_id: expedition::FieldExpeditionId,
+        /// Colony that launched the expedition.
+        colony_id: ColonyId,
+        /// Target hex tile.
+        target_hex: map::HexCoord,
+    },
+
+    /// A field expedition arrived at its target hex and began on-site work.
+    ExpeditionArrived {
+        /// Expedition that arrived.
+        expedition_id: expedition::FieldExpeditionId,
+    },
+
+    /// A field expedition discovered a resource deposit on-site.
+    ExpeditionDiscovery {
+        /// Expedition making the discovery.
+        expedition_id: expedition::FieldExpeditionId,
+        /// Hex where the discovery was made.
+        hex: map::HexCoord,
+        /// Discovered commodity identifier.
+        resource_id: String,
+        /// Quantity discovered.
+        amount: f64,
+    },
+
+    /// A field expedition completed its return and deposited resources.
+    ExpeditionReturned {
+        /// Expedition that returned.
+        expedition_id: expedition::FieldExpeditionId,
+        /// Colony that received the deposits.
+        colony_id: ColonyId,
+        /// Resources deposited: `(commodity_id, amount)`.
+        deposits: Vec<(String, f64)>,
+    },
+
+    /// A field expedition was lost due to supply depletion.
+    ExpeditionLost {
+        /// Expedition that was lost.
+        expedition_id: expedition::FieldExpeditionId,
+    },
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -1534,6 +1610,126 @@ impl GameEngine {
                             .or_default()
                             .push(count);
                     }
+                }
+
+                // ── Step 4e: Field expedition advancement (M8) ───────────
+                // Advance each active expedition by one sol: consume supplies,
+                // check arrival / on-site survey / return, emit events.
+                {
+                    let current_sol = self.state.sol;
+                    // Collect indices to avoid borrow conflicts.
+                    let exp_count = self.state.expeditions.len();
+                    let mut expedition_events: Vec<Event> = Vec::new();
+
+                    for i in 0..exp_count {
+                        let exp = &mut self.state.expeditions[i];
+                        if !exp.is_active() {
+                            continue;
+                        }
+                        // Burn supplies.
+                        exp.supplies_remaining -= exp.supply_consumed_per_sol;
+                        if exp.supplies_remaining <= expedition::SUPPLY_LOSS_THRESHOLD {
+                            // Lost to supply depletion.
+                            exp.status = expedition::ExpeditionStatus::Lost;
+                            expedition_events.push(Event::ExpeditionLost {
+                                expedition_id: exp.id,
+                            });
+                            continue;
+                        }
+
+                        match exp.status {
+                            expedition::ExpeditionStatus::InTransit => {
+                                if current_sol >= exp.eta_sol {
+                                    exp.status = expedition::ExpeditionStatus::OnSite;
+                                    exp.sol_arrived = Some(current_sol);
+                                    expedition_events.push(Event::ExpeditionArrived {
+                                        expedition_id: exp.id,
+                                    });
+                                }
+                            }
+                            expedition::ExpeditionStatus::OnSite => {
+                                // Simple discovery roll each sol on-site using deterministic
+                                // arithmetic (no external RNG dependency in core).
+                                let arrived_sol = exp.sol_arrived.unwrap_or(current_sol);
+                                let sols_on_site = current_sol.saturating_sub(arrived_sol);
+
+                                // Roll a discovery every other sol on-site (deterministic).
+                                if sols_on_site > 0 && sols_on_site.is_multiple_of(2) {
+                                    let resource_id = "raw_materials".to_string();
+                                    let amount = f64::from(exp.crew_count) * 10.0;
+                                    exp.discovered_resources
+                                        .push((resource_id.clone(), amount));
+                                    expedition_events.push(Event::ExpeditionDiscovery {
+                                        expedition_id: exp.id,
+                                        hex: exp.target_hex,
+                                        resource_id,
+                                        amount,
+                                    });
+                                }
+
+                                // Begin return after default on-site period.
+                                if sols_on_site
+                                    >= expedition::DEFAULT_ONSITE_SOLS
+                                {
+                                    exp.status = expedition::ExpeditionStatus::Returning;
+                                }
+                            }
+                            expedition::ExpeditionStatus::Returning => {
+                                // Return transit mirrors outbound; use sol_arrived + transit.
+                                let arrived_sol = exp.sol_arrived.unwrap_or(exp.sol_launched);
+                                let transit_duration = arrived_sol - exp.sol_launched;
+                                let return_eta = arrived_sol
+                                    + expedition::DEFAULT_ONSITE_SOLS
+                                    + transit_duration;
+
+                                if current_sol >= return_eta {
+                                    let deposits = exp.discovered_resources.clone();
+                                    exp.status = expedition::ExpeditionStatus::Completed;
+                                    let origin = exp.origin_colony;
+                                    let eid = exp.id;
+                                    let is_deep = exp.is_deep_space;
+
+                                    // Deposit discovered resources into origin colony pool.
+                                    if let Some(idx) = self
+                                        .state
+                                        .colonies
+                                        .iter()
+                                        .position(|c| c.id == origin)
+                                    {
+                                        for (res_id, amt) in &deposits {
+                                            self.state.colonies[idx]
+                                                .pool
+                                                .deposit(res_id, *amt);
+                                        }
+                                    }
+
+                                    expedition_events.push(Event::ExpeditionReturned {
+                                        expedition_id: eid,
+                                        colony_id: origin,
+                                        deposits: deposits.clone(),
+                                    });
+
+                                    // Deep-space expeditions contribute to the interstellar
+                                    // megaproject if one is registered.
+                                    if is_deep {
+                                        self.state.expedition_launched = true;
+                                        if self.state.victory.is_none() {
+                                            let snap = self.build_victory_snapshot();
+                                            for condition in
+                                                self.state.victory_state.evaluate(&snap)
+                                            {
+                                                self.state.victory = Some(condition.clone());
+                                                expedition_events
+                                                    .push(Event::VictoryAchieved { condition });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    events.extend(expedition_events);
                 }
 
                 // ── Step 5: Directive evaluation ──────────────────────────
@@ -2402,6 +2598,66 @@ impl GameEngine {
                     events.push(Event::VictoryAchieved { condition });
                 }
                 Ok(events)
+            }
+
+            // ── M8: Field Expeditions ─────────────────────────────────────────
+
+            Command::LaunchFieldExpedition {
+                colony_id,
+                target_hex,
+                crew_count,
+                supplies,
+                transit_sols,
+                is_deep_space,
+            } => {
+                // Validate colony exists.
+                let _colony_idx = self
+                    .state
+                    .colonies
+                    .iter()
+                    .position(|c| &c.id == colony_id)
+                    .ok_or(EngineError::ColonyNotFound(*colony_id))?;
+
+                #[allow(clippy::cast_precision_loss)]
+                let supply_per_sol = *crew_count as f32;
+                let expedition = expedition::Expedition::new(
+                    *colony_id,
+                    *target_hex,
+                    *crew_count,
+                    *supplies,
+                    // Default supply burn: 1 unit/sol per crew member.
+                    supply_per_sol,
+                    self.state.sol,
+                    *transit_sols,
+                    *is_deep_space,
+                );
+                let eid = expedition.id;
+                let hex = expedition.target_hex;
+                self.state.expeditions.push(expedition);
+                Ok(vec![Event::ExpeditionLaunched {
+                    expedition_id: eid,
+                    colony_id: *colony_id,
+                    target_hex: hex,
+                }])
+            }
+
+            Command::RecallExpedition { expedition_id } => {
+                let exp = self
+                    .state
+                    .expeditions
+                    .iter_mut()
+                    .find(|e| &e.id == expedition_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "expedition {:?} not found",
+                            expedition_id.0
+                        ))
+                    })?;
+
+                if exp.status == expedition::ExpeditionStatus::OnSite {
+                    exp.status = expedition::ExpeditionStatus::Returning;
+                }
+                Ok(vec![])
             }
 
             Command::EvaluateVictory => {
@@ -6882,5 +7138,260 @@ mod tests {
             queued > 0.0,
             "deferred count should be > 0 for capped evacuation, got {queued}"
         );
+    }
+
+    // ── M8: Field expedition tests (issue #103) ───────────────────────────────
+
+    fn make_expedition_engine() -> GameEngine {
+        let mut engine = GameEngine::new();
+        let colony = colony::Colony::new("Base Camp".to_string());
+        engine.state.add_colony(colony, 100);
+        engine
+    }
+
+    fn first_colony_id(engine: &GameEngine) -> ColonyId {
+        engine.state.colonies[0].id
+    }
+
+    #[test]
+    fn launch_field_expedition_creates_expedition_and_emits_event() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(3, -1);
+
+        let events = engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 4,
+                supplies: 200.0,
+                transit_sols: 10,
+                is_deep_space: false,
+            })
+            .unwrap();
+
+        assert_eq!(engine.state.expeditions.len(), 1);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::ExpeditionLaunched { .. })),
+            "ExpeditionLaunched event must be emitted"
+        );
+    }
+
+    #[test]
+    fn expedition_arrives_after_transit_sols() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(1, 0);
+
+        engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 2,
+                supplies: 500.0,
+                transit_sols: 3,
+                is_deep_space: false,
+            })
+            .unwrap();
+
+        // Advance 3 sols.
+        let mut arrived = false;
+        for _ in 0..3 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if evs
+                .iter()
+                .any(|e| matches!(e, Event::ExpeditionArrived { .. }))
+            {
+                arrived = true;
+            }
+        }
+        assert!(arrived, "ExpeditionArrived must be emitted within transit period");
+        assert_eq!(
+            engine.state.expeditions[0].status,
+            expedition::ExpeditionStatus::OnSite
+        );
+    }
+
+    #[test]
+    fn expedition_makes_discovery_on_site() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(0, 1);
+
+        engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 5,
+                supplies: 1000.0,
+                transit_sols: 1,
+                is_deep_space: false,
+            })
+            .unwrap();
+
+        // Advance enough sols to arrive and spend time on-site.
+        let mut discovery_found = false;
+        for _ in 0..10 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if evs
+                .iter()
+                .any(|e| matches!(e, Event::ExpeditionDiscovery { .. }))
+            {
+                discovery_found = true;
+            }
+        }
+        assert!(discovery_found, "At least one ExpeditionDiscovery expected");
+    }
+
+    #[test]
+    fn expedition_returns_and_deposits_resources() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(2, 0);
+
+        engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 3,
+                supplies: 2000.0,
+                transit_sols: 1,
+                is_deep_space: false,
+            })
+            .unwrap();
+
+        let mut returned = false;
+        // Advance enough sols to complete the full cycle.
+        for _ in 0..30 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if let Some(Event::ExpeditionReturned { deposits, .. }) =
+                evs.iter().find(|e| matches!(e, Event::ExpeditionReturned { .. }))
+            {
+                assert!(!deposits.is_empty(), "Deposits should not be empty on return");
+                returned = true;
+                break;
+            }
+        }
+        assert!(returned, "ExpeditionReturned must be emitted");
+        assert_eq!(
+            engine.state.expeditions[0].status,
+            expedition::ExpeditionStatus::Completed
+        );
+    }
+
+    #[test]
+    fn supply_depletion_causes_expedition_lost() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(5, 0);
+
+        // Only 3 supply units — will be exhausted in 1 sol (crew_count=4 burns 4/sol).
+        engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 4,
+                supplies: 3.0,
+                transit_sols: 10,
+                is_deep_space: false,
+            })
+            .unwrap();
+
+        let mut lost = false;
+        for _ in 0..5 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if evs
+                .iter()
+                .any(|e| matches!(e, Event::ExpeditionLost { .. }))
+            {
+                lost = true;
+                break;
+            }
+        }
+        assert!(lost, "ExpeditionLost must be emitted when supplies run out");
+        assert_eq!(
+            engine.state.expeditions[0].status,
+            expedition::ExpeditionStatus::Lost
+        );
+    }
+
+    #[test]
+    fn recall_sets_expedition_to_returning() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(1, 1);
+
+        engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 2,
+                supplies: 1000.0,
+                transit_sols: 1,
+                is_deep_space: false,
+            })
+            .unwrap();
+
+        // Arrive on-site (1 sol transit).
+        for _ in 0..2 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        assert_eq!(
+            engine.state.expeditions[0].status,
+            expedition::ExpeditionStatus::OnSite
+        );
+
+        let eid = engine.state.expeditions[0].id.clone();
+        engine
+            .apply(&Command::RecallExpedition {
+                expedition_id: eid,
+            })
+            .unwrap();
+
+        assert_eq!(
+            engine.state.expeditions[0].status,
+            expedition::ExpeditionStatus::Returning
+        );
+    }
+
+    #[test]
+    fn deep_space_expedition_return_sets_expedition_launched() {
+        let mut engine = make_expedition_engine();
+        // Set up capstone victory condition so victory snapshot works.
+        engine
+            .apply(&Command::InitVictoryConditions {
+                conditions: vec![victory::VictoryCondition::InterstellarExpeditionLaunched],
+            })
+            .unwrap();
+
+        let cid = first_colony_id(&engine);
+        let hex = map::HexCoord::new(0, 0);
+
+        engine
+            .apply(&Command::LaunchFieldExpedition {
+                colony_id: cid,
+                target_hex: hex,
+                crew_count: 5,
+                supplies: 5000.0,
+                transit_sols: 1,
+                is_deep_space: true,
+            })
+            .unwrap();
+
+        let mut victory_achieved = false;
+        for _ in 0..30 {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if evs
+                .iter()
+                .any(|e| matches!(e, Event::VictoryAchieved { .. }))
+            {
+                victory_achieved = true;
+                break;
+            }
+        }
+        assert!(engine.state.expedition_launched, "expedition_launched must be set after deep-space return");
+        assert!(victory_achieved, "VictoryAchieved must be emitted for deep-space expedition return");
     }
 }

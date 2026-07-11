@@ -213,6 +213,7 @@ impl FullStateBlob {
             needs_config: None,
             tech_registry: None,
             hazard_config: None,
+            expeditions: Vec::new(),
         }
     }
 }
