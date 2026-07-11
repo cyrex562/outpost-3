@@ -381,9 +381,9 @@ pub fn bootstrap(
         radius: 8,
     });
 
-    // Seed a placeholder star system. Content-driven system generation is a
-    // future refinement; this gives the UI something to render immediately.
-    seed_default_system(&mut engine);
+    // Seed the star system from the loaded content pack. Falls back to
+    // an empty system if the pack ships no `systems.yaml`.
+    seed_system_from_content(&mut engine);
     load_embedded_tech(&mut engine);
 
     let snap = build_snapshot(&engine);
@@ -403,22 +403,48 @@ fn load_embedded_tech(engine: &mut GameEngine) {
     }
 }
 
-fn seed_default_system(engine: &mut GameEngine) {
-    let bodies: &[(&str, BodyKind, f32, SystemRole)] = &[
-        ("Kepler-A", BodyKind::InnerPlanet, 0.4, SystemRole::RawExtraction),
-        ("Kepler-B", BodyKind::InnerPlanet, 0.7, SystemRole::PopulationHub),
-        ("Kepler-C", BodyKind::InnerPlanet, 1.1, SystemRole::Science),
-        ("Ceres Belt", BodyKind::AsteroidBelt, 2.4, SystemRole::RawExtraction),
-        ("Aurelian", BodyKind::GasGiant, 4.2, SystemRole::FuelProduction),
-        ("Aurelian-Moon", BodyKind::Moon, 4.35, SystemRole::Industry),
-        ("Selkin", BodyKind::InnerPlanet, 6.8, SystemRole::Unassigned),
-    ];
-    for (name, kind, distance, _role) in bodies.iter().cloned() {
+/// Seed `system_state.node_map` from the loaded content pack.
+///
+/// Picks the first `StarSystemDef` in the registry and applies one
+/// [`SystemCommand::AddBody`] per authored body. No-op when the pack ships
+/// no systems. Selection UI (letting the player pick which scenario)
+/// can layer on later without changing this seeding path.
+///
+/// Assigned roles land on the body via a follow-up
+/// [`SystemCommand::AssignRole`] since `AddBody` sets `Unassigned` by default.
+fn seed_system_from_content(engine: &mut GameEngine) {
+    let Some(system) = engine
+        .state
+        .registry
+        .as_ref()
+        .and_then(|r| r.star_systems().next().cloned())
+    else {
+        return;
+    };
+    for body in &system.bodies {
         let _ = engine.apply(&Command::System(SystemCommand::AddBody {
-            name: name.to_owned(),
-            kind,
-            distance_au: distance,
+            name: body.name.clone(),
+            kind: body.kind.clone(),
+            distance_au: body.distance_au,
         }));
+        if matches!(body.role, SystemRole::Unassigned) {
+            continue;
+        }
+        // `AddBody` doesn't carry the resulting body id back; look it up by name.
+        let body_id = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .iter()
+            .find(|(_, b)| b.name == body.name)
+            .map(|(id, _)| id.clone());
+        if let Some(id) = body_id {
+            let _ = engine.apply(&Command::System(SystemCommand::AssignRole {
+                body_id: id,
+                role: body.role.clone(),
+            }));
+        }
     }
 }
 

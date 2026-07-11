@@ -1,0 +1,79 @@
+# Authored star-system scenarios.
+#
+# Each entry defines a star system that can be selected at bootstrap and
+# seeds `SystemState.node_map`. Body records mirror `outpost_core::system::Body`
+# 1:1 (name / kind / role / distance_au). `role` is optional; the parser
+# falls back to `unassigned`.
+#
+# Bootstrap picks the first authored system when no explicit id is passed —
+# selection UI can be layered on later without changing the schema.
+
+- id: kepler-186
+  name: Kepler-186
+  description: >
+    A well-charted G-type system with three inner rocky worlds, a modest
+    asteroid belt, a ringed gas giant, and a lonely outer world.
+  bodies:
+    - name: Kepler-A
+      kind: inner_planet
+      role: raw_extraction
+      distance_au: 0.4
+    - name: Kepler-B
+      kind: inner_planet
+      role: population_hub
+      distance_au: 0.7
+    - name: Kepler-C
+      kind: inner_planet
+      role: science
+      distance_au: 1.1
+    - name: Ceres Belt
+      kind: asteroid_belt
+      role: raw_extraction
+      distance_au: 2.4
+    - name: Aurelian
+      kind: gas_giant
+      role: fuel_production
+      distance_au: 4.2
+    - name: Aurelian-Moon
+      kind: moon
+      role: industry
+      distance_au: 4.35
+    - name: Selkin
+      kind: inner_planet
+      distance_au: 6.8
+
+- id: trappist-1
+  name: Trappist-1
+  description: >
+    A crowded ultra-cool dwarf system with seven tightly-packed inner worlds
+    and a wide, resource-rich asteroid ring. Short travel times, thin margins.
+  bodies:
+    - name: T-1a
+      kind: inner_planet
+      role: raw_extraction
+      distance_au: 0.11
+    - name: T-1b
+      kind: inner_planet
+      role: population_hub
+      distance_au: 0.15
+    - name: T-1c
+      kind: inner_planet
+      role: science
+      distance_au: 0.21
+    - name: T-1d
+      kind: inner_planet
+      role: industry
+      distance_au: 0.28
+    - name: T-1e
+      kind: inner_planet
+      distance_au: 0.38
+    - name: T-1f
+      kind: inner_planet
+      distance_au: 0.52
+    - name: T-1g
+      kind: inner_planet
+      distance_au: 0.71
+    - name: Outer Ring
+      kind: asteroid_belt
+      role: raw_extraction
+      distance_au: 1.9
