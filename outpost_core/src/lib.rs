@@ -362,7 +362,6 @@ pub enum Command {
     LaunchExpedition,
 
     // ── M8: Field Expeditions (issue #103) ────────────────────────────────
-
     /// Launch a field expedition from a colony to explore a hex tile.
     ///
     /// Creates an [`expedition::Expedition`] in `InTransit` status and emits
@@ -1060,7 +1059,6 @@ pub enum Event {
     },
 
     // ── M8: Field expedition events (issue #103) ──────────────────────────
-
     /// A field expedition was launched from a colony.
     ExpeditionLaunched {
         /// Identifier of the new expedition.
@@ -1657,8 +1655,7 @@ impl GameEngine {
                                 if sols_on_site > 0 && sols_on_site.is_multiple_of(2) {
                                     let resource_id = "raw_materials".to_string();
                                     let amount = f64::from(exp.crew_count) * 10.0;
-                                    exp.discovered_resources
-                                        .push((resource_id.clone(), amount));
+                                    exp.discovered_resources.push((resource_id.clone(), amount));
                                     expedition_events.push(Event::ExpeditionDiscovery {
                                         expedition_id: exp.id,
                                         hex: exp.target_hex,
@@ -1668,9 +1665,7 @@ impl GameEngine {
                                 }
 
                                 // Begin return after default on-site period.
-                                if sols_on_site
-                                    >= expedition::DEFAULT_ONSITE_SOLS
-                                {
+                                if sols_on_site >= expedition::DEFAULT_ONSITE_SOLS {
                                     exp.status = expedition::ExpeditionStatus::Returning;
                                 }
                             }
@@ -1690,16 +1685,11 @@ impl GameEngine {
                                     let is_deep = exp.is_deep_space;
 
                                     // Deposit discovered resources into origin colony pool.
-                                    if let Some(idx) = self
-                                        .state
-                                        .colonies
-                                        .iter()
-                                        .position(|c| c.id == origin)
+                                    if let Some(idx) =
+                                        self.state.colonies.iter().position(|c| c.id == origin)
                                     {
                                         for (res_id, amt) in &deposits {
-                                            self.state.colonies[idx]
-                                                .pool
-                                                .deposit(res_id, *amt);
+                                            self.state.colonies[idx].pool.deposit(res_id, *amt);
                                         }
                                     }
 
@@ -2601,7 +2591,6 @@ impl GameEngine {
             }
 
             // ── M8: Field Expeditions ─────────────────────────────────────────
-
             Command::LaunchFieldExpedition {
                 colony_id,
                 target_hex,
@@ -7207,7 +7196,10 @@ mod tests {
                 arrived = true;
             }
         }
-        assert!(arrived, "ExpeditionArrived must be emitted within transit period");
+        assert!(
+            arrived,
+            "ExpeditionArrived must be emitted within transit period"
+        );
         assert_eq!(
             engine.state.expeditions[0].status,
             expedition::ExpeditionStatus::OnSite
@@ -7266,10 +7258,14 @@ mod tests {
         // Advance enough sols to complete the full cycle.
         for _ in 0..30 {
             let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
-            if let Some(Event::ExpeditionReturned { deposits, .. }) =
-                evs.iter().find(|e| matches!(e, Event::ExpeditionReturned { .. }))
+            if let Some(Event::ExpeditionReturned { deposits, .. }) = evs
+                .iter()
+                .find(|e| matches!(e, Event::ExpeditionReturned { .. }))
             {
-                assert!(!deposits.is_empty(), "Deposits should not be empty on return");
+                assert!(
+                    !deposits.is_empty(),
+                    "Deposits should not be empty on return"
+                );
                 returned = true;
                 break;
             }
@@ -7345,9 +7341,7 @@ mod tests {
 
         let eid = engine.state.expeditions[0].id.clone();
         engine
-            .apply(&Command::RecallExpedition {
-                expedition_id: eid,
-            })
+            .apply(&Command::RecallExpedition { expedition_id: eid })
             .unwrap();
 
         assert_eq!(
@@ -7391,7 +7385,13 @@ mod tests {
                 break;
             }
         }
-        assert!(engine.state.expedition_launched, "expedition_launched must be set after deep-space return");
-        assert!(victory_achieved, "VictoryAchieved must be emitted for deep-space expedition return");
+        assert!(
+            engine.state.expedition_launched,
+            "expedition_launched must be set after deep-space return"
+        );
+        assert!(
+            victory_achieved,
+            "VictoryAchieved must be emitted for deep-space expedition return"
+        );
     }
 }
