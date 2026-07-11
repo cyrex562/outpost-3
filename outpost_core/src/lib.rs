@@ -610,7 +610,7 @@ pub struct ColonySummary {
     pub commodity_pool: Vec<(String, f32)>,
     /// Placed building type identifiers.
     pub buildings: Vec<String>,
-    /// Active construction project identifiers (building_type).
+    /// Active construction project identifiers (`building_type`).
     pub active_construction: Vec<String>,
 }
 
@@ -2906,7 +2906,8 @@ impl GameEngine {
                     .iter()
                     .zip(self.state.populations.iter())
                     .map(|(c, p)| {
-                        let commodity_pool = c
+                        #[allow(clippy::cast_possible_truncation)]
+                        let commodity_pool: Vec<(String, f32)> = c
                             .pool
                             .commodity_ids()
                             .map(|cid| (cid.to_string(), c.pool.amount(cid) as f32))
