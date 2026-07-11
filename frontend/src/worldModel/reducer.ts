@@ -26,10 +26,13 @@ export function hydrateFromSnapshot(snap: WorldSnapshot): WorldState {
   for (const c of snap.colonies) {
     colonies[c.id] = {
       ...c,
-      stability: 1.0,
-      available_labour: 0,
-      buildings: [],
-      active_projects: [],
+      stability: c.stability,
+      available_labour: Math.max(0, c.available_labour),
+      buildings: c.buildings,
+      active_projects: c.active_construction.map((building_type, i) => ({
+        project_id: `${c.id}-proj-${i}`,
+        building_type,
+      })),
     }
   }
   return {
