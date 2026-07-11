@@ -50,6 +50,10 @@ export const useWorldStore = defineStore('world', () => {
       case 'ack':
         // Acknowledged — no state change needed here; callers may await acks.
         break
+      case 'new_game_snapshot':
+        // Full snapshot returned after NewGame init — treat the same as snapshot.
+        world.value = hydrateFromSnapshot(msg.state)
+        break
       case 'query_result':
         // Route colony_screen results to the game store.
         if (msg.result.kind === 'colony_screen') {
