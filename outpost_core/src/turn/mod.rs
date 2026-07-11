@@ -187,6 +187,10 @@ pub struct GameState {
     ///
     /// Keys are stored in canonical order (smaller id first) to allow bidirectional lookup.
     pub infra_routes: HashMap<(ColonyId, ColonyId), Uuid>,
+
+    // ── M8: Field expeditions (issue #103) ───────────────────────────────
+    /// All field expeditions launched this campaign (active and terminal).
+    pub expeditions: Vec<crate::expedition::Expedition>,
 }
 
 impl GameState {
@@ -229,6 +233,7 @@ impl GameState {
             hazard_config: None,
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
+            expeditions: Vec::new(),
         }
     }
 

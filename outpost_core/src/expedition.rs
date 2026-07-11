@@ -5,6 +5,8 @@
 //!
 //! # Architecture
 //!
+//! - [`Expedition`] — M8 field expedition with crew, supplies, sol-based transit.
+//! - [`ExpeditionStatus`] — M8 lifecycle phases: `InTransit` → `OnSite` → `Returning` → `Completed` / `Lost`.
 //! - [`ExpeditionType`] — the four mission profiles.
 //! - [`ExpeditionState`] — live per-expedition state tracked in [`ExpeditionRegistry`].
 //! - [`SurveyOutcome`] — full / partial / failed reveal produced at mission end.
@@ -19,8 +21,163 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::colony::ColonyId;
 use crate::interrupt::Tier;
+use crate::map::HexCoord;
 use crate::system::BodyId;
+
+// ─── M8: Field Expedition (issue #103) ───────────────────────────────────────
+
+/// Stable identifier for a field expedition mission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldExpeditionId(pub Uuid);
+
+impl FieldExpeditionId {
+    /// Create a new random [`FieldExpeditionId`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for FieldExpeditionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Lifecycle status for a field expedition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExpeditionStatus {
+    /// Crew is travelling to the target hex.
+    InTransit,
+    /// Crew has arrived and is actively exploring the target hex.
+    OnSite,
+    /// Survey complete; crew is returning to origin colony.
+    Returning,
+    /// Expedition has returned and resources deposited.
+    Completed,
+    /// Expedition was lost due to supply depletion or recall failure.
+    Lost,
+}
+
+/// A field expedition launched from a colony to explore a hex tile.
+///
+/// Advances each colony-sol; discovers resources on arrival; deposits them on return.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Expedition {
+    /// Stable identifier for this mission instance.
+    pub id: FieldExpeditionId,
+    /// Colony that launched this expedition.
+    pub origin_colony: ColonyId,
+    /// Target hex tile being explored.
+    pub target_hex: HexCoord,
+    /// Number of crew assigned to the mission.
+    pub crew_count: u32,
+    /// Supplies consumed per sol while in transit or on-site.
+    pub supply_consumed_per_sol: f32,
+    /// Sol counter at launch time.
+    pub sol_launched: u64,
+    /// Sol counter when the expedition is expected to arrive at the target.
+    pub eta_sol: u64,
+    /// Current lifecycle status.
+    pub status: ExpeditionStatus,
+    /// Supplies remaining.
+    pub supplies_remaining: f32,
+    /// Sol at which the expedition arrived on-site (set on arrival).
+    pub sol_arrived: Option<u64>,
+    /// Resources discovered on-site, to be deposited on return.
+    pub discovered_resources: Vec<(String, f64)>,
+    /// Whether this expedition is flagged as deep-space (contributes to megaproject).
+    pub is_deep_space: bool,
+}
+
+impl Expedition {
+    /// Construct a new field expedition.
+    ///
+    /// `transit_sols` is the number of sols to travel from origin to target.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        origin_colony: ColonyId,
+        target_hex: HexCoord,
+        crew_count: u32,
+        supplies: f32,
+        supply_consumed_per_sol: f32,
+        current_sol: u64,
+        transit_sols: u64,
+        is_deep_space: bool,
+    ) -> Self {
+        Self {
+            id: FieldExpeditionId::new(),
+            origin_colony,
+            target_hex,
+            crew_count,
+            supply_consumed_per_sol,
+            sol_launched: current_sol,
+            eta_sol: current_sol + transit_sols,
+            status: ExpeditionStatus::InTransit,
+            supplies_remaining: supplies,
+            sol_arrived: None,
+            discovered_resources: Vec::new(),
+            is_deep_space,
+        }
+    }
+
+    /// Returns `true` if the expedition is still active (not completed or lost).
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        !matches!(
+            self.status,
+            ExpeditionStatus::Completed | ExpeditionStatus::Lost
+        )
+    }
+}
+
+/// Outcome of advancing one field expedition by one sol.
+#[derive(Debug)]
+pub enum ExpeditionAdvanceOutcome {
+    /// Expedition arrived at the target hex this sol.
+    Arrived {
+        /// Expedition identifier.
+        id: FieldExpeditionId,
+    },
+    /// Expedition made a resource discovery on-site.
+    Discovery {
+        /// Expedition identifier.
+        id: FieldExpeditionId,
+        /// Discovered resource commodity id.
+        resource_id: String,
+        /// Amount discovered.
+        amount: f64,
+    },
+    /// Expedition began its return journey.
+    StartedReturn {
+        /// Expedition identifier.
+        id: FieldExpeditionId,
+    },
+    /// Expedition returned to origin colony and deposited resources.
+    Returned {
+        /// Expedition identifier.
+        id: FieldExpeditionId,
+        /// Resources deposited into the colony pool.
+        deposits: Vec<(String, f64)>,
+    },
+    /// Expedition was lost due to supply depletion.
+    Lost {
+        /// Expedition identifier.
+        id: FieldExpeditionId,
+    },
+    /// Nothing notable happened this sol.
+    Nominal,
+}
+
+/// Default transit sols for a field expedition that does not supply a distance.
+pub const DEFAULT_TRANSIT_SOLS: u64 = 10;
+/// Number of on-site sols before a basic expedition begins its return.
+pub const DEFAULT_ONSITE_SOLS: u64 = 5;
+/// Minimum supply margin before the expedition is considered at risk.
+pub const SUPPLY_LOSS_THRESHOLD: f32 = 0.0;
 
 // ─── Expedition Type ──────────────────────────────────────────────────────────
 
