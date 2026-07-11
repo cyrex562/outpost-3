@@ -116,6 +116,10 @@ async function finish(): Promise<void> {
     | { kind: 'colony_founded'; colony_id: string }
     | undefined
   if (founded) {
+    // Point the selection at the new colony BEFORE the construction commands
+    // land, so the per-command colony_screen refresh reflects the queued
+    // projects rather than a previous selection.
+    gameStore.selectedColonyId = founded.colony_id
     for (const bid of chosenBuildings.value) {
       const b = buildings.value.find((x) => x.id === bid)
       if (!b) continue
@@ -129,7 +133,10 @@ async function finish(): Promise<void> {
         construction_turns: b.construction_turns,
       })
     }
-    gameStore.selectedColonyId = founded.colony_id
+    // If no starting buildings were queued, the selection change fires the
+    // watcher which triggers a refresh. Await it explicitly here so that by
+    // the time ColonyView mounts, its stockpile table has data.
+    await gameStore.refreshColonyScreen(founded.colony_id)
   }
   router.push('/colony')
 }
