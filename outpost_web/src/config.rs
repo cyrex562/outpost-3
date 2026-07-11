@@ -12,6 +12,9 @@ pub struct RuntimeConfig {
     /// Path to the compiled Vue frontend `dist/` directory.
     /// When `None` the static-file middleware is omitted (API-only mode for tests).
     pub frontend_dist: Option<PathBuf>,
+    /// Root directory containing content packs (`core/`, `difficulty.yaml`, …).
+    /// Defaults to `content/` relative to the working directory.
+    pub content_dir: PathBuf,
 }
 
 impl Default for RuntimeConfig {
@@ -20,6 +23,7 @@ impl Default for RuntimeConfig {
             host: "127.0.0.1".into(),
             port: 3000,
             frontend_dist: None,
+            content_dir: PathBuf::from("content"),
         }
     }
 }

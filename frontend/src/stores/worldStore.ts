@@ -12,15 +12,21 @@ import type { WorldState } from '@/worldModel/model'
 import { EMPTY_WORLD_STATE } from '@/worldModel/model'
 import { applyEvent, hydrateFromSnapshot } from '@/worldModel/reducer'
 import type { ServerMessage } from '@/types/api'
+import type { ServerEvent } from '@/types/events'
 
 /** Connection status. */
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+
+/** Maximum number of recent server events to keep in the event log. */
+const MAX_EVENT_LOG = 50
 
 export const useWorldStore = defineStore('world', () => {
   // ─── State ──────────────────────────────────────────────────────────────────
   const world = ref<WorldState>({ ...EMPTY_WORLD_STATE })
   const connectionStatus = ref<ConnectionStatus>('disconnected')
   const lastError = ref<string | null>(null)
+  /** Rolling log of recent server events for the event log panel. */
+  const eventLog = ref<ServerEvent[]>([])
 
   // ─── Getters ────────────────────────────────────────────────────────────────
   const sol = computed(() => world.value.sol)
@@ -43,12 +49,17 @@ export const useWorldStore = defineStore('world', () => {
         break
       case 'event':
         world.value = applyEvent(world.value, msg.event)
+        eventLog.value = [...eventLog.value.slice(-(MAX_EVENT_LOG - 1)), msg.event]
         break
       case 'error':
         lastError.value = msg.message
         break
       case 'ack':
         // Acknowledged — no state change needed here; callers may await acks.
+        break
+      case 'new_game_snapshot':
+        // Full snapshot returned after NewGame init — treat the same as snapshot.
+        world.value = hydrateFromSnapshot(msg.state)
         break
       case 'query_result':
         // Route colony_screen results to the game store.
@@ -73,11 +84,16 @@ export const useWorldStore = defineStore('world', () => {
     world.value = { ...world.value, notifications: [] }
   }
 
+  function clearEventLog(): void {
+    eventLog.value = []
+  }
+
   return {
     // State (readonly refs exposed for components)
     world,
     connectionStatus,
     lastError,
+    eventLog,
     // Getters
     sol,
     month,
@@ -89,5 +105,6 @@ export const useWorldStore = defineStore('world', () => {
     handleServerMessage,
     setConnectionStatus,
     clearNotifications,
+    clearEventLog,
   }
 })

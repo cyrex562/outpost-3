@@ -691,6 +691,7 @@ dependencies = [
  "outpost_core",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror",
  "tokio",
  "tower",
