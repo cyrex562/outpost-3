@@ -244,6 +244,44 @@ pub struct DefaultDirectiveDef {
     pub priority: u8,
 }
 
+/// An authored celestial body that seeds `SystemState.node_map` at
+/// bootstrap. Field names deliberately mirror `outpost_core::system::Body`
+/// so the loader can map records 1:1 without a translation table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemBodyDef {
+    /// Display name.
+    pub name: String,
+    /// Body kind (mirrors `outpost_core::system::BodyKind` snake_case tags).
+    pub kind: crate::system::BodyKind,
+    /// Assigned system-role. Defaults to `Unassigned` when omitted.
+    #[serde(default = "SystemBodyDef::default_role")]
+    pub role: crate::system::SystemRole,
+    /// Distance from the primary in AU.
+    pub distance_au: f32,
+}
+
+impl SystemBodyDef {
+    fn default_role() -> crate::system::SystemRole {
+        crate::system::SystemRole::Unassigned
+    }
+}
+
+/// An authored star system scenario. Bootstrap picks one and populates the
+/// `system_state.node_map` by iterating `bodies`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StarSystemDef {
+    /// Unique identifier referenced by future selection UI / seeding logic.
+    pub id: String,
+    /// Human-readable name (e.g. "Kepler-186", "Trappist-1").
+    pub name: String,
+    /// Optional flavour text shown when selecting the scenario.
+    #[serde(default)]
+    pub description: String,
+    /// Ordered list of bodies to place in the system.
+    #[serde(default)]
+    pub bodies: Vec<SystemBodyDef>,
+}
+
 /// A named starter-supply package selectable during colony founding.
 ///
 /// Quantities in `commodities` are treated as **per-100-colonist** amounts.

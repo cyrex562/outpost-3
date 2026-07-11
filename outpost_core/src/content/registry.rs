@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::types::{
     BuildingDef, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint, PackManifest,
-    RecipeDef, SupplyPackage,
+    RecipeDef, StarSystemDef, SupplyPackage,
 };
 
 /// In-memory registry produced by loading one or more content packs.
@@ -27,6 +27,8 @@ pub struct ContentRegistry {
     pub default_directives: Vec<DefaultDirectiveDef>,
     /// Named starter-supply packages selectable at colony founding.
     pub(super) supply_packages: HashMap<String, SupplyPackage>,
+    /// Authored star-system scenarios used to seed `SystemState.node_map`.
+    pub(super) star_systems: HashMap<String, StarSystemDef>,
 }
 
 impl ContentRegistry {
@@ -39,6 +41,7 @@ impl ContentRegistry {
         self.orbital_blueprints.extend(other.orbital_blueprints);
         self.default_directives.extend(other.default_directives);
         self.supply_packages.extend(other.supply_packages);
+        self.star_systems.extend(other.star_systems);
     }
 
     /// The manifest of the most-recently loaded pack.
@@ -115,6 +118,17 @@ impl ContentRegistry {
     /// All supply packages as an iterator.
     pub fn supply_packages(&self) -> impl Iterator<Item = &SupplyPackage> {
         self.supply_packages.values()
+    }
+
+    /// Look up a star-system scenario by id.
+    #[must_use]
+    pub fn star_system(&self, id: &str) -> Option<&StarSystemDef> {
+        self.star_systems.get(id)
+    }
+
+    /// All star-system scenarios as an iterator.
+    pub fn star_systems(&self) -> impl Iterator<Item = &StarSystemDef> {
+        self.star_systems.values()
     }
 }
 

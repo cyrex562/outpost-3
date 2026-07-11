@@ -9,7 +9,8 @@ use super::{
     error::ContentError,
     registry::ContentRegistry,
     types::{
-        BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef, SupplyPackage,
+        BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef, StarSystemDef,
+        SupplyPackage,
     },
 };
 
@@ -51,6 +52,7 @@ impl PackLoader {
         let default_directives =
             collect_list::<DefaultDirectiveDef>(files, &["default_directives.yaml"])?;
         let supply_packages = collect_table::<SupplyPackage>(files, &["supplies.yaml"])?;
+        let star_systems = collect_table::<StarSystemDef>(files, &["systems.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
         let commodity_ids: std::collections::HashSet<&str> =
@@ -89,6 +91,7 @@ impl PackLoader {
             orbital_blueprints: std::collections::HashMap::new(),
             default_directives,
             supply_packages,
+            star_systems,
         })
     }
 }
@@ -175,6 +178,12 @@ impl HasId for SupplyPackage {
     }
 }
 
+impl HasId for StarSystemDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 /// Collect records from all matching file names into a plain `Vec`.
 ///
 /// Unlike [`collect_table`], no deduplication is performed — order is preserved.
@@ -190,4 +199,80 @@ where
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::system::{BodyKind, SystemRole};
+
+    fn minimal_pack_files(extra: &[(&str, &str)]) -> Vec<(String, String)> {
+        let pack = "id: t\nname: T\nversion: '0.1.0'\n".to_string();
+        let commodities = "\
+- id: iron_ore
+  name: Iron Ore
+  category: metallic_ore
+  base_value: 1.0
+"
+        .to_string();
+        let mut files = vec![
+            ("pack.yaml".to_string(), pack),
+            ("commodities.yaml".to_string(), commodities),
+        ];
+        for (name, text) in extra {
+            files.push(((*name).to_string(), (*text).to_string()));
+        }
+        files
+    }
+
+    #[test]
+    fn systems_yaml_populates_registry() {
+        let systems = "\
+- id: kepler-186
+  name: Kepler-186
+  description: Well-charted G-type system.
+  bodies:
+    - name: Kepler-A
+      kind: inner_planet
+      role: raw_extraction
+      distance_au: 0.4
+    - name: Aurelian
+      kind: gas_giant
+      distance_au: 4.2
+- id: trappist-1
+  name: Trappist-1
+  bodies:
+    - name: T-1a
+      kind: inner_planet
+      distance_au: 0.11
+";
+        let owned = minimal_pack_files(&[("systems.yaml", systems)]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let registry = PackLoader::load(&raw).expect("systems must parse");
+        assert_eq!(registry.star_systems().count(), 2);
+
+        let kepler = registry.star_system("kepler-186").expect("kepler present");
+        assert_eq!(kepler.name, "Kepler-186");
+        assert_eq!(kepler.bodies.len(), 2);
+        assert_eq!(kepler.bodies[0].name, "Kepler-A");
+        assert_eq!(kepler.bodies[0].kind, BodyKind::InnerPlanet);
+        assert_eq!(kepler.bodies[0].role, SystemRole::RawExtraction);
+        // Second body omits role — defaults to Unassigned.
+        assert_eq!(kepler.bodies[1].kind, BodyKind::GasGiant);
+        assert_eq!(kepler.bodies[1].role, SystemRole::Unassigned);
+    }
+
+    #[test]
+    fn systems_yaml_absence_is_not_an_error() {
+        let owned = minimal_pack_files(&[]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let registry = PackLoader::load(&raw).expect("pack must parse without systems.yaml");
+        assert_eq!(registry.star_systems().count(), 0);
+    }
 }

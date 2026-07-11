@@ -39,6 +39,7 @@ impl std::fmt::Display for BodyId {
 
 /// Category of a celestial body in the system node map.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BodyKind {
     /// Rocky inner planet.
     InnerPlanet,
@@ -56,6 +57,7 @@ pub enum BodyKind {
 ///
 /// The player assigns a role to guide automated resource flow and bonuses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SystemRole {
     /// Heavy industry, manufacturing, and processing.
     Industry,
