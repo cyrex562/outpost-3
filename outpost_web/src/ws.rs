@@ -143,8 +143,13 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
 }
 
 /// Convert a [`ClientCommand`] into a core [`Command`].
+#[allow(clippy::too_many_lines)]
 fn client_command_to_core(cmd: ClientCommand, _state: &AppState) -> Result<Command, String> {
     use outpost_core::colony::ColonyId;
+    use outpost_core::difficulty::DifficultyPreset;
+    use outpost_core::expedition::FieldExpeditionId;
+    use outpost_core::map::{HexCoord, InfraType};
+    use outpost_core::orbital::OrbitType;
     use std::str::FromStr;
 
     match cmd {
@@ -186,6 +191,141 @@ fn client_command_to_core(cmd: ClientCommand, _state: &AppState) -> Result<Comma
                 colony_id: id,
                 slot,
                 labour,
+            })
+        }
+        ClientCommand::SetDifficulty { grade } => {
+            let preset = match grade.to_lowercase().as_str() {
+                "sandbox" => DifficultyPreset::Sandbox,
+                "easy" => DifficultyPreset::Easy,
+                "normal" => DifficultyPreset::Normal,
+                "hard" => DifficultyPreset::Hard,
+                "brutal" => DifficultyPreset::Brutal,
+                _ => return Err(format!("unknown difficulty grade: {grade}")),
+            };
+            Ok(Command::SetDifficulty { preset })
+        }
+        ClientCommand::EnqueueResearch { tech_id } => Ok(Command::EnqueueResearch { tech_id }),
+        ClientCommand::CancelResearch => Ok(Command::CancelResearch),
+        ClientCommand::OpenEmigrationGate {
+            from_colony,
+            to_colony,
+            rate,
+        } => {
+            let from = ColonyId::from_str(&from_colony)
+                .map_err(|_| format!("invalid from_colony: {from_colony}"))?;
+            let to = ColonyId::from_str(&to_colony)
+                .map_err(|_| format!("invalid to_colony: {to_colony}"))?;
+            Ok(Command::OpenEmigrationGate {
+                from_colony: from,
+                to_colony: to,
+                rate,
+            })
+        }
+        ClientCommand::BuildInfrastructure {
+            from_colony,
+            to_colony,
+            infra_type,
+        } => {
+            let from = ColonyId::from_str(&from_colony)
+                .map_err(|_| format!("invalid from_colony: {from_colony}"))?;
+            let to = ColonyId::from_str(&to_colony)
+                .map_err(|_| format!("invalid to_colony: {to_colony}"))?;
+            let it = match infra_type.to_lowercase().as_str() {
+                "road" => InfraType::Road,
+                "rail" => InfraType::Rail,
+                "pipeline" => InfraType::Pipeline,
+                _ => return Err(format!("unknown infra_type: {infra_type}")),
+            };
+            Ok(Command::BuildInfrastructure {
+                from_colony: from,
+                to_colony: to,
+                infra_type: it,
+            })
+        }
+        ClientCommand::BeginOrbitalConstruction {
+            blueprint_id,
+            colony_id,
+            orbit_type,
+        } => {
+            let id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            let ot = match orbit_type.to_lowercase().as_str() {
+                "low" => OrbitType::Low,
+                "geostationary" => OrbitType::Geostationary,
+                "lagrange" => OrbitType::Lagrange,
+                _ => return Err(format!("unknown orbit_type: {orbit_type}")),
+            };
+            Ok(Command::BeginOrbitalConstruction {
+                blueprint_id,
+                colony_id: id,
+                orbit_type: ot,
+            })
+        }
+        ClientCommand::LaunchFieldExpedition {
+            colony_id,
+            target_hex_q,
+            target_hex_r,
+            crew,
+            supplies,
+            transit_sols,
+            is_deep_space,
+        } => {
+            let id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            Ok(Command::LaunchFieldExpedition {
+                colony_id: id,
+                target_hex: HexCoord {
+                    q: target_hex_q,
+                    r: target_hex_r,
+                },
+                crew_count: crew,
+                supplies,
+                transit_sols,
+                is_deep_space,
+            })
+        }
+        ClientCommand::RecallExpedition { expedition_id } => {
+            let uuid = uuid::Uuid::from_str(&expedition_id)
+                .map_err(|_| format!("invalid expedition_id: {expedition_id}"))?;
+            Ok(Command::RecallExpedition {
+                expedition_id: FieldExpeditionId(uuid),
+            })
+        }
+        ClientCommand::ContinueSandbox => Ok(Command::ContinueSandbox),
+        ClientCommand::SaveGame => {
+            // SaveGame is an infrastructure-layer operation, not a core Command.
+            // Return a descriptive error — the web host does not have a configured
+            // snapshot backend in this session.
+            Err("SaveGame is not supported in WebSocket sessions; use the REST snapshot API".into())
+        }
+        ClientCommand::LoadGame => {
+            // LoadGame is an infrastructure-layer operation.
+            Err("LoadGame is not supported in WebSocket sessions; use the REST snapshot API".into())
+        }
+        ClientCommand::SetDirective {
+            colony_id,
+            directive_json,
+        } => {
+            let _colony = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            let directive: outpost_core::directive::Directive =
+                serde_json::from_str(&directive_json)
+                    .map_err(|e| format!("invalid directive JSON: {e}"))?;
+            Ok(Command::SetDirective {
+                directive: Box::new(directive),
+            })
+        }
+        ClientCommand::RemoveDirective { directive_id } => {
+            let id = outpost_core::directive::DirectiveId::from_str(&directive_id)
+                .map_err(|_| format!("invalid directive_id: {directive_id}"))?;
+            Ok(Command::RemoveDirective { directive_id: id })
+        }
+        ClientCommand::SetManualOverride { colony_id, enabled } => {
+            let id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            Ok(Command::SetManualOverride {
+                colony_id: id,
+                enabled,
             })
         }
         // NewGame is handled before this function is called.
