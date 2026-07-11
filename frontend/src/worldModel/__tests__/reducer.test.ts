@@ -28,6 +28,8 @@ function stateWithColony(): WorldState {
         available_labour: 10,
         buildings: [],
         active_projects: [],
+        commodity_pool: [],
+        active_construction: [],
       },
     },
   }

@@ -1,9 +1,9 @@
 /**
- * Pinia store for session management and command dispatch.
+ * Pinia store for command dispatch.
  *
- * Holds the active session ID, a typed queue of pending commands,
- * the last batch of events returned by the server, and a toast message
- * for command feedback.
+ * In desktop (Tauri) mode all commands go through the Tauri bridge — no
+ * WebSocket, no session concept. In browser mode we still support the
+ * legacy REST + WebSocket path for `outpost_web`.
  */
 
 import { defineStore } from 'pinia'
@@ -12,8 +12,9 @@ import type { Command } from '@/types/commands'
 import type { GameEvent } from '@/types/gameEvents'
 import type { ColonyScreenData } from '@/types/screen'
 import { createSession, applyCommand, deleteSession } from '@/api/client'
+import { isTauri, apply as tauriApply, query as tauriQuery } from '@/services/tauriBridge'
+import { useWorldStore } from '@/stores/worldStore'
 
-/** A pending command waiting to be flushed to the server. */
 export interface PendingCommand {
   seq: number
   command: Command
@@ -22,47 +23,30 @@ export interface PendingCommand {
 export const useGameStore = defineStore('game', () => {
   // ─── State ─────────────────────────────────────────────────────────────────
 
-  /** Active REST session ID (null when no session is open). */
   const sessionId = ref<string | null>(null)
-
-  /** Queue of commands not yet sent to the server. */
   const pendingCommands = ref<PendingCommand[]>([])
-
-  /** Sequence counter for correlating acks. */
   const nextSeq = ref(1)
-
-  /** Events returned by the last command dispatch. */
   const lastEvents = ref<GameEvent[]>([])
-
-  /** Toast message shown after a command completes. */
   const toastMessage = ref<string | null>(null)
-
-  /** Whether a command is currently in flight. */
   const busy = ref(false)
-
-  /** Selected colony ID for the command panel. */
   const selectedColonyId = ref<string | null>(null)
-
-  /** Colony screen data for the currently selected colony. */
   const colonyScreen = ref<ColonyScreenData | null>(null)
 
   // ─── Getters ───────────────────────────────────────────────────────────────
 
-  const hasSession = computed(() => sessionId.value !== null)
+  const hasSession = computed(() => sessionId.value !== null || isTauri)
   const pendingCount = computed(() => pendingCommands.value.length)
 
-  // ─── Actions ───────────────────────────────────────────────────────────────
+  // ─── Session (browser mode only) ───────────────────────────────────────────
 
-  /** Open a new REST session with the server. */
   async function openSession(): Promise<void> {
-    if (sessionId.value !== null) return
+    if (isTauri || sessionId.value !== null) return
     const id = await createSession()
     sessionId.value = id
   }
 
-  /** Close and discard the current session. */
   async function closeSession(): Promise<void> {
-    if (sessionId.value === null) return
+    if (isTauri || sessionId.value === null) return
     try {
       await deleteSession(sessionId.value)
     } finally {
@@ -73,22 +57,42 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * Enqueue a command and immediately flush it to the server.
+   * Enqueue a command and dispatch it.
    *
-   * Shows a toast summarising the returned events.  If no session is open
-   * a new one is created automatically.
+   * In Tauri mode this goes over IPC; the returned events are pushed straight
+   * into the world store via `applyEvent` so state stays in sync without
+   * needing a WebSocket round-trip.
    */
   async function sendCommand(cmd: Command): Promise<GameEvent[]> {
-    if (sessionId.value === null) {
-      await openSession()
-    }
+    const worldStore = useWorldStore()
     const seq = nextSeq.value++
     pendingCommands.value.push({ seq, command: cmd })
     busy.value = true
     toastMessage.value = null
+
     try {
-      const id = sessionId.value!
-      const events = await applyCommand(id, cmd)
+      let events: GameEvent[]
+      if (isTauri) {
+        events = await tauriApply(cmd)
+        // Feed events into the world reducer directly.
+        for (const ev of events) {
+          worldStore.handleServerMessage({ type: 'event', event: ev as unknown as import('@/types/events').ServerEvent })
+        }
+        // Refresh colony screen if a colony is selected (so tables repopulate).
+        if (selectedColonyId.value) {
+          try {
+            const q = await tauriQuery({ kind: 'colony_screen', colony_id: selectedColonyId.value })
+            if (q.kind === 'colony_screen' && q.data) {
+              colonyScreen.value = q.data as ColonyScreenData
+            }
+          } catch {
+            // colony_screen may not be available for every colony; ignore.
+          }
+        }
+      } else {
+        if (sessionId.value === null) await openSession()
+        events = await applyCommand(sessionId.value!, cmd)
+      }
       lastEvents.value = events
       toastMessage.value = summariseEvents(events)
       pendingCommands.value = pendingCommands.value.filter((p) => p.seq !== seq)
@@ -103,19 +107,16 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  /** Dismiss the current toast. */
   function dismissToast(): void {
     toastMessage.value = null
   }
 
-  /** Set the colony screen data (populated by a WS query result). */
   function setColonyScreen(data: ColonyScreenData): void {
     colonyScreen.value = data
     selectedColonyId.value = data.colony_id
   }
 
   return {
-    // State
     sessionId,
     pendingCommands,
     lastEvents,
@@ -123,10 +124,8 @@ export const useGameStore = defineStore('game', () => {
     busy,
     selectedColonyId,
     colonyScreen,
-    // Getters
     hasSession,
     pendingCount,
-    // Actions
     openSession,
     closeSession,
     sendCommand,
@@ -135,9 +134,6 @@ export const useGameStore = defineStore('game', () => {
   }
 })
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Produce a one-line human-readable summary of a batch of game events. */
 function summariseEvents(events: GameEvent[]): string {
   if (events.length === 0) return 'Command accepted — no events.'
   const lines = events.map((e) => {

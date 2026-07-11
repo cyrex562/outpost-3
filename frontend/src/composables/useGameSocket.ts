@@ -16,6 +16,7 @@
 import { onUnmounted } from 'vue'
 import { useWorldStore } from '@/stores/worldStore'
 import type { ClientMessage, ServerMessage } from '@/types/api'
+import { isTauri } from '@/services/tauriBridge'
 
 const RECONNECT_DELAY_MS = 2000
 
@@ -30,6 +31,16 @@ export function useGameSocket() {
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let destroyed = false
+
+  // Desktop mode: no server to talk to. Report a synthetic 'connected' status
+  // so the header UI is happy and skip the WebSocket entirely.
+  if (isTauri) {
+    store.setConnectionStatus('connected')
+    return {
+      send: (_msg: ClientMessage): void => {},
+      disconnect: (): void => {},
+    }
+  }
 
   function connect(): void {
     if (destroyed) return

@@ -24,6 +24,8 @@ mono_crash.*.json
 
 # Rust/Cargo (kept in old/ — don't rebuild)
 /target/
+outpost_tauri/target/
+outpost_tauri/gen/schemas/
 **/*.rs.bk
 *.pdb
 

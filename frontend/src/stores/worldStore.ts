@@ -1,18 +1,15 @@
 /**
  * Pinia store that owns the live reactive world state.
- *
- * The store receives typed server messages via the WebSocket composable,
- * applies them through the pure reducer, and exposes derived getters so
- * components never access raw state fields directly.
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { WorldState } from '@/worldModel/model'
+import type { WorldState, ColonyState } from '@/worldModel/model'
 import { EMPTY_WORLD_STATE } from '@/worldModel/model'
 import { applyEvent, hydrateFromSnapshot } from '@/worldModel/reducer'
 import type { ServerMessage } from '@/types/api'
 import type { ServerEvent } from '@/types/events'
+import { isTauri } from '@/services/tauriBridge'
 
 /** Connection status. */
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -20,15 +17,20 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 /** Maximum number of recent server events to keep in the event log. */
 const MAX_EVENT_LOG = 50
 
+interface HydrateInput {
+  sol: number
+  month: number
+  colonies: { id: string; name: string; population: number }[]
+}
+
 export const useWorldStore = defineStore('world', () => {
-  // ─── State ──────────────────────────────────────────────────────────────────
   const world = ref<WorldState>({ ...EMPTY_WORLD_STATE })
-  const connectionStatus = ref<ConnectionStatus>('disconnected')
+  // Desktop mode has no socket to connect to — declare connected up front.
+  const connectionStatus = ref<ConnectionStatus>(isTauri ? 'connected' : 'disconnected')
   const lastError = ref<string | null>(null)
   /** Rolling log of recent server events for the event log panel. */
   const eventLog = ref<ServerEvent[]>([])
 
-  // ─── Getters ────────────────────────────────────────────────────────────────
   const sol = computed(() => world.value.sol)
   const month = computed(() => world.value.month)
   const colonies = computed(() => Object.values(world.value.colonies))
@@ -36,12 +38,6 @@ export const useWorldStore = defineStore('world', () => {
   const notifications = computed(() => world.value.notifications)
   const isConnected = computed(() => connectionStatus.value === 'connected')
 
-  // ─── Actions ────────────────────────────────────────────────────────────────
-
-  /**
-   * Process a typed server message received over the WebSocket.
-   * This is the single entry-point for all server-pushed state changes.
-   */
   function handleServerMessage(msg: ServerMessage): void {
     switch (msg.type) {
       case 'snapshot':
@@ -55,18 +51,17 @@ export const useWorldStore = defineStore('world', () => {
         lastError.value = msg.message
         break
       case 'ack':
-        // Acknowledged — no state change needed here; callers may await acks.
         break
       case 'new_game_snapshot':
         // Full snapshot returned after NewGame init — treat the same as snapshot.
         world.value = hydrateFromSnapshot(msg.state)
         break
       case 'query_result':
-        // Route colony_screen results to the game store.
         if (msg.result.kind === 'colony_screen') {
-          // Lazy import to avoid circular dependency.
           import('@/stores/game').then(({ useGameStore }) => {
-            useGameStore().setColonyScreen(msg.result.kind === 'colony_screen' ? msg.result.data : null!)
+            useGameStore().setColonyScreen(
+              msg.result.kind === 'colony_screen' ? msg.result.data : (null as never),
+            )
           })
         }
         break
@@ -88,23 +83,53 @@ export const useWorldStore = defineStore('world', () => {
     eventLog.value = []
   }
 
+  /** Hydrate the store from a Tauri `SnapshotPayload`. */
+  function hydrate(input: HydrateInput): void {
+    const nextColonies: Record<string, ColonyState> = {}
+    for (const c of input.colonies) {
+      nextColonies[c.id] = {
+        id: c.id,
+        name: c.name,
+        population: c.population,
+        stability: 1.0,
+        available_labour: 0,
+        buildings: [],
+        active_projects: [],
+        commodity_pool: [],
+        active_construction: [],
+      }
+    }
+    world.value = {
+      ...EMPTY_WORLD_STATE,
+      sol: input.sol,
+      month: input.month,
+      colonies: nextColonies,
+    }
+  }
+
+  /** Reset everything back to the pre-game state. */
+  function reset(): void {
+    world.value = { ...EMPTY_WORLD_STATE }
+    lastError.value = null
+    eventLog.value = []
+  }
+
   return {
-    // State (readonly refs exposed for components)
     world,
     connectionStatus,
     lastError,
     eventLog,
-    // Getters
     sol,
     month,
     colonies,
     researchTotal,
     notifications,
     isConnected,
-    // Actions
     handleServerMessage,
     setConnectionStatus,
     clearNotifications,
     clearEventLog,
+    hydrate,
+    reset,
   }
 })

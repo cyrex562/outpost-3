@@ -66,6 +66,8 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
         available_labour: 0,
         buildings: [],
         active_projects: [],
+        commodity_pool: [],
+        active_construction: [],
       }
       return {
         ...state,
@@ -250,7 +252,6 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
         id: nextNotificationId(),
         tier: 'urgent' as const,
         message: `Expedition ${event.expedition_id.slice(0, 8)} was lost`,
-        colony_id: undefined,
         timestamp_sol: state.sol,
       }
       return { ...state, notifications: [...state.notifications, notification] }
@@ -261,7 +262,6 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
         id: nextNotificationId(),
         tier: 'notable' as const,
         message: `Technology unlocked: ${event.tech_id}`,
-        colony_id: undefined,
         timestamp_sol: state.sol,
       }
       return { ...state, notifications: [...state.notifications, notification] }
@@ -272,7 +272,6 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
         id: nextNotificationId(),
         tier: 'urgent' as const,
         message: `Victory achieved: ${event.condition}`,
-        colony_id: undefined,
         timestamp_sol: state.sol,
       }
       return { ...state, notifications: [...state.notifications, notification] }
@@ -283,7 +282,6 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
         id: nextNotificationId(),
         tier: 'urgent' as const,
         message: `MENACE CRITICAL: ${event.menace_kind} at ${(event.level * 100).toFixed(0)}% — ${event.countdown_months} months until collapse`,
-        colony_id: undefined,
         timestamp_sol: state.sol,
       }
       return { ...state, notifications: [...state.notifications, notification] }
