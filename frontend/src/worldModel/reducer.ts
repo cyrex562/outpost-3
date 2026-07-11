@@ -26,10 +26,13 @@ export function hydrateFromSnapshot(snap: WorldSnapshot): WorldState {
   for (const c of snap.colonies) {
     colonies[c.id] = {
       ...c,
-      stability: 1.0,
-      available_labour: 0,
-      buildings: [],
-      active_projects: [],
+      stability: c.stability,
+      available_labour: Math.max(0, c.available_labour),
+      buildings: c.buildings,
+      active_projects: c.active_construction.map((building_type, i) => ({
+        project_id: `${c.id}-proj-${i}`,
+        building_type,
+      })),
     }
   }
   return {
@@ -63,6 +66,8 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
         available_labour: 0,
         buildings: [],
         active_projects: [],
+        commodity_pool: [],
+        active_construction: [],
       }
       return {
         ...state,
@@ -181,5 +186,115 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
       }
       return { ...state, notifications: [...state.notifications, notification] }
     }
+
+    case 'hazard_occurred': {
+      const colony = state.colonies[event.colony_id]
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'urgent' as const,
+        message: `${colony?.name ?? event.colony_id}: hazard — ${event.hazard_kind} (severity ${(event.severity * 100).toFixed(0)}%)`,
+        colony_id: event.colony_id,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
+    case 'migration_arrived': {
+      const colony = state.colonies[event.to_colony]
+      if (!colony) return state
+      const updated = {
+        ...colony,
+        population: Math.max(0, colony.population + event.count),
+        stability: Math.max(0, Math.min(1, colony.stability + event.overcrowding_stability_penalty)),
+      }
+      return { ...state, colonies: { ...state.colonies, [event.to_colony]: updated } }
+    }
+
+    case 'voluntary_emigration_triggered': {
+      const colony = state.colonies[event.from_colony]
+      if (!colony) return state
+      const updated = {
+        ...colony,
+        population: Math.max(0, colony.population - event.count),
+      }
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'notable' as const,
+        message: `${colony.name}: voluntary emigration — ${event.count} colonists departed`,
+        colony_id: event.from_colony,
+        timestamp_sol: state.sol,
+      }
+      return {
+        ...state,
+        colonies: { ...state.colonies, [event.from_colony]: updated },
+        notifications: [...state.notifications, notification],
+      }
+    }
+
+    case 'expedition_launched': {
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'notable' as const,
+        message: `Expedition launched from ${state.colonies[event.colony_id]?.name ?? event.colony_id} → hex (${event.target_hex_q}, ${event.target_hex_r})`,
+        colony_id: event.colony_id,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
+    case 'expedition_arrived':
+    case 'expedition_returned':
+      // Expedition lifecycle — no world-model mutation needed at this detail level.
+      return state
+
+    case 'expedition_lost': {
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'urgent' as const,
+        message: `Expedition ${event.expedition_id.slice(0, 8)} was lost`,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
+    case 'tech_unlocked': {
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'notable' as const,
+        message: `Technology unlocked: ${event.tech_id}`,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
+    case 'victory_achieved': {
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'urgent' as const,
+        message: `Victory achieved: ${event.condition}`,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
+    case 'menace_critical': {
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'urgent' as const,
+        message: `MENACE CRITICAL: ${event.menace_kind} at ${(event.level * 100).toFixed(0)}% — ${event.countdown_months} months until collapse`,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
+    case 'cargo_delivered':
+    case 'orbital_station_completed':
+      // These events update commodity pools / orbital state which the current
+      // world model does not yet track in detail; return unchanged state.
+      return state
+
+    case 'ignored':
+      // Explicitly mapped to indicate no frontend action required.
+      return state
   }
 }

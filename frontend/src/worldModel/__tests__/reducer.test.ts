@@ -28,6 +28,8 @@ function stateWithColony(): WorldState {
         available_labour: 10,
         buildings: [],
         active_projects: [],
+        commodity_pool: [],
+        active_construction: [],
       },
     },
   }
@@ -45,11 +47,48 @@ describe('hydrateFromSnapshot', () => {
     const snap: WorldSnapshot = {
       sol: 1,
       month: 0,
-      colonies: [{ id: COLONY_ID, name: 'Alpha', population: 50 }],
+      colonies: [
+        {
+          id: COLONY_ID,
+          name: 'Alpha',
+          population: 50,
+          stability: 0.8,
+          available_labour: 10,
+          commodity_pool: [['food', 20]],
+          buildings: ['habitat'],
+          active_construction: ['lab'],
+        },
+      ],
     }
     const state = hydrateFromSnapshot(snap)
     expect(state.colonies[COLONY_ID]).toBeDefined()
     expect(state.colonies[COLONY_ID]!.name).toBe('Alpha')
+    expect(state.colonies[COLONY_ID]!.stability).toBe(0.8)
+    expect(state.colonies[COLONY_ID]!.available_labour).toBe(10)
+    expect(state.colonies[COLONY_ID]!.buildings).toEqual(['habitat'])
+    expect(state.colonies[COLONY_ID]!.active_projects).toHaveLength(1)
+    expect(state.colonies[COLONY_ID]!.active_projects[0]!.building_type).toBe('lab')
+  })
+
+  it('available_labour is never negative on hydrate', () => {
+    const snap: WorldSnapshot = {
+      sol: 0,
+      month: 0,
+      colonies: [
+        {
+          id: COLONY_ID,
+          name: 'Alpha',
+          population: 10,
+          stability: 0.5,
+          available_labour: -5,
+          commodity_pool: [],
+          buildings: [],
+          active_construction: [],
+        },
+      ],
+    }
+    const state = hydrateFromSnapshot(snap)
+    expect(state.colonies[COLONY_ID]!.available_labour).toBeGreaterThanOrEqual(0)
   })
 
   it('clears notifications on hydrate', () => {

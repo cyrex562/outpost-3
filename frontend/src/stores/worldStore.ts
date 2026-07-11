@@ -8,10 +8,14 @@ import type { WorldState, ColonyState } from '@/worldModel/model'
 import { EMPTY_WORLD_STATE } from '@/worldModel/model'
 import { applyEvent, hydrateFromSnapshot } from '@/worldModel/reducer'
 import type { ServerMessage } from '@/types/api'
+import type { ServerEvent } from '@/types/events'
 import { isTauri } from '@/services/tauriBridge'
 
 /** Connection status. */
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+
+/** Maximum number of recent server events to keep in the event log. */
+const MAX_EVENT_LOG = 50
 
 interface HydrateInput {
   sol: number
@@ -24,6 +28,8 @@ export const useWorldStore = defineStore('world', () => {
   // Desktop mode has no socket to connect to — declare connected up front.
   const connectionStatus = ref<ConnectionStatus>(isTauri ? 'connected' : 'disconnected')
   const lastError = ref<string | null>(null)
+  /** Rolling log of recent server events for the event log panel. */
+  const eventLog = ref<ServerEvent[]>([])
 
   const sol = computed(() => world.value.sol)
   const month = computed(() => world.value.month)
@@ -39,11 +45,16 @@ export const useWorldStore = defineStore('world', () => {
         break
       case 'event':
         world.value = applyEvent(world.value, msg.event)
+        eventLog.value = [...eventLog.value.slice(-(MAX_EVENT_LOG - 1)), msg.event]
         break
       case 'error':
         lastError.value = msg.message
         break
       case 'ack':
+        break
+      case 'new_game_snapshot':
+        // Full snapshot returned after NewGame init — treat the same as snapshot.
+        world.value = hydrateFromSnapshot(msg.state)
         break
       case 'query_result':
         if (msg.result.kind === 'colony_screen') {
@@ -68,11 +79,15 @@ export const useWorldStore = defineStore('world', () => {
     world.value = { ...world.value, notifications: [] }
   }
 
+  function clearEventLog(): void {
+    eventLog.value = []
+  }
+
   /** Hydrate the store from a Tauri `SnapshotPayload`. */
   function hydrate(input: HydrateInput): void {
-    const colonies: Record<string, ColonyState> = {}
+    const nextColonies: Record<string, ColonyState> = {}
     for (const c of input.colonies) {
-      colonies[c.id] = {
+      nextColonies[c.id] = {
         id: c.id,
         name: c.name,
         population: c.population,
@@ -80,13 +95,15 @@ export const useWorldStore = defineStore('world', () => {
         available_labour: 0,
         buildings: [],
         active_projects: [],
+        commodity_pool: [],
+        active_construction: [],
       }
     }
     world.value = {
       ...EMPTY_WORLD_STATE,
       sol: input.sol,
       month: input.month,
-      colonies,
+      colonies: nextColonies,
     }
   }
 
@@ -94,12 +111,14 @@ export const useWorldStore = defineStore('world', () => {
   function reset(): void {
     world.value = { ...EMPTY_WORLD_STATE }
     lastError.value = null
+    eventLog.value = []
   }
 
   return {
     world,
     connectionStatus,
     lastError,
+    eventLog,
     sol,
     month,
     colonies,
@@ -109,6 +128,7 @@ export const useWorldStore = defineStore('world', () => {
     handleServerMessage,
     setConnectionStatus,
     clearNotifications,
+    clearEventLog,
     hydrate,
     reset,
   }
