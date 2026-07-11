@@ -84,7 +84,10 @@ victory_target: 10000
         assert_eq!(cfg.colonies.len(), 2);
         assert_eq!(cfg.colonies[0].name, "Alpha Base");
         assert_eq!(cfg.colonies[0].starting_pop, 500);
-        assert_eq!(cfg.colonies[0].buildings, ["water_extractor", "hydroponics"]);
+        assert_eq!(
+            cfg.colonies[0].buildings,
+            ["water_extractor", "hydroponics"]
+        );
         assert_eq!(cfg.trade_routes.len(), 1);
         assert_eq!(cfg.trade_routes[0].from, "Alpha Base");
         assert_eq!(cfg.trade_routes[0].max_per_month, 100.0);

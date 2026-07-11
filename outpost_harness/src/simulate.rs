@@ -147,14 +147,13 @@ pub fn run_scenario(cfg: &ScenarioConfig, turns: u64, seed: u64) -> Result<Scena
     let colony_summaries = colony_ids
         .iter()
         .map(|&(ref name, colony_id)| {
-            let status = query_colony_status(&engine, colony_id)
-                .unwrap_or(ColonyStatus {
-                    id: colony_id,
-                    name: name.clone(),
-                    population: 0.0,
-                    stability: 0.0,
-                    available_labour: 0.0,
-                });
+            let status = query_colony_status(&engine, colony_id).unwrap_or(ColonyStatus {
+                id: colony_id,
+                name: name.clone(),
+                population: 0.0,
+                stability: 0.0,
+                available_labour: 0.0,
+            });
 
             // Collect averaged commodity nets.
             let avg_commodity_nets: Vec<CommodityNet> = {
@@ -182,7 +181,9 @@ pub fn run_scenario(cfg: &ScenarioConfig, turns: u64, seed: u64) -> Result<Scena
                             .iter()
                             .rev()
                             .find(|s| s.colony_id == colony_id)
-                            .and_then(|s| s.commodity_nets.iter().find(|cn| cn.commodity_id == comm))
+                            .and_then(|s| {
+                                s.commodity_nets.iter().find(|cn| cn.commodity_id == comm)
+                            })
                             .map_or(0.0, |cn| cn.amount);
                         CommodityNet {
                             commodity_id: comm,
@@ -217,7 +218,9 @@ fn extract_colony_id(events: &[Event], name: &str) -> Result<ColonyId, String> {
             return Ok(*colony_id);
         }
     }
-    Err(format!("no ColonyFounded event returned when founding '{name}'"))
+    Err(format!(
+        "no ColonyFounded event returned when founding '{name}'"
+    ))
 }
 
 /// Look up a colony ID by display name.
@@ -243,7 +246,10 @@ fn construct_buildings(
                 construction_turns: 1,
             })
             .map_err(|e| {
-                format!("QueueConstruction '{building_type}' in '{}' failed: {e:?}", spec.name)
+                format!(
+                    "QueueConstruction '{building_type}' in '{}' failed: {e:?}",
+                    spec.name
+                )
             })?;
     }
     Ok(())

@@ -90,18 +90,26 @@ fn scenario_subcommand(args: &[String]) -> Result<i32, String> {
     let scenario_path = flag_value(args, "--scenario")
         .ok_or_else(|| "--scenario <path> is required".to_string())?;
     let turns: u64 = flag_value(args, "--turns")
-        .map(|v| v.parse::<u64>().map_err(|e| format!("invalid --turns value: {e}")))
+        .map(|v| {
+            v.parse::<u64>()
+                .map_err(|e| format!("invalid --turns value: {e}"))
+        })
         .transpose()?
         .unwrap_or(360);
     let seed: u64 = flag_value(args, "--seed")
-        .map(|v| v.parse::<u64>().map_err(|e| format!("invalid --seed value: {e}")))
+        .map(|v| {
+            v.parse::<u64>()
+                .map_err(|e| format!("invalid --seed value: {e}"))
+        })
         .transpose()?
         .unwrap_or(0);
     let report_path = flag_value(args, "--report");
     let json_mode = args.iter().any(|a| a == "--json")
-        || report_path
-            .as_deref()
-            .is_some_and(|p| std::path::Path::new(p).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")));
+        || report_path.as_deref().is_some_and(|p| {
+            std::path::Path::new(p)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        });
 
     // Load scenario YAML.
     let text = std::fs::read_to_string(&scenario_path)
@@ -134,9 +142,7 @@ fn scenario_subcommand(args: &[String]) -> Result<i32, String> {
 
 /// Extract the value of a `--flag <value>` pair from an args slice.
 fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2)
-        .find(|w| w[0] == flag)
-        .map(|w| w[1].clone())
+    args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
 }
 
 /// Format a [`simulate::ScenarioReport`] as a human-readable text report.
@@ -170,7 +176,11 @@ fn format_scenario_report_human(report: &simulate::ScenarioReport) -> String {
             out.push_str("    Commodity avg net/turn:\n");
             for cn in &cs.avg_commodity_nets {
                 let sign = if cn.net_per_turn >= 0.0 { "+" } else { "" };
-                let _ = writeln!(out, "      {:<20} {}{:.3}", cn.commodity_id, sign, cn.net_per_turn);
+                let _ = writeln!(
+                    out,
+                    "      {:<20} {}{:.3}",
+                    cn.commodity_id, sign, cn.net_per_turn
+                );
             }
         }
         out.push('\n');
