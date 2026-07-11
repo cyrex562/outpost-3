@@ -81,6 +81,92 @@ pub enum ClientCommand {
         /// Labour units to assign.
         labour: u64,
     },
+    /// Set the active difficulty preset.
+    SetDifficulty {
+        /// Difficulty grade: "sandbox", "easy", "normal", "hard", or "brutal".
+        grade: String,
+    },
+    /// Append a tech to the research queue.
+    EnqueueResearch {
+        /// Content-pack tech identifier.
+        tech_id: String,
+    },
+    /// Cancel the active research project and clear the queue.
+    CancelResearch,
+    /// Open a voluntary emigration gate between two colonies.
+    OpenEmigrationGate {
+        /// Source colony UUID.
+        from_colony: String,
+        /// Destination colony UUID.
+        to_colony: String,
+        /// Fraction of source population that departs per strategic month.
+        rate: f32,
+    },
+    /// Build infrastructure between two colonies.
+    BuildInfrastructure {
+        /// Source colony UUID.
+        from_colony: String,
+        /// Destination colony UUID.
+        to_colony: String,
+        /// Infrastructure type: "road", "rail", or "pipeline".
+        infra_type: String,
+    },
+    /// Begin construction of an orbital station using a blueprint.
+    BeginOrbitalConstruction {
+        /// Content-pack blueprint identifier.
+        blueprint_id: String,
+        /// Colony that funds and operates the station.
+        colony_id: String,
+        /// Orbit band: "low", "geostationary", or "lagrange".
+        orbit_type: String,
+    },
+    /// Launch a field expedition from a colony to a hex tile.
+    LaunchFieldExpedition {
+        /// Launching colony UUID.
+        colony_id: String,
+        /// Target hex column coordinate.
+        target_hex_q: i32,
+        /// Target hex row coordinate.
+        target_hex_r: i32,
+        /// Number of crew assigned.
+        crew: u32,
+        /// Supplies loaded for the mission.
+        supplies: f32,
+        /// Sols required for transit.
+        transit_sols: u64,
+        /// Whether this is a deep-space expedition.
+        is_deep_space: bool,
+    },
+    /// Recall an active field expedition back to its origin colony.
+    RecallExpedition {
+        /// Stable UUID of the expedition to recall.
+        expedition_id: String,
+    },
+    /// Activate sandbox-continue mode after a victory.
+    ContinueSandbox,
+    /// Snapshot current engine state to the configured `SQLite` database.
+    SaveGame,
+    /// Restore engine state from the configured `SQLite` database.
+    LoadGame,
+    /// Register or replace a directive for a colony.
+    SetDirective {
+        /// Colony UUID the directive targets.
+        colony_id: String,
+        /// Serialised directive payload (JSON).
+        directive_json: String,
+    },
+    /// Remove a directive by its UUID.
+    RemoveDirective {
+        /// UUID of the directive to remove.
+        directive_id: String,
+    },
+    /// Enable or disable manual override for a colony.
+    SetManualOverride {
+        /// Target colony UUID.
+        colony_id: String,
+        /// `true` to enable manual override; `false` to resume automation.
+        enabled: bool,
+    },
     /// Initialise a new game: load content, apply difficulty, seed planet, found colony.
     NewGame {
         /// Difficulty preset to apply.
@@ -702,6 +788,238 @@ mod tests {
                 seq,
                 command: ClientCommand::AdvanceSol,
             } => assert_eq!(seq, 1),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_set_difficulty_deserialises() {
+        let raw =
+            r#"{"type":"command","seq":3,"command":{"kind":"set_difficulty","grade":"hard"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::SetDifficulty { grade },
+            } => {
+                assert_eq!(seq, 3);
+                assert_eq!(grade, "hard");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_enqueue_research_deserialises() {
+        let raw = r#"{"type":"command","seq":4,"command":{"kind":"enqueue_research","tech_id":"fusion_power"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::EnqueueResearch { tech_id },
+            } => {
+                assert_eq!(seq, 4);
+                assert_eq!(tech_id, "fusion_power");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_cancel_research_deserialises() {
+        let raw = r#"{"type":"command","seq":5,"command":{"kind":"cancel_research"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::CancelResearch,
+            } => assert_eq!(seq, 5),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_open_emigration_gate_deserialises() {
+        let raw = r#"{"type":"command","seq":6,"command":{"kind":"open_emigration_gate","from_colony":"00000000-0000-0000-0000-000000000001","to_colony":"00000000-0000-0000-0000-000000000002","rate":0.1}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::OpenEmigrationGate {
+                        from_colony,
+                        to_colony,
+                        rate,
+                    },
+            } => {
+                assert_eq!(seq, 6);
+                assert!(from_colony.contains("0001"));
+                assert!(to_colony.contains("0002"));
+                assert!((rate - 0.1).abs() < 1e-5);
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_build_infrastructure_deserialises() {
+        let raw = r#"{"type":"command","seq":7,"command":{"kind":"build_infrastructure","from_colony":"00000000-0000-0000-0000-000000000001","to_colony":"00000000-0000-0000-0000-000000000002","infra_type":"road"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::BuildInfrastructure {
+                        from_colony: _,
+                        to_colony: _,
+                        infra_type,
+                    },
+            } => {
+                assert_eq!(seq, 7);
+                assert_eq!(infra_type, "road");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_begin_orbital_construction_deserialises() {
+        let raw = r#"{"type":"command","seq":8,"command":{"kind":"begin_orbital_construction","blueprint_id":"relay_station","colony_id":"00000000-0000-0000-0000-000000000001","orbit_type":"low"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::BeginOrbitalConstruction {
+                        blueprint_id,
+                        colony_id: _,
+                        orbit_type,
+                    },
+            } => {
+                assert_eq!(seq, 8);
+                assert_eq!(blueprint_id, "relay_station");
+                assert_eq!(orbit_type, "low");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_launch_field_expedition_deserialises() {
+        let raw = r#"{"type":"command","seq":9,"command":{"kind":"launch_field_expedition","colony_id":"00000000-0000-0000-0000-000000000001","target_hex_q":3,"target_hex_r":-1,"crew":5,"supplies":100.0,"transit_sols":10,"is_deep_space":false}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::LaunchFieldExpedition {
+                        colony_id: _,
+                        target_hex_q,
+                        target_hex_r,
+                        crew,
+                        supplies: _,
+                        transit_sols,
+                        is_deep_space,
+                    },
+            } => {
+                assert_eq!(seq, 9);
+                assert_eq!(target_hex_q, 3);
+                assert_eq!(target_hex_r, -1);
+                assert_eq!(crew, 5);
+                assert_eq!(transit_sols, 10);
+                assert!(!is_deep_space);
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_recall_expedition_deserialises() {
+        let raw = r#"{"type":"command","seq":10,"command":{"kind":"recall_expedition","expedition_id":"00000000-0000-0000-0000-000000000099"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::RecallExpedition { expedition_id },
+            } => {
+                assert_eq!(seq, 10);
+                assert!(expedition_id.contains("0099"));
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_continue_sandbox_deserialises() {
+        let raw = r#"{"type":"command","seq":11,"command":{"kind":"continue_sandbox"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::ContinueSandbox,
+            } => assert_eq!(seq, 11),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_save_game_deserialises() {
+        let raw = r#"{"type":"command","seq":12,"command":{"kind":"save_game"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::SaveGame,
+            } => assert_eq!(seq, 12),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_load_game_deserialises() {
+        let raw = r#"{"type":"command","seq":13,"command":{"kind":"load_game"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::LoadGame,
+            } => assert_eq!(seq, 13),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_remove_directive_deserialises() {
+        let raw = r#"{"type":"command","seq":14,"command":{"kind":"remove_directive","directive_id":"00000000-0000-0000-0000-000000000042"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::RemoveDirective { directive_id },
+            } => {
+                assert_eq!(seq, 14);
+                assert!(directive_id.contains("0042"));
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_set_manual_override_deserialises() {
+        let raw = r#"{"type":"command","seq":15,"command":{"kind":"set_manual_override","colony_id":"00000000-0000-0000-0000-000000000001","enabled":true}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::SetManualOverride {
+                        colony_id: _,
+                        enabled,
+                    },
+            } => {
+                assert_eq!(seq, 15);
+                assert!(enabled);
+            }
             _ => panic!("unexpected variant"),
         }
     }
