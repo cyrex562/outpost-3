@@ -8,6 +8,9 @@
 
 import type { ServerEvent } from './events'
 
+/** Difficulty preset matching the Rust `DifficultyPreset` enum. */
+export type DifficultyPreset = 'Sandbox' | 'Easy' | 'Normal' | 'Hard' | 'Brutal'
+
 // ─── Shared domain types ─────────────────────────────────────────────────────
 
 /** Lightweight summary of a colony returned by ListColonies. */
@@ -69,6 +72,12 @@ export type QueryResultPayload =
   | { kind: 'labour'; labour: number }
   | { kind: 'colony_screen'; data: import('@/types/screen').ColonyScreenData }
 
+export interface NewGameSnapshotMessage {
+  type: 'new_game_snapshot'
+  seq: number
+  state: WorldSnapshot
+}
+
 /** Union of all server→client WebSocket messages. */
 export type ServerMessage =
   | SnapshotMessage
@@ -76,6 +85,7 @@ export type ServerMessage =
   | ErrorMessage
   | AckMessage
   | QueryResultMessage
+  | NewGameSnapshotMessage
 
 // ─── Client → Server messages ────────────────────────────────────────────────
 
@@ -92,6 +102,7 @@ export type ClientCommand =
       construction_turns: number
     }
   | { kind: 'assign_labour'; colony_id: string; slot: string; labour: number }
+  | { kind: 'new_game'; difficulty: DifficultyPreset; planet_seed: number }
 
 export type ClientQuery =
   | { kind: 'current_sol' }

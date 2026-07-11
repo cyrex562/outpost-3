@@ -19,7 +19,7 @@
 //! | `"command"`   | `{ seq, command: ClientCmd }`   | Drive the engine                 |
 //! | `"query"`     | `{ seq, query: ClientQuery }`   | Read-only state query            |
 
-use outpost_core::{ColonyStatus, ColonySummary, Event, QueryResult};
+use outpost_core::{difficulty::DifficultyPreset, ColonyStatus, ColonySummary, Event, QueryResult};
 use serde::{Deserialize, Serialize};
 
 // ─── Client → Server ─────────────────────────────────────────────────────────
@@ -81,6 +81,13 @@ pub enum ClientCommand {
         /// Labour units to assign.
         labour: u64,
     },
+    /// Initialise a new game: load content, apply difficulty, seed planet, found colony.
+    NewGame {
+        /// Difficulty preset to apply.
+        difficulty: DifficultyPreset,
+        /// Deterministic seed used for planet map generation.
+        planet_seed: u64,
+    },
 }
 
 /// Queries the client can issue (read-only, no state mutation).
@@ -125,6 +132,13 @@ pub enum ServerMessage {
     Ack {
         /// The sequence number from the originating [`ClientMessage::Command`].
         seq: u64,
+    },
+    /// Full snapshot returned after `NewGame` initialisation completes.
+    NewGameSnapshot {
+        /// Sequence number from the originating command.
+        seq: u64,
+        /// Current world snapshot (post-init).
+        state: WorldSnapshot,
     },
     /// Response to a client query.
     QueryResult {
@@ -490,6 +504,32 @@ mod tests {
             } => assert_eq!(seq, 2),
             _ => panic!("unexpected variant"),
         }
+    }
+
+    #[test]
+    fn new_game_command_deserialises() {
+        let raw = r#"{"type":"command","seq":10,"command":{"kind":"new_game","difficulty":"Normal","planet_seed":42}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::NewGame { difficulty, planet_seed },
+            } => {
+                assert_eq!(seq, 10);
+                assert_eq!(difficulty, DifficultyPreset::Normal);
+                assert_eq!(planet_seed, 42);
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn new_game_snapshot_serialises() {
+        let snap = WorldSnapshot { sol: 0, month: 0, colonies: vec![] };
+        let msg = ServerMessage::NewGameSnapshot { seq: 10, state: snap };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(json.contains("\"type\":\"new_game_snapshot\""));
+        assert!(json.contains("\"seq\":10"));
     }
 
     #[test]
