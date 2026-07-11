@@ -98,6 +98,101 @@ export interface ProductionShortfallEvent {
   reason: string
 }
 
+export interface HazardOccurredEvent {
+  kind: 'hazard_occurred'
+  colony_id: string
+  /** Hazard category, e.g. "DustStorm" */
+  hazard_kind: string
+  severity: number
+  stability_delta: number
+  commodity_losses: [string, number][]
+  population_lost: number
+}
+
+export interface MigrationArrivedEvent {
+  kind: 'migration_arrived'
+  from_colony: string | null
+  to_colony: string
+  count: number
+  overcrowding_stability_penalty: number
+  forced_departure_stability_penalty: number
+}
+
+export interface VoluntaryEmigrationTriggeredEvent {
+  kind: 'voluntary_emigration_triggered'
+  from_colony: string
+  to_colony: string
+  count: number
+}
+
+export interface ExpeditionLaunchedEvent {
+  kind: 'expedition_launched'
+  expedition_id: string
+  colony_id: string
+  target_hex_q: number
+  target_hex_r: number
+}
+
+export interface ExpeditionArrivedEvent {
+  kind: 'expedition_arrived'
+  expedition_id: string
+}
+
+export interface ExpeditionReturnedEvent {
+  kind: 'expedition_returned'
+  expedition_id: string
+  colony_id: string
+  deposits: [string, number][]
+}
+
+export interface ExpeditionLostEvent {
+  kind: 'expedition_lost'
+  expedition_id: string
+}
+
+export interface TechUnlockedEvent {
+  kind: 'tech_unlocked'
+  tech_id: string
+}
+
+export interface VictoryAchievedEvent {
+  kind: 'victory_achieved'
+  /** Debug representation of the VictoryCondition variant, e.g. "InterstellarExpeditionLaunched" */
+  condition: string
+}
+
+export interface MenaceCriticalEvent {
+  kind: 'menace_critical'
+  /** Menace category, e.g. "EnvironmentalCollapse" */
+  menace_kind: string
+  level: number
+  countdown_months: number
+}
+
+export interface CargoDeliveredEvent {
+  kind: 'cargo_delivered'
+  shipment_id: string
+  colony_id: string
+  commodity_id: string
+  amount: number
+}
+
+export interface OrbitalStationCompletedEvent {
+  kind: 'orbital_station_completed'
+  station_id: string
+  colony_id: string
+  /** Station type, e.g. "Habitat" */
+  station_type: string
+  /** Orbit band, e.g. "Low" */
+  orbit_type: string
+  blueprint_id: string
+}
+
+/** A core event that the frontend does not need to act on. */
+export interface IgnoredEvent {
+  kind: 'ignored'
+}
+
 /** Union of all typed server events. */
 export type ServerEvent =
   | ColonySolAdvancedEvent
@@ -114,3 +209,16 @@ export type ServerEvent =
   | ManualOverrideChangedEvent
   | DirectiveFiredEvent
   | ProductionShortfallEvent
+  | HazardOccurredEvent
+  | MigrationArrivedEvent
+  | VoluntaryEmigrationTriggeredEvent
+  | ExpeditionLaunchedEvent
+  | ExpeditionArrivedEvent
+  | ExpeditionReturnedEvent
+  | ExpeditionLostEvent
+  | TechUnlockedEvent
+  | VictoryAchievedEvent
+  | MenaceCriticalEvent
+  | CargoDeliveredEvent
+  | OrbitalStationCompletedEvent
+  | IgnoredEvent
