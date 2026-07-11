@@ -38,6 +38,8 @@ use outpost_core::content::registry::ContentRegistry;
 
 mod assertions;
 mod config;
+mod scenario;
+mod simulate;
 use assertions::{check_assertions, Assertion, AssertionResult};
 use config::ColonyConfig;
 
@@ -59,7 +61,7 @@ fn run() -> Result<i32, String> {
 
     if args.len() < 2 {
         return Err(format!(
-            "usage: {} <run|check> ...\n  run   <pack_dir> <colony_config> [--json]\n  check <bundle_dir> [--json]",
+            "usage: {} <run|check|scenario> ...\n  run      <pack_dir> <colony_config> [--json]\n  check    <bundle_dir> [--json]\n  scenario --scenario <path> [--turns N] [--report <path>] [--seed N] [--json]",
             args[0]
         ));
     }
@@ -67,11 +69,125 @@ fn run() -> Result<i32, String> {
     match args[1].as_str() {
         "run" => run_subcommand(&args),
         "check" => check_subcommand(&args),
+        "scenario" => scenario_subcommand(&args),
         other => Err(format!(
-            "unknown subcommand '{other}'. usage: {} <run|check>",
+            "unknown subcommand '{other}'. usage: {} <run|check|scenario>",
             args[0]
         )),
     }
+}
+
+/// `harness scenario --scenario <path> [--turns N] [--report <path>] [--seed N]`
+///
+/// Loads a multi-colony scenario YAML, runs the simulation for the given number
+/// of colony-sol turns, and emits a balance report.
+///
+/// Exit codes:
+/// - 0 — simulation completed successfully
+/// - 3 — error (bad args, missing files, parse failure)
+fn scenario_subcommand(args: &[String]) -> Result<i32, String> {
+    // Parse flags manually (clap is available but we keep parity with existing style).
+    let scenario_path = flag_value(args, "--scenario")
+        .ok_or_else(|| "--scenario <path> is required".to_string())?;
+    let turns: u64 = flag_value(args, "--turns")
+        .map(|v| {
+            v.parse::<u64>()
+                .map_err(|e| format!("invalid --turns value: {e}"))
+        })
+        .transpose()?
+        .unwrap_or(360);
+    let seed: u64 = flag_value(args, "--seed")
+        .map(|v| {
+            v.parse::<u64>()
+                .map_err(|e| format!("invalid --seed value: {e}"))
+        })
+        .transpose()?
+        .unwrap_or(0);
+    let report_path = flag_value(args, "--report");
+    let json_mode = args.iter().any(|a| a == "--json")
+        || report_path.as_deref().is_some_and(|p| {
+            std::path::Path::new(p)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        });
+
+    // Load scenario YAML.
+    let text = std::fs::read_to_string(&scenario_path)
+        .map_err(|e| format!("failed to read scenario file '{scenario_path}': {e}"))?;
+    let cfg: scenario::ScenarioConfig =
+        serde_yaml::from_str(&text).map_err(|e| format!("invalid scenario YAML: {e}"))?;
+
+    // Run simulation.
+    let report = simulate::run_scenario(&cfg, turns, seed)?;
+
+    // Serialise output.
+    let output = if json_mode {
+        serde_json::to_string_pretty(&report)
+            .map_err(|e| format!("failed to serialize report: {e}"))?
+    } else {
+        format_scenario_report_human(&report)
+    };
+
+    // Write or print.
+    if let Some(ref path) = report_path {
+        std::fs::write(path, &output)
+            .map_err(|e| format!("failed to write report to '{path}': {e}"))?;
+        eprintln!("report written to {path}");
+    } else {
+        println!("{output}");
+    }
+
+    Ok(0)
+}
+
+/// Extract the value of a `--flag <value>` pair from an args slice.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
+}
+
+/// Format a [`simulate::ScenarioReport`] as a human-readable text report.
+fn format_scenario_report_human(report: &simulate::ScenarioReport) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    out.push_str("╔══════════════════════════════════════════════════════════════╗\n");
+    out.push_str("║           MULTI-COLONY NETWORK BALANCE REPORT               ║\n");
+    out.push_str("╠══════════════════════════════════════════════════════════════╣\n");
+    let _ = write!(
+        out,
+        "  Turns simulated : {}\n  RNG seed        : {}\n  Colonies        : {}\n",
+        report.turns_simulated,
+        report.seed,
+        report.colony_summaries.len()
+    );
+    out.push_str("╠══════════════════════════════════════════════════════════════╣\n");
+
+    for cs in &report.colony_summaries {
+        let _ = writeln!(out, "  Colony: {}", cs.colony_name);
+        let _ = write!(
+            out,
+            "    Final population : {:.1}\n    Final stability  : {:.3}\n",
+            cs.final_population, cs.final_stability
+        );
+
+        if cs.avg_commodity_nets.is_empty() {
+            out.push_str("    (no commodity data)\n");
+        } else {
+            out.push_str("    Commodity avg net/turn:\n");
+            for cn in &cs.avg_commodity_nets {
+                let sign = if cn.net_per_turn >= 0.0 { "+" } else { "" };
+                let _ = writeln!(
+                    out,
+                    "      {:<20} {}{:.3}",
+                    cn.commodity_id, sign, cn.net_per_turn
+                );
+            }
+        }
+        out.push('\n');
+    }
+
+    out.push_str("╚══════════════════════════════════════════════════════════════╝\n");
+    out
 }
 
 /// `harness run <pack_dir> <colony_config> [--json]`
@@ -738,6 +854,101 @@ version: '0.1.0'
         assert!(parsed.is_array());
         assert_eq!(parsed.as_array().unwrap().len(), 1);
 
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    // ── scenario subcommand tests ─────────────────────────────────────────
+
+    #[test]
+    fn flag_value_extracts_correctly() {
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "scenario".into(),
+            "--scenario".into(),
+            "my.yaml".into(),
+            "--turns".into(),
+            "120".into(),
+        ];
+        assert_eq!(flag_value(&args, "--scenario"), Some("my.yaml".into()));
+        assert_eq!(flag_value(&args, "--turns"), Some("120".into()));
+        assert_eq!(flag_value(&args, "--seed"), None);
+    }
+
+    #[test]
+    fn scenario_subcommand_missing_scenario_flag_returns_error() {
+        let args: Vec<String> = vec!["harness".into(), "scenario".into()];
+        let err = scenario_subcommand(&args).unwrap_err();
+        assert!(err.contains("--scenario"), "got: {err}");
+    }
+
+    #[test]
+    fn scenario_subcommand_nonexistent_file_returns_error() {
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "scenario".into(),
+            "--scenario".into(),
+            "/nonexistent/scenario.yaml".into(),
+        ];
+        let err = scenario_subcommand(&args).unwrap_err();
+        assert!(err.contains("failed to read"), "got: {err}");
+    }
+
+    #[test]
+    fn scenario_subcommand_runs_minimal_scenario() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join("outpost_scenario_test_minimal");
+        fs::create_dir_all(&tmp).unwrap();
+        let scenario_path = tmp.join("basic.yaml");
+        fs::write(
+            &scenario_path,
+            "colonies:\n  - name: Solo\n    starting_pop: 100\n",
+        )
+        .unwrap();
+
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "scenario".into(),
+            "--scenario".into(),
+            scenario_path.to_str().unwrap().to_string(),
+            "--turns".into(),
+            "5".into(),
+            "--seed".into(),
+            "0".into(),
+        ];
+        let code = scenario_subcommand(&args).expect("should succeed");
+        assert_eq!(code, 0);
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scenario_subcommand_writes_json_report() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join("outpost_scenario_test_json");
+        fs::create_dir_all(&tmp).unwrap();
+        let scenario_path = tmp.join("sc.yaml");
+        let report_path = tmp.join("report.json");
+        fs::write(
+            &scenario_path,
+            "colonies:\n  - name: Alpha\n    starting_pop: 200\n",
+        )
+        .unwrap();
+
+        let args: Vec<String> = vec![
+            "harness".into(),
+            "scenario".into(),
+            "--scenario".into(),
+            scenario_path.to_str().unwrap().to_string(),
+            "--turns".into(),
+            "3".into(),
+            "--report".into(),
+            report_path.to_str().unwrap().to_string(),
+        ];
+        let code = scenario_subcommand(&args).expect("should succeed");
+        assert_eq!(code, 0);
+        assert!(report_path.exists(), "report file should be written");
+        let content = fs::read_to_string(&report_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["turns_simulated"], 3);
         fs::remove_dir_all(&tmp).ok();
     }
 

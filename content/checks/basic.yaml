@@ -1,0 +1,27 @@
+# Basic two-colony network balance scenario.
+#
+# Usage:
+#   cargo run -p outpost_harness -- scenario \
+#     --scenario content/checks/basic.yaml \
+#     --turns 120 --seed 0
+#
+# Alpha Base focuses on water and food production; Beta Station is a
+# smaller mining outpost that imports water from Alpha Base.
+
+colonies:
+  - name: Alpha Base
+    starting_pop: 500
+    buildings: []
+
+  - name: Beta Station
+    starting_pop: 200
+    buildings: []
+
+trade_routes:
+  - from: Alpha Base
+    to: Beta Station
+    commodity: water
+    max_per_month: 100
+
+victory: population_milestone
+victory_target: 10000
