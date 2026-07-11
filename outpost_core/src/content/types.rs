@@ -243,3 +243,23 @@ pub struct DefaultDirectiveDef {
     #[serde(default)]
     pub priority: u8,
 }
+
+/// A named starter-supply package selectable during colony founding.
+///
+/// Quantities in `commodities` are treated as **per-100-colonist** amounts.
+/// They are scaled linearly by `starting_population / 100.0` when applied
+/// so packages remain balanced regardless of colony size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupplyPackage {
+    /// Unique identifier referenced by `Command::FoundColony*`.
+    pub id: String,
+    /// Human-readable name (e.g. "Lean", "Standard", "Stockpile").
+    pub name: String,
+    /// Short flavour / summary text shown in the founding UI.
+    #[serde(default)]
+    pub description: String,
+    /// Commodities deposited into the new colony's pool, scaled by
+    /// `starting_population / 100.0`.
+    #[serde(default)]
+    pub commodities: Vec<Ingredient>,
+}

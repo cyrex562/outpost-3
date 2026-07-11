@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::types::{
     BuildingDef, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint, PackManifest,
-    RecipeDef,
+    RecipeDef, SupplyPackage,
 };
 
 /// In-memory registry produced by loading one or more content packs.
@@ -25,6 +25,8 @@ pub struct ContentRegistry {
     pub orbital_blueprints: HashMap<String, OrbitalStationBlueprint>,
     /// Default directives inserted into every newly-founded colony.
     pub default_directives: Vec<DefaultDirectiveDef>,
+    /// Named starter-supply packages selectable at colony founding.
+    pub(super) supply_packages: HashMap<String, SupplyPackage>,
 }
 
 impl ContentRegistry {
@@ -36,6 +38,7 @@ impl ContentRegistry {
         self.buildings.extend(other.buildings);
         self.orbital_blueprints.extend(other.orbital_blueprints);
         self.default_directives.extend(other.default_directives);
+        self.supply_packages.extend(other.supply_packages);
     }
 
     /// The manifest of the most-recently loaded pack.
@@ -101,6 +104,17 @@ impl ContentRegistry {
     #[must_use]
     pub fn default_directives(&self) -> &[DefaultDirectiveDef] {
         &self.default_directives
+    }
+
+    /// Look up a supply package by id.
+    #[must_use]
+    pub fn supply_package(&self, id: &str) -> Option<&SupplyPackage> {
+        self.supply_packages.get(id)
+    }
+
+    /// All supply packages as an iterator.
+    pub fn supply_packages(&self) -> impl Iterator<Item = &SupplyPackage> {
+        self.supply_packages.values()
     }
 }
 

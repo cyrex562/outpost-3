@@ -38,6 +38,7 @@ export type Command =
       starting_population: number
       site_id: string
       focus: string | null
+      supplies_id?: string | null
     }
 
 /** Directive trigger condition shape. */

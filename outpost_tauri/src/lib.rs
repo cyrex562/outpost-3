@@ -33,6 +33,7 @@ pub fn run() {
             commands::get_colonize_targets,
             commands::list_buildings,
             commands::get_planet_map,
+            commands::list_supply_packages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Outpost 3");

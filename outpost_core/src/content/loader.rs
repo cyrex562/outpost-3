@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use super::{
     error::ContentError,
     registry::ContentRegistry,
-    types::{BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef},
+    types::{
+        BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef, SupplyPackage,
+    },
 };
 
 /// Named raw file: a `(filename, yaml_text)` pair.
@@ -48,6 +50,7 @@ impl PackLoader {
         let buildings = collect_table::<BuildingDef>(files, &["buildings.yaml"])?;
         let default_directives =
             collect_list::<DefaultDirectiveDef>(files, &["default_directives.yaml"])?;
+        let supply_packages = collect_table::<SupplyPackage>(files, &["supplies.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
         let commodity_ids: std::collections::HashSet<&str> =
@@ -66,6 +69,18 @@ impl PackLoader {
             }
         }
 
+        for pkg in supply_packages.values() {
+            for ing in &pkg.commodities {
+                if !commodity_ids.contains(ing.id.as_str()) {
+                    return Err(ContentError::UnknownCommodityRef {
+                        file: "supplies.yaml".to_string(),
+                        id: pkg.id.clone(),
+                        commodity_id: ing.id.clone(),
+                    });
+                }
+            }
+        }
+
         Ok(ContentRegistry {
             manifest,
             commodities,
@@ -73,6 +88,7 @@ impl PackLoader {
             buildings,
             orbital_blueprints: std::collections::HashMap::new(),
             default_directives,
+            supply_packages,
         })
     }
 }
@@ -148,6 +164,12 @@ impl HasId for RecipeDef {
 }
 
 impl HasId for BuildingDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl HasId for SupplyPackage {
     fn id(&self) -> &str {
         &self.id
     }
