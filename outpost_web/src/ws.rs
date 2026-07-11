@@ -81,7 +81,11 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
     match msg {
         ClientMessage::Command { seq, command } => {
             // NewGame is a multi-step initialisation flow — handle it separately.
-            if let ClientCommand::NewGame { difficulty, planet_seed } = command {
+            if let ClientCommand::NewGame {
+                difficulty,
+                planet_seed,
+            } = command
+            {
                 handle_new_game(seq, difficulty, planet_seed, state, socket).await;
                 return;
             }
@@ -271,15 +275,21 @@ async fn handle_new_game(
         // Seed the planet map.
         let mut events: Vec<outpost_core::Event> = Vec::new();
 
-        let seed_evs = engine.apply(&Command::SeedPlanet { seed: planet_seed, radius: 4 })
+        let seed_evs = engine
+            .apply(&Command::SeedPlanet {
+                seed: planet_seed,
+                radius: 4,
+            })
             .map_err(|e| format!("SeedPlanet failed: {e}"))?;
         events.extend(seed_evs);
 
         // Found the initial colony.
-        let colony_evs = engine.apply(&Command::FoundColony {
-            name: "Alpha Base".into(),
-            starting_population: 200,
-        }).map_err(|e| format!("FoundColony failed: {e}"))?;
+        let colony_evs = engine
+            .apply(&Command::FoundColony {
+                name: "Alpha Base".into(),
+                starting_population: 200,
+            })
+            .map_err(|e| format!("FoundColony failed: {e}"))?;
         events.extend(colony_evs);
 
         Ok(events)
@@ -291,7 +301,10 @@ async fn handle_new_game(
                 let _ = state.events.send(e);
             }
             let snapshot = build_snapshot(state);
-            let msg = ServerMessage::NewGameSnapshot { seq, state: snapshot };
+            let msg = ServerMessage::NewGameSnapshot {
+                seq,
+                state: snapshot,
+            };
             let _ = send_json(socket, &msg).await;
         }
         Err(e) => {
@@ -308,8 +321,13 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
         return Err(format!("pack directory not found: {}", pack_dir.display()));
     }
 
-    let file_names = ["pack.yaml", "commodities.yaml", "buildings.yaml", "recipes.yaml",
-                      "default_directives.yaml"];
+    let file_names = [
+        "pack.yaml",
+        "commodities.yaml",
+        "buildings.yaml",
+        "recipes.yaml",
+        "default_directives.yaml",
+    ];
     let mut raw_contents: Vec<(String, String)> = Vec::new();
 
     for name in &file_names {
@@ -335,8 +353,7 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
 fn load_difficulty_table(path: &std::path::Path) -> Result<DifficultyGradeTable, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read difficulty.yaml: {e}"))?;
-    serde_yaml::from_str(&text)
-        .map_err(|e| format!("failed to parse difficulty.yaml: {e}"))
+    serde_yaml::from_str(&text).map_err(|e| format!("failed to parse difficulty.yaml: {e}"))
 }
 
 async fn send_json(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), axum::Error> {
@@ -380,21 +397,29 @@ mod tests {
     fn load_core_content_pack_succeeds() {
         // Find content/core relative to the workspace root.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-        let root = std::path::Path::new(&manifest).parent().unwrap_or(std::path::Path::new("."));
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
         let core_dir = root.join("content").join("core");
         if !core_dir.is_dir() {
             // Skip if running outside the workspace (CI artefact layout).
             return;
         }
         let result = load_content_pack_from_dir(&core_dir);
-        assert!(result.is_ok(), "core pack failed to load: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "core pack failed to load: {:?}",
+            result.err()
+        );
     }
 
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-        let root = std::path::Path::new(&manifest).parent().unwrap_or(std::path::Path::new("."));
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
         let path = root.join("content").join("difficulty.yaml");
         if !path.exists() {
             return;
@@ -406,13 +431,15 @@ mod tests {
     /// After a `NewGame` sequence the engine has registry and needs_config loaded.
     #[test]
     fn new_game_sequence_sets_registry_and_needs_config() {
-        use outpost_core::GameEngine;
-        use outpost_core::Command;
-        use outpost_core::needs::NeedsConfig;
         use outpost_core::difficulty::DifficultyPreset;
+        use outpost_core::needs::NeedsConfig;
+        use outpost_core::Command;
+        use outpost_core::GameEngine;
 
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-        let root = std::path::Path::new(&manifest).parent().unwrap_or(std::path::Path::new("."));
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
         let core_dir = root.join("content").join("core");
         if !core_dir.is_dir() {
             return;
@@ -429,28 +456,40 @@ mod tests {
         engine.state.difficulty_scalar = difficulty_scalar;
         engine.state.needs_config = Some(NeedsConfig::default_survival());
 
-        engine.apply(&Command::SeedPlanet { seed: 99, radius: 4 }).expect("seed planet");
-        engine.apply(&Command::FoundColony {
-            name: "Test Base".into(),
-            starting_population: 200,
-        }).expect("found colony");
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 99,
+                radius: 4,
+            })
+            .expect("seed planet");
+        engine
+            .apply(&Command::FoundColony {
+                name: "Test Base".into(),
+                starting_population: 200,
+            })
+            .expect("found colony");
 
         assert!(engine.state.registry.is_some(), "registry should be set");
-        assert!(engine.state.needs_config.is_some(), "needs_config should be set");
+        assert!(
+            engine.state.needs_config.is_some(),
+            "needs_config should be set"
+        );
         assert_eq!(engine.state.difficulty_preset, DifficultyPreset::Normal);
     }
 
     /// After NewGame init, advancing a sol produces NeedsResolved events (subsystems active).
     #[test]
     fn advance_sol_after_new_game_produces_needs_resolved() {
+        use outpost_core::difficulty::DifficultyPreset;
+        use outpost_core::needs::NeedsConfig;
         use outpost_core::Command;
         use outpost_core::Event;
         use outpost_core::GameEngine;
-        use outpost_core::difficulty::DifficultyPreset;
-        use outpost_core::needs::NeedsConfig;
 
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-        let root = std::path::Path::new(&manifest).parent().unwrap_or(std::path::Path::new("."));
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
         let core_dir = root.join("content").join("core");
         if !core_dir.is_dir() {
             return;
@@ -465,15 +504,24 @@ mod tests {
         engine.state.difficulty_preset = DifficultyPreset::Normal;
         engine.state.needs_config = Some(NeedsConfig::default_survival());
 
-        engine.apply(&Command::SeedPlanet { seed: 1, radius: 4 }).expect("seed");
-        engine.apply(&Command::FoundColony {
-            name: "Alpha".into(),
-            starting_population: 50,
-        }).expect("found");
+        engine
+            .apply(&Command::SeedPlanet { seed: 1, radius: 4 })
+            .expect("seed");
+        engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 50,
+            })
+            .expect("found");
 
         let result = engine.apply(&Command::AdvanceColonySol).expect("advance");
 
-        let has_needs_resolved = result.iter().any(|e| matches!(e, Event::NeedsResolved { .. }));
-        assert!(has_needs_resolved, "expected NeedsResolved event after sol advance, got: {result:?}");
+        let has_needs_resolved = result
+            .iter()
+            .any(|e| matches!(e, Event::NeedsResolved { .. }));
+        assert!(
+            has_needs_resolved,
+            "expected NeedsResolved event after sol advance, got: {result:?}"
+        );
     }
 }

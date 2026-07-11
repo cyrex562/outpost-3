@@ -513,7 +513,11 @@ mod tests {
         match msg {
             ClientMessage::Command {
                 seq,
-                command: ClientCommand::NewGame { difficulty, planet_seed },
+                command:
+                    ClientCommand::NewGame {
+                        difficulty,
+                        planet_seed,
+                    },
             } => {
                 assert_eq!(seq, 10);
                 assert_eq!(difficulty, DifficultyPreset::Normal);
@@ -525,8 +529,15 @@ mod tests {
 
     #[test]
     fn new_game_snapshot_serialises() {
-        let snap = WorldSnapshot { sol: 0, month: 0, colonies: vec![] };
-        let msg = ServerMessage::NewGameSnapshot { seq: 10, state: snap };
+        let snap = WorldSnapshot {
+            sol: 0,
+            month: 0,
+            colonies: vec![],
+        };
+        let msg = ServerMessage::NewGameSnapshot {
+            seq: 10,
+            state: snap,
+        };
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains("\"type\":\"new_game_snapshot\""));
         assert!(json.contains("\"seq\":10"));
