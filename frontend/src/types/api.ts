@@ -67,6 +67,7 @@ export type QueryResultPayload =
   | { kind: 'colony_status'; status: ColonyStatus }
   | { kind: 'research_total'; total: number }
   | { kind: 'labour'; labour: number }
+  | { kind: 'colony_screen'; data: import('@/types/screen').ColonyScreenData }
 
 /** Union of all server→client WebSocket messages. */
 export type ServerMessage =
@@ -97,6 +98,7 @@ export type ClientQuery =
   | { kind: 'current_month' }
   | { kind: 'list_colonies' }
   | { kind: 'colony_status'; colony_id: string }
+  | { kind: 'colony_screen'; colony_id: string }
 
 export interface ClientCommandMessage {
   type: 'command'

@@ -6,7 +6,7 @@
  * and produces the correct derived state.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { applyEvent, hydrateFromSnapshot } from '../reducer'
 import type { WorldState } from '../model'
 import { EMPTY_WORLD_STATE } from '../model'

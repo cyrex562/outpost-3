@@ -51,7 +51,13 @@ export const useWorldStore = defineStore('world', () => {
         // Acknowledged — no state change needed here; callers may await acks.
         break
       case 'query_result':
-        // Query results are handled by the caller via a promise; no store update.
+        // Route colony_screen results to the game store.
+        if (msg.result.kind === 'colony_screen') {
+          // Lazy import to avoid circular dependency.
+          import('@/stores/game').then(({ useGameStore }) => {
+            useGameStore().setColonyScreen(msg.result.kind === 'colony_screen' ? msg.result.data : null!)
+          })
+        }
         break
     }
   }
