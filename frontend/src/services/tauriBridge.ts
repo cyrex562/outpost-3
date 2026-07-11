@@ -178,3 +178,14 @@ export interface PlanetMap {
 export async function getPlanetMap(): Promise<PlanetMap> {
   return invoke<PlanetMap>('get_planet_map')
 }
+
+export interface SupplyPackage {
+  id: string
+  name: string
+  description: string
+  commodities: [string, number][]
+}
+
+export async function listSupplyPackages(): Promise<SupplyPackage[]> {
+  return invoke<SupplyPackage[]>('list_supply_packages')
+}

@@ -166,6 +166,11 @@ pub enum Command {
         site_id: SiteId,
         /// Optional economic focus description (e.g. "mining", "agriculture").
         focus: Option<String>,
+        /// Optional `SupplyPackage` id (from the content pack) used to seed
+        /// the new colony's commodity pool. Amounts in the package are per-100-
+        /// colonist and scale linearly with `starting_population`.
+        #[serde(default)]
+        supplies_id: Option<String>,
     },
     /// Add an infrastructure trade route between two colonies.
     ///
@@ -1986,6 +1991,7 @@ impl GameEngine {
                 starting_population,
                 site_id,
                 focus,
+                supplies_id,
             } => {
                 if name.trim().is_empty() {
                     return Err(EngineError::InvalidArgument(
@@ -2019,6 +2025,21 @@ impl GameEngine {
                 if pm.colonies.iter().any(|n| n.coord == coord) {
                     return Err(EngineError::SiteOccupied);
                 }
+                // Resolve the supply package (if any) up front so an unknown id
+                // is reported before any mutation happens.
+                let supplies = if let Some(id) = supplies_id.as_deref() {
+                    let registry = self.state.registry.as_ref().ok_or_else(|| {
+                        EngineError::InvalidArgument(
+                            "no content registry loaded — cannot resolve supplies_id".into(),
+                        )
+                    })?;
+                    let pkg = registry.supply_package(id).ok_or_else(|| {
+                        EngineError::InvalidArgument(format!("unknown supplies_id: {id}"))
+                    })?;
+                    Some(pkg.commodities.clone())
+                } else {
+                    None
+                };
                 let _ = pm;
                 let colony = colony::Colony::new(name.clone());
                 let colony_id = colony.id;
@@ -2034,6 +2055,20 @@ impl GameEngine {
                 pm_mut
                     .place_colony(colony_id, coord)
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
+                // Seed the starter supplies (per-100-colonist quantities are
+                // scaled linearly by starting_population).
+                if let Some(ings) = supplies {
+                    let scale = (*starting_population as f64) / 100.0;
+                    let idx = self
+                        .find_colony_index(colony_id)
+                        .expect("colony was just inserted");
+                    for ing in &ings {
+                        let qty = ing.quantity * scale;
+                        if qty > 0.0 {
+                            self.state.colonies[idx].pool.deposit(&ing.id, qty);
+                        }
+                    }
+                }
                 Ok(vec![
                     Event::ColonyFoundedAtSite {
                         colony_id,
@@ -5239,6 +5274,7 @@ mod tests {
                 starting_population: 10,
                 site_id: site_a,
                 focus: None,
+                supplies_id: None,
             })
             .unwrap();
         engine
@@ -5247,6 +5283,7 @@ mod tests {
                 starting_population: 20,
                 site_id: site_b,
                 focus: None,
+                supplies_id: None,
             })
             .unwrap();
 
@@ -5425,6 +5462,7 @@ mod tests {
                 starting_population: 50,
                 site_id: site,
                 focus: Some("mining".into()),
+                supplies_id: None,
             })
             .unwrap();
 
@@ -5980,6 +6018,7 @@ mod tests {
             starting_population: 100,
             site_id: trade::SiteId::new(),
             focus: None,
+            supplies_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::NoPlanetMap)),
@@ -6045,6 +6084,7 @@ mod tests {
             starting_population: 50,
             site_id: trade::SiteId::new(), // random UUID — not in map
             focus: None,
+            supplies_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::SiteNotFound(_))),
@@ -6080,6 +6120,7 @@ mod tests {
                 starting_population: 200,
                 site_id,
                 focus: Some("mining".into()),
+                supplies_id: None,
             })
             .unwrap();
 
@@ -6123,6 +6164,7 @@ mod tests {
                 starting_population: 100,
                 site_id,
                 focus: None,
+                supplies_id: None,
             })
             .unwrap();
 
@@ -6132,11 +6174,129 @@ mod tests {
             starting_population: 100,
             site_id,
             focus: None,
+            supplies_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::SiteOccupied)),
             "expected SiteOccupied, got {result:?}"
         );
+    }
+
+    #[test]
+    fn found_colony_at_site_seeds_pool_from_supply_package() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let commodities_yaml = "\
+- id: water
+  name: Water
+  category: consumable
+  base_value: 1.0
+- id: food_ration
+  name: Food Ration
+  category: consumable
+  base_value: 1.0
+";
+        let supplies_yaml = "\
+- id: standard
+  name: Standard
+  commodities:
+    - id: water
+      quantity: 400.0
+    - id: food_ration
+      quantity: 300.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("commodities.yaml", commodities_yaml),
+            ("supplies.yaml", supplies_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Alpha".into(),
+                starting_population: 200,
+                site_id,
+                focus: None,
+                supplies_id: Some("standard".into()),
+            })
+            .unwrap();
+
+        // starting_population 200 → scale 2.0 → 400 * 2 = 800 water, 300 * 2 = 600 food.
+        let colony = &engine.state.colonies[0];
+        assert!(
+            (colony.pool.amount("water") - 800.0).abs() < 0.001,
+            "expected 800 water, got {}",
+            colony.pool.amount("water")
+        );
+        assert!(
+            (colony.pool.amount("food_ration") - 600.0).abs() < 0.001,
+            "expected 600 food_ration, got {}",
+            colony.pool.amount("food_ration")
+        );
+    }
+
+    #[test]
+    fn found_colony_at_site_rejects_unknown_supplies_id() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let commodities_yaml = "\
+- id: water
+  name: Water
+  category: consumable
+  base_value: 1.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("commodities.yaml", commodities_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet { seed: 8, radius: 3 })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Alpha".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: Some("nonexistent".into()),
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected InvalidArgument, got {result:?}"
+        );
+        // Colony must not have been added on failure.
+        assert!(engine.state.colonies.is_empty());
     }
 
     #[test]
@@ -6182,6 +6342,7 @@ mod tests {
                 starting_population: 150,
                 site_id,
                 focus: None,
+                supplies_id: None,
             })
             .unwrap();
 
@@ -6358,6 +6519,7 @@ mod tests {
                 starting_population: 100,
                 site_id: site_a,
                 focus: None,
+                supplies_id: None,
             })
             .unwrap();
         let colony_a = events_a
@@ -6377,6 +6539,7 @@ mod tests {
                 starting_population: 80,
                 site_id: site_b,
                 focus: None,
+                supplies_id: None,
             })
             .unwrap();
         let colony_b = events_b

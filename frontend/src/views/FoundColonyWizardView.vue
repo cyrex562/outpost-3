@@ -5,10 +5,12 @@ import {
   getColonizeTargets,
   getPlanetMap,
   listBuildings,
+  listSupplyPackages,
   type ColonizeTarget,
   type BuildingOption,
   type PlanetHex,
   type PlanetMap,
+  type SupplyPackage,
 } from '@/services/tauriBridge'
 import PlanetHexMap from '@/components/PlanetHexMap.vue'
 import { useGameStore } from '@/stores/game'
@@ -27,10 +29,11 @@ const chosenBody = ref<ColonizeTarget | null>(null)
 const planetMap = ref<PlanetMap | null>(null)
 const chosenHex = ref<PlanetHex | null>(null)
 
-// Step 3: choose starting buildings
+// Step 3: choose starting buildings + supply package
 const buildings = ref<BuildingOption[]>([])
 const chosenBuildings = ref<Set<string>>(new Set())
-const supplyLevel = ref<'lean' | 'standard' | 'stockpile'>('standard')
+const supplyPackages = ref<SupplyPackage[]>([])
+const chosenSupplyId = ref<string | null>(null)
 
 // Step 4: name + population
 const colonyName = ref('Alpha Base')
@@ -41,6 +44,10 @@ onMounted(async () => {
     bodies.value = await getColonizeTargets()
     buildings.value = await listBuildings()
     planetMap.value = await getPlanetMap()
+    supplyPackages.value = await listSupplyPackages()
+    // Default the supply pick to a "Standard"-named package if present, else the first.
+    const std = supplyPackages.value.find((p) => p.id === 'standard' || p.name.toLowerCase() === 'standard')
+    chosenSupplyId.value = std?.id ?? supplyPackages.value[0]?.id ?? null
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -93,6 +100,7 @@ async function finish(): Promise<void> {
           starting_population: startingPop.value,
           site_id: site,
           focus: null,
+          supplies_id: chosenSupplyId.value,
         }
       : {
           kind: 'found_colony',
@@ -208,22 +216,41 @@ async function finish(): Promise<void> {
 
     <!-- Step 3: loadout -->
     <section v-else-if="step === 3" class="panel">
-      <p class="hint">Choose starting buildings and initial supply level.</p>
+      <p class="hint">Choose starting buildings and a supply package.</p>
 
-      <div class="supply-row">
-        <label>
-          <input type="radio" v-model="supplyLevel" value="lean" />
-          Lean
-        </label>
-        <label>
-          <input type="radio" v-model="supplyLevel" value="standard" />
-          Standard
-        </label>
-        <label>
-          <input type="radio" v-model="supplyLevel" value="stockpile" />
-          Stockpile
+      <h4 class="sub-title">Supply package</h4>
+      <div class="supply-grid" v-if="supplyPackages.length > 0">
+        <label
+          v-for="pkg in supplyPackages"
+          :key="pkg.id"
+          class="supply-card"
+          :class="{ selected: chosenSupplyId === pkg.id }"
+        >
+          <input
+            type="radio"
+            name="supply-pkg"
+            :checked="chosenSupplyId === pkg.id"
+            @change="chosenSupplyId = pkg.id"
+          />
+          <div class="supply-info">
+            <div class="supply-name">{{ pkg.name }}</div>
+            <div class="supply-desc">{{ pkg.description || '—' }}</div>
+            <div class="supply-cost">
+              at {{ startingPop }} colonists:
+              <span
+                v-for="(c, i) in pkg.commodities"
+                :key="i"
+                class="cost-chip"
+              >
+                {{ (c[1] * startingPop / 100).toFixed(0) }} {{ c[0] }}
+              </span>
+            </div>
+          </div>
         </label>
       </div>
+      <div v-else class="hint">No supply packages authored in this content pack.</div>
+
+      <h4 class="sub-title">Starting buildings</h4>
 
       <div class="building-grid">
         <label
@@ -280,7 +307,14 @@ async function finish(): Promise<void> {
             {{ chosenHex.biome }} · {{ chosenHex.terrain }} ({{ chosenHex.q }}, {{ chosenHex.r }})
           </strong>
         </div>
-        <div>Supply: <strong>{{ supplyLevel }}</strong></div>
+        <div>
+          Supply:
+          <strong>
+            {{
+              supplyPackages.find((p) => p.id === chosenSupplyId)?.name ?? 'none'
+            }}
+          </strong>
+        </div>
         <div>Buildings: <strong>{{ chosenBuildings.size }}</strong></div>
       </div>
     </section>
@@ -395,8 +429,43 @@ async function finish(): Promise<void> {
   margin-top: 0.15rem;
 }
 
-.supply-row { display: flex; gap: 1rem; font-size: 0.85rem; color: #aab; }
-.supply-row label { display: flex; gap: 0.3rem; align-items: center; }
+.sub-title {
+  color: #668;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 0.75rem;
+}
+
+.supply-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.5rem;
+}
+.supply-card {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  background: #14141e;
+  border: 1px solid #334;
+  border-radius: 4px;
+  padding: 0.5rem;
+  cursor: pointer;
+  color: #aab;
+}
+.supply-card:hover { background: #1a1a2a; }
+.supply-card.selected { border-color: #468; background: #182030; }
+.supply-info { display: flex; flex-direction: column; min-width: 0; }
+.supply-name { color: #8cf; font-size: 0.85rem; font-weight: bold; }
+.supply-desc { color: #778; font-size: 0.75rem; margin-top: 0.15rem; }
+.supply-cost {
+  color: #668;
+  font-size: 0.72rem;
+  margin-top: 0.35rem;
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
 
 .building-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.5rem; }
 .building-card {

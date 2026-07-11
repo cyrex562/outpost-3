@@ -85,6 +85,8 @@ pub enum ClientCommand {
         starting_population: u64,
         site_id: String,
         focus: Option<String>,
+        #[serde(default)]
+        supplies_id: Option<String>,
     },
 }
 
@@ -488,6 +490,7 @@ pub fn apply_command(
             starting_population,
             site_id,
             focus,
+            supplies_id,
         } => {
             let uuid = Uuid::parse_str(&site_id)
                 .map_err(|_| CmdError::InvalidArg(format!("bad site_id: {site_id}")))?;
@@ -496,6 +499,7 @@ pub fn apply_command(
                 starting_population,
                 site_id: SiteId(uuid),
                 focus,
+                supplies_id,
             }
         }
     };
@@ -785,6 +789,44 @@ pub struct PlanetMapWire {
     pub seed: u64,
     pub radius: u32,
     pub hexes: Vec<PlanetHexWire>,
+}
+
+/// A starter supply package option surfaced in the founding wizard.
+#[derive(Debug, Serialize)]
+pub struct SupplyPackageWire {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub commodities: Vec<(String, f64)>,
+}
+
+/// Return all `SupplyPackage` records from the loaded content pack, sorted by name.
+#[tauri::command]
+pub fn list_supply_packages(
+    engine_state: State<'_, EngineState>,
+) -> CmdResult<Vec<SupplyPackageWire>> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    let registry = engine
+        .state
+        .registry
+        .as_ref()
+        .ok_or_else(|| CmdError::Content("no content registry loaded".into()))?;
+    let mut out: Vec<SupplyPackageWire> = registry
+        .supply_packages()
+        .map(|p| SupplyPackageWire {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            description: p.description.clone(),
+            commodities: p
+                .commodities
+                .iter()
+                .map(|i| (i.id.clone(), i.quantity))
+                .collect(),
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
 }
 
 /// Return the current planet hex map with per-cell metadata.
