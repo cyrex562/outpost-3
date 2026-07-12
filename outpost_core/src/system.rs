@@ -73,6 +73,63 @@ pub enum SystemRole {
     Unassigned,
 }
 
+/// Atmospheric composition band for a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Atmosphere {
+    /// No meaningful atmosphere (vacuum / trace).
+    None,
+    /// Very thin — supports rudimentary EVA operations only.
+    Thin,
+    /// Human-breathable without heavy equipment.
+    Breathable,
+    /// Thick / high-pressure but non-toxic.
+    Dense,
+    /// Chemically hostile (corrosive / poisonous).
+    Toxic,
+}
+
+/// Surface temperature band for a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemperatureBand {
+    /// Well below survivable liquid-water range.
+    Frozen,
+    /// Cold but manageable with insulation.
+    Cold,
+    /// Human-comfortable band.
+    Temperate,
+    /// Consistently hot — cooling infrastructure required.
+    Hot,
+    /// Lethal without heavy shielding.
+    Extreme,
+}
+
+/// Ambient radiation exposure level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RadiationLevel {
+    /// Negligible — near-Earth-baseline exposure.
+    Low,
+    /// Elevated — shielding recommended.
+    Moderate,
+    /// Dangerous — heavy shielding mandatory.
+    High,
+}
+
+fn default_atmosphere() -> Atmosphere {
+    Atmosphere::None
+}
+fn default_temperature() -> TemperatureBand {
+    TemperatureBand::Temperate
+}
+fn default_gravity_g() -> f32 {
+    1.0
+}
+fn default_radiation() -> RadiationLevel {
+    RadiationLevel::Low
+}
+
 /// A celestial body in the system node map.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Body {
@@ -86,10 +143,22 @@ pub struct Body {
     pub role: SystemRole,
     /// Distance from the system primary in arbitrary AU units (used for travel time).
     pub distance_au: f32,
+    /// Atmospheric composition band.
+    #[serde(default = "default_atmosphere")]
+    pub atmosphere: Atmosphere,
+    /// Surface temperature band.
+    #[serde(default = "default_temperature")]
+    pub temperature: TemperatureBand,
+    /// Surface gravity as a fraction of Earth-g.
+    #[serde(default = "default_gravity_g")]
+    pub gravity_g: f32,
+    /// Ambient radiation exposure level.
+    #[serde(default = "default_radiation")]
+    pub radiation: RadiationLevel,
 }
 
 impl Body {
-    /// Create a new unassigned body.
+    /// Create a new unassigned body with neutral attributes.
     #[must_use]
     pub fn new(name: impl Into<String>, kind: BodyKind, distance_au: f32) -> Self {
         Self {
@@ -98,7 +167,54 @@ impl Body {
             kind,
             role: SystemRole::Unassigned,
             distance_au,
+            atmosphere: default_atmosphere(),
+            temperature: default_temperature(),
+            gravity_g: default_gravity_g(),
+            radiation: default_radiation(),
         }
+    }
+
+    /// Composite habitability score (0–100) derived from the body's attributes.
+    ///
+    /// The score is a weighted sum of atmosphere / temperature / gravity /
+    /// radiation contributions. It is deterministic from the attributes so it
+    /// never drifts out of sync with authored content.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn habitability(&self) -> u8 {
+        let atmo = match self.atmosphere {
+            Atmosphere::Breathable => 30.0,
+            Atmosphere::Thin => 15.0,
+            Atmosphere::Dense => 10.0,
+            Atmosphere::None => 5.0,
+            Atmosphere::Toxic => 0.0,
+        };
+        let temp = match self.temperature {
+            TemperatureBand::Temperate => 30.0,
+            TemperatureBand::Cold => 20.0,
+            TemperatureBand::Hot => 15.0,
+            TemperatureBand::Frozen => 5.0,
+            TemperatureBand::Extreme => 0.0,
+        };
+        // Gravity contributes up to 20 pts, peaking near 1.0 g.
+        let g = self.gravity_g.clamp(0.0, 3.0);
+        let grav = (20.0 - (g - 1.0).abs() * 20.0).max(0.0);
+        let rad = match self.radiation {
+            RadiationLevel::Low => 20.0,
+            RadiationLevel::Moderate => 10.0,
+            RadiationLevel::High => 0.0,
+        };
+        (atmo + temp + grav + rad).round().clamp(0.0, 100.0) as u8
+    }
+
+    /// Productivity multiplier derived from [`Self::habitability`].
+    ///
+    /// Range: `[0.75, 1.25]` — a habitability of `50` maps to `1.0` (neutral),
+    /// `0` to `0.75` (−25 %), and `100` to `1.25` (+25 %). Applied as a
+    /// multiplicative scalar on colony production outputs.
+    #[must_use]
+    pub fn habitability_modifier(&self) -> f32 {
+        0.75 + f32::from(self.habitability()) * 0.005
     }
 }
 
@@ -468,6 +584,22 @@ pub enum SystemCommand {
         /// New role to assign.
         role: SystemRole,
     },
+    /// Overwrite a body's environmental attributes.
+    ///
+    /// Used by the content pack loader to populate authored attributes after
+    /// [`SystemCommand::AddBody`] creates the body with neutral defaults.
+    SetBodyAttributes {
+        /// Target body.
+        body_id: BodyId,
+        /// Atmospheric composition band.
+        atmosphere: Atmosphere,
+        /// Surface temperature band.
+        temperature: TemperatureBand,
+        /// Surface gravity as a fraction of Earth-g.
+        gravity_g: f32,
+        /// Ambient radiation exposure level.
+        radiation: RadiationLevel,
+    },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
         /// Origin body.
@@ -557,6 +689,19 @@ pub enum SystemEvent {
         previous_role: SystemRole,
         /// New role.
         new_role: SystemRole,
+    },
+    /// A body's environmental attributes were overwritten.
+    BodyAttributesSet {
+        /// Target body.
+        body_id: BodyId,
+        /// Atmospheric composition band.
+        atmosphere: Atmosphere,
+        /// Surface temperature band.
+        temperature: TemperatureBand,
+        /// Surface gravity as a fraction of Earth-g.
+        gravity_g: f32,
+        /// Ambient radiation exposure level.
+        radiation: RadiationLevel,
     },
     /// A shipping route was added between two bodies.
     ShippingRouteAdded {
@@ -728,6 +873,31 @@ pub fn apply_system_command(
                 name: name.clone(),
                 kind: kind.clone(),
                 distance_au: *distance_au,
+            }])
+        }
+
+        SystemCommand::SetBodyAttributes {
+            body_id,
+            atmosphere,
+            temperature,
+            gravity_g,
+            radiation,
+        } => {
+            let body = state
+                .node_map
+                .bodies
+                .get_mut(body_id)
+                .ok_or_else(|| SystemError::BodyNotFound(body_id.clone()))?;
+            body.atmosphere = *atmosphere;
+            body.temperature = *temperature;
+            body.gravity_g = *gravity_g;
+            body.radiation = *radiation;
+            Ok(vec![SystemEvent::BodyAttributesSet {
+                body_id: body_id.clone(),
+                atmosphere: *atmosphere,
+                temperature: *temperature,
+                gravity_g: *gravity_g,
+                radiation: *radiation,
             }])
         }
 
@@ -1080,6 +1250,81 @@ mod tests {
             }
         ));
         assert_eq!(state.node_map.bodies[&inner_id].role, SystemRole::Industry);
+    }
+
+    #[test]
+    fn body_habitability_earthlike_high() {
+        // Breathable + temperate + 1.0 g + low radiation → the maximum score.
+        let body = Body {
+            id: BodyId::new(),
+            name: "Earth".into(),
+            kind: BodyKind::InnerPlanet,
+            role: SystemRole::Unassigned,
+            distance_au: 1.0,
+            atmosphere: Atmosphere::Breathable,
+            temperature: TemperatureBand::Temperate,
+            gravity_g: 1.0,
+            radiation: RadiationLevel::Low,
+        };
+        assert_eq!(body.habitability(), 100);
+        assert!((body.habitability_modifier() - 1.25).abs() < 1e-4);
+    }
+
+    #[test]
+    fn body_habitability_toxic_extreme_low() {
+        // Toxic + extreme + 0 g + high radiation → the minimum score.
+        let body = Body {
+            id: BodyId::new(),
+            name: "Hellworld".into(),
+            kind: BodyKind::InnerPlanet,
+            role: SystemRole::Unassigned,
+            distance_au: 0.2,
+            atmosphere: Atmosphere::Toxic,
+            temperature: TemperatureBand::Extreme,
+            gravity_g: 0.0,
+            radiation: RadiationLevel::High,
+        };
+        assert_eq!(body.habitability(), 0);
+        assert!((body.habitability_modifier() - 0.75).abs() < 1e-4);
+    }
+
+    #[test]
+    fn body_defaults_within_habitable_range() {
+        // A body created via `Body::new` gets safe defaults (temperate / 1 g /
+        // low radiation, atmosphere=none) so callers that don't set attributes
+        // explicitly land in the habitable range — no penalty at production
+        // time. Actual authored content always overrides the defaults.
+        let body = Body::new("Placeholder", BodyKind::InnerPlanet, 1.0);
+        assert!(body.habitability() >= 50);
+        assert!(body.habitability_modifier() >= 1.0);
+    }
+
+    #[test]
+    fn set_body_attributes_overwrites_and_emits_event() {
+        let (mut state, inner_id, _) = make_state_with_two_bodies();
+        let events = apply_system_command(
+            &mut state,
+            &SystemCommand::SetBodyAttributes {
+                body_id: inner_id.clone(),
+                atmosphere: Atmosphere::Toxic,
+                temperature: TemperatureBand::Extreme,
+                gravity_g: 2.5,
+                radiation: RadiationLevel::High,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            events[0],
+            SystemEvent::BodyAttributesSet {
+                atmosphere: Atmosphere::Toxic,
+                ..
+            }
+        ));
+        let body = &state.node_map.bodies[&inner_id];
+        assert_eq!(body.atmosphere, Atmosphere::Toxic);
+        assert_eq!(body.temperature, TemperatureBand::Extreme);
+        assert!((body.gravity_g - 2.5).abs() < 1e-6);
+        assert_eq!(body.radiation, RadiationLevel::High);
     }
 
     #[test]

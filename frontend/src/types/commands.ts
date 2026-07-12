@@ -40,6 +40,7 @@ export type Command =
       focus: string | null
       supplies_id?: string | null
     }
+  | { kind: 'assign_colony_home_body'; colony_id: string; body_id: string }
 
 /** Directive trigger condition shape. */
 export interface DirectiveCondition {

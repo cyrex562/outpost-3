@@ -368,48 +368,49 @@ impl TurnProcessor {
         // entirely when hazards are disabled — cleaner than clamping the
         // HazardProbability scalar to zero.
         if state.hazards_enabled {
-        if let Some(hazard_cfg) = &state.hazard_config.clone() {
-            use rand::Rng as _;
-            let hazard_prob_scalar = state
-                .difficulty_scalar
-                .scalar_for(&ModifiableQuantity::HazardProbability);
-            for (colony, pop) in state.colonies.iter().zip(state.populations.iter()) {
-                let terrain: Option<String> = colony.terrain_id.clone();
-                let pool_entries: Vec<(String, f64)> = colony
-                    .pool
-                    .commodity_ids()
-                    .map(|id| (id.to_owned(), colony.pool.amount(id)))
-                    .collect();
+            if let Some(hazard_cfg) = &state.hazard_config.clone() {
+                use rand::Rng as _;
+                let hazard_prob_scalar = state
+                    .difficulty_scalar
+                    .scalar_for(&ModifiableQuantity::HazardProbability);
+                for (colony, pop) in state.colonies.iter().zip(state.populations.iter()) {
+                    let terrain: Option<String> = colony.terrain_id.clone();
+                    let pool_entries: Vec<(String, f64)> = colony
+                        .pool
+                        .commodity_ids()
+                        .map(|id| (id.to_owned(), colony.pool.amount(id)))
+                        .collect();
 
-                for kind in HazardKind::ALL {
-                    let rng_prob: f32 = self.rng.gen();
-                    let rng_sev: f32 = self.rng.gen();
-                    // Use lower 32 bits for commodity index selection (safe on all targets).
-                    #[allow(clippy::cast_possible_truncation)]
-                    let rng_comm: usize = (rand::RngCore::next_u64(&mut self.rng) as u32) as usize;
+                    for kind in HazardKind::ALL {
+                        let rng_prob: f32 = self.rng.gen();
+                        let rng_sev: f32 = self.rng.gen();
+                        // Use lower 32 bits for commodity index selection (safe on all targets).
+                        #[allow(clippy::cast_possible_truncation)]
+                        let rng_comm: usize =
+                            (rand::RngCore::next_u64(&mut self.rng) as u32) as usize;
 
-                    // Apply difficulty scalar to hazard probability.
-                    // Dividing rng_prob by hazard_prob_scalar is equivalent to scaling
-                    // the effective probability: `rng_prob / s < p` ⟺ `rng_prob < p × s`.
-                    // Clamped at a minimum to avoid division by zero.
-                    let adjusted_rng_prob = rng_prob / hazard_prob_scalar.max(f32::EPSILON);
+                        // Apply difficulty scalar to hazard probability.
+                        // Dividing rng_prob by hazard_prob_scalar is equivalent to scaling
+                        // the effective probability: `rng_prob / s < p` ⟺ `rng_prob < p × s`.
+                        // Clamped at a minimum to avoid division by zero.
+                        let adjusted_rng_prob = rng_prob / hazard_prob_scalar.max(f32::EPSILON);
 
-                    if let Some(outcome) = roll_hazard(
-                        adjusted_rng_prob,
-                        rng_sev,
-                        rng_comm,
-                        kind,
-                        colony.id,
-                        terrain.as_deref(),
-                        hazard_cfg,
-                        pop.count,
-                        &pool_entries,
-                    ) {
-                        hazard_outcomes.push(outcome);
+                        if let Some(outcome) = roll_hazard(
+                            adjusted_rng_prob,
+                            rng_sev,
+                            rng_comm,
+                            kind,
+                            colony.id,
+                            terrain.as_deref(),
+                            hazard_cfg,
+                            pop.count,
+                            &pool_entries,
+                        ) {
+                            hazard_outcomes.push(outcome);
+                        }
                     }
                 }
             }
-        }
         } // end `if state.hazards_enabled`
         hazard_outcomes
     }

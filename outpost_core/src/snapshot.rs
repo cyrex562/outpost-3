@@ -921,10 +921,7 @@ mod tests {
         let state = make_state_with_colonies();
         let blob = FullStateBlob::from_game_state(&state);
         let mut value: serde_json::Value = serde_json::to_value(&blob).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("maintenance_enabled");
+        value.as_object_mut().unwrap().remove("maintenance_enabled");
         let restored: FullStateBlob = serde_json::from_value(value).unwrap();
         assert!(
             restored.maintenance_enabled,

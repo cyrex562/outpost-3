@@ -520,7 +520,10 @@ mod tests {
             ModifiableQuantity::MaintenanceConsumption,
         ] {
             let n = normal.scalar_for(&q);
-            assert!((n - 1.0).abs() < 1e-4, "{q:?} should be 1.0 at Normal, got {n}");
+            assert!(
+                (n - 1.0).abs() < 1e-4,
+                "{q:?} should be 1.0 at Normal, got {n}"
+            );
         }
     }
 
@@ -530,7 +533,10 @@ mod tests {
         let q = ModifiableQuantity::ResourceConsumption;
         let brutal = table.build_scalar(DifficultyPreset::Brutal).scalar_for(&q);
         let easy = table.build_scalar(DifficultyPreset::Easy).scalar_for(&q);
-        assert!(brutal > easy, "Brutal consumption ({brutal}) must exceed Easy ({easy})");
+        assert!(
+            brutal > easy,
+            "Brutal consumption ({brutal}) must exceed Easy ({easy})"
+        );
     }
 
     #[test]
@@ -675,9 +681,9 @@ mod tests {
         let mut pool_hard = pool_normal.clone();
 
         let normal =
-            process_production_scaled(&mut pool_normal, &placed, 10.0, &reg, 1.0, 1.0, true);
+            process_production_scaled(&mut pool_normal, &placed, 10.0, &reg, 1.0, 1.0, true, 1.0);
         let hard =
-            process_production_scaled(&mut pool_hard, &placed, 10.0, &reg, 2.0, 1.0, true);
+            process_production_scaled(&mut pool_hard, &placed, 10.0, &reg, 2.0, 1.0, true, 1.0);
 
         assert!(
             hard.power_grid.demand > normal.power_grid.demand,

@@ -48,6 +48,24 @@ pub struct Colony {
     /// colonies created without map context.
     #[serde(default)]
     pub terrain_id: Option<String>,
+    /// Optional back-pointer to the star-system body this colony sits on.
+    ///
+    /// Set by [`crate::Command::AssignColonyHomeBody`] so downstream systems
+    /// (production modifier, habitability displays, future colonisation
+    /// gating) can look up the body's environmental attributes.
+    #[serde(default)]
+    pub home_body_id: Option<crate::system::BodyId>,
+    /// Multiplicative scalar applied to colony production outputs.
+    ///
+    /// Derived from the home body's habitability rating when
+    /// [`crate::Command::AssignColonyHomeBody`] runs. Defaults to `1.0`
+    /// (neutral) for colonies founded without a body reference.
+    #[serde(default = "default_habitability_modifier")]
+    pub habitability_modifier: f32,
+}
+
+fn default_habitability_modifier() -> f32 {
+    1.0
 }
 
 impl Colony {
@@ -62,6 +80,8 @@ impl Colony {
             build_queue: ConstructionQueue::new(),
             slot_capacity: BASE_SLOT_CAPACITY,
             terrain_id: None,
+            home_body_id: None,
+            habitability_modifier: default_habitability_modifier(),
         }
     }
 

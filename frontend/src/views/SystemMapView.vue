@@ -76,6 +76,18 @@ function bodyRadius(b: SystemBody): number {
   }
 }
 
+function formatModifier(mod: number): string {
+  const pct = (mod - 1.0) * 100
+  const sign = pct >= 0 ? '+' : ''
+  return `${sign}${pct.toFixed(0)}%`
+}
+
+function habitabilityTone(mod: number): 'bonus' | 'neutral' | 'penalty' {
+  if (mod > 1.001) return 'bonus'
+  if (mod < 0.999) return 'penalty'
+  return 'neutral'
+}
+
 const orbitRadii = computed(() =>
   bodies.value.map((b) => b.distance_au * WORLD_SCALE),
 )
@@ -416,6 +428,21 @@ function foundColony(body?: SystemBody | null): void {
           <dd>{{ selected.distance_au.toFixed(2) }} AU</dd>
           <dt>Colonizable</dt>
           <dd>{{ selected.colonizable ? 'yes' : 'no' }}</dd>
+          <dt>Atmosphere</dt>
+          <dd>{{ selected.atmosphere }}</dd>
+          <dt>Temperature</dt>
+          <dd>{{ selected.temperature }}</dd>
+          <dt>Gravity</dt>
+          <dd>{{ selected.gravity_g.toFixed(2) }} g</dd>
+          <dt>Radiation</dt>
+          <dd>{{ selected.radiation }}</dd>
+          <dt>Habitability</dt>
+          <dd>
+            {{ selected.habitability }} / 100
+            <span class="modifier" :class="habitabilityTone(selected.habitability_modifier)">
+              ({{ formatModifier(selected.habitability_modifier) }} productivity)
+            </span>
+          </dd>
         </dl>
         <button
           v-if="selected.colonizable"
@@ -515,8 +542,12 @@ function foundColony(body?: SystemBody | null): void {
 .side-panel h3 { color: #8cf; margin-bottom: 0.5rem; }
 .side-panel.hint { color: #557; font-style: italic; font-size: 0.85rem; }
 
-.stats { display: grid; grid-template-columns: 90px 1fr; gap: 0.35rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.75rem; }
+.stats { display: grid; grid-template-columns: 100px 1fr; gap: 0.35rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.75rem; }
 .stats dt { color: #668; }
 .stats dd { color: #aab; }
+.modifier { font-size: 0.75rem; margin-left: 0.25rem; }
+.modifier.bonus { color: #6c9; }
+.modifier.neutral { color: #778; }
+.modifier.penalty { color: #d86; }
 .err { color: #d66; font-size: 0.8rem; }
 </style>

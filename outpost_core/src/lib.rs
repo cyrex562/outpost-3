@@ -172,6 +172,21 @@ pub enum Command {
         #[serde(default)]
         supplies_id: Option<String>,
     },
+    /// Link a colony to its home system body and inherit the body's
+    /// habitability-derived productivity modifier (issue #163).
+    ///
+    /// Called by the founding wizard right after [`Command::FoundColony`] or
+    /// [`Command::FoundColonyAtSite`] to record which star-system body the
+    /// colony sits on. The core looks up the body in `system_state.node_map`,
+    /// stashes `body_id` on the colony, and copies
+    /// [`system::Body::habitability_modifier`] into
+    /// [`colony::Colony::habitability_modifier`].
+    AssignColonyHomeBody {
+        /// Colony to update.
+        colony_id: ColonyId,
+        /// Body the colony calls home.
+        body_id: system::BodyId,
+    },
     /// Add an infrastructure trade route between two colonies.
     ///
     /// Subsequent strategic turns will flow commodity surpluses from the
@@ -783,6 +798,15 @@ pub enum Event {
         site_id: SiteId,
         /// Optional economic focus.
         focus: Option<String>,
+    },
+    /// A colony's home body was recorded (issue #163).
+    ColonyHomeBodySet {
+        /// Colony that was updated.
+        colony_id: ColonyId,
+        /// Body the colony was linked to.
+        body_id: system::BodyId,
+        /// Productivity multiplier copied from the body's habitability.
+        habitability_modifier: f32,
     },
     /// A trade route was added to the planetary trade network.
     TradeRouteAdded {
@@ -1614,6 +1638,7 @@ impl GameEngine {
                             power_scalar,
                             maintenance_scalar,
                             maintenance_enabled,
+                            colony.habitability_modifier,
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -2142,6 +2167,28 @@ impl GameEngine {
                         r: coord.r,
                     },
                 ])
+            }
+
+            Command::AssignColonyHomeBody { colony_id, body_id } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let body = self
+                    .state
+                    .system_state
+                    .node_map
+                    .bodies
+                    .get(body_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!("body not found: {body_id}"))
+                    })?;
+                let modifier = body.habitability_modifier();
+                let colony = &mut self.state.colonies[idx];
+                colony.home_body_id = Some(body_id.clone());
+                colony.habitability_modifier = modifier;
+                Ok(vec![Event::ColonyHomeBodySet {
+                    colony_id: *colony_id,
+                    body_id: body_id.clone(),
+                    habitability_modifier: modifier,
+                }])
             }
 
             Command::AddTradeRoute {
@@ -3713,6 +3760,85 @@ mod tests {
         assert_eq!(cols[0].id, *colony_id);
         assert_eq!(cols[0].name, "Alpha Base");
         assert!((cols[0].population - 150.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn assign_colony_home_body_copies_habitability_modifier() {
+        // Bootstrap: create an inner planet, mark its attributes hostile, found
+        // a colony, then link the colony to the body. Expect the colony's
+        // habitability_modifier to reflect the body's derived value (issue #163).
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Hellworld".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 0.3,
+            }))
+            .unwrap();
+        let body_id = match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        };
+        engine
+            .apply(&Command::System(system::SystemCommand::SetBodyAttributes {
+                body_id: body_id.clone(),
+                atmosphere: system::Atmosphere::Toxic,
+                temperature: system::TemperatureBand::Extreme,
+                gravity_g: 0.0,
+                radiation: system::RadiationLevel::High,
+            }))
+            .unwrap();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Doomed".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded");
+        };
+        let colony_id = *colony_id;
+        let events = engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id,
+                body_id: body_id.clone(),
+            })
+            .unwrap();
+        let Event::ColonyHomeBodySet {
+            habitability_modifier,
+            ..
+        } = &events[0]
+        else {
+            panic!("expected ColonyHomeBodySet");
+        };
+        assert!((habitability_modifier - 0.75).abs() < 1e-4);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!((engine.state.colonies[idx].habitability_modifier - 0.75).abs() < 1e-4);
+        assert_eq!(
+            engine.state.colonies[idx].home_body_id.as_ref(),
+            Some(&body_id)
+        );
+    }
+
+    #[test]
+    fn assign_colony_home_body_fails_when_body_unknown() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::FoundColony {
+                name: "Alpha".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colonies = engine.state.colonies.clone();
+        let colony_id = colonies[0].id;
+        let bogus = system::BodyId::new();
+        let err = engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id,
+                body_id: bogus,
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
     }
 
     #[test]

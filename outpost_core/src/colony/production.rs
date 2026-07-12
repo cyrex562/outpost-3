@@ -147,7 +147,16 @@ pub fn process_production(
     labor_available: f32,
     registry: &ContentRegistry,
 ) -> ProductionStepOutcome {
-    process_production_scaled(pool, buildings, labor_available, registry, 1.0, 1.0, true)
+    process_production_scaled(
+        pool,
+        buildings,
+        labor_available,
+        registry,
+        1.0,
+        1.0,
+        true,
+        1.0,
+    )
 }
 
 /// Same as [`process_production`] but multiplies positive `power_delta` and
@@ -159,6 +168,12 @@ pub fn process_production(
 /// Generators (negative `power_delta`) are unaffected by `power_scalar`.
 /// When `maintenance_enabled` is `false` the maintenance draw is short-
 /// circuited regardless of `maintenance_scalar` (the master toggle).
+///
+/// `productivity_multiplier` scales every recipe **output** deposit (issue
+/// #163) — used to fold in the colony's habitability modifier. Inputs and
+/// maintenance draws are unaffected so worlds that are hard to live on still
+/// consume the same feedstock but yield less product.
+#[allow(clippy::too_many_arguments)]
 pub fn process_production_scaled(
     pool: &mut ColonyPool,
     buildings: &[(String, u32)],
@@ -167,6 +182,7 @@ pub fn process_production_scaled(
     power_scalar: f32,
     maintenance_scalar: f32,
     maintenance_enabled: bool,
+    productivity_multiplier: f32,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar);
@@ -222,13 +238,16 @@ pub fn process_production_scaled(
         }
 
         // Combined per-commodity demand (recipe inputs + maintenance).
-        let (input_ratio, tight_commodity, tight_is_maintenance) =
-            compute_effective_input_ratio(
-                pool,
-                recipe,
-                if has_maintenance { bdef.maintenance.as_slice() } else { &[] },
-                maintenance_multiplier,
-            );
+        let (input_ratio, tight_commodity, tight_is_maintenance) = compute_effective_input_ratio(
+            pool,
+            recipe,
+            if has_maintenance {
+                bdef.maintenance.as_slice()
+            } else {
+                &[]
+            },
+            maintenance_multiplier,
+        );
 
         // Power/labor ratios only apply to recipe-running buildings. A pure
         // maintenance-only building doesn't consume labour or drive brownouts.
@@ -295,6 +314,7 @@ pub fn process_production_scaled(
     }
 
     // Pass B: apply all changes now that every scale has been determined.
+    let output_multiplier = f64::from(productivity_multiplier.max(0.0));
     let mut building_results: Vec<BuildingProductionResult> = Vec::new();
     for p in pending {
         if p.scale > 1e-9 {
@@ -303,7 +323,10 @@ pub fn process_production_scaled(
                     pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
                 }
                 for ingredient in &recipe.outputs {
-                    pool.deposit(&ingredient.id, ingredient.quantity * p.scale);
+                    pool.deposit(
+                        &ingredient.id,
+                        ingredient.quantity * p.scale * output_multiplier,
+                    );
                 }
             }
             for ingredient in p.maintenance {
@@ -313,10 +336,7 @@ pub fn process_production_scaled(
                 );
             }
         }
-        let recipe_id = p
-            .recipe
-            .map(|r| r.id.clone())
-            .unwrap_or_default();
+        let recipe_id = p.recipe.map(|r| r.id.clone()).unwrap_or_default();
         building_results.push(BuildingProductionResult {
             building_type: p.building_type.to_owned(),
             recipe_id,
@@ -834,9 +854,8 @@ mod tests {
         let mut pool = ColonyPool::new(); // empty — no spare_parts
 
         let placed = buildings(&["solar_array", "advanced_smelter"]);
-        let outcome = process_production_scaled(
-            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
-        );
+        let outcome =
+            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true, 1.0);
 
         let smelter = outcome
             .building_results
@@ -871,13 +890,27 @@ mod tests {
         let mut pool_normal = ColonyPool::new();
         pool_normal.deposit("spare_parts", 0.5);
         let normal = process_production_scaled(
-            &mut pool_normal, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
+            &mut pool_normal,
+            &placed,
+            10.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
         );
 
         let mut pool_harsh = ColonyPool::new();
         pool_harsh.deposit("spare_parts", 0.5);
         let harsh = process_production_scaled(
-            &mut pool_harsh, &placed, 10.0_f32, &reg, 1.0, 2.0, true,
+            &mut pool_harsh,
+            &placed,
+            10.0_f32,
+            &reg,
+            1.0,
+            2.0,
+            true,
+            1.0,
         );
 
         let get_scale = |o: &ProductionStepOutcome, ty: &str| -> f64 {
@@ -909,9 +942,8 @@ mod tests {
         let mut pool = ColonyPool::new(); // empty pool
 
         let placed = buildings(&["solar_array", "advanced_smelter"]);
-        let outcome = process_production_scaled(
-            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, false,
-        );
+        let outcome =
+            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, false, 1.0);
 
         let smelter = outcome
             .building_results
@@ -924,10 +956,10 @@ mod tests {
             smelter.scale
         );
         assert!(
-            !smelter.shortfalls.iter().any(|s| matches!(
-                s.reason,
-                ShortfallReason::MaintenanceShort { .. }
-            )),
+            !smelter
+                .shortfalls
+                .iter()
+                .any(|s| matches!(s.reason, ShortfallReason::MaintenanceShort { .. })),
             "no MaintenanceShort should fire when maintenance is disabled"
         );
         // Recipe output still runs at scale 1.
@@ -993,9 +1025,8 @@ mod tests {
         pool.deposit("scrap", 0.3); // less than combined demand of 1.5
 
         let placed = buildings(&["solar_array", "recycler"]);
-        let outcome = process_production_scaled(
-            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
-        );
+        let outcome =
+            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true, 1.0);
 
         let recycler = outcome
             .building_results
@@ -1011,10 +1042,10 @@ mod tests {
             recycler.shortfalls
         );
         assert!(
-            !recycler.shortfalls.iter().any(|s| matches!(
-                s.reason,
-                ShortfallReason::MaintenanceShort { .. }
-            )),
+            !recycler
+                .shortfalls
+                .iter()
+                .any(|s| matches!(s.reason, ShortfallReason::MaintenanceShort { .. })),
             "shared commodity must NOT report as MaintenanceShort"
         );
     }
@@ -1027,19 +1058,72 @@ mod tests {
         pool.deposit("iron_ore", 100.0);
 
         let placed = buildings(&["solar_array", "mine", "smelter"]);
-        let outcome = process_production_scaled(
-            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
-        );
+        let outcome =
+            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true, 1.0);
 
         for res in &outcome.building_results {
             assert!(
-                !res.shortfalls.iter().any(|s| matches!(
-                    s.reason,
-                    ShortfallReason::MaintenanceShort { .. }
-                )),
+                !res.shortfalls
+                    .iter()
+                    .any(|s| matches!(s.reason, ShortfallReason::MaintenanceShort { .. })),
                 "no MaintenanceShort should fire when nothing has upkeep authored (building: {})",
                 res.building_type
             );
         }
+    }
+
+    // ── Habitability-driven productivity multiplier (issue #163) ─────────────
+
+    #[test]
+    fn productivity_multiplier_scales_outputs_only() {
+        // With productivity_multiplier = 1.25 the smelter should still consume
+        // 2 ore (unchanged input) but deposit 1.25 iron_plate. Inputs are
+        // preserved so harsh worlds still consume feedstock at the base rate.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        let outcome =
+            process_production_scaled(&mut pool, &placed, 100.0_f32, &reg, 1.0, 1.0, true, 1.25);
+
+        let smelt = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "smelter")
+            .unwrap();
+        assert!(
+            smelt.is_full_production(),
+            "smelter shortfalls: {:?}",
+            smelt.shortfalls
+        );
+        // Input drain unchanged: 10 - 2 = 8 ore.
+        assert!(
+            (pool.amount("iron_ore") - 8.0).abs() < 1e-6,
+            "expected 8.0 ore left, got {}",
+            pool.amount("iron_ore")
+        );
+        // Output multiplied: 1.0 * 1.25 = 1.25 iron_plate.
+        assert!(
+            (pool.amount("iron_plate") - 1.25).abs() < 1e-6,
+            "expected 1.25 iron_plate, got {}",
+            pool.amount("iron_plate")
+        );
+    }
+
+    #[test]
+    fn productivity_multiplier_below_one_reduces_outputs() {
+        // A harsh world (0.75×) yields 25 % less product per turn.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        process_production_scaled(&mut pool, &placed, 100.0_f32, &reg, 1.0, 1.0, true, 0.75);
+        assert!(
+            (pool.amount("iron_plate") - 0.75).abs() < 1e-6,
+            "expected 0.75 iron_plate at 0.75× productivity, got {}",
+            pool.amount("iron_plate")
+        );
     }
 }
