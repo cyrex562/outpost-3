@@ -200,6 +200,18 @@ pub fn apply_research_turn(
     pool: &mut SystemResearchPool,
     registry: &TechRegistry,
 ) -> ResearchTurnResult {
+    apply_research_turn_scaled(state, pool, registry, 1.0)
+}
+
+/// Same as [`apply_research_turn`] but multiplies each tech's authored
+/// `research_cost` by `cost_scalar` (the resolved `ResearchCost` difficulty
+/// scalar, #161) when checking for completion.
+pub fn apply_research_turn_scaled(
+    state: &mut TechState,
+    pool: &mut SystemResearchPool,
+    registry: &TechRegistry,
+    cost_scalar: f32,
+) -> ResearchTurnResult {
     let mut completed = Vec::new();
     let mut new_effects = Vec::new();
 
@@ -213,6 +225,7 @@ pub fn apply_research_turn(
     }
 
     let mut remaining = available;
+    let cost_mul = cost_scalar.max(0.0);
 
     loop {
         let project_id = match state.current_project.clone() {
@@ -234,7 +247,8 @@ pub fn apply_research_turn(
             break; // Unknown tech — stop silently.
         };
 
-        let needed = (def.research_cost - state.progress).max(0.0);
+        let effective_cost = def.research_cost * cost_mul;
+        let needed = (effective_cost - state.progress).max(0.0);
         if remaining >= needed {
             // Tech completes.
             remaining -= needed;

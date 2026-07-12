@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { exitApp as tauriExit, isTauri, bootstrap, listSaves, loadGame } from '@/services/tauriBridge'
+import {
+  exitApp as tauriExit,
+  isTauri,
+  bootstrap,
+  listSaves,
+  loadGame,
+  listCustomPresets,
+  deleteCustomPreset,
+  type CustomPreset,
+} from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
+import CustomDifficultyPanel from '@/components/CustomDifficultyPanel.vue'
 
 const router = useRouter()
 const worldStore = useWorldStore()
@@ -14,10 +24,62 @@ const error = ref<string | null>(null)
 // New game form
 const contentDir = ref('embedded')
 const seed = ref(0)
-const difficulty = ref<'Sandbox' | 'Easy' | 'Normal' | 'Hard' | 'Brutal'>('Normal')
+// Difficulty selection: built-in preset name, "Custom", or "custom:<name>" for a saved preset.
+const difficulty = ref<string>('Normal')
+const savedPresets = ref<CustomPreset[]>([])
+
+// Buffered payload from CustomDifficultyPanel (both for "Custom…" and named-custom selections).
+const customPayload = ref<{
+  scalars: Record<string, number>
+  menaceEnabled: boolean
+  hazardsEnabled: boolean
+} | null>(null)
+
+const isCustomSelection = computed(
+  () => difficulty.value === 'Custom' || difficulty.value.startsWith('custom:'),
+)
 
 // Load game
 const availableSaves = ref<string[]>([])
+
+async function refreshPresets() {
+  if (!isTauri) return
+  try {
+    savedPresets.value = await listCustomPresets()
+  } catch {
+    savedPresets.value = []
+  }
+}
+
+onMounted(refreshPresets)
+
+// When a named custom preset is picked, seed customPayload so bootstrap sends
+// the saved values (the panel will pre-populate from its own onMounted knob fetch).
+watch(difficulty, () => {
+  if (difficulty.value.startsWith('custom:')) {
+    const name = difficulty.value.slice('custom:'.length)
+    const p = savedPresets.value.find((sp) => sp.name === name)
+    if (p) {
+      customPayload.value = {
+        scalars: { ...p.scalars },
+        menaceEnabled: p.menace_enabled,
+        hazardsEnabled: p.hazards_enabled,
+      }
+    }
+  } else if (difficulty.value !== 'Custom') {
+    customPayload.value = null
+  }
+})
+
+async function removeSavedPreset(name: string) {
+  await deleteCustomPreset(name)
+  await refreshPresets()
+  if (difficulty.value === `custom:${name}`) difficulty.value = 'Normal'
+}
+
+function onPanelChange(payload: typeof customPayload.value) {
+  customPayload.value = payload
+}
 
 async function startNewGame(): Promise<void> {
   busy.value = true
@@ -27,7 +89,18 @@ async function startNewGame(): Promise<void> {
       error.value = 'New game requires desktop mode.'
       return
     }
-    const snap = await bootstrap(contentDir.value, seed.value, difficulty.value)
+    // For "Custom" and "custom:*" selections, pass the buffered scalars payload.
+    // For built-in presets, don't send custom_scalars — the engine picks the grade table.
+    const presetName = isCustomSelection.value ? 'Custom' : difficulty.value
+    const cp = isCustomSelection.value ? customPayload.value : null
+    const snap = await bootstrap(
+      contentDir.value,
+      seed.value,
+      presetName,
+      cp?.scalars,
+      cp?.menaceEnabled,
+      cp?.hazardsEnabled,
+    )
     worldStore.hydrate({ sol: snap.sol, month: snap.month, colonies: snap.colonies })
     router.push('/system')
   } catch (e) {
@@ -94,16 +167,38 @@ async function exitApp(): Promise<void> {
       </label>
       <label>
         Difficulty
-        <select v-model="difficulty" class="input">
+        <select v-model="difficulty" class="input" data-testid="difficulty-select">
           <option>Sandbox</option>
           <option>Easy</option>
           <option>Normal</option>
           <option>Hard</option>
           <option>Brutal</option>
+          <option value="Custom">Custom…</option>
+          <optgroup v-if="savedPresets.length" label="Saved">
+            <option
+              v-for="p in savedPresets"
+              :key="p.name"
+              :value="'custom:' + p.name"
+            >★ {{ p.name }}</option>
+          </optgroup>
         </select>
       </label>
+      <div v-if="difficulty.startsWith('custom:')" class="row named-preset-row">
+        <span class="hint">Selected saved preset: {{ difficulty.slice('custom:'.length) }}</span>
+        <button
+          type="button"
+          class="btn danger small"
+          title="Delete preset"
+          @click="removeSavedPreset(difficulty.slice('custom:'.length))"
+        >×</button>
+      </div>
+      <CustomDifficultyPanel
+        v-if="isCustomSelection"
+        :live="false"
+        @change="onPanelChange"
+      />
       <div class="row">
-        <button class="btn primary" :disabled="busy" @click="startNewGame">
+        <button class="btn primary" data-testid="btn-start" :disabled="busy" @click="startNewGame">
           {{ busy ? 'Starting…' : 'Start' }}
         </button>
         <button class="btn" @click="mode = 'root'">Back</button>
@@ -193,7 +288,9 @@ async function exitApp(): Promise<void> {
 .btn.danger { border-color: #a55; color: #c88; }
 .btn.wide { width: 100%; text-align: left; }
 
-.row { display: flex; gap: 0.6rem; margin-top: 0.5rem; }
+.row { display: flex; gap: 0.6rem; margin-top: 0.5rem; align-items: center; }
+.named-preset-row { justify-content: space-between; }
+.btn.small { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
 .err { color: #d66; font-size: 0.8rem; }
 .hint { color: #558; font-style: italic; font-size: 0.85rem; }
 .save-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }

@@ -31,6 +31,18 @@ pub enum ModifiableQuantity {
     StabilityRate,
     /// Environmental hazard trigger probability.
     HazardProbability,
+    /// Per-capita resource consumption rate (food, water, oxygen, power).
+    ///
+    /// Higher values increase how much each colonist consumes per sol.
+    /// Applied in [`crate::needs::apply_needs_check_scaled`].
+    ResourceConsumption,
+    /// Research cost multiplier applied when checking tech completion.
+    ///
+    /// Higher values require more research points to complete a tech.
+    ResearchCost,
+    /// Power requirement multiplier applied to positive `power_delta`
+    /// and to recipe `power_draw` (consumers only, not generators).
+    PowerRequirement,
 }
 
 // ─── ModifierDescriptor ───────────────────────────────────────────────────────

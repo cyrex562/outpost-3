@@ -227,10 +227,28 @@ pub fn apply_needs_check(
     population: f64,
     config: &NeedsConfig,
 ) -> NeedsReport {
+    apply_needs_check_scaled(pool, population, config, 1.0)
+}
+
+/// Same as [`apply_needs_check`] but multiplies per-capita draws by
+/// `consumption_scalar` (the resolved `ResourceConsumption` difficulty scalar,
+/// #161). Housing requirements are unaffected.
+#[must_use]
+pub fn apply_needs_check_scaled(
+    pool: &mut ColonyPool,
+    population: f64,
+    config: &NeedsConfig,
+    consumption_scalar: f32,
+) -> NeedsReport {
     let mut need_results: Vec<NeedSatisfaction> = Vec::with_capacity(config.needs.len());
+    let scalar = f64::from(consumption_scalar.max(0.0));
 
     for def in &config.needs {
-        let required = def.required_amount(population);
+        let base = def.required_amount(population);
+        let required = match &def.scaling {
+            NeedScaling::PerCapita { .. } => base * scalar,
+            NeedScaling::Housing => base,
+        };
 
         let (consumed, satisfaction) = if required <= 0.0 {
             (0.0, 1.0_f32)

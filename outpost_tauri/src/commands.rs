@@ -9,6 +9,7 @@ use include_dir::{include_dir, Dir};
 use outpost_core::colony::ColonyId;
 use outpost_core::content::loader::PackLoader;
 use outpost_core::difficulty::DifficultyPreset;
+use outpost_core::modifier::{DifficultyScalar, ModifiableQuantity};
 use outpost_core::needs::NeedsConfig;
 use outpost_core::snapshot::Snapshot as SnapshotDb;
 use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
@@ -17,9 +18,9 @@ use outpost_core::trade::SiteId;
 use outpost_core::{Command, Event, GameEngine, Query, QueryResult};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::state::EngineState;
 
@@ -98,6 +99,21 @@ pub enum ClientCommand {
         #[serde(default)]
         supplies_id: Option<String>,
     },
+    /// Set an active preset (built-in) mid-game.
+    SetDifficulty {
+        preset: String,
+    },
+    /// Install a custom scalar map + toggles atomically (issue #161).
+    SetCustomDifficulty {
+        /// Slider values keyed by knob id (see [`get_difficulty_knobs`]).
+        scalars: std::collections::HashMap<String, f32>,
+        menace_enabled: bool,
+        hazards_enabled: bool,
+    },
+    /// Master hazards toggle (issue #161).
+    SetHazardsEnabled {
+        enabled: bool,
+    },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -161,6 +177,10 @@ pub enum ServerEvent {
         building_type: String,
         scale: f64,
         reason: String,
+    },
+    /// The active difficulty preset changed (issue #161).
+    DifficultyChanged {
+        preset: String,
     },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
@@ -254,6 +274,9 @@ impl ServerEvent {
                 building_type: building_type.clone(),
                 scale: *scale,
                 reason: format!("{reason:?}"),
+            },
+            Event::DifficultyChanged { preset } => Self::DifficultyChanged {
+                preset: preset.label().to_owned(),
             },
             other => Self::Unknown {
                 core_kind: format!("{other:?}").split_whitespace().next().unwrap_or("event").to_owned(),
@@ -354,8 +377,128 @@ fn parse_preset(difficulty: &str) -> DifficultyPreset {
         "Easy" | "easy" => DifficultyPreset::Easy,
         "Hard" | "hard" => DifficultyPreset::Hard,
         "Brutal" | "brutal" => DifficultyPreset::Brutal,
+        "Custom" | "custom" => DifficultyPreset::Custom,
         _ => DifficultyPreset::Normal,
     }
+}
+
+// ── #161: knob spec + custom-preset persistence ─────────────────────────────
+
+/// One row in the custom-difficulty panel. Sliders and toggles are unified so
+/// the frontend can render every knob from a single list.
+///
+/// `preset_default_at_current_preset` seeds the panel from the currently
+/// selected built-in preset so "Custom" starts as a copy of that preset.
+#[derive(Debug, Serialize)]
+pub struct KnobSpec {
+    pub id: String,
+    pub label: String,
+    /// `"slider"` or `"toggle"`.
+    pub kind: &'static str,
+    /// Slider step values (empty for toggles).
+    pub step: Vec<f32>,
+    pub min: f32,
+    pub max: f32,
+    /// Value at the currently active preset (baseline reference).
+    pub preset_default_at_current_preset: f32,
+    /// The engine's current effective value (post-Custom / post-toggle).
+    pub current_value: f32,
+}
+
+/// Canonical order of the 11 slider knobs + 2 toggles surfaced to the UI.
+///
+/// The `.0` is the wire id used both in [`KnobSpec::id`] and in the
+/// [`ClientCommand::SetCustomDifficulty::scalars`] map keys.
+const SLIDER_KNOBS: &[(&str, &str, ModifiableQuantityKey)] = &[
+    ("production_rate", "Production Rate", ModifiableQuantityKey::ProductionRateAll),
+    ("labor_efficiency", "Labor Efficiency", ModifiableQuantityKey::LaborEfficiency),
+    ("research_rate", "Research Rate", ModifiableQuantityKey::ResearchRate),
+    ("storage_capacity", "Storage Capacity", ModifiableQuantityKey::StorageCapacity),
+    ("population_growth", "Population Growth", ModifiableQuantityKey::PopulationGrowth),
+    ("stability_decay", "Stability Decay", ModifiableQuantityKey::StabilityRate),
+    ("hazard_probability", "Hazard Probability", ModifiableQuantityKey::HazardProbability),
+    ("slot_capacity", "Slot Capacity", ModifiableQuantityKey::SlotCapacity),
+    ("resource_consumption", "Resource Consumption", ModifiableQuantityKey::ResourceConsumption),
+    ("research_cost", "Research Cost", ModifiableQuantityKey::ResearchCost),
+    ("power_requirement", "Power Requirement", ModifiableQuantityKey::PowerRequirement),
+];
+
+/// Fixed anchor slider steps shared by every knob (issue #161 design decision).
+const SLIDER_STEPS: [f32; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+#[derive(Debug, Clone, Copy)]
+enum ModifiableQuantityKey {
+    ProductionRateAll,
+    LaborEfficiency,
+    ResearchRate,
+    StorageCapacity,
+    PopulationGrowth,
+    StabilityRate,
+    HazardProbability,
+    SlotCapacity,
+    ResourceConsumption,
+    ResearchCost,
+    PowerRequirement,
+}
+
+impl ModifiableQuantityKey {
+    fn to_quantity(self) -> ModifiableQuantity {
+        match self {
+            Self::ProductionRateAll => ModifiableQuantity::ProductionRate("*".into()),
+            Self::LaborEfficiency => ModifiableQuantity::LaborEfficiency,
+            Self::ResearchRate => ModifiableQuantity::ResearchRate,
+            Self::StorageCapacity => ModifiableQuantity::StorageCapacity,
+            Self::PopulationGrowth => ModifiableQuantity::PopulationGrowth,
+            Self::StabilityRate => ModifiableQuantity::StabilityRate,
+            Self::HazardProbability => ModifiableQuantity::HazardProbability,
+            Self::SlotCapacity => ModifiableQuantity::SlotCapacity,
+            Self::ResourceConsumption => ModifiableQuantity::ResourceConsumption,
+            Self::ResearchCost => ModifiableQuantity::ResearchCost,
+            Self::PowerRequirement => ModifiableQuantity::PowerRequirement,
+        }
+    }
+}
+
+/// Assemble a [`DifficultyScalar`] from a knob-id → value map submitted by the UI.
+fn scalars_from_map(map: &std::collections::HashMap<String, f32>) -> DifficultyScalar {
+    let mut out = DifficultyScalar::new();
+    for (id, _, key) in SLIDER_KNOBS {
+        if let Some(v) = map.get(*id) {
+            out.set(key.to_quantity(), *v);
+        }
+    }
+    out
+}
+
+/// Wire form of a saved custom-difficulty preset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomPreset {
+    pub name: String,
+    /// Knob-id → value.
+    pub scalars: std::collections::HashMap<String, f32>,
+    pub menace_enabled: bool,
+    pub hazards_enabled: bool,
+}
+
+/// Directory containing one .yaml per saved preset.
+fn custom_preset_dir(app: &AppHandle) -> Result<PathBuf, CmdError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| CmdError::Snapshot(format!("no app data dir: {e}")))?
+        .join("custom_difficulty");
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| CmdError::Snapshot(e.to_string()))?;
+    }
+    Ok(dir)
+}
+
+fn sanitize_preset_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ') { c } else { '_' })
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -370,6 +513,9 @@ pub fn bootstrap(
     content_dir: String,
     planet_seed: u64,
     difficulty: String,
+    #[allow(non_snake_case)] custom_scalars: Option<std::collections::HashMap<String, f32>>,
+    custom_menace_enabled: Option<bool>,
+    custom_hazards_enabled: Option<bool>,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<SnapshotPayload> {
     let registry = if content_dir.is_empty() || content_dir == "embedded" {
@@ -385,6 +531,15 @@ pub fn bootstrap(
     let _ = engine.apply(&Command::SetDifficulty {
         preset: parse_preset(&difficulty),
     });
+
+    // Overlay a custom-difficulty payload if one was supplied (issue #161).
+    if let Some(map) = custom_scalars {
+        let _ = engine.apply(&Command::SetCustomDifficulty {
+            scalars: scalars_from_map(&map),
+            menace_enabled: custom_menace_enabled.unwrap_or(true),
+            hazards_enabled: custom_hazards_enabled.unwrap_or(true),
+        });
+    }
 
     let _ = engine.apply(&Command::SeedPlanet {
         seed: planet_seed,
@@ -542,6 +697,21 @@ pub fn apply_command(
                 focus,
                 supplies_id,
             }
+        }
+        ClientCommand::SetDifficulty { preset } => Command::SetDifficulty {
+            preset: parse_preset(&preset),
+        },
+        ClientCommand::SetCustomDifficulty {
+            scalars,
+            menace_enabled,
+            hazards_enabled,
+        } => Command::SetCustomDifficulty {
+            scalars: scalars_from_map(&scalars),
+            menace_enabled,
+            hazards_enabled,
+        },
+        ClientCommand::SetHazardsEnabled { enabled } => {
+            Command::SetHazardsEnabled { enabled }
         }
     };
 
@@ -970,4 +1140,127 @@ pub fn list_saves(dir: String) -> CmdResult<Vec<String>> {
     }
     saves.sort();
     Ok(saves)
+}
+
+// ── #161: difficulty knob discovery + preset persistence ────────────────────
+
+/// Return one [`KnobSpec`] per slider / toggle so the panel is data-driven.
+///
+/// Slider defaults + current values are read from the engine's current
+/// difficulty scalar; toggles read `hazards_enabled` and the presence of an
+/// active `menace_state`.
+#[tauri::command]
+pub fn get_difficulty_knobs(
+    engine_state: State<'_, EngineState>,
+) -> CmdResult<Vec<KnobSpec>> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    let state = &engine.state;
+
+    // Reference row from the current preset (or Normal for Custom).
+    let ref_preset = if matches!(state.difficulty_preset, DifficultyPreset::Custom) {
+        DifficultyPreset::Normal
+    } else {
+        state.difficulty_preset
+    };
+    let ref_scalar = state.difficulty_grade_table.build_scalar(ref_preset);
+
+    let mut specs: Vec<KnobSpec> = Vec::new();
+    for (id, label, key) in SLIDER_KNOBS {
+        let q = key.to_quantity();
+        specs.push(KnobSpec {
+            id: (*id).to_owned(),
+            label: (*label).to_owned(),
+            kind: "slider",
+            step: SLIDER_STEPS.to_vec(),
+            min: SLIDER_STEPS[0],
+            max: SLIDER_STEPS[SLIDER_STEPS.len() - 1],
+            preset_default_at_current_preset: ref_scalar.scalar_for(&q),
+            current_value: state.difficulty_scalar.scalar_for(&q),
+        });
+    }
+
+    specs.push(KnobSpec {
+        id: "menace_enabled".into(),
+        label: "Menace Enabled".into(),
+        kind: "toggle",
+        step: vec![],
+        min: 0.0,
+        max: 1.0,
+        preset_default_at_current_preset: 1.0,
+        current_value: if state.menace_state.is_some() { 1.0 } else { 0.0 },
+    });
+    specs.push(KnobSpec {
+        id: "hazards_enabled".into(),
+        label: "Hazards Enabled".into(),
+        kind: "toggle",
+        step: vec![],
+        min: 0.0,
+        max: 1.0,
+        preset_default_at_current_preset: 1.0,
+        current_value: if state.hazards_enabled { 1.0 } else { 0.0 },
+    });
+    Ok(specs)
+}
+
+/// Enumerate every saved preset in the app-data directory.
+#[tauri::command]
+pub fn list_custom_presets(app: AppHandle) -> CmdResult<Vec<CustomPreset>> {
+    let dir = custom_preset_dir(&app)?;
+    let mut out: Vec<CustomPreset> = Vec::new();
+    let entries = std::fs::read_dir(&dir).map_err(|e| CmdError::Snapshot(e.to_string()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| CmdError::Snapshot(e.to_string()))?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+            continue;
+        }
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if let Ok(preset) = serde_yaml::from_str::<CustomPreset>(&text) {
+            out.push(preset);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// Persist a named preset (replaces on collision).
+#[tauri::command]
+pub fn save_custom_preset(
+    app: AppHandle,
+    name: String,
+    scalars: std::collections::HashMap<String, f32>,
+    menace_enabled: bool,
+    hazards_enabled: bool,
+) -> CmdResult<()> {
+    let sanitized = sanitize_preset_name(&name);
+    if sanitized.is_empty() {
+        return Err(CmdError::InvalidArg("preset name is empty".into()));
+    }
+    let dir = custom_preset_dir(&app)?;
+    let preset = CustomPreset {
+        name: sanitized.clone(),
+        scalars,
+        menace_enabled,
+        hazards_enabled,
+    };
+    let text = serde_yaml::to_string(&preset)
+        .map_err(|e| CmdError::Snapshot(format!("yaml: {e}")))?;
+    let path = dir.join(format!("{sanitized}.yaml"));
+    std::fs::write(&path, text).map_err(|e| CmdError::Snapshot(e.to_string()))
+}
+
+/// Delete a named preset. Missing files are treated as success.
+#[tauri::command]
+pub fn delete_custom_preset(app: AppHandle, name: String) -> CmdResult<()> {
+    let sanitized = sanitize_preset_name(&name);
+    let dir = custom_preset_dir(&app)?;
+    let path = dir.join(format!("{sanitized}.yaml"));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| CmdError::Snapshot(e.to_string()))?;
+    }
+    Ok(())
 }

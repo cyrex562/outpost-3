@@ -58,3 +58,38 @@ rows:
     normal: 1.00
     hard: 1.40
     brutal: 2.00
+
+  # --- #161 additions -------------------------------------------------------
+
+  # SlotCapacity: harder difficulty gives fewer build slots.
+  - quantity: SlotCapacity
+    sandbox: 1.50
+    easy: 1.20
+    normal: 1.00
+    hard: 0.85
+    brutal: 0.70
+
+  # ResourceConsumption > 1.0 means colonists drain more per sol.
+  - quantity: ResourceConsumption
+    sandbox: 0.70
+    easy: 0.85
+    normal: 1.00
+    hard: 1.15
+    brutal: 1.30
+
+  # ResearchCost > 1.0 inflates the cost of every tech.
+  - quantity: ResearchCost
+    sandbox: 0.70
+    easy: 0.85
+    normal: 1.00
+    hard: 1.20
+    brutal: 1.50
+
+  # PowerRequirement > 1.0 makes buildings and recipes hungrier for power
+  # (generators are unaffected).
+  - quantity: PowerRequirement
+    sandbox: 0.70
+    easy: 0.85
+    normal: 1.00
+    hard: 1.15
+    brutal: 1.30
