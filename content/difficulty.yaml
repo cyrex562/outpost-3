@@ -93,3 +93,15 @@ rows:
     normal: 1.00
     hard: 1.15
     brutal: 1.30
+
+  # --- #180 additions -------------------------------------------------------
+
+  # MaintenanceConsumption > 1.0 inflates the per-sol upkeep drain of every
+  # authored `BuildingDef.maintenance` entry. Master toggle via
+  # `maintenance_enabled` short-circuits the drain regardless of scalar.
+  - quantity: MaintenanceConsumption
+    sandbox: 0.70
+    easy: 0.85
+    normal: 1.00
+    hard: 1.15
+    brutal: 1.30

@@ -258,6 +258,17 @@ pub fn default_grade_table() -> DifficultyGradeTable {
         brutal: 1.30,
     });
 
+    // Maintenance consumption (issue #180) — harder difficulty inflates the
+    // per-sol upkeep drain of every authored `BuildingDef::maintenance` entry.
+    table.add_row(DifficultyGradeRow {
+        quantity: ModifiableQuantity::MaintenanceConsumption,
+        sandbox: 0.70,
+        easy: 0.85,
+        normal: 1.00,
+        hard: 1.15,
+        brutal: 1.30,
+    });
+
     table
 }
 
@@ -506,6 +517,7 @@ mod tests {
             ModifiableQuantity::ResourceConsumption,
             ModifiableQuantity::ResearchCost,
             ModifiableQuantity::PowerRequirement,
+            ModifiableQuantity::MaintenanceConsumption,
         ] {
             let n = normal.scalar_for(&q);
             assert!((n - 1.0).abs() < 1e-4, "{q:?} should be 1.0 at Normal, got {n}");
@@ -635,6 +647,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         };
         let recipe = RecipeDef {
             id: "smelt".into(),
@@ -662,8 +675,9 @@ mod tests {
         let mut pool_hard = pool_normal.clone();
 
         let normal =
-            process_production_scaled(&mut pool_normal, &placed, 10.0, &reg, 1.0);
-        let hard = process_production_scaled(&mut pool_hard, &placed, 10.0, &reg, 2.0);
+            process_production_scaled(&mut pool_normal, &placed, 10.0, &reg, 1.0, 1.0, true);
+        let hard =
+            process_production_scaled(&mut pool_hard, &placed, 10.0, &reg, 2.0, 1.0, true);
 
         assert!(
             hard.power_grid.demand > normal.power_grid.demand,
@@ -690,6 +704,7 @@ mod tests {
                 scalars,
                 menace_enabled: false,
                 hazards_enabled: false,
+                maintenance_enabled: true,
             })
             .expect("SetCustomDifficulty");
         assert!(matches!(
@@ -737,6 +752,7 @@ mod tests {
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
+                maintenance_enabled: true,
             })
             .expect("custom off");
         assert!(engine.state.menace_state.is_none());
@@ -747,6 +763,7 @@ mod tests {
                 scalars: DifficultyScalar::new(),
                 menace_enabled: true,
                 hazards_enabled: true,
+                maintenance_enabled: true,
             })
             .expect("custom on");
         assert!(
@@ -772,9 +789,70 @@ mod tests {
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
+                maintenance_enabled: true,
             })
             .expect("custom");
         assert!(engine.state.hazards_enabled);
+    }
+
+    #[test]
+    fn set_custom_difficulty_propagates_maintenance_enabled_atomically() {
+        // Issue #180: the atomic panel apply must carry maintenance_enabled
+        // alongside menace/hazards toggles.
+        use crate::modifier::DifficultyScalar;
+        use crate::{Command, GameEngine};
+
+        let mut engine = GameEngine::new();
+        assert!(engine.state.maintenance_enabled);
+
+        engine
+            .apply(&Command::SetCustomDifficulty {
+                scalars: DifficultyScalar::new(),
+                menace_enabled: false,
+                hazards_enabled: true,
+                maintenance_enabled: false,
+            })
+            .expect("custom");
+        assert!(!engine.state.maintenance_enabled);
+
+        engine
+            .apply(&Command::SetCustomDifficulty {
+                scalars: DifficultyScalar::new(),
+                menace_enabled: false,
+                hazards_enabled: true,
+                maintenance_enabled: true,
+            })
+            .expect("custom on");
+        assert!(engine.state.maintenance_enabled);
+    }
+
+    #[test]
+    fn set_maintenance_enabled_toggles_state() {
+        // Issue #180: standalone toggle mirrors SetHazardsEnabled.
+        use crate::{Command, GameEngine};
+
+        let mut engine = GameEngine::new();
+        assert!(engine.state.maintenance_enabled);
+        engine
+            .apply(&Command::SetMaintenanceEnabled { enabled: false })
+            .expect("toggle off");
+        assert!(!engine.state.maintenance_enabled);
+        engine
+            .apply(&Command::SetMaintenanceEnabled { enabled: true })
+            .expect("toggle on");
+        assert!(engine.state.maintenance_enabled);
+    }
+
+    #[test]
+    fn brutal_maintenance_consumption_is_harsher_than_easy() {
+        let table = default_grade_table();
+        let q = ModifiableQuantity::MaintenanceConsumption;
+        let brutal = table.build_scalar(DifficultyPreset::Brutal).scalar_for(&q);
+        let easy = table.build_scalar(DifficultyPreset::Easy).scalar_for(&q);
+        assert!(
+            brutal > easy,
+            "Brutal maintenance ({brutal}) must exceed Easy ({easy})"
+        );
     }
 
     #[test]

@@ -33,6 +33,7 @@ const customPayload = ref<{
   scalars: Record<string, number>
   menaceEnabled: boolean
   hazardsEnabled: boolean
+  maintenanceEnabled: boolean
 } | null>(null)
 
 const isCustomSelection = computed(
@@ -64,6 +65,8 @@ watch(difficulty, () => {
         scalars: { ...p.scalars },
         menaceEnabled: p.menace_enabled,
         hazardsEnabled: p.hazards_enabled,
+        // Pre-#180 preset files may omit maintenance_enabled; default to on.
+        maintenanceEnabled: p.maintenance_enabled ?? true,
       }
     }
   } else if (difficulty.value !== 'Custom') {
@@ -100,6 +103,7 @@ async function startNewGame(): Promise<void> {
       cp?.scalars,
       cp?.menaceEnabled,
       cp?.hazardsEnabled,
+      cp?.maintenanceEnabled,
     )
     worldStore.hydrate({ sol: snap.sol, month: snap.month, colonies: snap.colonies })
     router.push('/system')

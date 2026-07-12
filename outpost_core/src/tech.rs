@@ -759,6 +759,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         }];
         let researched = HashSet::new();
         let result = unlocked_buildings(buildings.iter(), &researched);
@@ -780,6 +781,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 3,
             tech_prerequisite: Some("science_tier2".to_string()),
+            maintenance: vec![],
         }];
 
         let empty: HashSet<TechId> = HashSet::new();

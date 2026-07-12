@@ -169,6 +169,17 @@ pub struct BuildingDef {
     /// Optional tech node that must be researched before this building can be queued.
     #[serde(default)]
     pub tech_prerequisite: Option<String>,
+    /// Per-sol upkeep drained from the colony pool while the building is
+    /// operational (issue #180).
+    ///
+    /// Multiplied by the `MaintenanceConsumption` difficulty scalar and short-
+    /// circuited by `GameState::maintenance_enabled == false`.  Empty (the
+    /// default) means the building has no maintenance requirement.
+    ///
+    /// Under-construction projects do **not** pay maintenance; the drain begins
+    /// the sol after `BuildingConstructed` fires.
+    #[serde(default)]
+    pub maintenance: Vec<Ingredient>,
 }
 
 fn default_labor() -> u32 {

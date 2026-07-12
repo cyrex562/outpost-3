@@ -43,6 +43,13 @@ pub enum ModifiableQuantity {
     /// Power requirement multiplier applied to positive `power_delta`
     /// and to recipe `power_draw` (consumers only, not generators).
     PowerRequirement,
+    /// Per-building maintenance draw multiplier (issue #180).
+    ///
+    /// Higher values increase how much each building's authored
+    /// [`crate::content::BuildingDef::maintenance`] entries drain from the
+    /// colony pool each sol. Applied in
+    /// [`crate::colony::process_production_scaled`].
+    MaintenanceConsumption,
 }
 
 // ─── ModifierDescriptor ───────────────────────────────────────────────────────

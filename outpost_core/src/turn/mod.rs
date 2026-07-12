@@ -184,6 +184,12 @@ pub struct GameState {
     /// When `false`, hazard rolls are short-circuited regardless of the
     /// `HazardProbability` scalar.  Defaults to `true` on new games.
     pub hazards_enabled: bool,
+    /// Master building-maintenance toggle (issue #180 custom difficulty).
+    ///
+    /// When `false`, per-building `maintenance` draws are short-circuited
+    /// regardless of the `MaintenanceConsumption` scalar. Defaults to `true`
+    /// on new games so authored maintenance costs apply by default.
+    pub maintenance_enabled: bool,
     /// Most recently activated menace definition, if any.
     ///
     /// Kept alongside `menace_state` so a menace-disabled → re-enabled
@@ -243,6 +249,7 @@ impl GameState {
             modifier_accumulator: ModifierAccumulator::new(),
             hazard_config: None,
             hazards_enabled: true,
+            maintenance_enabled: true,
             last_menace_definition: None,
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
@@ -763,6 +770,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 3,
             tech_prerequisite: Some("adv_lab_tech".to_string()),
+            maintenance: vec![],
         }];
 
         let empty: HashSet<String> = HashSet::new();

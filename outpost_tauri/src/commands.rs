@@ -103,15 +103,23 @@ pub enum ClientCommand {
     SetDifficulty {
         preset: String,
     },
-    /// Install a custom scalar map + toggles atomically (issue #161).
+    /// Install a custom scalar map + toggles atomically (issue #161, #180).
     SetCustomDifficulty {
         /// Slider values keyed by knob id (see [`get_difficulty_knobs`]).
         scalars: std::collections::HashMap<String, f32>,
         menace_enabled: bool,
         hazards_enabled: bool,
+        /// Master maintenance toggle (issue #180). Pre-#180 clients that omit
+        /// this default to `true` so authored building upkeep still applies.
+        #[serde(default)]
+        maintenance_enabled: Option<bool>,
     },
     /// Master hazards toggle (issue #161).
     SetHazardsEnabled {
+        enabled: bool,
+    },
+    /// Master maintenance toggle (issue #180).
+    SetMaintenanceEnabled {
         enabled: bool,
     },
 }
@@ -421,6 +429,7 @@ const SLIDER_KNOBS: &[(&str, &str, ModifiableQuantityKey)] = &[
     ("resource_consumption", "Resource Consumption", ModifiableQuantityKey::ResourceConsumption),
     ("research_cost", "Research Cost", ModifiableQuantityKey::ResearchCost),
     ("power_requirement", "Power Requirement", ModifiableQuantityKey::PowerRequirement),
+    ("maintenance_consumption", "Maintenance Consumption", ModifiableQuantityKey::MaintenanceConsumption),
 ];
 
 /// Fixed anchor slider steps shared by every knob (issue #161 design decision).
@@ -439,6 +448,7 @@ enum ModifiableQuantityKey {
     ResourceConsumption,
     ResearchCost,
     PowerRequirement,
+    MaintenanceConsumption,
 }
 
 impl ModifiableQuantityKey {
@@ -455,6 +465,7 @@ impl ModifiableQuantityKey {
             Self::ResourceConsumption => ModifiableQuantity::ResourceConsumption,
             Self::ResearchCost => ModifiableQuantity::ResearchCost,
             Self::PowerRequirement => ModifiableQuantity::PowerRequirement,
+            Self::MaintenanceConsumption => ModifiableQuantity::MaintenanceConsumption,
         }
     }
 }
@@ -478,6 +489,14 @@ pub struct CustomPreset {
     pub scalars: std::collections::HashMap<String, f32>,
     pub menace_enabled: bool,
     pub hazards_enabled: bool,
+    /// Master maintenance toggle (issue #180). Pre-#180 preset YAMLs default
+    /// to `true` so authored building upkeep still applies after upgrade.
+    #[serde(default = "yes")]
+    pub maintenance_enabled: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Directory containing one .yaml per saved preset.
@@ -516,6 +535,7 @@ pub fn bootstrap(
     #[allow(non_snake_case)] custom_scalars: Option<std::collections::HashMap<String, f32>>,
     custom_menace_enabled: Option<bool>,
     custom_hazards_enabled: Option<bool>,
+    custom_maintenance_enabled: Option<bool>,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<SnapshotPayload> {
     let registry = if content_dir.is_empty() || content_dir == "embedded" {
@@ -538,6 +558,7 @@ pub fn bootstrap(
             scalars: scalars_from_map(&map),
             menace_enabled: custom_menace_enabled.unwrap_or(true),
             hazards_enabled: custom_hazards_enabled.unwrap_or(true),
+            maintenance_enabled: custom_maintenance_enabled.unwrap_or(true),
         });
     }
 
@@ -705,13 +726,18 @@ pub fn apply_command(
             scalars,
             menace_enabled,
             hazards_enabled,
+            maintenance_enabled,
         } => Command::SetCustomDifficulty {
             scalars: scalars_from_map(&scalars),
             menace_enabled,
             hazards_enabled,
+            maintenance_enabled: maintenance_enabled.unwrap_or(true),
         },
         ClientCommand::SetHazardsEnabled { enabled } => {
             Command::SetHazardsEnabled { enabled }
+        }
+        ClientCommand::SetMaintenanceEnabled { enabled } => {
+            Command::SetMaintenanceEnabled { enabled }
         }
     };
 
@@ -1200,6 +1226,16 @@ pub fn get_difficulty_knobs(
         preset_default_at_current_preset: 1.0,
         current_value: if state.hazards_enabled { 1.0 } else { 0.0 },
     });
+    specs.push(KnobSpec {
+        id: "maintenance_enabled".into(),
+        label: "Maintenance Enabled".into(),
+        kind: "toggle",
+        step: vec![],
+        min: 0.0,
+        max: 1.0,
+        preset_default_at_current_preset: 1.0,
+        current_value: if state.maintenance_enabled { 1.0 } else { 0.0 },
+    });
     Ok(specs)
 }
 
@@ -1235,6 +1271,7 @@ pub fn save_custom_preset(
     scalars: std::collections::HashMap<String, f32>,
     menace_enabled: bool,
     hazards_enabled: bool,
+    maintenance_enabled: Option<bool>,
 ) -> CmdResult<()> {
     let sanitized = sanitize_preset_name(&name);
     if sanitized.is_empty() {
@@ -1246,6 +1283,7 @@ pub fn save_custom_preset(
         scalars,
         menace_enabled,
         hazards_enabled,
+        maintenance_enabled: maintenance_enabled.unwrap_or(true),
     };
     let text = serde_yaml::to_string(&preset)
         .map_err(|e| CmdError::Snapshot(format!("yaml: {e}")))?;
