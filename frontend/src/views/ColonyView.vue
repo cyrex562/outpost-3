@@ -551,27 +551,41 @@ function eventLogClass(kind: string): string {
 .sparkline-wrap { align-self: flex-end; }
 .sparkline { display: block; }
 
-/* Stability bar */
+/* Stability bar
+ *
+ * State classes (.stability-high / -mid / -low) are applied to both the fill
+ * and the label. They're scoped here so the fill only receives a background
+ * colour and the label only receives a text colour — otherwise the label
+ * ends up as coloured text on a matching coloured block and reads as noise.
+ */
 .stability-section { margin-bottom: 0.75rem; }
 .stability-bar-track {
-  height: 8px;
-  background: #1a1a2a;
+  height: 12px;
+  background: #0d0d15;
   border: 1px solid #334;
   border-radius: 4px;
   overflow: hidden;
-  margin: 0.25rem 0;
+  margin: 0.35rem 0;
   width: 100%;
   max-width: 300px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 .stability-bar-fill {
   height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s ease;
+  transition: width 0.3s ease, background 0.2s;
 }
-.stability-high { background: #3a8; color: #4c9; }
-.stability-mid  { background: #a82; color: #ca6; }
-.stability-low  { background: #a33; color: #c55; }
-.stability-label { font-size: 0.75rem; }
+.stability-bar-fill.stability-high { background: #4ec990; }
+.stability-bar-fill.stability-mid  { background: #d4a24a; }
+.stability-bar-fill.stability-low  { background: #d0574a; }
+
+.stability-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.stability-label.stability-high { color: #6adba5; }
+.stability-label.stability-mid  { color: #eab764; }
+.stability-label.stability-low  { color: #e77767; }
 
 /* Commodity table */
 .section { margin-bottom: 1rem; }
