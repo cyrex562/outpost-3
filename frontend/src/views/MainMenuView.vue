@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { isTauri, bootstrap, listSaves, loadGame } from '@/services/tauriBridge'
+import { exitApp as tauriExit, isTauri, bootstrap, listSaves, loadGame } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
 
 const router = useRouter()
@@ -61,11 +61,9 @@ async function loadSelected(name: string): Promise<void> {
   }
 }
 
-function exitApp(): void {
+async function exitApp(): Promise<void> {
   if (isTauri) {
-    import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
-      getCurrentWebviewWindow().close()
-    })
+    await tauriExit()
   } else {
     window.close()
   }

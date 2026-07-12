@@ -21,6 +21,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
             commands::is_ready,
+            commands::exit_app,
             commands::snapshot,
             commands::apply_command,
             commands::run_query,

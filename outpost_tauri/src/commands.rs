@@ -28,7 +28,7 @@ static EMBEDDED_PACK: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../content/bas
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, thiserror::Error, Serialize)]
+#[derive(Debug, thiserror::Error)]
 pub enum CmdError {
     #[error("engine not initialised — call bootstrap first")]
     NotInitialised,
@@ -40,6 +40,16 @@ pub enum CmdError {
     Snapshot(String),
     #[error("invalid argument: {0}")]
     InvalidArg(String),
+}
+
+// Serialise as the Display string. Deriving `Serialize` on the enum makes
+// tauri reject `invoke` with a structured object (e.g. `{"Snapshot": "..."}`)
+// which the frontend then stringifies to `[object Object]`. Emitting the
+// human-readable form keeps every reject path legible in the UI.
+impl Serialize for CmdError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
 }
 
 impl From<outpost_core::EngineError> for CmdError {
@@ -452,6 +462,16 @@ fn seed_system_from_content(engine: &mut GameEngine) {
 #[tauri::command]
 pub fn is_ready(engine_state: State<'_, EngineState>) -> bool {
     engine_state.engine.lock().unwrap().is_some()
+}
+
+/// Terminate the app process cleanly.
+///
+/// Using `AppHandle::exit(0)` instead of `WebviewWindow::close()` avoids the
+/// v2 quirk where closing the main window doesn't necessarily reap the
+/// process, and doesn't depend on the `core:window:close` capability.
+#[tauri::command]
+pub fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 /// Return a fresh full snapshot of engine state.
