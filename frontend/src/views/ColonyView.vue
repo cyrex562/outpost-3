@@ -6,12 +6,19 @@
  * both the REST path (gameStore.sendCommand) and the WebSocket send.
  */
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
 import { useGameSocket } from '@/composables/useGameSocket'
 import CommandPanel from '@/components/CommandPanel.vue'
 import type { ColonyState } from '@/worldModel/model'
+import {
+  isTauri,
+  listBuildings,
+  getTechTree,
+  type BuildingOption,
+  type TechNode,
+} from '@/services/tauriBridge'
 
 const worldStore = useWorldStore()
 const gameStore = useGameStore()
@@ -109,46 +116,72 @@ function formatNet(net: number): string {
 
 // ─── Construction queue ───────────────────────────────────────────────────────
 
-/** Building type to queue — user types it in or it is set by a quick-queue button. */
-const queueBuildingType = ref('')
-const queueSlotCost = ref(1)
-const queueLabourPerTurn = ref(1)
-const queueTurns = ref(5)
 const queueBusy = ref(false)
 
-async function queueConstruction(): Promise<void> {
+/** Full building catalog from the loaded content pack. */
+const buildingCatalog = ref<BuildingOption[]>([])
+
+/** Tech node states — used to decide which buildings are tech-unlocked. */
+const techNodes = ref<TechNode[]>([])
+
+/** Set of tech ids the player has researched. */
+const researchedTechs = computed<Set<string>>(
+  () => new Set(techNodes.value.filter((t) => t.state === 'researched').map((t) => t.id)),
+)
+
+/** Slots not currently reserved by an active building or in-flight project. */
+const slotsAvailable = computed<number | null>(() => {
+  const scr = gameStore.colonyScreen
+  if (!scr || scr.colony_id !== selectedColony.value?.id) return null
+  return scr.slot_capacity - scr.slots_used
+})
+
+async function loadCatalog(): Promise<void> {
+  if (!isTauri) return
+  try {
+    const [buildings, techs] = await Promise.all([listBuildings(), getTechTree()])
+    buildingCatalog.value = buildings
+    techNodes.value = techs
+  } catch {
+    // catalog / tech tree may fail to load if engine isn't ready — ignore
+  }
+}
+
+onMounted(loadCatalog)
+// The catalog is pack-static but tech state changes over time. Refresh
+// whenever the player switches colonies so a differently-selected colony
+// sees the same tech gates (currently a system-wide pool anyway).
+watch(() => gameStore.selectedColonyId, loadCatalog)
+
+/**
+ * Return `null` when the building can be queued, or a short human-readable
+ * reason (used as button tooltip + disabled state) otherwise.
+ */
+function disabledReason(b: BuildingOption): string | null {
+  if (b.tech_prerequisite && !researchedTechs.value.has(b.tech_prerequisite)) {
+    return `Requires: ${b.tech_prerequisite}`
+  }
+  const free = slotsAvailable.value
+  if (free !== null && b.slot_cost > free) {
+    return `Needs ${b.slot_cost} slot${b.slot_cost === 1 ? '' : 's'}, ${free} free`
+  }
+  return null
+}
+
+async function queueBuilding(b: BuildingOption): Promise<void> {
   const col = selectedColony.value
-  if (!col || !queueBuildingType.value.trim()) return
+  if (!col || queueBusy.value || disabledReason(b) !== null) return
   queueBusy.value = true
   try {
-    const colonyId = col.id
-    const buildingType = queueBuildingType.value.trim()
-    // Send over WebSocket for immediate feedback.
-    const seq = Date.now()
-    send({
-      type: 'command',
-      seq,
-      command: {
-        kind: 'queue_construction',
-        colony_id: colonyId,
-        building_type: buildingType,
-        slot_cost: queueSlotCost.value,
-        labor_per_turn: queueLabourPerTurn.value,
-        construction_cost: [],
-        construction_turns: queueTurns.value,
-      },
-    })
-    // Also flush via REST so the response updates state synchronously.
     await gameStore.sendCommand({
       kind: 'queue_construction',
-      colony_id: colonyId,
-      building_type: buildingType,
-      slot_cost: queueSlotCost.value,
-      labor_per_turn: queueLabourPerTurn.value,
-      construction_cost: [],
-      construction_turns: queueTurns.value,
+      colony_id: col.id,
+      building_type: b.id,
+      slot_cost: b.slot_cost,
+      labor_per_turn: b.labor_per_turn,
+      construction_cost: b.construction_cost,
+      construction_turns: b.construction_turns,
     })
-    queueBuildingType.value = ''
   } finally {
     queueBusy.value = false
   }
@@ -410,38 +443,68 @@ function eventLogClass(kind: string): string {
               </div>
               <div v-else class="hint">No projects in queue.</div>
 
-              <!-- Queue new construction form -->
-              <form
-                class="queue-form"
-                data-testid="queue-construction-form"
-                @submit.prevent="queueConstruction"
-              >
-                <input
-                  v-model="queueBuildingType"
-                  class="input-sm"
-                  placeholder="Building type (e.g. mine)"
-                  data-testid="queue-building-type-input"
-                />
-                <div class="queue-params">
-                  <label class="param-label">Slots
-                    <input v-model.number="queueSlotCost" class="input-xs" type="number" min="1" data-testid="queue-slot-cost" />
-                  </label>
-                  <label class="param-label">Labour/turn
-                    <input v-model.number="queueLabourPerTurn" class="input-xs" type="number" min="0" data-testid="queue-labour-per-turn" />
-                  </label>
-                  <label class="param-label">Turns
-                    <input v-model.number="queueTurns" class="input-xs" type="number" min="1" data-testid="queue-turns" />
-                  </label>
+              <!-- Build catalog: browse buildings the pack ships, queue with one click -->
+              <div class="build-catalog-wrap" data-testid="build-catalog">
+                <div class="catalog-heading">
+                  <h5 class="catalog-title">Build</h5>
+                  <span
+                    v-if="slotsAvailable !== null"
+                    class="catalog-slots"
+                    data-testid="catalog-slots"
+                  >
+                    {{ slotsAvailable }} slot{{ slotsAvailable === 1 ? '' : 's' }} free
+                  </span>
                 </div>
-                <button
-                  type="submit"
-                  class="btn-queue"
-                  :disabled="queueBusy || !queueBuildingType.trim()"
-                  data-testid="btn-queue-construction"
-                >
-                  Queue Construction
-                </button>
-              </form>
+                <div v-if="buildingCatalog.length === 0" class="hint">
+                  No buildings available in the loaded content pack.
+                </div>
+                <div v-else class="build-catalog">
+                  <div
+                    v-for="b in buildingCatalog"
+                    :key="b.id"
+                    class="build-card"
+                    :class="{ 'is-disabled': disabledReason(b) !== null }"
+                    :title="disabledReason(b) ?? ''"
+                    :data-testid="`build-card-${b.id}`"
+                  >
+                    <div class="build-card-head">
+                      <span class="build-card-name">{{ b.name }}</span>
+                      <span class="build-card-cat">{{ b.category }}</span>
+                    </div>
+                    <p v-if="b.description" class="build-card-desc">{{ b.description }}</p>
+                    <div class="build-card-stats">
+                      {{ b.construction_turns }} sols · {{ b.labor_per_turn }} labor/turn ·
+                      {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
+                    </div>
+                    <div v-if="b.construction_cost.length" class="build-card-cost">
+                      <span
+                        v-for="(c, i) in b.construction_cost"
+                        :key="i"
+                        class="cost-chip"
+                      >
+                        {{ c[1] }} {{ c[0] }}
+                      </span>
+                    </div>
+                    <div class="build-card-foot">
+                      <span
+                        v-if="disabledReason(b)"
+                        class="build-card-reason"
+                        :data-testid="`build-card-reason-${b.id}`"
+                      >
+                        {{ disabledReason(b) }}
+                      </span>
+                      <button
+                        class="btn-queue"
+                        :disabled="queueBusy || disabledReason(b) !== null"
+                        :data-testid="`btn-queue-${b.id}`"
+                        @click="queueBuilding(b)"
+                      >
+                        Queue
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </template>
@@ -660,49 +723,78 @@ function eventLogClass(kind: string): string {
 }
 .queue-progress { font-size: 0.72rem; color: #668; }
 
-/* Queue form */
-.queue-form { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
-.input-sm {
-  background: #0d0d15;
-  border: 1px solid #334;
-  border-radius: 3px;
-  color: #cdd;
-  padding: 0.3rem 0.5rem;
-  font-family: monospace;
-  font-size: 0.82rem;
+/* Build catalog */
+.build-catalog-wrap { margin-top: 0.75rem; }
+.catalog-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
 }
-.input-sm:focus { outline: none; border-color: #558; }
-.queue-params { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-.param-label {
-  font-size: 0.72rem;
+.catalog-title {
   color: #668;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.catalog-slots { color: #778; font-size: 0.72rem; }
+
+.build-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem;
+}
+.build-card {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-}
-.input-xs {
-  width: 52px;
-  background: #0d0d15;
+  gap: 0.25rem;
+  background: #14141e;
   border: 1px solid #334;
-  border-radius: 3px;
-  color: #cdd;
-  padding: 0.2rem 0.3rem;
-  font-family: monospace;
-  font-size: 0.8rem;
+  border-radius: 4px;
+  padding: 0.55rem 0.6rem;
+  color: #aab;
 }
+.build-card.is-disabled { opacity: 0.55; }
+.build-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.build-card-name { color: #8cf; font-size: 0.86rem; font-weight: 600; }
+.build-card-cat {
+  color: #557;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.build-card-desc { color: #889; font-size: 0.76rem; }
+.build-card-stats { color: #668; font-size: 0.72rem; }
+.build-card-cost { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.cost-chip {
+  background: #1a1a2a;
+  border: 1px solid #223;
+  border-radius: 2px;
+  padding: 0.05rem 0.3rem;
+  color: #8a8;
+  font-size: 0.7rem;
+}
+.build-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+.build-card-reason { color: #a86; font-size: 0.7rem; font-style: italic; }
 .btn-queue {
   background: #1a2030;
   border: 1px solid #468;
   border-radius: 3px;
   color: #8cf;
-  padding: 0.35rem 0.7rem;
+  padding: 0.3rem 0.7rem;
   font-family: monospace;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   cursor: pointer;
-  align-self: flex-start;
+  margin-left: auto;
 }
 .btn-queue:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-queue:hover:not(:disabled) { background: #182030; }
+.btn-queue:hover:not(:disabled) { background: #22293a; }
 
 /* Notifications */
 .notifications { margin-top: 1rem; }
