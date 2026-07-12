@@ -123,6 +123,12 @@ export interface SystemBody {
   role: string
   distance_au: number
   colonizable: boolean
+  atmosphere: string
+  temperature: string
+  gravity_g: number
+  radiation: string
+  habitability: number
+  habitability_modifier: number
 }
 
 export async function getSystemBodies(): Promise<SystemBody[]> {

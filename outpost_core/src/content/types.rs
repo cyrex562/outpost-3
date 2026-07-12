@@ -269,11 +269,35 @@ pub struct SystemBodyDef {
     pub role: crate::system::SystemRole,
     /// Distance from the primary in AU.
     pub distance_au: f32,
+    /// Atmospheric composition band.
+    #[serde(default = "SystemBodyDef::default_atmosphere")]
+    pub atmosphere: crate::system::Atmosphere,
+    /// Surface temperature band.
+    #[serde(default = "SystemBodyDef::default_temperature")]
+    pub temperature: crate::system::TemperatureBand,
+    /// Surface gravity as a fraction of Earth-g.
+    #[serde(default = "SystemBodyDef::default_gravity_g")]
+    pub gravity_g: f32,
+    /// Ambient radiation exposure level.
+    #[serde(default = "SystemBodyDef::default_radiation")]
+    pub radiation: crate::system::RadiationLevel,
 }
 
 impl SystemBodyDef {
     fn default_role() -> crate::system::SystemRole {
         crate::system::SystemRole::Unassigned
+    }
+    fn default_atmosphere() -> crate::system::Atmosphere {
+        crate::system::Atmosphere::None
+    }
+    fn default_temperature() -> crate::system::TemperatureBand {
+        crate::system::TemperatureBand::Temperate
+    }
+    fn default_gravity_g() -> f32 {
+        1.0
+    }
+    fn default_radiation() -> crate::system::RadiationLevel {
+        crate::system::RadiationLevel::Low
     }
 }
 

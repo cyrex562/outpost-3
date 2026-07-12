@@ -122,6 +122,11 @@ pub enum ClientCommand {
     SetMaintenanceEnabled {
         enabled: bool,
     },
+    /// Link a colony to its home star-system body (issue #163).
+    AssignColonyHomeBody {
+        colony_id: String,
+        body_id: String,
+    },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -189,6 +194,12 @@ pub enum ServerEvent {
     /// The active difficulty preset changed (issue #161).
     DifficultyChanged {
         preset: String,
+    },
+    /// A colony's home body was recorded (issue #163).
+    ColonyHomeBodySet {
+        colony_id: String,
+        body_id: String,
+        habitability_modifier: f32,
     },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
@@ -285,6 +296,15 @@ impl ServerEvent {
             },
             Event::DifficultyChanged { preset } => Self::DifficultyChanged {
                 preset: preset.label().to_owned(),
+            },
+            Event::ColonyHomeBodySet {
+                colony_id,
+                body_id,
+                habitability_modifier,
+            } => Self::ColonyHomeBodySet {
+                colony_id: colony_id.to_string(),
+                body_id: body_id.0.to_string(),
+                habitability_modifier: *habitability_modifier,
             },
             other => Self::Unknown {
                 core_kind: format!("{other:?}").split_whitespace().next().unwrap_or("event").to_owned(),
@@ -613,9 +633,6 @@ fn seed_system_from_content(engine: &mut GameEngine) {
             kind: body.kind.clone(),
             distance_au: body.distance_au,
         }));
-        if matches!(body.role, SystemRole::Unassigned) {
-            continue;
-        }
         // `AddBody` doesn't carry the resulting body id back; look it up by name.
         let body_id = engine
             .state
@@ -625,7 +642,15 @@ fn seed_system_from_content(engine: &mut GameEngine) {
             .iter()
             .find(|(_, b)| b.name == body.name)
             .map(|(id, _)| id.clone());
-        if let Some(id) = body_id {
+        let Some(id) = body_id else { continue };
+        let _ = engine.apply(&Command::System(SystemCommand::SetBodyAttributes {
+            body_id: id.clone(),
+            atmosphere: body.atmosphere,
+            temperature: body.temperature,
+            gravity_g: body.gravity_g,
+            radiation: body.radiation,
+        }));
+        if !matches!(body.role, SystemRole::Unassigned) {
             let _ = engine.apply(&Command::System(SystemCommand::AssignRole {
                 body_id: id,
                 role: body.role.clone(),
@@ -739,6 +764,15 @@ pub fn apply_command(
         ClientCommand::SetMaintenanceEnabled { enabled } => {
             Command::SetMaintenanceEnabled { enabled }
         }
+        ClientCommand::AssignColonyHomeBody { colony_id, body_id } => {
+            let cid = parse_colony(&colony_id)?;
+            let bid = Uuid::parse_str(&body_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad body_id: {body_id}")))?;
+            Command::AssignColonyHomeBody {
+                colony_id: cid,
+                body_id: outpost_core::system::BodyId(bid),
+            }
+        }
     };
 
     let events = engine.apply(&core_cmd).map_err(CmdError::from)?;
@@ -824,6 +858,12 @@ pub struct SystemBodyWire {
     pub role: String,
     pub distance_au: f32,
     pub colonizable: bool,
+    pub atmosphere: String,
+    pub temperature: String,
+    pub gravity_g: f32,
+    pub radiation: String,
+    pub habitability: u8,
+    pub habitability_modifier: f32,
 }
 
 /// Return the current list of system bodies with rendering hints.
@@ -847,6 +887,12 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
                 b.kind,
                 BodyKind::InnerPlanet | BodyKind::Moon | BodyKind::AsteroidBelt
             ),
+            atmosphere: format!("{:?}", b.atmosphere),
+            temperature: format!("{:?}", b.temperature),
+            gravity_g: b.gravity_g,
+            radiation: format!("{:?}", b.radiation),
+            habitability: b.habitability(),
+            habitability_modifier: b.habitability_modifier(),
         })
         .collect();
     Ok(bodies)

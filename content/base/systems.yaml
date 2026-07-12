@@ -2,8 +2,16 @@
 #
 # Each entry defines a star system that can be selected at bootstrap and
 # seeds `SystemState.node_map`. Body records mirror `outpost_core::system::Body`
-# 1:1 (name / kind / role / distance_au). `role` is optional; the parser
-# falls back to `unassigned`.
+# 1:1 (name / kind / role / distance_au / attributes). `role` is optional; the
+# parser falls back to `unassigned`.
+#
+# Environmental attributes (atmosphere, temperature, gravity_g, radiation) are
+# used by `outpost_core::system::Body::habitability()` to derive a 0–100 rating
+# and a productivity modifier applied to colony output. See issue #163.
+# Enums use snake_case tags:
+#   atmosphere:  none | thin | breathable | dense | toxic
+#   temperature: frozen | cold | temperate | hot | extreme
+#   radiation:   low | moderate | high
 #
 # Bootstrap picks the first authored system when no explicit id is passed —
 # selection UI can be layered on later without changing the schema.
@@ -18,29 +26,57 @@
       kind: inner_planet
       role: raw_extraction
       distance_au: 0.4
+      atmosphere: thin
+      temperature: hot
+      gravity_g: 0.62
+      radiation: high
     - name: Kepler-B
       kind: inner_planet
       role: population_hub
       distance_au: 0.7
+      atmosphere: breathable
+      temperature: temperate
+      gravity_g: 0.98
+      radiation: low
     - name: Kepler-C
       kind: inner_planet
       role: science
       distance_au: 1.1
+      atmosphere: thin
+      temperature: cold
+      gravity_g: 0.85
+      radiation: moderate
     - name: Ceres Belt
       kind: asteroid_belt
       role: raw_extraction
       distance_au: 2.4
+      atmosphere: none
+      temperature: frozen
+      gravity_g: 0.05
+      radiation: moderate
     - name: Aurelian
       kind: gas_giant
       role: fuel_production
       distance_au: 4.2
+      atmosphere: dense
+      temperature: cold
+      gravity_g: 2.4
+      radiation: high
     - name: Aurelian-Moon
       kind: moon
       role: industry
       distance_au: 4.35
+      atmosphere: none
+      temperature: cold
+      gravity_g: 0.18
+      radiation: high
     - name: Selkin
       kind: inner_planet
       distance_au: 6.8
+      atmosphere: toxic
+      temperature: frozen
+      gravity_g: 1.3
+      radiation: moderate
 
 - id: trappist-1
   name: Trappist-1
@@ -52,28 +88,60 @@
       kind: inner_planet
       role: raw_extraction
       distance_au: 0.11
+      atmosphere: thin
+      temperature: hot
+      gravity_g: 0.55
+      radiation: high
     - name: T-1b
       kind: inner_planet
       role: population_hub
       distance_au: 0.15
+      atmosphere: breathable
+      temperature: temperate
+      gravity_g: 0.95
+      radiation: moderate
     - name: T-1c
       kind: inner_planet
       role: science
       distance_au: 0.21
+      atmosphere: thin
+      temperature: temperate
+      gravity_g: 0.9
+      radiation: moderate
     - name: T-1d
       kind: inner_planet
       role: industry
       distance_au: 0.28
+      atmosphere: dense
+      temperature: cold
+      gravity_g: 1.15
+      radiation: moderate
     - name: T-1e
       kind: inner_planet
       distance_au: 0.38
+      atmosphere: none
+      temperature: cold
+      gravity_g: 0.72
+      radiation: high
     - name: T-1f
       kind: inner_planet
       distance_au: 0.52
+      atmosphere: toxic
+      temperature: frozen
+      gravity_g: 0.88
+      radiation: high
     - name: T-1g
       kind: inner_planet
       distance_au: 0.71
+      atmosphere: none
+      temperature: frozen
+      gravity_g: 0.6
+      radiation: high
     - name: Outer Ring
       kind: asteroid_belt
       role: raw_extraction
       distance_au: 1.9
+      atmosphere: none
+      temperature: frozen
+      gravity_g: 0.04
+      radiation: moderate

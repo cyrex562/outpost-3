@@ -141,6 +141,16 @@ async function finish(): Promise<void> {
     // land, so the per-command colony_screen refresh reflects the queued
     // projects rather than a previous selection.
     gameStore.selectedColonyId = founded.colony_id
+    // Link the new colony to its star-system body so production picks up the
+    // habitability modifier (issue #163). Silent failure is fine — a colony
+    // without a home body just runs at the neutral 1.0 multiplier.
+    if (chosenBody.value) {
+      await gameStore.sendCommand({
+        kind: 'assign_colony_home_body',
+        colony_id: founded.colony_id,
+        body_id: chosenBody.value.body_id,
+      })
+    }
     for (const bid of chosenBuildings.value) {
       const b = buildings.value.find((x) => x.id === bid)
       if (!b) continue
