@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import {
   getColonizeTargets,
   getPlanetMap,
@@ -16,10 +16,13 @@ import PlanetHexMap from '@/components/PlanetHexMap.vue'
 import { useGameStore } from '@/stores/game'
 
 const router = useRouter()
+const route = useRoute()
 const gameStore = useGameStore()
 
 const step = ref<1 | 2 | 3 | 4>(1)
 const error = ref<string | null>(null)
+/** True when the wizard was launched from the map with a body preselected. */
+const bodyLocked = ref(false)
 
 // Step 1: pick a body
 const bodies = ref<ColonizeTarget[]>([])
@@ -48,6 +51,18 @@ onMounted(async () => {
     // Default the supply pick to a "Standard"-named package if present, else the first.
     const std = supplyPackages.value.find((p) => p.id === 'standard' || p.name.toLowerCase() === 'standard')
     chosenSupplyId.value = std?.id ?? supplyPackages.value[0]?.id ?? null
+
+    // If the wizard was launched from a body's "Found Colony Here" button,
+    // the id lands in the `body` query. Preselect and skip step 1.
+    const preselectedId = typeof route.query.body === 'string' ? route.query.body : null
+    if (preselectedId) {
+      const match = bodies.value.find((b) => b.body_id === preselectedId)
+      if (match) {
+        chosenBody.value = match
+        bodyLocked.value = true
+        step.value = 2
+      }
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
@@ -78,6 +93,12 @@ function next(): void {
 }
 
 function back(): void {
+  // When the body was preselected from the star map, step 1 is skipped —
+  // back-from-step-2 should return to the map, not surface a hidden step 1.
+  if (bodyLocked.value && step.value === 2) {
+    router.push('/system')
+    return
+  }
   if (step.value > 1) step.value = (step.value - 1) as 1 | 2 | 3 | 4
   else router.push('/system')
 }
