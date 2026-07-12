@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getSystemBodies, type SystemBody } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
@@ -14,22 +14,24 @@ const error = ref<string | null>(null)
 onMounted(async () => {
   try {
     bodies.value = await getSystemBodies()
+    // After the body list arrives, fit the viewBox to the data if the user
+    // hasn't already customised it (persisted state overrides fit-all).
+    if (!persistedLoaded.value) resetView()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
 })
 
-// ── Layout math ────────────────────────────────────────────────────────────
+// ── World-space layout math ──────────────────────────────────────────────
+//
+// The SVG uses viewBox coordinates (world units); actual pixel size comes
+// from the container's width + the user-adjustable `mapHeight`. Bodies are
+// placed at their orbital distance from the origin (the star at 0,0) using
+// a deterministic id-hashed angle so the layout is stable across reloads.
 
-const svgSize = 720
-const center = svgSize / 2
-// Scale distance_au → pixels so the farthest body lands at ~45% of half-width.
-const maxAu = computed(() =>
-  Math.max(1, ...bodies.value.map((b) => b.distance_au)),
-)
-const scale = computed(() => (center * 0.9) / maxAu.value)
+const WORLD_SCALE = 100 // 1 AU = 100 world units
 
-// Distribute bodies around the star by hashing their id → angle.
+/** Deterministic angle per body (radians) so orbits don't reshuffle. */
 function angleFor(id: string): number {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
@@ -37,9 +39,9 @@ function angleFor(id: string): number {
 }
 
 function bodyPos(b: SystemBody): { x: number; y: number } {
-  const r = b.distance_au * scale.value
+  const r = b.distance_au * WORLD_SCALE
   const a = angleFor(b.id)
-  return { x: center + r * Math.cos(a), y: center + r * Math.sin(a) }
+  return { x: r * Math.cos(a), y: r * Math.sin(a) }
 }
 
 function bodyColor(b: SystemBody): string {
@@ -75,14 +77,224 @@ function bodyRadius(b: SystemBody): number {
 }
 
 const orbitRadii = computed(() =>
-  bodies.value.map((b) => b.distance_au * scale.value),
+  bodies.value.map((b) => b.distance_au * WORLD_SCALE),
 )
+
+// ── Persistence ──────────────────────────────────────────────────────────
+
+interface Persisted {
+  x: number
+  y: number
+  w: number
+  h: number
+  panelHeight: number
+}
+
+const STORAGE_KEY = 'outpost3.system-map.layout'
+const persistedLoaded = ref(false)
+
+function loadPersisted(): Persisted | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as Persisted
+    if (
+      typeof p.x === 'number' &&
+      typeof p.y === 'number' &&
+      typeof p.w === 'number' &&
+      typeof p.h === 'number' &&
+      typeof p.panelHeight === 'number'
+    ) {
+      return p
+    }
+  } catch {
+    // corrupt entry — ignore and re-fit
+  }
+  return null
+}
+
+function savePersisted(): void {
+  try {
+    const payload: Persisted = {
+      x: viewBox.value.x,
+      y: viewBox.value.y,
+      w: viewBox.value.w,
+      h: viewBox.value.h,
+      panelHeight: mapHeight.value,
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+  } catch {
+    // storage full or blocked — non-fatal
+  }
+}
+
+// ── ViewBox state (pan + zoom) ───────────────────────────────────────────
+
+const DEFAULT_VIEW = { x: -600, y: -600, w: 1200, h: 1200 }
+const viewBox = ref({ ...DEFAULT_VIEW })
+
+const mapHeight = ref(720)
+
+const persisted = loadPersisted()
+if (persisted) {
+  viewBox.value = { x: persisted.x, y: persisted.y, w: persisted.w, h: persisted.h }
+  mapHeight.value = persisted.panelHeight
+  persistedLoaded.value = true
+}
+
+const viewBoxStr = computed(
+  () => `${viewBox.value.x} ${viewBox.value.y} ${viewBox.value.w} ${viewBox.value.h}`,
+)
+
+/**
+ * Recompute the viewBox so every body + a padded margin fits. Also clears
+ * the persisted entry so the next mount will re-fit if bodies change.
+ */
+function resetView(): void {
+  const maxAu = bodies.value.length
+    ? Math.max(1, ...bodies.value.map((b) => b.distance_au))
+    : 5
+  const worldMax = maxAu * WORLD_SCALE * 1.2
+  viewBox.value = { x: -worldMax, y: -worldMax, w: worldMax * 2, h: worldMax * 2 }
+  savePersisted()
+}
+
+// Track the SVG element so wheel/mouse handlers can compute cursor
+// coordinates against its bounding rect.
+const svgRef = ref<SVGSVGElement | null>(null)
+
+const ZOOM_STEP = 1.15
+const ZOOM_STEP_INV = 1 / ZOOM_STEP
+const MIN_VIEW = 80 // don't allow zooming past 80 world units wide
+const MAX_VIEW = 20000 // or further out than 20 000
+
+function onWheel(e: WheelEvent): void {
+  e.preventDefault()
+  const svg = svgRef.value
+  if (!svg) return
+  const rect = svg.getBoundingClientRect()
+  const factor = e.deltaY > 0 ? ZOOM_STEP : ZOOM_STEP_INV
+  const newW = viewBox.value.w * factor
+  const newH = viewBox.value.h * factor
+  // Clamp so we don't over-zoom.
+  if (newW < MIN_VIEW || newW > MAX_VIEW) return
+  const mouseRatioX = (e.clientX - rect.left) / rect.width
+  const mouseRatioY = (e.clientY - rect.top) / rect.height
+  viewBox.value = {
+    x: viewBox.value.x - (newW - viewBox.value.w) * mouseRatioX,
+    y: viewBox.value.y - (newH - viewBox.value.h) * mouseRatioY,
+    w: newW,
+    h: newH,
+  }
+  savePersisted()
+}
+
+// ── Pan drag ─────────────────────────────────────────────────────────────
+
+let isDragging = false
+let dragStartX = 0
+let dragStartY = 0
+let dragStartVbX = 0
+let dragStartVbY = 0
+
+function onMouseDown(e: MouseEvent): void {
+  // Only left-drag pans; ignore body clicks (they're handled by <g @click>).
+  if (e.button !== 0) return
+  isDragging = true
+  dragStartX = e.clientX
+  dragStartY = e.clientY
+  dragStartVbX = viewBox.value.x
+  dragStartVbY = viewBox.value.y
+}
+
+function onMouseMove(e: MouseEvent): void {
+  if (!isDragging) return
+  const svg = svgRef.value
+  if (!svg) return
+  const rect = svg.getBoundingClientRect()
+  const scaleX = viewBox.value.w / rect.width
+  const scaleY = viewBox.value.h / rect.height
+  viewBox.value = {
+    ...viewBox.value,
+    x: dragStartVbX - (e.clientX - dragStartX) * scaleX,
+    y: dragStartVbY - (e.clientY - dragStartY) * scaleY,
+  }
+}
+
+function onMouseUp(): void {
+  if (isDragging) {
+    isDragging = false
+    savePersisted()
+  }
+}
+
+// ── Panel resize (bottom-right grip drags height only) ───────────────────
+
+const MIN_PANEL_H = 320
+const MAX_PANEL_H = 1400
+let isResizing = false
+let resizeStartY = 0
+let resizeStartH = 0
+
+function onResizeStart(e: MouseEvent): void {
+  isResizing = true
+  resizeStartY = e.clientY
+  resizeStartH = mapHeight.value
+  e.preventDefault()
+}
+
+function onResizeMove(e: MouseEvent): void {
+  if (!isResizing) return
+  const delta = e.clientY - resizeStartY
+  const next = Math.min(MAX_PANEL_H, Math.max(MIN_PANEL_H, resizeStartH + delta))
+  mapHeight.value = next
+}
+
+function onResizeEnd(): void {
+  if (isResizing) {
+    isResizing = false
+    savePersisted()
+  }
+}
+
+// Global mouse listeners keep pan + resize drags working even when the
+// cursor leaves the SVG bounds mid-gesture (matches harsh_realm's UX).
+onMounted(() => {
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', onResizeEnd)
+})
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', onResizeEnd)
+})
+
+// Also persist whenever the user selects a different body — not strictly
+// required, but keeps the layout write cadence low without silent drops.
+watch(mapHeight, savePersisted)
+
+// ── Zoom-aware sizing ────────────────────────────────────────────────────
+
+/**
+ * A label at world-size N appears at N * (viewBox.w / pixelWidth) pixels.
+ * To keep labels around a target pixel size, scale the world font size
+ * inversely with zoom. We derive the "zoom" ratio from viewBox width vs
+ * the default view width so labels stay legible across the zoom range.
+ */
+const labelScale = computed(() => viewBox.value.w / DEFAULT_VIEW.w)
+const labelFontSize = computed(() => Math.max(6, Math.min(18, 10 * labelScale.value)))
+const labelOffsetY = computed(() => 12 * labelScale.value)
+const strokeScale = computed(() => Math.max(0.5, Math.min(2, 1 * labelScale.value)))
+
+// ── Navigation ───────────────────────────────────────────────────────────
 
 function goToColony(): void {
   router.push('/colony')
 }
 
-/** Navigate to the founding wizard. If a body is passed, preselect it. */
 function foundColony(body?: SystemBody | null): void {
   if (body) {
     router.push({ path: '/found', query: { body: body.id } })
@@ -100,79 +312,98 @@ function foundColony(body?: SystemBody | null): void {
         Sol {{ worldStore.sol }} · Month {{ worldStore.month }}
       </div>
       <div class="actions">
+        <button class="btn" data-testid="btn-reset-view" @click="resetView">
+          Reset View
+        </button>
         <button class="btn" @click="foundColony()">Found Colony</button>
         <button class="btn" @click="goToColony">Colony Dashboard</button>
       </div>
     </div>
 
     <div class="content">
-      <svg
-        :width="svgSize"
-        :height="svgSize"
-        class="map"
-        data-testid="system-map-svg"
-      >
-        <!-- Star at center -->
-        <circle
-          :cx="center"
-          :cy="center"
-          r="14"
-          fill="#fda"
-          stroke="#ffd"
-          stroke-width="1"
-        />
-        <text
-          :x="center"
-          :y="center - 20"
-          text-anchor="middle"
-          fill="#fda"
-          font-size="11"
-          font-family="monospace"
+      <div class="map-wrap" :style="{ height: `${mapHeight}px` }">
+        <svg
+          ref="svgRef"
+          :viewBox="viewBoxStr"
+          preserveAspectRatio="xMidYMid meet"
+          class="map"
+          :class="{ dragging: isDragging }"
+          data-testid="system-map-svg"
+          @wheel.passive="false"
+          @wheel="onWheel"
+          @mousedown="onMouseDown"
         >
-          KEPLER
-        </text>
-
-        <!-- Orbit tracks -->
-        <circle
-          v-for="(r, i) in orbitRadii"
-          :key="`orbit-${i}`"
-          :cx="center"
-          :cy="center"
-          :r="r"
-          fill="none"
-          stroke="#334"
-          stroke-width="1"
-          stroke-dasharray="2 3"
-        />
-
-        <!-- Bodies -->
-        <g
-          v-for="b in bodies"
-          :key="b.id"
-          class="body-group"
-          :class="{ selected: selected?.id === b.id }"
-          @click="selected = b"
-        >
+          <!-- Star at origin -->
           <circle
-            :cx="bodyPos(b).x"
-            :cy="bodyPos(b).y"
-            :r="bodyRadius(b)"
-            :fill="bodyColor(b)"
-            stroke="#000"
+            cx="0"
+            cy="0"
+            r="14"
+            fill="#fda"
+            stroke="#ffd"
             stroke-width="1"
           />
           <text
-            :x="bodyPos(b).x"
-            :y="bodyPos(b).y + bodyRadius(b) + 12"
+            x="0"
+            :y="-20 * labelScale"
             text-anchor="middle"
-            fill="#aac"
-            font-size="10"
+            fill="#fda"
+            :font-size="Math.max(8, 11 * labelScale)"
             font-family="monospace"
+            class="body-label"
           >
-            {{ b.name }}
+            KEPLER
           </text>
-        </g>
-      </svg>
+
+          <!-- Orbit tracks -->
+          <circle
+            v-for="(r, i) in orbitRadii"
+            :key="`orbit-${i}`"
+            cx="0"
+            cy="0"
+            :r="r"
+            fill="none"
+            stroke="#334"
+            :stroke-width="strokeScale"
+            :stroke-dasharray="`${2 * strokeScale} ${3 * strokeScale}`"
+          />
+
+          <!-- Bodies -->
+          <g
+            v-for="b in bodies"
+            :key="b.id"
+            class="body-group"
+            :class="{ selected: selected?.id === b.id }"
+            @click.stop="selected = b"
+          >
+            <circle
+              :cx="bodyPos(b).x"
+              :cy="bodyPos(b).y"
+              :r="bodyRadius(b)"
+              :fill="bodyColor(b)"
+              stroke="#000"
+              stroke-width="1"
+            />
+            <text
+              :x="bodyPos(b).x"
+              :y="bodyPos(b).y + bodyRadius(b) + labelOffsetY"
+              text-anchor="middle"
+              fill="#aac"
+              :font-size="labelFontSize"
+              font-family="monospace"
+              class="body-label"
+            >
+              {{ b.name }}
+            </text>
+          </g>
+        </svg>
+        <!-- Bottom-right corner grip for panel height resize. -->
+        <div
+          class="resize-grip"
+          data-testid="map-resize-grip"
+          :class="{ active: isResizing }"
+          @mousedown="onResizeStart"
+        />
+      </div>
 
       <aside class="side-panel" v-if="selected" data-testid="body-details">
         <h3>{{ selected.name }}</h3>
@@ -195,7 +426,8 @@ function foundColony(body?: SystemBody | null): void {
         </button>
       </aside>
       <aside v-else class="side-panel hint">
-        Click a body to inspect it.
+        Scroll to zoom, drag to pan, corner grip to resize.<br />
+        Click a body to inspect.
       </aside>
     </div>
 
@@ -224,10 +456,48 @@ function foundColony(body?: SystemBody | null): void {
 .btn.primary { border-color: #468; color: #8cf; }
 
 .content { display: flex; gap: 1rem; align-items: flex-start; }
-.map {
-  background: radial-gradient(ellipse at center, #05050b 0%, #000 80%);
+
+.map-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   border: 1px solid #223;
   border-radius: 6px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, #05050b 0%, #000 80%);
+}
+.map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.map.dragging { cursor: grabbing; }
+
+.resize-grip {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 45%,
+    #446 45% 55%,
+    transparent 55% 65%,
+    #446 65% 75%,
+    transparent 75%
+  );
+  border-radius: 2px;
+  z-index: 2;
+}
+.resize-grip:hover, .resize-grip.active { filter: brightness(1.5); }
+
+.body-label {
+  pointer-events: none;
 }
 
 .body-group { cursor: pointer; }
@@ -235,6 +505,7 @@ function foundColony(body?: SystemBody | null): void {
 
 .side-panel {
   min-width: 220px;
+  max-width: 260px;
   background: #101018;
   border: 1px solid #334;
   border-radius: 6px;
@@ -242,7 +513,7 @@ function foundColony(body?: SystemBody | null): void {
   color: #aab;
 }
 .side-panel h3 { color: #8cf; margin-bottom: 0.5rem; }
-.side-panel.hint { color: #557; font-style: italic; }
+.side-panel.hint { color: #557; font-style: italic; font-size: 0.85rem; }
 
 .stats { display: grid; grid-template-columns: 90px 1fr; gap: 0.35rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.75rem; }
 .stats dt { color: #668; }
