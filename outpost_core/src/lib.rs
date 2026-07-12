@@ -338,7 +338,8 @@ pub enum Command {
         preset: difficulty::DifficultyPreset,
     },
     /// Install a user-authored [`modifier::DifficultyScalar`] atomically alongside
-    /// the menace / hazards toggles (issue #161 custom-difficulty menu).
+    /// the menace / hazards / maintenance toggles (issue #161 custom-difficulty
+    /// menu; maintenance added in #180).
     ///
     /// The preset is set to [`difficulty::DifficultyPreset::Custom`]. When
     /// `menace_enabled` is `false` any active menace is cleared; when it flips
@@ -350,12 +351,22 @@ pub enum Command {
         menace_enabled: bool,
         /// Whether environmental hazards should fire.
         hazards_enabled: bool,
+        /// Whether per-building maintenance draws should apply (issue #180).
+        maintenance_enabled: bool,
     },
     /// Toggle the master hazard switch (issue #161).
     ///
     /// A cleaner in-game toggle than clamping `HazardProbability` to zero.
     SetHazardsEnabled {
         /// New master hazards-enabled state.
+        enabled: bool,
+    },
+    /// Toggle the master building-maintenance switch (issue #180).
+    ///
+    /// When `false`, per-building `maintenance` draws are short-circuited
+    /// regardless of the `MaintenanceConsumption` scalar.
+    SetMaintenanceEnabled {
+        /// New master maintenance-enabled state.
         enabled: bool,
     },
     /// Activate the existential clock with the given authored menace definition.
@@ -1577,6 +1588,11 @@ impl GameEngine {
                         .state
                         .difficulty_scalar
                         .scalar_for(&modifier::ModifiableQuantity::PowerRequirement);
+                    let maintenance_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::MaintenanceConsumption);
+                    let maintenance_enabled = self.state.maintenance_enabled;
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -1596,6 +1612,8 @@ impl GameEngine {
                             labor,
                             registry,
                             power_scalar,
+                            maintenance_scalar,
+                            maintenance_enabled,
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -2616,10 +2634,12 @@ impl GameEngine {
                 scalars,
                 menace_enabled,
                 hazards_enabled,
+                maintenance_enabled,
             } => {
                 self.state.difficulty_preset = difficulty::DifficultyPreset::Custom;
                 self.state.difficulty_scalar = scalars.clone();
                 self.state.hazards_enabled = *hazards_enabled;
+                self.state.maintenance_enabled = *maintenance_enabled;
                 if *menace_enabled {
                     // Re-attach the last-known definition if the player
                     // toggles menace back on with nothing currently active.
@@ -2638,6 +2658,11 @@ impl GameEngine {
 
             Command::SetHazardsEnabled { enabled } => {
                 self.state.hazards_enabled = *enabled;
+                Ok(vec![])
+            }
+
+            Command::SetMaintenanceEnabled { enabled } => {
+                self.state.maintenance_enabled = *enabled;
                 Ok(vec![])
             }
 
@@ -4346,6 +4371,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -4361,6 +4387,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 4,
             tech_prerequisite: None,
+            maintenance: vec![],
         });
 
         reg.insert_building(BuildingDef {
@@ -4375,6 +4402,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {

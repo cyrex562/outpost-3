@@ -8,6 +8,7 @@
 //! `ColonyTurnProcessor.ProcessProduction()` is the behavioural spec;
 //! the key improvement here is that scaling is continuous.
 
+use crate::content::types::Ingredient;
 use crate::content::{BuildingCategory, ContentRegistry, RecipeDef};
 
 use super::pool::ColonyPool;
@@ -60,6 +61,17 @@ pub enum ShortfallReason {
     PowerBrownout,
     /// Insufficient colony labour.
     LaborShort,
+    /// Per-sol maintenance draw could not be satisfied (issue #180).
+    ///
+    /// Emitted when the tightest constraint on the building's effective input
+    /// ratio is a commodity that appears **only** in
+    /// [`crate::content::BuildingDef::maintenance`], not in the recipe inputs.
+    /// A shared commodity (input + maintenance) still reports as
+    /// [`ShortfallReason::InputShort`].
+    MaintenanceShort {
+        /// The maintenance commodity id that was the tightest constraint.
+        commodity_id: String,
+    },
 }
 
 /// Outcome of one building's production attempt this turn.
@@ -101,7 +113,11 @@ pub struct ProductionStepOutcome {
 /// Holds a building's pre-computed scale before any pool mutations occur.
 struct PendingProduction<'a> {
     building_type: &'a str,
-    recipe: &'a RecipeDef,
+    recipe: Option<&'a RecipeDef>,
+    maintenance: &'a [Ingredient],
+    /// Effective per-sol maintenance multiplier
+    /// (`MaintenanceConsumption` scalar; `0.0` when disabled).
+    maintenance_multiplier: f64,
     scale: f64,
     shortfalls: Vec<ProductionShortfall>,
 }
@@ -131,20 +147,26 @@ pub fn process_production(
     labor_available: f32,
     registry: &ContentRegistry,
 ) -> ProductionStepOutcome {
-    process_production_scaled(pool, buildings, labor_available, registry, 1.0)
+    process_production_scaled(pool, buildings, labor_available, registry, 1.0, 1.0, true)
 }
 
 /// Same as [`process_production`] but multiplies positive `power_delta` and
 /// `recipe.power_draw` (consumers only) by `power_scalar` (the resolved
-/// `PowerRequirement` difficulty scalar, #161).
+/// `PowerRequirement` difficulty scalar, #161) and per-sol
+/// [`crate::content::BuildingDef::maintenance`] draws by `maintenance_scalar`
+/// (the resolved `MaintenanceConsumption` difficulty scalar, #180).
 ///
-/// Generators (negative `power_delta`) are unaffected.
+/// Generators (negative `power_delta`) are unaffected by `power_scalar`.
+/// When `maintenance_enabled` is `false` the maintenance draw is short-
+/// circuited regardless of `maintenance_scalar` (the master toggle).
 pub fn process_production_scaled(
     pool: &mut ColonyPool,
     buildings: &[(String, u32)],
     labor_available: f32,
     registry: &ContentRegistry,
     power_scalar: f32,
+    maintenance_scalar: f32,
+    maintenance_enabled: bool,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar);
@@ -180,38 +202,68 @@ pub fn process_production_scaled(
     // behaviour described in the behavioural spec.
 
     let mut pending: Vec<PendingProduction<'_>> = Vec::new();
+    let maintenance_multiplier = if maintenance_enabled {
+        f64::from(maintenance_scalar.max(0.0))
+    } else {
+        0.0
+    };
 
     for (building_type, _slot_cost) in buildings {
         let Some(bdef) = registry.building(building_type) else {
             continue; // unknown building type — skip
         };
-        let Some(recipe) = first_recipe_for_building(building_type, registry) else {
-            continue; // building has no recipe (e.g. housing, storage)
-        };
+        let recipe = first_recipe_for_building(building_type, registry);
+        let has_maintenance = maintenance_enabled && !bdef.maintenance.is_empty();
 
-        // Power ratio: essential buildings (Power category) always get 1.0.
-        let power_ratio = if bdef.category == BuildingCategory::Power {
-            1.0
+        // Buildings with neither a recipe nor an active maintenance list stay
+        // out of the production pass entirely (unchanged pre-#180 behaviour).
+        if recipe.is_none() && !has_maintenance {
+            continue;
+        }
+
+        // Combined per-commodity demand (recipe inputs + maintenance).
+        let (input_ratio, tight_commodity, tight_is_maintenance) =
+            compute_effective_input_ratio(
+                pool,
+                recipe,
+                if has_maintenance { bdef.maintenance.as_slice() } else { &[] },
+                maintenance_multiplier,
+            );
+
+        // Power/labor ratios only apply to recipe-running buildings. A pure
+        // maintenance-only building doesn't consume labour or drive brownouts.
+        let (power_ratio, applies_labor) = if recipe.is_some() {
+            let pr = if bdef.category == BuildingCategory::Power {
+                1.0
+            } else {
+                brownout_ratio
+            };
+            (pr, true)
         } else {
-            brownout_ratio
+            (1.0, false)
         };
-
-        // Input ratio: tightest input constraint, in [0, 1].
-        // Evaluated against the *pre-turn* pool state (before any production
-        // is applied).
-        let (input_ratio, tight_commodity) = compute_input_ratio(pool, recipe);
+        let effective_labor_ratio = if applies_labor { labor_ratio } else { 1.0 };
 
         // Overall scale factor.
-        let scale = input_ratio.min(power_ratio).min(labor_ratio).max(0.0);
+        let scale = input_ratio
+            .min(power_ratio)
+            .min(effective_labor_ratio)
+            .max(0.0);
 
-        // Record shortfalls.
+        // Record shortfalls. Maintenance-only tight constraints report as
+        // `MaintenanceShort`; shared input+maintenance constraints stay as
+        // `InputShort` for backwards compatibility with pre-#180 events.
         let mut shortfalls: Vec<ProductionShortfall> = Vec::new();
 
         if input_ratio < 1.0 - 1e-9 {
+            let commodity_id = tight_commodity.unwrap_or_default();
+            let reason = if tight_is_maintenance {
+                ShortfallReason::MaintenanceShort { commodity_id }
+            } else {
+                ShortfallReason::InputShort { commodity_id }
+            };
             shortfalls.push(ProductionShortfall {
-                reason: ShortfallReason::InputShort {
-                    commodity_id: tight_commodity.unwrap_or_default(),
-                },
+                reason,
                 effective_scale: input_ratio,
             });
         }
@@ -221,16 +273,22 @@ pub fn process_production_scaled(
                 effective_scale: power_ratio,
             });
         }
-        if labor_ratio < 1.0 - 1e-9 {
+        if effective_labor_ratio < 1.0 - 1e-9 {
             shortfalls.push(ProductionShortfall {
                 reason: ShortfallReason::LaborShort,
-                effective_scale: labor_ratio,
+                effective_scale: effective_labor_ratio,
             });
         }
 
         pending.push(PendingProduction {
             building_type,
             recipe,
+            maintenance: if has_maintenance {
+                bdef.maintenance.as_slice()
+            } else {
+                &[]
+            },
+            maintenance_multiplier,
             scale,
             shortfalls,
         });
@@ -240,16 +298,28 @@ pub fn process_production_scaled(
     let mut building_results: Vec<BuildingProductionResult> = Vec::new();
     for p in pending {
         if p.scale > 1e-9 {
-            for ingredient in &p.recipe.inputs {
-                pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
+            if let Some(recipe) = p.recipe {
+                for ingredient in &recipe.inputs {
+                    pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
+                }
+                for ingredient in &recipe.outputs {
+                    pool.deposit(&ingredient.id, ingredient.quantity * p.scale);
+                }
             }
-            for ingredient in &p.recipe.outputs {
-                pool.deposit(&ingredient.id, ingredient.quantity * p.scale);
+            for ingredient in p.maintenance {
+                pool.withdraw(
+                    &ingredient.id,
+                    ingredient.quantity * p.maintenance_multiplier * p.scale,
+                );
             }
         }
+        let recipe_id = p
+            .recipe
+            .map(|r| r.id.clone())
+            .unwrap_or_default();
         building_results.push(BuildingProductionResult {
             building_type: p.building_type.to_owned(),
-            recipe_id: p.recipe.id.clone(),
+            recipe_id,
             scale: p.scale,
             shortfalls: p.shortfalls,
         });
@@ -296,27 +366,62 @@ fn compute_power_grid_scaled(
     PowerGrid { capacity, demand }
 }
 
-/// Compute the `input_ratio` (tightest supply constraint) for a recipe.
+/// Compute the effective input ratio for a building, combining recipe inputs
+/// with scaled maintenance draws (issue #180).
 ///
-/// Returns `(ratio, Option<commodity_id>)`.  `ratio` is in `[0.0, 1.0]`; the
-/// commodity id is the tightest constraint (or `None` when there are no inputs).
-fn compute_input_ratio(pool: &ColonyPool, recipe: &RecipeDef) -> (f64, Option<String>) {
-    let mut ratio = 1.0f64;
-    let mut tight: Option<String> = None;
+/// Returns `(ratio, tight_commodity_id, tight_is_maintenance_only)`.
+///
+/// Per-commodity demand is summed across recipe inputs and maintenance entries
+/// so the pool is never double-counted. The returned `tight_is_maintenance_only`
+/// is `true` only when the tightest constraint is a commodity that appears
+/// exclusively in the maintenance list — this drives the `MaintenanceShort`
+/// vs. `InputShort` attribution.
+fn compute_effective_input_ratio(
+    pool: &ColonyPool,
+    recipe: Option<&RecipeDef>,
+    maintenance: &[Ingredient],
+    maintenance_multiplier: f64,
+) -> (f64, Option<String>, bool) {
+    // Merged (id, quantity, has_recipe_demand) list, preserving deterministic
+    // order: recipe inputs first, then maintenance entries (with dedup).
+    let mut demands: Vec<(String, f64, bool)> = Vec::new();
 
-    for ingredient in &recipe.inputs {
-        if ingredient.quantity <= 0.0 {
-            continue;
+    if let Some(r) = recipe {
+        for ing in &r.inputs {
+            if ing.quantity > 0.0 {
+                demands.push((ing.id.clone(), ing.quantity, true));
+            }
         }
-        let available = pool.amount(&ingredient.id);
-        let r = (available / ingredient.quantity).min(1.0);
-        if r < ratio {
-            ratio = r;
-            tight = Some(ingredient.id.clone());
+    }
+    if maintenance_multiplier > 0.0 {
+        for ing in maintenance {
+            if ing.quantity <= 0.0 {
+                continue;
+            }
+            let scaled = ing.quantity * maintenance_multiplier;
+            if let Some(existing) = demands.iter_mut().find(|d| d.0 == ing.id) {
+                existing.1 += scaled;
+            } else {
+                demands.push((ing.id.clone(), scaled, false));
+            }
         }
     }
 
-    (ratio.max(0.0), tight)
+    let mut ratio = 1.0f64;
+    let mut tight: Option<String> = None;
+    let mut tight_is_maintenance = false;
+
+    for (id, qty, has_recipe_demand) in &demands {
+        let available = pool.amount(id);
+        let r = (available / *qty).min(1.0);
+        if r < ratio {
+            ratio = r;
+            tight = Some(id.clone());
+            tight_is_maintenance = !*has_recipe_demand;
+        }
+    }
+
+    (ratio.max(0.0), tight, tight_is_maintenance)
 }
 
 /// Return the first recipe whose `building` field matches `building_type`.
@@ -358,6 +463,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         });
 
         // Mine: extracts ore; needs 30 kW; 2 workers
@@ -373,6 +479,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_ore".into(),
@@ -400,6 +507,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "smelt_iron".into(),
@@ -659,6 +767,277 @@ mod tests {
             assert!(
                 res.scale > 0.0,
                 "building {} should have non-zero output during partial brownout",
+                res.building_type
+            );
+        }
+    }
+
+    // ── Maintenance (issue #180) ─────────────────────────────────────────────
+
+    /// Registry with an `advanced_smelter` that requires 0.5 spare_parts / sol
+    /// of upkeep and runs a recipe with no other inputs.
+    fn make_registry_with_maintenance() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+
+        reg.insert_building(BuildingDef {
+            id: "solar_array".into(),
+            name: "Solar Array".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: -100.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+
+        reg.insert_building(BuildingDef {
+            id: "advanced_smelter".into(),
+            name: "Advanced Smelter".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![Ingredient {
+                id: "spare_parts".into(),
+                quantity: 0.5,
+            }],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "advanced_smelt".into(),
+            name: "Advanced Smelt".into(),
+            building: "advanced_smelter".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "iron_plate".into(),
+                quantity: 1.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+
+        reg
+    }
+
+    #[test]
+    fn maintenance_short_scales_building_to_zero_when_pool_empty() {
+        // Q1=A + Q2=A: a building that needs upkeep and gets none stops.
+        let reg = make_registry_with_maintenance();
+        let mut pool = ColonyPool::new(); // empty — no spare_parts
+
+        let placed = buildings(&["solar_array", "advanced_smelter"]);
+        let outcome = process_production_scaled(
+            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
+        );
+
+        let smelter = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "advanced_smelter")
+            .expect("advanced_smelter must appear even with maintenance-only tightness");
+        assert!(
+            smelter.scale.abs() < 1e-9,
+            "expected scale 0.0 with empty pool, got {}",
+            smelter.scale
+        );
+        assert!(
+            smelter.shortfalls.iter().any(|s| matches!(
+                &s.reason,
+                ShortfallReason::MaintenanceShort { commodity_id } if commodity_id == "spare_parts"
+            )),
+            "expected MaintenanceShort(spare_parts) shortfall, got {:?}",
+            smelter.shortfalls
+        );
+        // No iron_plate produced because scale was 0.
+        assert!(pool.amount("iron_plate").abs() < 1e-9);
+    }
+
+    #[test]
+    fn maintenance_consumption_scalar_multiplies_effective_draw() {
+        // A 2.0× MaintenanceConsumption scalar doubles the per-sol upkeep, so
+        // a pool sized for the neutral rate covers only half the demand.
+        let reg = make_registry_with_maintenance();
+        let placed = buildings(&["solar_array", "advanced_smelter"]);
+
+        // 0.5 spare_parts base — deposit exactly 0.5.
+        let mut pool_normal = ColonyPool::new();
+        pool_normal.deposit("spare_parts", 0.5);
+        let normal = process_production_scaled(
+            &mut pool_normal, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
+        );
+
+        let mut pool_harsh = ColonyPool::new();
+        pool_harsh.deposit("spare_parts", 0.5);
+        let harsh = process_production_scaled(
+            &mut pool_harsh, &placed, 10.0_f32, &reg, 1.0, 2.0, true,
+        );
+
+        let get_scale = |o: &ProductionStepOutcome, ty: &str| -> f64 {
+            o.building_results
+                .iter()
+                .find(|r| r.building_type == ty)
+                .map(|r| r.scale)
+                .unwrap()
+        };
+
+        let normal_scale = get_scale(&normal, "advanced_smelter");
+        let harsh_scale = get_scale(&harsh, "advanced_smelter");
+
+        assert!(
+            (normal_scale - 1.0).abs() < 1e-6,
+            "neutral scalar should run at full scale, got {normal_scale}"
+        );
+        assert!(
+            (harsh_scale - 0.5).abs() < 1e-6,
+            "2× scalar should halve the effective scale, got {harsh_scale}"
+        );
+    }
+
+    #[test]
+    fn maintenance_enabled_false_short_circuits_drain() {
+        // Q1=A + master toggle: with maintenance_enabled=false the smelter
+        // runs at full scale even when the maintenance commodity is empty.
+        let reg = make_registry_with_maintenance();
+        let mut pool = ColonyPool::new(); // empty pool
+
+        let placed = buildings(&["solar_array", "advanced_smelter"]);
+        let outcome = process_production_scaled(
+            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, false,
+        );
+
+        let smelter = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "advanced_smelter")
+            .unwrap();
+        assert!(
+            (smelter.scale - 1.0).abs() < 1e-6,
+            "master maintenance toggle off should ignore upkeep, got scale {}",
+            smelter.scale
+        );
+        assert!(
+            !smelter.shortfalls.iter().any(|s| matches!(
+                s.reason,
+                ShortfallReason::MaintenanceShort { .. }
+            )),
+            "no MaintenanceShort should fire when maintenance is disabled"
+        );
+        // Recipe output still runs at scale 1.
+        assert!((pool.amount("iron_plate") - 1.0).abs() < 1e-6);
+        // No spare_parts drained.
+        assert!(pool.amount("spare_parts").abs() < 1e-9);
+    }
+
+    #[test]
+    fn shared_commodity_reports_as_input_short_not_maintenance() {
+        // Backwards-compat guard: when a commodity appears in BOTH the recipe
+        // inputs and the maintenance list, a tightness on that commodity must
+        // still report as InputShort (existing UI/interrupt contracts).
+        let mut reg = ContentRegistry::default();
+
+        reg.insert_building(BuildingDef {
+            id: "solar_array".into(),
+            name: "Solar Array".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: -100.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+
+        reg.insert_building(BuildingDef {
+            id: "recycler".into(),
+            name: "Recycler".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            // Same commodity as the recipe input.
+            maintenance: vec![Ingredient {
+                id: "scrap".into(),
+                quantity: 0.5,
+            }],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "recycle".into(),
+            name: "Recycle".into(),
+            building: "recycler".into(),
+            inputs: vec![Ingredient {
+                id: "scrap".into(),
+                quantity: 1.0,
+            }],
+            outputs: vec![],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+
+        let mut pool = ColonyPool::new();
+        pool.deposit("scrap", 0.3); // less than combined demand of 1.5
+
+        let placed = buildings(&["solar_array", "recycler"]);
+        let outcome = process_production_scaled(
+            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
+        );
+
+        let recycler = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "recycler")
+            .unwrap();
+        assert!(
+            recycler.shortfalls.iter().any(|s| matches!(
+                &s.reason,
+                ShortfallReason::InputShort { commodity_id } if commodity_id == "scrap"
+            )),
+            "shared commodity tightness must report InputShort, got {:?}",
+            recycler.shortfalls
+        );
+        assert!(
+            !recycler.shortfalls.iter().any(|s| matches!(
+                s.reason,
+                ShortfallReason::MaintenanceShort { .. }
+            )),
+            "shared commodity must NOT report as MaintenanceShort"
+        );
+    }
+
+    #[test]
+    fn empty_maintenance_list_is_free() {
+        // Q4: authored empty maintenance means no drain regardless of pool state.
+        let reg = make_registry_with_power(); // no maintenance authored anywhere
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 100.0);
+
+        let placed = buildings(&["solar_array", "mine", "smelter"]);
+        let outcome = process_production_scaled(
+            &mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true,
+        );
+
+        for res in &outcome.building_results {
+            assert!(
+                !res.shortfalls.iter().any(|s| matches!(
+                    s.reason,
+                    ShortfallReason::MaintenanceShort { .. }
+                )),
+                "no MaintenanceShort should fire when nothing has upkeep authored (building: {})",
                 res.building_type
             );
         }

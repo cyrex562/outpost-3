@@ -20,13 +20,14 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { live: false })
 
 const emit = defineEmits<{
-  change: [payload: { scalars: Record<string, number>; menaceEnabled: boolean; hazardsEnabled: boolean }]
+  change: [payload: { scalars: Record<string, number>; menaceEnabled: boolean; hazardsEnabled: boolean; maintenanceEnabled: boolean }]
 }>()
 
 const knobs = ref<DifficultyKnob[]>([])
 const scalars = ref<Record<string, number>>({})
 const menaceEnabled = ref(true)
 const hazardsEnabled = ref(true)
+const maintenanceEnabled = ref(true)
 const busy = ref(false)
 const err = ref<string | null>(null)
 
@@ -52,8 +53,10 @@ async function refreshKnobs() {
     }
     const menace = data.find((k) => k.id === 'menace_enabled')
     const hazards = data.find((k) => k.id === 'hazards_enabled')
+    const maintenance = data.find((k) => k.id === 'maintenance_enabled')
     if (menace) menaceEnabled.value = menace.current_value > 0.5
     if (hazards) hazardsEnabled.value = hazards.current_value > 0.5
+    if (maintenance) maintenanceEnabled.value = maintenance.current_value > 0.5
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e)
   }
@@ -79,11 +82,12 @@ function emitCurrent() {
     scalars: { ...scalars.value },
     menaceEnabled: menaceEnabled.value,
     hazardsEnabled: hazardsEnabled.value,
+    maintenanceEnabled: maintenanceEnabled.value,
   })
 }
 
 // When live, propagate every value change to the parent immediately.
-watch([scalars, menaceEnabled, hazardsEnabled], emitCurrent, { deep: true })
+watch([scalars, menaceEnabled, hazardsEnabled, maintenanceEnabled], emitCurrent, { deep: true })
 
 async function commitSave() {
   const name = saveName.value.trim()
@@ -91,7 +95,13 @@ async function commitSave() {
   busy.value = true
   err.value = null
   try {
-    await saveCustomPreset(name, { ...scalars.value }, menaceEnabled.value, hazardsEnabled.value)
+    await saveCustomPreset(
+      name,
+      { ...scalars.value },
+      menaceEnabled.value,
+      hazardsEnabled.value,
+      maintenanceEnabled.value,
+    )
     savePromptOpen.value = false
     saveName.value = ''
     await refreshPresets()
@@ -106,6 +116,8 @@ function loadPreset(p: CustomPreset) {
   scalars.value = { ...p.scalars }
   menaceEnabled.value = p.menace_enabled
   hazardsEnabled.value = p.hazards_enabled
+  // Pre-#180 preset files may omit maintenance_enabled; default to on.
+  maintenanceEnabled.value = p.maintenance_enabled ?? true
   showLoad.value = false
   emitCurrent()
 }
@@ -183,6 +195,10 @@ function ghostPercent(knob: DifficultyKnob): number {
       <div class="cdp-row cdp-toggle-row">
         <label class="cdp-label" for="cdp-hazards">Hazards Enabled</label>
         <input id="cdp-hazards" type="checkbox" v-model="hazardsEnabled" />
+      </div>
+      <div class="cdp-row cdp-toggle-row">
+        <label class="cdp-label" for="cdp-maintenance">Maintenance Enabled</label>
+        <input id="cdp-maintenance" type="checkbox" v-model="maintenanceEnabled" />
       </div>
     </div>
 

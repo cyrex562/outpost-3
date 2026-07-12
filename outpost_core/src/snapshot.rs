@@ -148,6 +148,10 @@ struct FullStateBlob {
     hazards_enabled: bool,
     #[serde(default)]
     last_menace_definition: Option<crate::menace::MenaceDefinition>,
+
+    // ── #180 Maintenance ──────────────────────────────────────────────────────
+    #[serde(default = "default_true")]
+    maintenance_enabled: bool,
 }
 
 fn default_true() -> bool {
@@ -194,6 +198,7 @@ impl FullStateBlob {
             expeditions: state.expeditions.clone(),
             hazards_enabled: state.hazards_enabled,
             last_menace_definition: state.last_menace_definition.clone(),
+            maintenance_enabled: state.maintenance_enabled,
         }
     }
 
@@ -236,6 +241,7 @@ impl FullStateBlob {
             expeditions: self.expeditions,
             hazards_enabled: self.hazards_enabled,
             last_menace_definition: self.last_menace_definition,
+            maintenance_enabled: self.maintenance_enabled,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
@@ -888,6 +894,43 @@ mod tests {
     }
 
     // ── schema version is stored and checked ──────────────────────────────
+
+    // ── #180 Maintenance flag round-trips ─────────────────────────────────
+
+    #[test]
+    fn round_trip_preserves_maintenance_enabled() {
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        let mut state = make_state_with_colonies();
+        state.maintenance_enabled = false;
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+        assert!(
+            !restored.maintenance_enabled,
+            "maintenance_enabled=false must persist across snapshot round-trip"
+        );
+    }
+
+    #[test]
+    fn snapshot_without_maintenance_field_defaults_to_true() {
+        // Pre-#180 snapshots don't carry `maintenance_enabled`. The serde
+        // default must restore the flag to `true` so authored upkeep still
+        // applies for old save games.
+        //
+        // Emulate a legacy blob by serialising the current shape, stripping
+        // the field, then deserialising back.
+        let state = make_state_with_colonies();
+        let blob = FullStateBlob::from_game_state(&state);
+        let mut value: serde_json::Value = serde_json::to_value(&blob).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("maintenance_enabled");
+        let restored: FullStateBlob = serde_json::from_value(value).unwrap();
+        assert!(
+            restored.maintenance_enabled,
+            "missing maintenance_enabled must default to true for pre-#180 saves"
+        );
+    }
 
     #[test]
     fn schema_version_is_current() {

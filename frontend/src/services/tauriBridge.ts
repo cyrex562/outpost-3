@@ -61,6 +61,7 @@ export async function bootstrap(
   customScalars?: Record<string, number>,
   customMenaceEnabled?: boolean,
   customHazardsEnabled?: boolean,
+  customMaintenanceEnabled?: boolean,
 ): Promise<SnapshotPayload> {
   return invoke<SnapshotPayload>('bootstrap', {
     contentDir,
@@ -69,6 +70,7 @@ export async function bootstrap(
     customScalars: customScalars ?? null,
     customMenaceEnabled: customMenaceEnabled ?? null,
     customHazardsEnabled: customHazardsEnabled ?? null,
+    customMaintenanceEnabled: customMaintenanceEnabled ?? null,
   })
 }
 
@@ -221,6 +223,8 @@ export interface CustomPreset {
   scalars: Record<string, number>
   menace_enabled: boolean
   hazards_enabled: boolean
+  /** Master maintenance toggle (issue #180). Optional for pre-#180 preset files. */
+  maintenance_enabled?: boolean
 }
 
 export async function getDifficultyKnobs(): Promise<DifficultyKnob[]> {
@@ -236,12 +240,14 @@ export async function saveCustomPreset(
   scalars: Record<string, number>,
   menaceEnabled: boolean,
   hazardsEnabled: boolean,
+  maintenanceEnabled?: boolean,
 ): Promise<void> {
   return invoke<void>('save_custom_preset', {
     name,
     scalars,
     menaceEnabled,
     hazardsEnabled,
+    maintenanceEnabled: maintenanceEnabled ?? null,
   })
 }
 
@@ -254,6 +260,7 @@ export async function setCustomDifficulty(
   scalars: Record<string, number>,
   menaceEnabled: boolean,
   hazardsEnabled: boolean,
+  maintenanceEnabled?: boolean,
 ): Promise<GameEvent[]> {
   return invoke<GameEvent[]>('apply_command', {
     command: {
@@ -261,6 +268,7 @@ export async function setCustomDifficulty(
       scalars,
       menace_enabled: menaceEnabled,
       hazards_enabled: hazardsEnabled,
+      maintenance_enabled: maintenanceEnabled ?? null,
     },
   })
 }

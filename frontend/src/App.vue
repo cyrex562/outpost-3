@@ -34,10 +34,16 @@ async function onDifficultyChange(payload: {
   scalars: Record<string, number>
   menaceEnabled: boolean
   hazardsEnabled: boolean
+  maintenanceEnabled: boolean
 }) {
   if (!isTauri) return
   try {
-    await setCustomDifficulty(payload.scalars, payload.menaceEnabled, payload.hazardsEnabled)
+    await setCustomDifficulty(
+      payload.scalars,
+      payload.menaceEnabled,
+      payload.hazardsEnabled,
+      payload.maintenanceEnabled,
+    )
     // Refresh snapshot so any UI that reads world state sees the update.
     const snap = await fetchSnapshot()
     store.hydrate({ sol: snap.sol, month: snap.month, colonies: snap.colonies })

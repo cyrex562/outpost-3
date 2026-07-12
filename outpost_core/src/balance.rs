@@ -23,6 +23,7 @@
 //!     slot_cost: 1,
 //!     construction_turns: 1,
 //!     tech_prerequisite: None,
+//!     maintenance: vec![],
 //! };
 //! let mine_recipe = RecipeDef {
 //!     id: "mine_ore".into(),
@@ -264,6 +265,7 @@ mod tests {
             slot_cost: 1,
             construction_turns: 1,
             tech_prerequisite: None,
+            maintenance: vec![],
         }
     }
 
