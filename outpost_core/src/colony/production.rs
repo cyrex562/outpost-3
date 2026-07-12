@@ -131,8 +131,23 @@ pub fn process_production(
     labor_available: f32,
     registry: &ContentRegistry,
 ) -> ProductionStepOutcome {
+    process_production_scaled(pool, buildings, labor_available, registry, 1.0)
+}
+
+/// Same as [`process_production`] but multiplies positive `power_delta` and
+/// `recipe.power_draw` (consumers only) by `power_scalar` (the resolved
+/// `PowerRequirement` difficulty scalar, #161).
+///
+/// Generators (negative `power_delta`) are unaffected.
+pub fn process_production_scaled(
+    pool: &mut ColonyPool,
+    buildings: &[(String, u32)],
+    labor_available: f32,
+    registry: &ContentRegistry,
+    power_scalar: f32,
+) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
-    let power_grid = compute_power_grid(buildings, registry);
+    let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar);
     let brownout_ratio = power_grid.supply_ratio();
 
     // ── Step 2: compute labor ratio ──────────────────────────────────────────
@@ -250,10 +265,17 @@ pub fn process_production(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Compute the colony power grid from placed buildings.
-fn compute_power_grid(buildings: &[(String, u32)], registry: &ContentRegistry) -> PowerGrid {
+/// Compute the colony power grid, scaling consumer power draws by
+/// `power_scalar` (issue #161). Generators are unaffected. Pass `1.0` for
+/// the neutral (no-difficulty) case.
+fn compute_power_grid_scaled(
+    buildings: &[(String, u32)],
+    registry: &ContentRegistry,
+    power_scalar: f32,
+) -> PowerGrid {
     let mut capacity = 0.0f64;
     let mut demand = 0.0f64;
+    let mul = f64::from(power_scalar.max(0.0));
 
     for (building_type, _) in buildings {
         let Some(bdef) = registry.building(building_type) else {
@@ -263,11 +285,11 @@ fn compute_power_grid(buildings: &[(String, u32)], registry: &ContentRegistry) -
         if bdef.power_delta < 0.0 {
             capacity += -bdef.power_delta;
         } else {
-            demand += bdef.power_delta;
+            demand += bdef.power_delta * mul;
         }
         // Recipe power draw adds to demand.
         if let Some(recipe) = first_recipe_for_building(building_type, registry) {
-            demand += recipe.power_draw;
+            demand += recipe.power_draw * mul;
         }
     }
 

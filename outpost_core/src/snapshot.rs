@@ -142,6 +142,16 @@ struct FullStateBlob {
     // ── In-progress expeditions (issue #139) ─────────────────────────────────
     #[serde(default)]
     expeditions: Vec<Expedition>,
+
+    // ── #161 Custom difficulty ────────────────────────────────────────────────
+    #[serde(default = "default_true")]
+    hazards_enabled: bool,
+    #[serde(default)]
+    last_menace_definition: Option<crate::menace::MenaceDefinition>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl FullStateBlob {
@@ -182,6 +192,8 @@ impl FullStateBlob {
             planet_map: state.planet_map.clone(),
             sandbox_mode: state.sandbox_mode,
             expeditions: state.expeditions.clone(),
+            hazards_enabled: state.hazards_enabled,
+            last_menace_definition: state.last_menace_definition.clone(),
         }
     }
 
@@ -222,6 +234,8 @@ impl FullStateBlob {
             planet_map: self.planet_map,
             sandbox_mode: self.sandbox_mode,
             expeditions: self.expeditions,
+            hazards_enabled: self.hazards_enabled,
+            last_menace_definition: self.last_menace_definition,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,

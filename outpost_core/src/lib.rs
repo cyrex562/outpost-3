@@ -59,7 +59,7 @@ use migration::{
     compute_attractiveness, compute_auto_flows, resolve_arrival, AutoMigrationParams,
     ColonyAttractiveness, EmigrationGate, PendingMigration,
 };
-use needs::{apply_needs_check, apply_population_dynamics};
+use needs::{apply_needs_check_scaled, apply_population_dynamics};
 use orbital::{OrbitalError, OrbitalStation, SatelliteConstellation};
 use trade::{SiteId, TradeOverride, TradeRoute};
 use turn::{GameState, TurnProcessor};
@@ -331,9 +331,32 @@ pub enum Command {
 
     // ── Phase 10: Difficulty / Menace / Victory ───────────────────────────
     /// Set the active difficulty preset, rebuilding the difficulty scalar from the grade table.
+    ///
+    /// Since #161, callable at any sol so mid-game difficulty changes are supported.
     SetDifficulty {
         /// Preset to activate.
         preset: difficulty::DifficultyPreset,
+    },
+    /// Install a user-authored [`modifier::DifficultyScalar`] atomically alongside
+    /// the menace / hazards toggles (issue #161 custom-difficulty menu).
+    ///
+    /// The preset is set to [`difficulty::DifficultyPreset::Custom`]. When
+    /// `menace_enabled` is `false` any active menace is cleared; when it flips
+    /// back on the engine re-attaches the last-known menace definition (if any).
+    SetCustomDifficulty {
+        /// Per-quantity scalar map assembled from the panel sliders.
+        scalars: modifier::DifficultyScalar,
+        /// Whether the existential-menace clock should be active.
+        menace_enabled: bool,
+        /// Whether environmental hazards should fire.
+        hazards_enabled: bool,
+    },
+    /// Toggle the master hazard switch (issue #161).
+    ///
+    /// A cleaner in-game toggle than clamping `HazardProbability` to zero.
+    SetHazardsEnabled {
+        /// New master hazards-enabled state.
+        enabled: bool,
     },
     /// Activate the existential clock with the given authored menace definition.
     ///
@@ -1497,6 +1520,10 @@ impl GameEngine {
                         .state
                         .difficulty_scalar
                         .scalar_for(&modifier::ModifiableQuantity::PopulationGrowth);
+                    let consumption_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::ResourceConsumption);
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -1504,7 +1531,12 @@ impl GameEngine {
                         .zip(self.state.populations.iter_mut())
                     {
                         let population_count = f64::from(pop.count);
-                        let report = apply_needs_check(&mut colony.pool, population_count, &config);
+                        let report = apply_needs_check_scaled(
+                            &mut colony.pool,
+                            population_count,
+                            &config,
+                            consumption_scalar,
+                        );
 
                         let housing_sat = report
                             .needs
@@ -1541,6 +1573,10 @@ impl GameEngine {
                 // Only runs when a content registry is loaded.  Shortfalls are
                 // emitted as `ProductionShortfall` events; no crash on partial.
                 if let Some(registry) = &self.state.registry.clone() {
+                    let power_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::PowerRequirement);
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -1554,8 +1590,13 @@ impl GameEngine {
                             .map(|b| (b.building_type.clone(), b.slot_cost))
                             .collect();
                         colony.pool.reset_deltas();
-                        let prod_outcome =
-                            colony::process_production(&mut colony.pool, &placed, labor, registry);
+                        let prod_outcome = colony::process_production_scaled(
+                            &mut colony.pool,
+                            &placed,
+                            labor,
+                            registry,
+                            power_scalar,
+                        );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
                             for shortfall in &result.shortfalls {
@@ -2563,18 +2604,47 @@ impl GameEngine {
 
             // ── Phase 10: Difficulty / Menace / Victory ───────────────────
             Command::SetDifficulty { preset } => {
-                if self.state.sol > 0 {
-                    return Err(EngineError::InvalidState(
-                        "difficulty can only be set before the first turn (sol must be 0)".into(),
-                    ));
-                }
+                // The sol > 0 gate was removed for #161 so the custom-difficulty
+                // menu can retune the game mid-campaign.
                 self.state.difficulty_preset = *preset;
                 self.state.difficulty_scalar =
                     self.state.difficulty_grade_table.build_scalar(*preset);
                 Ok(vec![Event::DifficultyChanged { preset: *preset }])
             }
 
+            Command::SetCustomDifficulty {
+                scalars,
+                menace_enabled,
+                hazards_enabled,
+            } => {
+                self.state.difficulty_preset = difficulty::DifficultyPreset::Custom;
+                self.state.difficulty_scalar = scalars.clone();
+                self.state.hazards_enabled = *hazards_enabled;
+                if *menace_enabled {
+                    // Re-attach the last-known definition if the player
+                    // toggles menace back on with nothing currently active.
+                    if self.state.menace_state.is_none() {
+                        if let Some(def) = self.state.last_menace_definition.clone() {
+                            self.state.menace_state = Some(menace::MenaceState::new(def));
+                        }
+                    }
+                } else {
+                    self.state.menace_state = None;
+                }
+                Ok(vec![Event::DifficultyChanged {
+                    preset: difficulty::DifficultyPreset::Custom,
+                }])
+            }
+
+            Command::SetHazardsEnabled { enabled } => {
+                self.state.hazards_enabled = *enabled;
+                Ok(vec![])
+            }
+
             Command::ActivateMenace { definition } => {
+                if let Some(def) = definition.as_ref() {
+                    self.state.last_menace_definition = Some(def.clone());
+                }
                 self.state.menace_state = definition
                     .as_ref()
                     .map(|d| menace::MenaceState::new(d.clone()));

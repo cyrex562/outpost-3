@@ -58,11 +58,17 @@ export async function bootstrap(
   contentDir: string,
   planetSeed: number,
   difficulty: string,
+  customScalars?: Record<string, number>,
+  customMenaceEnabled?: boolean,
+  customHazardsEnabled?: boolean,
 ): Promise<SnapshotPayload> {
   return invoke<SnapshotPayload>('bootstrap', {
     contentDir,
     planetSeed,
     difficulty,
+    customScalars: customScalars ?? null,
+    customMenaceEnabled: customMenaceEnabled ?? null,
+    customHazardsEnabled: customHazardsEnabled ?? null,
   })
 }
 
@@ -195,4 +201,66 @@ export interface SupplyPackage {
 
 export async function listSupplyPackages(): Promise<SupplyPackage[]> {
   return invoke<SupplyPackage[]>('list_supply_packages')
+}
+
+// ── #161 Custom difficulty ──────────────────────────────────────────────────
+
+export interface DifficultyKnob {
+  id: string
+  label: string
+  kind: 'slider' | 'toggle'
+  step: number[]
+  min: number
+  max: number
+  preset_default_at_current_preset: number
+  current_value: number
+}
+
+export interface CustomPreset {
+  name: string
+  scalars: Record<string, number>
+  menace_enabled: boolean
+  hazards_enabled: boolean
+}
+
+export async function getDifficultyKnobs(): Promise<DifficultyKnob[]> {
+  return invoke<DifficultyKnob[]>('get_difficulty_knobs')
+}
+
+export async function listCustomPresets(): Promise<CustomPreset[]> {
+  return invoke<CustomPreset[]>('list_custom_presets')
+}
+
+export async function saveCustomPreset(
+  name: string,
+  scalars: Record<string, number>,
+  menaceEnabled: boolean,
+  hazardsEnabled: boolean,
+): Promise<void> {
+  return invoke<void>('save_custom_preset', {
+    name,
+    scalars,
+    menaceEnabled,
+    hazardsEnabled,
+  })
+}
+
+export async function deleteCustomPreset(name: string): Promise<void> {
+  return invoke<void>('delete_custom_preset', { name })
+}
+
+/** Fire `SetCustomDifficulty` on the engine in one round-trip. */
+export async function setCustomDifficulty(
+  scalars: Record<string, number>,
+  menaceEnabled: boolean,
+  hazardsEnabled: boolean,
+): Promise<GameEvent[]> {
+  return invoke<GameEvent[]>('apply_command', {
+    command: {
+      kind: 'set_custom_difficulty',
+      scalars,
+      menace_enabled: menaceEnabled,
+      hazards_enabled: hazardsEnabled,
+    },
+  })
 }

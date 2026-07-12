@@ -179,6 +179,17 @@ pub struct GameState {
     /// When `None`, hazard rolling is skipped.  Populate via the content pack
     /// loader and assign before calling [`TurnProcessor::advance`].
     pub hazard_config: Option<HazardConfig>,
+    /// Master hazards toggle (issue #161 custom difficulty).
+    ///
+    /// When `false`, hazard rolls are short-circuited regardless of the
+    /// `HazardProbability` scalar.  Defaults to `true` on new games.
+    pub hazards_enabled: bool,
+    /// Most recently activated menace definition, if any.
+    ///
+    /// Kept alongside `menace_state` so a menace-disabled → re-enabled
+    /// toggle in the custom-difficulty menu can restore the previous
+    /// definition without needing to reload the content pack.
+    pub last_menace_definition: Option<crate::menace::MenaceDefinition>,
 
     /// System-zoom layer state: node map, hauler fleet, in-transit shipments, megaprojects.
     pub system_state: SystemState,
@@ -231,6 +242,8 @@ impl GameState {
             unlocked_commodities: HashSet::new(),
             modifier_accumulator: ModifierAccumulator::new(),
             hazard_config: None,
+            hazards_enabled: true,
+            last_menace_definition: None,
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
             expeditions: Vec::new(),
@@ -344,6 +357,10 @@ impl TurnProcessor {
 
         // ── Environmental hazard rolls ────────────────────────────────────
         let mut hazard_outcomes = Vec::new();
+        // Master toggle from the custom-difficulty menu (#161). Skip rolling
+        // entirely when hazards are disabled — cleaner than clamping the
+        // HazardProbability scalar to zero.
+        if state.hazards_enabled {
         if let Some(hazard_cfg) = &state.hazard_config.clone() {
             use rand::Rng as _;
             let hazard_prob_scalar = state
@@ -386,6 +403,7 @@ impl TurnProcessor {
                 }
             }
         }
+        } // end `if state.hazards_enabled`
         hazard_outcomes
     }
 
@@ -431,10 +449,14 @@ impl TurnProcessor {
         if let Some(reg) = state.tech_registry.as_ref() {
             // Clone to avoid borrow conflict; registry is read-only here.
             let reg_clone = reg.clone();
-            let result = crate::tech::apply_research_turn(
+            let cost_scalar = state
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::ResearchCost);
+            let result = crate::tech::apply_research_turn_scaled(
                 &mut state.tech_state,
                 &mut state.research_pool,
                 &reg_clone,
+                cost_scalar,
             );
             // Wire completed tech effects into live state.
             for effects in &result.new_effects {

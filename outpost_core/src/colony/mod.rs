@@ -17,8 +17,8 @@ pub mod production;
 pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{
-    process_production, BuildingProductionResult, PowerGrid, ProductionShortfall,
-    ProductionStepOutcome, ShortfallReason,
+    process_production, process_production_scaled, BuildingProductionResult, PowerGrid,
+    ProductionShortfall, ProductionStepOutcome, ShortfallReason,
 };
 
 /// Unique identifier for a colony.

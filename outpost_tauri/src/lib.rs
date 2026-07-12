@@ -35,6 +35,10 @@ pub fn run() {
             commands::list_buildings,
             commands::get_planet_map,
             commands::list_supply_packages,
+            commands::get_difficulty_knobs,
+            commands::list_custom_presets,
+            commands::save_custom_preset,
+            commands::delete_custom_preset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Outpost 3");

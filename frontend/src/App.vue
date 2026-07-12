@@ -3,8 +3,18 @@ import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameSocket } from '@/composables/useGameSocket'
 import { useWorldStore } from '@/stores/worldStore'
-import { exitApp as tauriExit, isTauri, resetEngine, saveGame, listSaves, loadGame } from '@/services/tauriBridge'
+import {
+  exitApp as tauriExit,
+  isTauri,
+  resetEngine,
+  saveGame,
+  listSaves,
+  loadGame,
+  setCustomDifficulty,
+  snapshot as fetchSnapshot,
+} from '@/services/tauriBridge'
 import { useGameStore } from '@/stores/game'
+import CustomDifficultyPanel from '@/components/CustomDifficultyPanel.vue'
 
 useGameSocket()
 
@@ -15,9 +25,26 @@ const gameStore = useGameStore()
 
 const inGame = computed(() => route.path !== '/' && route.path !== '/menu')
 const showMenu = ref(false)
+const showDifficulty = ref(false)
 const savePath = ref('outpost3.o3save')
 const availableSaves = ref<string[]>([])
 const menuError = ref<string | null>(null)
+
+async function onDifficultyChange(payload: {
+  scalars: Record<string, number>
+  menaceEnabled: boolean
+  hazardsEnabled: boolean
+}) {
+  if (!isTauri) return
+  try {
+    await setCustomDifficulty(payload.scalars, payload.menaceEnabled, payload.hazardsEnabled)
+    // Refresh snapshot so any UI that reads world state sees the update.
+    const snap = await fetchSnapshot()
+    store.hydrate({ sol: snap.sol, month: snap.month, colonies: snap.colonies })
+  } catch (e) {
+    menuError.value = `Difficulty change failed: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
 
 async function openMenu(): Promise<void> {
   showMenu.value = true
@@ -134,6 +161,19 @@ async function exitApp(): Promise<void> {
 
         <section class="menu-section">
           <div class="row">
+            <button
+              class="menu-action"
+              data-testid="btn-difficulty"
+              @click="showDifficulty = !showDifficulty"
+            >{{ showDifficulty ? 'Hide Difficulty' : 'Difficulty…' }}</button>
+          </div>
+          <div v-if="showDifficulty" class="difficulty-slot">
+            <CustomDifficultyPanel :live="true" @change="onDifficultyChange" />
+          </div>
+        </section>
+
+        <section class="menu-section">
+          <div class="row">
             <button class="menu-action" @click="goToMainMenu">Main Menu</button>
             <button class="menu-action danger" @click="exitApp">Exit to Desktop</button>
             <button class="menu-action" @click="closeMenu">Resume</button>
@@ -211,11 +251,14 @@ body { font-family: monospace; background: #0a0a0f; color: #cdd; }
   border-radius: 6px;
   padding: 1.5rem;
   min-width: 320px;
-  max-width: 480px;
+  max-width: 560px;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
+.difficulty-slot { margin-top: 0.4rem; }
 .menu-dialog h3 { color: #8cf; }
 .menu-dialog h4 { color: #668; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .menu-section { display: flex; flex-direction: column; gap: 0.4rem; }
