@@ -82,8 +82,13 @@ function goToColony(): void {
   router.push('/colony')
 }
 
-function foundColony(): void {
-  router.push('/found')
+/** Navigate to the founding wizard. If a body is passed, preselect it. */
+function foundColony(body?: SystemBody | null): void {
+  if (body) {
+    router.push({ path: '/found', query: { body: body.id } })
+  } else {
+    router.push('/found')
+  }
 }
 </script>
 
@@ -95,7 +100,7 @@ function foundColony(): void {
         Sol {{ worldStore.sol }} · Month {{ worldStore.month }}
       </div>
       <div class="actions">
-        <button class="btn" @click="foundColony">Found Colony</button>
+        <button class="btn" @click="foundColony()">Found Colony</button>
         <button class="btn" @click="goToColony">Colony Dashboard</button>
       </div>
     </div>
@@ -184,7 +189,7 @@ function foundColony(): void {
         <button
           v-if="selected.colonizable"
           class="btn primary"
-          @click="foundColony"
+          @click="foundColony(selected)"
         >
           Found Colony Here
         </button>
