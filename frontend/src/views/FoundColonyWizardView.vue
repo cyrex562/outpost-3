@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   getColonizeTargets,
   getPlanetMap,
+  getSystemBodies,
   listBuildings,
   listSupplyPackages,
   type ColonizeTarget,
@@ -11,6 +12,7 @@ import {
   type PlanetHex,
   type PlanetMap,
   type SupplyPackage,
+  type SystemBody,
 } from '@/services/tauriBridge'
 import PlanetHexMap from '@/components/PlanetHexMap.vue'
 import { useGameStore } from '@/stores/game'
@@ -31,6 +33,17 @@ const chosenBody = ref<ColonizeTarget | null>(null)
 // Step 2: pick a landing site on the planet map
 const planetMap = ref<PlanetMap | null>(null)
 const chosenHex = ref<PlanetHex | null>(null)
+const planetMapRef = ref<InstanceType<typeof PlanetHexMap> | null>(null)
+
+// Full system-body attribute records (from get_system_bodies), keyed by id.
+// Used to render the environmental header strip in step 2. Kept separate from
+// the colonize-target list because that endpoint only carries the minimum
+// needed for the body-picker cards.
+const systemBodies = ref<SystemBody[]>([])
+const chosenBodyAttributes = computed<SystemBody | null>(() => {
+  if (!chosenBody.value) return null
+  return systemBodies.value.find((b) => b.id === chosenBody.value?.body_id) ?? null
+})
 
 // Step 3: choose starting buildings + supply package
 const buildings = ref<BuildingOption[]>([])
@@ -45,6 +58,7 @@ const startingPop = ref(100)
 onMounted(async () => {
   try {
     bodies.value = await getColonizeTargets()
+    systemBodies.value = await getSystemBodies()
     buildings.value = await listBuildings()
     planetMap.value = await getPlanetMap()
     supplyPackages.value = await listSupplyPackages()
@@ -85,6 +99,35 @@ const canAdvance = computed(() => {
 
 function pickHex(hex: PlanetHex): void {
   chosenHex.value = hex
+}
+
+/**
+ * Find the highest-suitability habitable + unoccupied hex, select it, and
+ * pan/zoom the planet map to focus it. No-op when the map hasn't loaded or
+ * no habitable site exists.
+ */
+function jumpToBestSite(): void {
+  const map = planetMap.value
+  if (!map) return
+  const candidates = map.hexes
+    .filter((h) => h.habitable && h.occupied_by === null)
+    .sort((a, b) => b.suitability - a.suitability)
+  const best = candidates[0]
+  if (!best) return
+  chosenHex.value = best
+  planetMapRef.value?.focusSite(best.site_id)
+}
+
+function formatModifier(mod: number): string {
+  const pct = (mod - 1.0) * 100
+  const sign = pct >= 0 ? '+' : ''
+  return `${sign}${pct.toFixed(0)}%`
+}
+
+function habitabilityTone(mod: number): 'bonus' | 'neutral' | 'penalty' {
+  if (mod > 1.001) return 'bonus'
+  if (mod < 0.999) return 'penalty'
+  return 'neutral'
 }
 
 function next(): void {
@@ -207,13 +250,53 @@ async function finish(): Promise<void> {
     <section v-else-if="step === 2" class="panel">
       <p class="hint">
         Choose a landing site on <strong>{{ chosenBody?.body_name }}</strong>.
-        Ocean cells are impassable; dashed rings mark the top-3 suitability scores;
-        stars mark occupied hexes.
+        Scroll to zoom, drag to pan. Ocean cells are impassable; dashed rings
+        mark the top-3 suitability scores; stars mark occupied hexes.
       </p>
+      <div v-if="chosenBodyAttributes" class="body-strip" data-testid="body-strip">
+        <div class="strip-item">
+          <span class="strip-label">Atmosphere</span>
+          <span class="strip-value">{{ chosenBodyAttributes.atmosphere }}</span>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Temperature</span>
+          <span class="strip-value">{{ chosenBodyAttributes.temperature }}</span>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Gravity</span>
+          <span class="strip-value">{{ chosenBodyAttributes.gravity_g.toFixed(2) }} g</span>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Radiation</span>
+          <span class="strip-value">{{ chosenBodyAttributes.radiation }}</span>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Habitability</span>
+          <span class="strip-value">
+            {{ chosenBodyAttributes.habitability }} / 100
+            <span
+              class="modifier"
+              :class="habitabilityTone(chosenBodyAttributes.habitability_modifier)"
+            >
+              ({{ formatModifier(chosenBodyAttributes.habitability_modifier) }})
+            </span>
+          </span>
+        </div>
+        <div class="strip-spacer" />
+        <button
+          class="btn map-btn"
+          data-testid="jump-to-best-site"
+          :disabled="!planetMap"
+          @click="jumpToBestSite"
+        >
+          Jump to best site
+        </button>
+      </div>
       <div class="map-layout">
         <div class="map-wrap">
           <PlanetHexMap
             v-if="planetMap"
+            ref="planetMapRef"
             :map="planetMap"
             :selected-site="chosenHex?.site_id ?? null"
             :highlight-top-n="3"
@@ -436,6 +519,34 @@ async function finish(): Promise<void> {
 .body-meta { font-size: 0.75rem; color: #667; }
 
 /* Step 2 layout */
+.body-strip {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: #14141e;
+  border: 1px solid #223;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.78rem;
+  color: #aab;
+  flex-wrap: wrap;
+}
+.strip-item { display: flex; flex-direction: column; }
+.strip-label {
+  color: #668;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.strip-value { color: #aab; font-family: monospace; }
+.strip-spacer { flex: 1; }
+.map-btn { margin-left: auto; }
+.modifier { font-size: 0.7rem; margin-left: 0.2rem; }
+.modifier.bonus { color: #6c9; }
+.modifier.neutral { color: #778; }
+.modifier.penalty { color: #d86; }
+
 .map-layout {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) 220px;
