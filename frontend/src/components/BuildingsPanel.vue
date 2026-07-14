@@ -1,0 +1,153 @@
+<script setup lang="ts">
+/**
+ * Active buildings + labour assignment panel.
+ *
+ * Building status (running / idle / partial) is derived client-side from
+ * `labour_assigned` + `full_capacity` — the wire type doesn't carry an
+ * explicit status enum, and deriving here avoids a backend change for a
+ * purely presentational label (issue #169).
+ */
+
+import { ref } from 'vue'
+import type { BuildingRow } from '@/types/screen'
+
+const props = defineProps<{
+  /** `null` when the colony screen hasn't loaded yet for the selected colony. */
+  buildings: BuildingRow[] | null
+  slotsUsed: number
+  slotCapacity: number
+  labourAvailable: number
+  labourTotal: number
+}>()
+
+const emit = defineEmits<{
+  (e: 'assign-labour', buildingType: string, labour: number): void
+}>()
+
+/** Temporary labour values being edited (keyed by building_type). */
+const labourDraft = ref<Record<string, number>>({})
+
+function labourForBuilding(buildingType: string, current: number): number {
+  return labourDraft.value[buildingType] ?? current
+}
+
+function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' {
+  if (b.labour_assigned === 0) return 'idle'
+  return b.full_capacity ? 'running' : 'partial'
+}
+
+function statusLabel(status: 'idle' | 'running' | 'partial'): string {
+  return { idle: 'Idle', running: 'Running', partial: 'Partial' }[status]
+}
+
+function assignLabour(buildingType: string): void {
+  const labour = labourDraft.value[buildingType]
+  if (labour === undefined) return
+  emit('assign-labour', buildingType, labour)
+  delete labourDraft.value[buildingType]
+}
+</script>
+
+<template>
+  <div class="panel" data-testid="buildings-panel">
+    <h4 class="panel-title">Buildings &amp; Labour</h4>
+
+    <ul v-if="props.buildings !== null" class="building-list" data-testid="building-list">
+      <li
+        v-for="b in props.buildings"
+        :key="b.building_type"
+        class="building-item"
+        :data-testid="`building-row-${b.building_type}`"
+      >
+        <span class="building-name">{{ b.building_type }}</span>
+        <span
+          class="building-status"
+          :class="`status-${buildingStatus(b)}`"
+          :data-testid="`building-status-${b.building_type}`"
+        >
+          {{ statusLabel(buildingStatus(b)) }}
+        </span>
+        <span class="building-meta">{{ b.slot_cost }} slot{{ b.slot_cost !== 1 ? 's' : '' }}</span>
+        <div class="labour-controls">
+          <input
+            class="labour-input"
+            type="number"
+            min="0"
+            :value="labourForBuilding(b.building_type, b.labour_assigned)"
+            :data-testid="`labour-input-${b.building_type}`"
+            @input="labourDraft[b.building_type] = +($event.target as HTMLInputElement).value"
+          />
+          <button
+            class="btn-assign"
+            :disabled="labourDraft[b.building_type] === undefined"
+            :data-testid="`assign-labour-${b.building_type}`"
+            @click="assignLabour(b.building_type)"
+          >
+            Assign
+          </button>
+        </div>
+      </li>
+      <li v-if="props.buildings.length === 0" class="empty-row">No active buildings.</li>
+    </ul>
+    <div v-else class="hint">No building data loaded.</div>
+
+    <div v-if="props.buildings !== null" class="slots-summary" data-testid="slots-summary">
+      Build slots: {{ props.slotsUsed }} / {{ props.slotCapacity }}
+      &nbsp;|&nbsp;
+      Labour: {{ props.labourAvailable }} / {{ props.labourTotal }} free
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
+.panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.6rem; }
+.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+
+.building-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; }
+.building-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #13131e;
+  border: 1px solid #223;
+  border-radius: 3px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  color: #aab;
+  flex-wrap: wrap;
+}
+.building-name { flex: 1 0 100px; }
+.building-meta { color: #668; font-size: 0.72rem; }
+.building-status { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; }
+.status-running { color: #6adba5; }
+.status-partial { color: #eab764; }
+.status-idle    { color: #778; }
+
+.labour-controls { display: flex; align-items: center; gap: 0.3rem; }
+.labour-input {
+  width: 54px;
+  background: #0d0d15;
+  border: 1px solid #334;
+  border-radius: 3px;
+  color: #cdd;
+  padding: 0.2rem 0.35rem;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+.btn-assign {
+  background: #1a2030;
+  border: 1px solid #336;
+  border-radius: 3px;
+  color: #89b;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.btn-assign:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-assign:hover:not(:disabled) { background: #1e2840; }
+
+.empty-row { color: #445; font-style: italic; }
+
+.slots-summary { font-size: 0.72rem; color: #558; margin-top: 0.35rem; }
+</style>

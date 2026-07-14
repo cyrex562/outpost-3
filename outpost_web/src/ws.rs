@@ -180,6 +180,19 @@ fn client_command_to_core(cmd: ClientCommand, _state: &AppState) -> Result<Comma
                 construction_turns,
             })
         }
+        ClientCommand::CancelConstruction {
+            colony_id,
+            project_id,
+        } => {
+            let colony_id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            let project_id = uuid::Uuid::from_str(&project_id)
+                .map_err(|_| format!("invalid project_id: {project_id}"))?;
+            Ok(Command::CancelConstruction {
+                colony_id,
+                project_id,
+            })
+        }
         ClientCommand::AssignLabour {
             colony_id,
             slot,
@@ -566,6 +579,58 @@ mod tests {
         }
         let result = load_difficulty_table(&path);
         assert!(result.is_ok(), "difficulty.yaml failed: {:?}", result.err());
+    }
+
+    /// `ClientCommand::CancelConstruction` translates to the matching core
+    /// `Command` variant with parsed UUIDs (issue #169).
+    #[test]
+    fn client_command_cancel_construction_translates_to_core_command() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+        use outpost_core::colony::ColonyId;
+        use outpost_core::Command;
+        use uuid::Uuid;
+
+        let colony_id = ColonyId::new_v4();
+        let project_id = Uuid::new_v4();
+        let state = new_state(RuntimeConfig::default());
+
+        let core_cmd = client_command_to_core(
+            ClientCommand::CancelConstruction {
+                colony_id: colony_id.to_string(),
+                project_id: project_id.to_string(),
+            },
+            &state,
+        )
+        .expect("translation should succeed");
+
+        match core_cmd {
+            Command::CancelConstruction {
+                colony_id: got_colony,
+                project_id: got_project,
+            } => {
+                assert_eq!(got_colony, colony_id);
+                assert_eq!(got_project, project_id);
+            }
+            other => panic!("expected Command::CancelConstruction, got {other:?}"),
+        }
+    }
+
+    /// Malformed UUIDs are rejected with a descriptive error rather than panicking.
+    #[test]
+    fn client_command_cancel_construction_rejects_invalid_ids() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+
+        let state = new_state(RuntimeConfig::default());
+        let result = client_command_to_core(
+            ClientCommand::CancelConstruction {
+                colony_id: "not-a-uuid".into(),
+                project_id: "also-not-a-uuid".into(),
+            },
+            &state,
+        );
+        assert!(result.is_err());
     }
 
     /// After a `NewGame` sequence the engine has registry and needs_config loaded.

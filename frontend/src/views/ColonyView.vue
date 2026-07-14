@@ -1,16 +1,28 @@
 <script setup lang="ts">
 /**
- * Colony dashboard — shows population, stability, commodity stockpile,
- * active buildings with labour assignment, construction queue,
- * and an event log panel.  Interactive controls are wired through
- * both the REST path (gameStore.sendCommand) and the WebSocket send.
+ * Colony dashboard — a draggable/resizable multi-panel layout (issue #169)
+ * showing population, commodities, buildings, construction queue, and
+ * alerts/event log for the selected colony. Panels are laid out with
+ * Splitpanes (dockable, resizable splits) and the split sizes persist to
+ * localStorage, mirroring the pattern SystemMapView.vue already uses for
+ * its own layout state.
+ *
+ * CommandPanel stays outside the resizable panel area — it's a colony-level
+ * action bar (advance turn, found colony, ...), not a data-display panel.
  */
 
 import { computed, onMounted, ref, watch } from 'vue'
+import { Splitpanes, Pane } from 'splitpanes'
+import type { SplitpanesResizedPayload } from 'splitpanes'
+import 'splitpanes/dist/splitpanes.css'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
-import { useGameSocket } from '@/composables/useGameSocket'
 import CommandPanel from '@/components/CommandPanel.vue'
+import PopulationPanel from '@/components/PopulationPanel.vue'
+import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
+import BuildingsPanel from '@/components/BuildingsPanel.vue'
+import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
+import AlertsPanel from '@/components/AlertsPanel.vue'
 import type { ColonyState } from '@/worldModel/model'
 import {
   isTauri,
@@ -22,7 +34,6 @@ import {
 
 const worldStore = useWorldStore()
 const gameStore = useGameStore()
-const { send } = useGameSocket()
 
 // ─── Colony selection ─────────────────────────────────────────────────────────
 
@@ -50,26 +61,18 @@ onMounted(() => {
   }
 })
 
-// ─── Stability helpers ────────────────────────────────────────────────────────
+/** The colony screen data, but only when it matches the selected colony. */
+const screen = computed(() => {
+  const scr = gameStore.colonyScreen
+  if (!scr || scr.colony_id !== selectedColony.value?.id) return null
+  return scr
+})
 
-function stabilityClass(stability: number): string {
-  if (stability > 0.6) return 'stability-high'
-  if (stability >= 0.3) return 'stability-mid'
-  return 'stability-low'
-}
-
-function stabilityLabel(stability: number): string {
-  const pct = (stability * 100).toFixed(0)
-  if (stability > 0.6) return `${pct}% — Stable`
-  if (stability >= 0.3) return `${pct}% — Uncertain`
-  return `${pct}% — Critical`
-}
-
-// ─── Sparkline helpers ────────────────────────────────────────────────────────
+// ─── Population trend ─────────────────────────────────────────────────────────
 
 /**
- * Produce a tiny SVG polyline path from an array of population samples.
- * Uses the last 10 notifications of type needs_resolved to approximate trend.
+ * Produce population samples for the sparkline. Uses the last 10
+ * notifications of type needs_resolved to approximate trend.
  */
 const populationTrend = computed((): number[] => {
   const notifications = worldStore.notifications
@@ -81,40 +84,11 @@ const populationTrend = computed((): number[] => {
       samples.unshift(0)
     }
   }
-  // If no data, return flat line.
   if (samples.length === 0) return [0, 0, 0]
   return samples
 })
 
-function sparklinePath(values: number[]): string {
-  if (values.length < 2) return ''
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const range = max - min || 1
-  const w = 80
-  const h = 20
-  const pts = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * w
-    const y = h - ((v - min) / range) * h
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  })
-  return `M ${pts.join(' L ')}`
-}
-
-// ─── Commodity net colour ─────────────────────────────────────────────────────
-
-function netClass(net: number): string {
-  if (net > 0) return 'net-positive'
-  if (net < 0) return 'net-negative'
-  return 'net-zero'
-}
-
-function formatNet(net: number): string {
-  if (net > 0) return `+${net.toFixed(2)}`
-  return net.toFixed(2)
-}
-
-// ─── Construction queue ───────────────────────────────────────────────────────
+// ─── Construction queue: catalog + queueing ────────────────────────────────────
 
 const queueBusy = ref(false)
 
@@ -130,11 +104,7 @@ const researchedTechs = computed<Set<string>>(
 )
 
 /** Slots not currently reserved by an active building or in-flight project. */
-const slotsAvailable = computed<number | null>(() => {
-  const scr = gameStore.colonyScreen
-  if (!scr || scr.colony_id !== selectedColony.value?.id) return null
-  return scr.slot_capacity - scr.slots_used
-})
+const slotsAvailable = computed<number | null>(() => (screen.value ? screen.value.slot_capacity - screen.value.slots_used : null))
 
 async function loadCatalog(): Promise<void> {
   if (!isTauri) return
@@ -187,410 +157,185 @@ async function queueBuilding(b: BuildingOption): Promise<void> {
   }
 }
 
-// ─── Labour assignment ────────────────────────────────────────────────────────
+// ─── Construction queue: cancelling ────────────────────────────────────────────
 
-/** Temporary labour values being edited (keyed by building_type). */
-const labourDraft = ref<Record<string, number>>({})
+/** Project ids with a cancel request currently in flight. */
+const cancelingIds = ref<Set<string>>(new Set())
 
-function labourForBuilding(buildingType: string, current: number): number {
-  return labourDraft.value[buildingType] ?? current
+async function cancelConstruction(projectId: string): Promise<void> {
+  const col = selectedColony.value
+  if (!col || cancelingIds.value.has(projectId)) return
+  cancelingIds.value = new Set(cancelingIds.value).add(projectId)
+  try {
+    await gameStore.sendCommand({
+      kind: 'cancel_construction',
+      colony_id: col.id,
+      project_id: projectId,
+    })
+  } finally {
+    const next = new Set(cancelingIds.value)
+    next.delete(projectId)
+    cancelingIds.value = next
+  }
 }
 
-async function assignLabour(buildingType: string): Promise<void> {
+// ─── Labour assignment ────────────────────────────────────────────────────────
+
+async function assignLabour(buildingType: string, labour: number): Promise<void> {
   const col = selectedColony.value
   if (!col) return
-  const labour = labourDraft.value[buildingType]
-  if (labour === undefined) return
-  const colonyId = col.id
-  const seq = Date.now()
-  // Send over WebSocket.
-  send({
-    type: 'command',
-    seq,
-    command: { kind: 'assign_labour', colony_id: colonyId, slot: buildingType, labour },
-  })
-  // Also flush via REST so state reflects the change.
   await gameStore.sendCommand({
     kind: 'assign_labour',
-    colony_id: colonyId,
+    colony_id: col.id,
     slot: buildingType,
     labour,
   })
-  delete labourDraft.value[buildingType]
 }
 
-// ─── Event log ────────────────────────────────────────────────────────────────
+// ─── Panel layout persistence ───────────────────────────────────────────────────
 
-const eventLog = computed(() => worldStore.eventLog)
-
-function formatEventKind(kind: string): string {
-  return kind.replace(/_/g, ' ')
+interface PersistedLayout {
+  /** [main-column %, alerts %] */
+  outer: number[]
+  /** [population %, commodities %, buildings %, construction-queue %] */
+  left: number[]
 }
 
-function eventLogClass(kind: string): string {
-  if (kind.includes('shortfall') || kind.includes('cancel')) return 'log-warn'
-  if (kind.includes('founded') || kind.includes('constructed') || kind.includes('advanced'))
-    return 'log-info'
-  return 'log-default'
+const STORAGE_KEY = 'outpost3.colony-view.layout'
+const DEFAULT_OUTER = [70, 30]
+const DEFAULT_LEFT = [22, 22, 28, 28]
+
+function loadPersistedLayout(): PersistedLayout {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return { outer: DEFAULT_OUTER, left: DEFAULT_LEFT }
+    const p = JSON.parse(raw) as Partial<PersistedLayout>
+    const outer = Array.isArray(p.outer) && p.outer.length === 2 ? p.outer : DEFAULT_OUTER
+    const left = Array.isArray(p.left) && p.left.length === 4 ? p.left : DEFAULT_LEFT
+    return { outer, left }
+  } catch {
+    // corrupt entry — fall back to defaults
+    return { outer: DEFAULT_OUTER, left: DEFAULT_LEFT }
+  }
+}
+
+const persistedLayout = loadPersistedLayout()
+const outerSizes = ref<number[]>(persistedLayout.outer)
+const leftSizes = ref<number[]>(persistedLayout.left)
+
+function savePersistedLayout(): void {
+  try {
+    const payload: PersistedLayout = { outer: outerSizes.value, left: leftSizes.value }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+  } catch {
+    // storage full or blocked — non-fatal
+  }
+}
+
+function onOuterResized(payload: SplitpanesResizedPayload): void {
+  outerSizes.value = payload.panes.map((p) => p.size)
+  savePersistedLayout()
+}
+
+function onLeftResized(payload: SplitpanesResizedPayload): void {
+  leftSizes.value = payload.panes.map((p) => p.size)
+  savePersistedLayout()
 }
 </script>
 
 <template>
   <div class="colony-view">
-    <div class="layout">
-      <!-- ── Left panel: dashboard ───────────────────────────────────────── -->
-      <div class="dashboard">
-        <h2 class="section-title">Colony Dashboard</h2>
+    <div v-if="colonies.length === 0" class="empty-state" data-testid="no-colonies">
+      No colonies founded yet. Use the command panel to found one.
+    </div>
 
-        <div v-if="colonies.length === 0" class="empty-state" data-testid="no-colonies">
-          No colonies founded yet. Use the command panel to found one.
+    <template v-else>
+      <div class="colony-header">
+        <div class="colony-tabs" data-testid="colony-tabs">
+          <button
+            v-for="col in colonies"
+            :key="col.id"
+            class="tab"
+            :class="{ active: selectedColony?.id === col.id }"
+            @click="gameStore.selectedColonyId = col.id"
+          >
+            {{ col.name }}
+          </button>
         </div>
-
-        <template v-else>
-          <!-- Colony selector tabs -->
-          <div class="colony-tabs" data-testid="colony-tabs">
-            <button
-              v-for="col in colonies"
-              :key="col.id"
-              class="tab"
-              :class="{ active: selectedColony?.id === col.id }"
-              @click="gameStore.selectedColonyId = col.id"
-            >
-              {{ col.name }}
-            </button>
-          </div>
-
-          <!-- Selected colony details -->
-          <div v-if="selectedColony" class="colony-detail" :data-testid="`colony-detail-${selectedColony.id}`">
-            <!-- Population + sparkline -->
-            <div class="stat-row" data-testid="population-section">
-              <div class="stat-block">
-                <span class="stat-label">Population</span>
-                <span class="stat-value" data-testid="population-count">
-                  {{ selectedColony.population.toFixed(0) }}
-                </span>
-              </div>
-              <div class="sparkline-wrap" title="Population trend (last sessions)">
-                <svg
-                  width="80"
-                  height="20"
-                  class="sparkline"
-                  data-testid="population-sparkline"
-                  aria-hidden="true"
-                >
-                  <path
-                    v-if="populationTrend.length >= 2"
-                    :d="sparklinePath(populationTrend)"
-                    fill="none"
-                    stroke="#4c8"
-                    stroke-width="1.5"
-                  />
-                  <line
-                    v-else
-                    x1="0" y1="10" x2="80" y2="10"
-                    stroke="#444"
-                    stroke-width="1"
-                    stroke-dasharray="4 3"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            <!-- Stability bar -->
-            <div class="stat-block stability-section" data-testid="stability-section">
-              <span class="stat-label">Stability</span>
-              <div
-                class="stability-bar-track"
-                role="progressbar"
-                :aria-valuenow="Math.round(selectedColony.stability * 100)"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                data-testid="stability-bar"
-              >
-                <div
-                  class="stability-bar-fill"
-                  :class="stabilityClass(selectedColony.stability)"
-                  :style="{ width: `${(selectedColony.stability * 100).toFixed(1)}%` }"
-                />
-              </div>
-              <span
-                class="stability-label"
-                :class="stabilityClass(selectedColony.stability)"
-                data-testid="stability-label"
-              >
-                {{ stabilityLabel(selectedColony.stability) }}
-              </span>
-            </div>
-
-            <!-- Labour -->
-            <div class="stat-row">
-              <div class="stat-block">
-                <span class="stat-label">Labour</span>
-                <span class="stat-value">{{ selectedColony.available_labour }}</span>
-              </div>
-            </div>
-
-            <!-- Commodity stock table -->
-            <div class="section" data-testid="commodity-section">
-              <h4 class="sub-title">Commodities</h4>
-              <div v-if="!gameStore.colonyScreen || gameStore.colonyScreen.colony_id !== selectedColony.id"
-                   class="hint">
-                Advance a turn to load commodity data.
-              </div>
-              <table v-else class="stock-table" data-testid="commodity-table">
-                <thead>
-                  <tr>
-                    <th>Commodity</th>
-                    <th class="num">Amount</th>
-                    <th class="num">Capacity</th>
-                    <th class="num">Net/Sol</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="row in gameStore.colonyScreen.stockpile"
-                    :key="row.commodity_id"
-                    :data-testid="`stock-row-${row.commodity_id}`"
-                  >
-                    <td>{{ row.commodity_id }}</td>
-                    <td class="num">{{ row.amount.toFixed(1) }}</td>
-                    <td class="num">{{ row.capacity != null ? row.capacity.toFixed(1) : '∞' }}</td>
-                    <td class="num" :class="netClass(row.net_per_turn)">
-                      {{ formatNet(row.net_per_turn) }}
-                    </td>
-                  </tr>
-                  <tr v-if="gameStore.colonyScreen.stockpile.length === 0">
-                    <td colspan="4" class="empty-row">No commodities tracked yet.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Active buildings + labour assignment -->
-            <div class="section" data-testid="directives-section">
-              <h4 class="sub-title">Active Buildings &amp; Labour</h4>
-              <ul
-                v-if="gameStore.colonyScreen && gameStore.colonyScreen.colony_id === selectedColony.id"
-                class="directive-list"
-                data-testid="directive-list"
-              >
-                <li
-                  v-for="b in gameStore.colonyScreen.buildings"
-                  :key="b.building_type"
-                  class="directive-item"
-                  :data-testid="`building-row-${b.building_type}`"
-                >
-                  <span class="building-name">{{ b.building_type }}</span>
-                  <span class="directive-meta">{{ b.slot_cost }} slot{{ b.slot_cost !== 1 ? 's' : '' }}</span>
-                  <div class="labour-controls">
-                    <input
-                      class="labour-input"
-                      type="number"
-                      min="0"
-                      :value="labourForBuilding(b.building_type, b.labour_assigned)"
-                      :data-testid="`labour-input-${b.building_type}`"
-                      @input="labourDraft[b.building_type] = +($event.target as HTMLInputElement).value"
-                    />
-                    <button
-                      class="btn-assign"
-                      :disabled="labourDraft[b.building_type] === undefined"
-                      :data-testid="`assign-labour-${b.building_type}`"
-                      @click="assignLabour(b.building_type)"
-                    >
-                      Assign
-                    </button>
-                  </div>
-                  <span class="directive-meta">{{ b.full_capacity ? 'full' : 'partial' }}</span>
-                </li>
-                <li v-if="gameStore.colonyScreen.buildings.length === 0" class="empty-row">
-                  No active buildings/directives.
-                </li>
-              </ul>
-              <div v-else class="hint">No building data loaded.</div>
-
-              <!-- Build slots summary -->
-              <div
-                v-if="gameStore.colonyScreen && gameStore.colonyScreen.colony_id === selectedColony.id"
-                class="slots-summary"
-                data-testid="slots-summary"
-              >
-                Build slots: {{ gameStore.colonyScreen.slots_used }} / {{ gameStore.colonyScreen.slot_capacity }}
-                &nbsp;|&nbsp;
-                Labour: {{ gameStore.colonyScreen.labour_available }} / {{ gameStore.colonyScreen.labour_total }} free
-              </div>
-            </div>
-
-            <!-- Construction queue -->
-            <div class="section" data-testid="construction-queue-section">
-              <h4 class="sub-title">Construction Queue</h4>
-              <div
-                v-if="gameStore.colonyScreen && gameStore.colonyScreen.colony_id === selectedColony.id && gameStore.colonyScreen.construction_queue.length > 0"
-              >
-                <ul class="queue-list" data-testid="construction-queue-list">
-                  <li
-                    v-for="proj in gameStore.colonyScreen.construction_queue"
-                    :key="proj.project_id"
-                    class="queue-item"
-                    :data-testid="`queue-item-${proj.project_id}`"
-                  >
-                    <span class="building-name">{{ proj.building_type }}</span>
-                    <span class="queue-progress">
-                      {{ proj.turns_completed }}/{{ proj.turns_total }} turns
-                    </span>
-                    <span class="directive-meta">{{ proj.slot_cost }} slot{{ proj.slot_cost !== 1 ? 's' : '' }}</span>
-                  </li>
-                </ul>
-              </div>
-              <div v-else class="hint">No projects in queue.</div>
-
-              <!-- Build catalog: browse buildings the pack ships, queue with one click -->
-              <div class="build-catalog-wrap" data-testid="build-catalog">
-                <div class="catalog-heading">
-                  <h5 class="catalog-title">Build</h5>
-                  <span
-                    v-if="slotsAvailable !== null"
-                    class="catalog-slots"
-                    data-testid="catalog-slots"
-                  >
-                    {{ slotsAvailable }} slot{{ slotsAvailable === 1 ? '' : 's' }} free
-                  </span>
-                </div>
-                <div v-if="buildingCatalog.length === 0" class="hint">
-                  No buildings available in the loaded content pack.
-                </div>
-                <div v-else class="build-catalog">
-                  <div
-                    v-for="b in buildingCatalog"
-                    :key="b.id"
-                    class="build-card"
-                    :class="{ 'is-disabled': disabledReason(b) !== null }"
-                    :title="disabledReason(b) ?? ''"
-                    :data-testid="`build-card-${b.id}`"
-                  >
-                    <div class="build-card-head">
-                      <span class="build-card-name">{{ b.name }}</span>
-                      <span class="build-card-cat">{{ b.category }}</span>
-                    </div>
-                    <p v-if="b.description" class="build-card-desc">{{ b.description }}</p>
-                    <div class="build-card-stats">
-                      {{ b.construction_turns }} sols · {{ b.labor_per_turn }} labor/turn ·
-                      {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
-                    </div>
-                    <div v-if="b.construction_cost.length" class="build-card-cost">
-                      <span
-                        v-for="(c, i) in b.construction_cost"
-                        :key="i"
-                        class="cost-chip"
-                      >
-                        {{ c[1] }} {{ c[0] }}
-                      </span>
-                    </div>
-                    <div class="build-card-foot">
-                      <span
-                        v-if="disabledReason(b)"
-                        class="build-card-reason"
-                        :data-testid="`build-card-reason-${b.id}`"
-                      >
-                        {{ disabledReason(b) }}
-                      </span>
-                      <button
-                        class="btn-queue"
-                        :disabled="queueBusy || disabledReason(b) !== null"
-                        :data-testid="`btn-queue-${b.id}`"
-                        @click="queueBuilding(b)"
-                      >
-                        Queue
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- Notifications -->
-        <div
-          v-if="worldStore.notifications.length > 0"
-          class="notifications"
-          data-testid="notifications"
-        >
-          <h4 class="sub-title">Alerts</h4>
-          <ul>
-            <li
-              v-for="n in worldStore.notifications"
-              :key="n.id"
-              :class="`notification tier-${n.tier}`"
-            >
-              {{ n.message }}
-            </li>
-          </ul>
-        </div>
-
-        <div class="research-total" data-testid="research-total">
-          System research: {{ worldStore.researchTotal.toFixed(1) }} RP
-        </div>
+        <CommandPanel />
       </div>
 
-      <!-- ── Right panel: command panel + event log ──────────────────────── -->
-      <aside class="command-sidebar">
-        <CommandPanel />
+      <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
+        <Splitpanes class="default-theme colony-splitpanes" @resized="onOuterResized">
+          <Pane :size="outerSizes[0]" min-size="40">
+            <Splitpanes horizontal @resized="onLeftResized">
+              <Pane :size="leftSizes[0]" min-size="10">
+                <PopulationPanel
+                  :population="selectedColony.population"
+                  :stability="selectedColony.stability"
+                  :available-labour="selectedColony.available_labour"
+                  :population-trend="populationTrend"
+                />
+              </Pane>
+              <Pane :size="leftSizes[1]" min-size="10">
+                <CommoditiesPanel :stockpile="screen ? screen.stockpile : null" />
+              </Pane>
+              <Pane :size="leftSizes[2]" min-size="10">
+                <BuildingsPanel
+                  :buildings="screen ? screen.buildings : null"
+                  :slots-used="screen?.slots_used ?? 0"
+                  :slot-capacity="screen?.slot_capacity ?? 0"
+                  :labour-available="screen?.labour_available ?? 0"
+                  :labour-total="screen?.labour_total ?? 0"
+                  @assign-labour="assignLabour"
+                />
+              </Pane>
+              <Pane :size="leftSizes[3]" min-size="10">
+                <ConstructionQueuePanel
+                  :queue="screen ? screen.construction_queue : null"
+                  :catalog="buildingCatalog"
+                  :disabled-reason="disabledReason"
+                  :slots-available="slotsAvailable"
+                  :queue-busy="queueBusy"
+                  :canceling-ids="cancelingIds"
+                  @queue="queueBuilding"
+                  @cancel="cancelConstruction"
+                />
+              </Pane>
+            </Splitpanes>
+          </Pane>
+          <Pane :size="outerSizes[1]" min-size="15">
+            <AlertsPanel
+              :notifications="worldStore.notifications"
+              :event-log="worldStore.eventLog"
+              @clear-log="worldStore.clearEventLog()"
+            />
+          </Pane>
+        </Splitpanes>
+      </div>
 
-        <!-- Event log panel -->
-        <div class="event-log" data-testid="event-log">
-          <div class="event-log-header">
-            <h4 class="sub-title" style="margin:0">Event Log</h4>
-            <button
-              class="btn-clear-log"
-              data-testid="btn-clear-event-log"
-              @click="worldStore.clearEventLog()"
-            >
-              Clear
-            </button>
-          </div>
-          <div v-if="eventLog.length === 0" class="hint" style="padding:0.4rem 0">
-            No events yet.
-          </div>
-          <ul v-else class="log-list" data-testid="event-log-list">
-            <li
-              v-for="(ev, idx) in [...eventLog].reverse()"
-              :key="idx"
-              class="log-item"
-              :class="eventLogClass(ev.kind)"
-              :data-testid="`log-item-${ev.kind}`"
-            >
-              {{ formatEventKind(ev.kind) }}
-            </li>
-          </ul>
-        </div>
-      </aside>
-    </div>
+      <div class="research-total" data-testid="research-total">
+        System research: {{ worldStore.researchTotal.toFixed(1) }} RP
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .colony-view { width: 100%; }
 
-.layout {
-  display: grid;
-  grid-template-columns: 1fr 240px;
-  gap: 1.25rem;
-  align-items: start;
-}
-
-@media (max-width: 700px) {
-  .layout { grid-template-columns: 1fr; }
-}
-
-.dashboard { min-width: 0; }
-
-.section-title { color: #8cf; font-size: 1rem; margin-bottom: 0.75rem; }
-.sub-title { color: #668; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; margin: 0.75rem 0 0.4rem; }
-
 .empty-state { color: #666; font-style: italic; margin: 1rem 0; }
 
-/* Colony tabs */
-.colony-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.colony-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.colony-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .tab {
   background: #151520;
   border: 1px solid #334;
@@ -604,249 +349,28 @@ function eventLogClass(kind: string): string {
 .tab.active { border-color: #558; color: #aac; background: #1a1a2a; }
 .tab:hover:not(.active) { border-color: #446; color: #aab; }
 
-/* Stats */
-.stat-row { display: flex; gap: 1.5rem; margin-bottom: 0.5rem; align-items: flex-end; }
-.stat-block { display: flex; flex-direction: column; }
-.stat-label { font-size: 0.7rem; color: #668; margin-bottom: 0.1rem; }
-.stat-value { font-size: 1.1rem; color: #dde; }
-
-/* Sparkline */
-.sparkline-wrap { align-self: flex-end; }
-.sparkline { display: block; }
-
-/* Stability bar
- *
- * State classes (.stability-high / -mid / -low) are applied to both the fill
- * and the label. They're scoped here so the fill only receives a background
- * colour and the label only receives a text colour — otherwise the label
- * ends up as coloured text on a matching coloured block and reads as noise.
- */
-.stability-section { margin-bottom: 0.75rem; }
-.stability-bar-track {
-  height: 12px;
-  background: #0d0d15;
-  border: 1px solid #334;
+.panel-layout {
+  height: 70vh;
+  min-height: 420px;
+  border: 1px solid #223;
   border-radius: 4px;
   overflow: hidden;
-  margin: 0.35rem 0;
-  width: 100%;
-  max-width: 300px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
 }
-.stability-bar-fill {
-  height: 100%;
-  transition: width 0.3s ease, background 0.2s;
-}
-.stability-bar-fill.stability-high { background: #4ec990; }
-.stability-bar-fill.stability-mid  { background: #d4a24a; }
-.stability-bar-fill.stability-low  { background: #d0574a; }
-
-.stability-label {
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.stability-label.stability-high { color: #6adba5; }
-.stability-label.stability-mid  { color: #eab764; }
-.stability-label.stability-low  { color: #e77767; }
-
-/* Commodity table */
-.section { margin-bottom: 1rem; }
-.stock-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-.stock-table th { color: #668; font-weight: normal; text-align: left; padding: 0.2rem 0.4rem; border-bottom: 1px solid #222; }
-.stock-table th.num, .stock-table td.num { text-align: right; }
-.stock-table td { padding: 0.25rem 0.4rem; border-bottom: 1px solid #1a1a24; color: #aab; }
-.stock-table tbody tr:hover td { background: #13131e; }
-.net-positive { color: #4c9; }
-.net-negative { color: #c55; }
-.net-zero     { color: #667; }
-.empty-row { color: #445; font-style: italic; }
-
-/* Buildings + labour */
-.directive-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
-.directive-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: #13131e;
-  border: 1px solid #223;
-  border-radius: 3px;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.8rem;
-  color: #aab;
-  flex-wrap: wrap;
-}
-.building-name { flex: 1 0 100px; }
-.directive-meta { color: #668; font-size: 0.72rem; }
-.labour-controls { display: flex; align-items: center; gap: 0.3rem; }
-.labour-input {
-  width: 54px;
-  background: #0d0d15;
-  border: 1px solid #334;
-  border-radius: 3px;
-  color: #cdd;
-  padding: 0.2rem 0.35rem;
-  font-family: monospace;
-  font-size: 0.8rem;
-}
-.btn-assign {
-  background: #1a2030;
-  border: 1px solid #336;
-  border-radius: 3px;
-  color: #89b;
-  padding: 0.15rem 0.4rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-.btn-assign:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-assign:hover:not(:disabled) { background: #1e2840; }
-
-/* Slots summary */
-.slots-summary {
-  font-size: 0.72rem;
-  color: #558;
-  margin-top: 0.35rem;
-}
-
-/* Construction queue list */
-.queue-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.5rem; }
-.queue-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: #111120;
-  border: 1px solid #223;
-  border-radius: 3px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.8rem;
-  color: #aab;
-}
-.queue-progress { font-size: 0.72rem; color: #668; }
-
-/* Build catalog */
-.build-catalog-wrap { margin-top: 0.75rem; }
-.catalog-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.4rem;
-}
-.catalog-title {
-  color: #668;
-  font-size: 0.78rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.catalog-slots { color: #778; font-size: 0.72rem; }
-
-.build-catalog {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.5rem;
-}
-.build-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  background: #14141e;
-  border: 1px solid #334;
-  border-radius: 4px;
-  padding: 0.55rem 0.6rem;
-  color: #aab;
-}
-.build-card.is-disabled { opacity: 0.55; }
-.build-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
-.build-card-name { color: #8cf; font-size: 0.86rem; font-weight: 600; }
-.build-card-cat {
-  color: #557;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.build-card-desc { color: #889; font-size: 0.76rem; }
-.build-card-stats { color: #668; font-size: 0.72rem; }
-.build-card-cost { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-.cost-chip {
-  background: #1a1a2a;
-  border: 1px solid #223;
-  border-radius: 2px;
-  padding: 0.05rem 0.3rem;
-  color: #8a8;
-  font-size: 0.7rem;
-}
-.build-card-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-.build-card-reason { color: #a86; font-size: 0.7rem; font-style: italic; }
-.btn-queue {
-  background: #1a2030;
-  border: 1px solid #468;
-  border-radius: 3px;
-  color: #8cf;
-  padding: 0.3rem 0.7rem;
-  font-family: monospace;
-  font-size: 0.78rem;
-  cursor: pointer;
-  margin-left: auto;
-}
-.btn-queue:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-queue:hover:not(:disabled) { background: #22293a; }
-
-/* Notifications */
-.notifications { margin-top: 1rem; }
-.notifications ul { list-style: none; }
-.notification { padding: 0.2rem 0.5rem; font-size: 0.78rem; border-left: 3px solid #555; margin-bottom: 0.2rem; }
-.notification.tier-notable  { border-color: #c84; color: #ca8; }
-.notification.tier-urgent   { border-color: #c44; color: #c66; }
-.notification.tier-blocking { border-color: #f44; color: #f66; }
-.notification.tier-ambient  { border-color: #446; color: #778; }
 
 .research-total { margin-top: 0.75rem; font-size: 0.78rem; color: #6a8; }
-.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+</style>
 
-/* Event log */
-.event-log {
-  margin-top: 1rem;
-  background: #111118;
-  border: 1px solid #334;
-  border-radius: 4px;
-  padding: 0.75rem;
+<style>
+/* Splitpanes theme overrides — unscoped so they reach the library's own
+   root elements, which render outside this component's scoped attribute. */
+.colony-splitpanes.default-theme .splitpanes__pane {
+  background: #0d0d15;
 }
-.event-log-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.4rem;
+.colony-splitpanes.default-theme .splitpanes__splitter {
+  background: #14141e;
+  border-color: #223;
 }
-.btn-clear-log {
-  background: transparent;
-  border: 1px solid #334;
-  border-radius: 3px;
-  color: #556;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.7rem;
-  cursor: pointer;
+.colony-splitpanes.default-theme .splitpanes__splitter:hover {
+  background: #1a1a2a;
 }
-.btn-clear-log:hover { color: #889; border-color: #446; }
-.log-list {
-  list-style: none;
-  max-height: 200px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-.log-item {
-  font-size: 0.74rem;
-  padding: 0.15rem 0.35rem;
-  border-left: 2px solid #334;
-  color: #778;
-}
-.log-info    { border-color: #468; color: #8ab; }
-.log-warn    { border-color: #853; color: #b86; }
-.log-default { border-color: #334; color: #667; }
 </style>
