@@ -296,6 +296,13 @@ impl PlanetMap {
     /// elevation. Higher latitudes and elevations shift the cell colder.
     /// Elevation also biases terrain: peaks favour mountains/volcanic, basins
     /// favour ocean/wetlands.
+    ///
+    /// Deposits are generated in two passes (issue #188): elevation is
+    /// computed for every cell first, then a handful of per-commodity "vein
+    /// centres" are placed (biased toward each commodity's preferred
+    /// elevation band), and finally each cell's deposit roll is biased by
+    /// proximity to the nearest vein — producing coherent ore fields instead
+    /// of independent per-cell noise.
     #[must_use]
     pub fn generate_for_body(seed: u64, radius: u32, body_temperature: TemperatureBand) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
@@ -305,14 +312,27 @@ impl PlanetMap {
 
         let equator_normal = equator_normal(seed);
 
+        // Pass 1: elevation for every cell (drives vein placement below).
+        let elevations: HashMap<HexCoord, f32> = coords
+            .iter()
+            .map(|coord| (*coord, compute_elevation(seed, *coord, &mut rng)))
+            .collect();
+
+        // Vein centres, keyed by commodity, placed after elevation is known
+        // so elevation-band bias (e.g. iron on ridges) can steer placement.
+        let veins = place_veins(&mut rng, &coords, &elevations, radius);
+
+        // Pass 2: terrain, biome, temperature, and deposits.
         for coord in &coords {
+            let elevation = elevations[coord];
             let cell = generate_cell(
                 &mut rng,
                 *coord,
                 radius,
-                seed,
+                elevation,
                 body_temperature,
                 equator_normal,
+                &veins,
             );
             cells.insert(*coord, cell);
             let site_id = site_id_for_coord(seed, *coord);
@@ -346,15 +366,43 @@ impl PlanetMap {
     /// Returns `None` only if the map has no habitable cells (degenerate).
     #[must_use]
     pub fn best_landing_site(&self) -> Option<HexCoord> {
-        self.cells
+        self.top_landing_sites(1, 0).into_iter().next()
+    }
+
+    /// Return up to `n` recommended landing sites, greedily selected by
+    /// suitability while enforcing a minimum hex distance between any two
+    /// picks (issue #188) so the recommendations don't all cluster in the
+    /// same corner of the map.
+    ///
+    /// Habitable, unoccupied cells only. If fewer than `n` cells satisfy the
+    /// distance constraint, the returned list is shorter than `n`.
+    #[must_use]
+    pub fn top_landing_sites(&self, n: usize, min_distance: u32) -> Vec<HexCoord> {
+        let mut candidates: Vec<&HexCell> = self
+            .cells
             .values()
-            .max_by(|a, b| {
-                a.suitability()
-                    .partial_cmp(&b.suitability())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .filter(|c| c.is_habitable())
-            .map(|c| c.coord)
+            .filter(|c| c.is_habitable() && !self.colonies.iter().any(|node| node.coord == c.coord))
+            .collect();
+        candidates.sort_by(|a, b| {
+            b.suitability()
+                .partial_cmp(&a.suitability())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| (a.coord.q, a.coord.r).cmp(&(b.coord.q, b.coord.r)))
+        });
+
+        let mut picked: Vec<HexCoord> = Vec::with_capacity(n);
+        for cell in candidates {
+            if picked.len() >= n {
+                break;
+            }
+            if picked
+                .iter()
+                .all(|p| p.distance(cell.coord) >= min_distance)
+            {
+                picked.push(cell.coord);
+            }
+        }
+        picked
     }
 
     /// Place a colony node at the given hex coordinate.
@@ -568,17 +616,21 @@ fn site_id_for_coord(seed: u64, coord: HexCoord) -> SiteId {
 
 /// Generate a single hex cell at `coord` using the given RNG.
 ///
+/// `elevation` is precomputed for every cell before this function runs (see
+/// [`PlanetMap::generate_for_body`]) so vein placement can be biased by it.
 /// `equator_normal` is the seed-derived unit normal to the equator line, used to
 /// project each hex into a latitude proxy in `[0.0, 1.0]`. `body_temperature`
 /// carries through as the baseline temperature band before latitude/elevation
-/// shifts.
+/// shifts. `veins` are the map's per-commodity vein centres, used to bias the
+/// deposit roll and commodity choice toward coherent ore fields.
 fn generate_cell(
     rng: &mut ChaCha8Rng,
     coord: HexCoord,
     radius: u32,
-    seed: u64,
+    elevation: f32,
     body_temperature: TemperatureBand,
     equator_normal: (f32, f32),
+    veins: &[Vein],
 ) -> HexCell {
     // Rough distance from centre as a fraction [0, 1].
     let dist_frac = if radius == 0 {
@@ -589,10 +641,6 @@ fn generate_cell(
             HexCoord::origin().distance(coord) as f32 / radius as f32
         }
     };
-
-    // Elevation is a spatial sinusoidal field plus a per-cell RNG jitter, so
-    // relief reads as coherent ridges/valleys but no two cells are identical.
-    let elevation = compute_elevation(seed, coord, rng);
 
     // Latitude proxy: perpendicular distance from a seed-oriented equator line
     // through the origin, normalised so poles sit at ~1.0.
@@ -654,15 +702,22 @@ fn generate_cell(
     cell.elevation = elevation;
     cell.temperature = temperature;
 
-    // Seed deposits with low probability.
+    // Deposit rolls are biased by proximity to the nearest vein centre
+    // (issue #188): cells inside a vein's influence radius roll far more
+    // often and inherit that vein's commodity, producing coherent ore
+    // fields. Cells outside any vein's influence still get a small
+    // background chance at a biome-appropriate commodity so the map isn't
+    // entirely empty between fields.
     if !matches!(terrain, Terrain::Ocean) {
-        if rng.gen::<f32>() < 0.25 {
+        let (deposit_prob, nearest_commodity) = nearest_vein_influence(coord, veins);
+        if rng.gen::<f32>() < deposit_prob {
             let richness: f32 = rng.gen::<f32>() * 0.9 + 0.1;
-            let commodity = pick_deposit_commodity(rng, biome);
+            let commodity = nearest_commodity.unwrap_or_else(|| pick_deposit_commodity(rng, biome));
             cell.deposits.push(Deposit::new(commodity, richness));
         }
-        // Rare second deposit.
-        if rng.gen::<f32>() < 0.06 {
+        // Rare second deposit, at a flat low rate independent of veins —
+        // keeps the occasional surprise find outside authored ore fields.
+        if rng.gen::<f32>() < BACKGROUND_DEPOSIT_PROB {
             let richness: f32 = rng.gen::<f32>() * 0.5 + 0.05;
             let commodity = pick_deposit_commodity(rng, biome);
             cell.deposits.push(Deposit::new(commodity, richness));
@@ -813,6 +868,131 @@ fn pick_deposit_commodity(rng: &mut ChaCha8Rng, biome: Biome) -> &'static str {
             }
         }
     }
+}
+
+// ─── Deposit Veins (issue #188) ──────────────────────────────────────────────
+
+/// A placed ore-field centre: a commodity and the hex it's anchored on.
+type Vein = (&'static str, HexCoord);
+
+/// Every commodity eligible to anchor a vein, in a fixed order so vein
+/// placement (and therefore map determinism) doesn't depend on iteration
+/// order of any collection.
+const VEIN_COMMODITIES: [&str; 9] = [
+    "iron",
+    "silicates",
+    "rare_metals",
+    "water_ice",
+    "methane",
+    "sulfur",
+    "geothermal_energy",
+    "water",
+    "organics",
+];
+
+/// Hex distance within which a vein centre biases nearby cells toward its
+/// commodity and raises the deposit roll probability. Keeps ore fields
+/// readable as a small cluster of hexes rather than a single spawn.
+const VEIN_INFLUENCE_RADIUS: u32 = 3;
+
+/// Deposit roll probability at a vein's centre cell.
+const VEIN_PEAK_PROB: f32 = 0.55;
+
+/// Deposit roll probability far from any vein (also used for the flat-rate
+/// rare "second deposit" roll). Small enough to keep total map coverage
+/// near the ~15%-of-hexes target from #188 while still allowing stray finds.
+const BACKGROUND_DEPOSIT_PROB: f32 = 0.02;
+
+/// Number of vein centres placed per commodity, scaled so ore-field density
+/// (fields per unit area) stays roughly constant as the map grows.
+///
+/// Map cell count grows quadratically with `radius` (`3r²+3r+1`), so vein
+/// count is derived from cell count rather than `radius` directly — a
+/// linear-in-`radius` vein count would make small maps disproportionately
+/// deposit-dense (each vein's fixed-size influence area covers a much
+/// larger fraction of a small map).
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+fn vein_count_for_radius(radius: u32) -> usize {
+    let cells = 3 * radius * radius + 3 * radius + 1;
+    ((cells as f32 * 0.033 / VEIN_COMMODITIES.len() as f32).round() as usize).max(1)
+}
+
+/// Preferred elevation band for a commodity's vein placement, in `[0.0,
+/// 1.0]`, or `None` if the commodity has no elevation preference.
+///
+/// Metals and geothermal commodities favour ridges/peaks; ices and water
+/// favour valleys/basins — consistent with the elevation field #187 added.
+fn commodity_elevation_bias(commodity: &str) -> Option<f32> {
+    match commodity {
+        "iron" | "rare_metals" | "sulfur" | "geothermal_energy" => Some(0.8),
+        "water_ice" | "methane" | "water" => Some(0.2),
+        _ => None,
+    }
+}
+
+/// Place vein centres for every commodity in [`VEIN_COMMODITIES`].
+///
+/// For commodities with an elevation preference, candidates are restricted
+/// to the half of `coords` closest to that preference before a centre is
+/// drawn, so e.g. iron veins land preferentially on ridges. Selection order
+/// (commodity list order, then draw order within a commodity) is fixed so
+/// the result is deterministic for a given `seed` + `radius`.
+fn place_veins(
+    rng: &mut ChaCha8Rng,
+    coords: &[HexCoord],
+    elevations: &HashMap<HexCoord, f32>,
+    radius: u32,
+) -> Vec<Vein> {
+    let count = vein_count_for_radius(radius);
+    let mut veins = Vec::with_capacity(count * VEIN_COMMODITIES.len());
+
+    for commodity in VEIN_COMMODITIES {
+        let mut pool: Vec<HexCoord> = coords.to_vec();
+        if let Some(target) = commodity_elevation_bias(commodity) {
+            pool.sort_by(|a, b| {
+                let da = (elevations[a] - target).abs();
+                let db = (elevations[b] - target).abs();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            pool.truncate((pool.len() / 2).max(count));
+        }
+
+        for _ in 0..count.min(pool.len()) {
+            let idx = rng.gen_range(0..pool.len());
+            let coord = pool.swap_remove(idx);
+            veins.push((commodity, coord));
+        }
+    }
+
+    veins
+}
+
+/// Return `(deposit_probability, commodity)` for `coord` based on its
+/// distance to the nearest vein centre.
+///
+/// Probability decays linearly from [`VEIN_PEAK_PROB`] at the vein centre to
+/// [`BACKGROUND_DEPOSIT_PROB`] at [`VEIN_INFLUENCE_RADIUS`] hexes away, and
+/// stays at the background rate (with no commodity bias) beyond that.
+#[allow(clippy::cast_precision_loss)]
+fn nearest_vein_influence(coord: HexCoord, veins: &[Vein]) -> (f32, Option<&'static str>) {
+    let nearest = veins
+        .iter()
+        .map(|(commodity, vein_coord)| (coord.distance(*vein_coord), *commodity))
+        .min_by_key(|(dist, _)| *dist);
+
+    let Some((dist, commodity)) = nearest else {
+        return (BACKGROUND_DEPOSIT_PROB, None);
+    };
+    if dist > VEIN_INFLUENCE_RADIUS {
+        return (BACKGROUND_DEPOSIT_PROB, None);
+    }
+    let t = dist as f32 / VEIN_INFLUENCE_RADIUS as f32;
+    let prob = VEIN_PEAK_PROB + (BACKGROUND_DEPOSIT_PROB - VEIN_PEAK_PROB) * t;
+    (prob, Some(commodity))
 }
 
 /// Compute the infrastructure construction cost between two hex coordinates.
@@ -1360,5 +1540,182 @@ mod tests {
             assert_eq!(cell.temperature, other.temperature);
             assert!((cell.elevation - other.elevation).abs() < 1e-6);
         }
+    }
+
+    // ── Radius bump + deposit retuning (issue #188) ──────────────────────────
+
+    /// Acceptable band around the ~15%-of-habitable-cells deposit density
+    /// target. Wide enough to absorb per-seed RNG variance while still
+    /// catching a regression to the old flat-25% roll (which lands north of
+    /// 25%) or an over-correction toward near-zero density.
+    const DEPOSIT_DENSITY_MIN_PCT: f64 = 8.0;
+    const DEPOSIT_DENSITY_MAX_PCT: f64 = 25.0;
+
+    #[allow(clippy::cast_precision_loss)]
+    fn deposit_density_pct(map: &PlanetMap) -> f64 {
+        let habitable: Vec<&HexCell> = map.cells.values().filter(|c| c.is_habitable()).collect();
+        let with_deposit = habitable.iter().filter(|c| !c.deposits.is_empty()).count();
+        100.0 * with_deposit as f64 / habitable.len() as f64
+    }
+
+    #[test]
+    fn deposit_density_in_target_band_across_seeds_and_radii() {
+        for radius in [10u32, 12, 16] {
+            for seed in 0..10u64 {
+                let map = PlanetMap::generate(seed, radius);
+                let pct = deposit_density_pct(&map);
+                assert!(
+                    (DEPOSIT_DENSITY_MIN_PCT..=DEPOSIT_DENSITY_MAX_PCT).contains(&pct),
+                    "radius {radius} seed {seed}: deposit density {pct:.2}% outside target band \
+                     [{DEPOSIT_DENSITY_MIN_PCT}, {DEPOSIT_DENSITY_MAX_PCT}]"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn map_cell_count_matches_radius_formula_for_supported_radii() {
+        for radius in [10u32, 12, 16] {
+            let map = PlanetMap::generate(0, radius);
+            let expected = (3 * radius * radius + 3 * radius + 1) as usize;
+            assert_eq!(
+                map.cells.len(),
+                expected,
+                "radius {radius}: cell count mismatch"
+            );
+        }
+    }
+
+    /// Mean nearest-neighbour hex distance among cells holding a given
+    /// commodity's deposit, vs. the same statistic computed over an equal
+    /// number of uniformly-random habitable cells. Vein clustering should
+    /// pull deposits of the same commodity closer together than chance.
+    #[allow(clippy::cast_precision_loss)]
+    fn mean_nearest_neighbour_distance(coords: &[HexCoord]) -> f64 {
+        let mut total = 0u32;
+        for (i, a) in coords.iter().enumerate() {
+            let nearest = coords
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, b)| a.distance(*b))
+                .min()
+                .expect("at least one other coordinate");
+            total += nearest;
+        }
+        f64::from(total) / coords.len() as f64
+    }
+
+    #[test]
+    fn deposits_cluster_by_commodity_more_than_random_baseline() {
+        for radius in [10u32, 12, 16] {
+            for seed in 0..10u64 {
+                let map = PlanetMap::generate(seed, radius);
+                let habitable: Vec<HexCoord> = map
+                    .cells
+                    .values()
+                    .filter(|c| c.is_habitable())
+                    .map(|c| c.coord)
+                    .collect();
+
+                let mut by_commodity: HashMap<&str, Vec<HexCoord>> = HashMap::new();
+                for cell in map.cells.values() {
+                    for d in &cell.deposits {
+                        by_commodity
+                            .entry(d.commodity_id.as_str())
+                            .or_default()
+                            .push(cell.coord);
+                    }
+                }
+
+                // Random baseline: evenly-spaced sample across all habitable
+                // cells is the best a uniform-random placement can achieve on
+                // average, so nearest-neighbour distance shrinks with density.
+                // Approximate it by sampling every Nth habitable cell (by
+                // stable sort order) for a commodity with `n` occurrences.
+                let mut sorted_habitable = habitable.clone();
+                sorted_habitable.sort_by_key(|c| (c.q, c.r));
+
+                for (commodity, coords) in &by_commodity {
+                    if coords.len() < 3 {
+                        continue; // too few points for a meaningful comparison
+                    }
+                    let actual = mean_nearest_neighbour_distance(coords);
+
+                    let stride = (sorted_habitable.len() / coords.len()).max(1);
+                    let baseline_coords: Vec<HexCoord> = sorted_habitable
+                        .iter()
+                        .step_by(stride)
+                        .copied()
+                        .take(coords.len())
+                        .collect();
+                    let baseline = mean_nearest_neighbour_distance(&baseline_coords);
+
+                    assert!(
+                        actual <= baseline,
+                        "radius {radius} seed {seed} {commodity}: clustered mean_nn {actual:.2} \
+                         should not exceed evenly-spaced baseline {baseline:.2} (n={})",
+                        coords.len()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn top_landing_sites_respects_minimum_distance() {
+        for seed in 0..10u64 {
+            let map = PlanetMap::generate(seed, 12);
+            let sites = map.top_landing_sites(3, 3);
+            for i in 0..sites.len() {
+                for j in (i + 1)..sites.len() {
+                    let d = sites[i].distance(sites[j]);
+                    assert!(
+                        d >= 3,
+                        "seed {seed}: sites {:?} and {:?} are only {d} hexes apart",
+                        sites[i],
+                        sites[j]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn top_landing_sites_all_habitable_and_unique() {
+        let map = PlanetMap::generate(42, 12);
+        let sites = map.top_landing_sites(3, 3);
+        let mut seen = std::collections::HashSet::new();
+        for coord in &sites {
+            let cell = map.cell(*coord).unwrap();
+            assert!(
+                cell.is_habitable(),
+                "landing site {coord:?} must be habitable"
+            );
+            assert!(seen.insert(*coord), "landing site {coord:?} returned twice");
+        }
+    }
+
+    #[test]
+    fn best_landing_site_matches_top_landing_sites_first_pick() {
+        let map = PlanetMap::generate(5, 12);
+        assert_eq!(
+            map.best_landing_site(),
+            map.top_landing_sites(1, 0).into_iter().next()
+        );
+    }
+
+    #[test]
+    fn generate_for_body_radius_12_completes_within_budget() {
+        // Sanity guard against an accidental O(n^2)+ blowup in vein placement
+        // or deposit rolls; 100ms is the `getPlanetMap` playtest gate from
+        // #188, generation itself should be a small fraction of that.
+        let start = std::time::Instant::now();
+        let _map = PlanetMap::generate(1, 12);
+        assert!(
+            start.elapsed().as_millis() < 100,
+            "planet map generation at radius 12 took {:?}, expected well under 100ms",
+            start.elapsed()
+        );
     }
 }
