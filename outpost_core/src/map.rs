@@ -20,7 +20,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::colony::ColonyId;
+use crate::system::TemperatureBand;
 use crate::trade::SiteId;
+
+/// Root-3, memoised for hex-to-cartesian conversion.
+const SQRT_3: f32 = 1.732_050_8;
 
 // ─── Hex Coordinates ─────────────────────────────────────────────────────────
 
@@ -178,6 +182,13 @@ impl Deposit {
 
 // ─── HexCell ─────────────────────────────────────────────────────────────────
 
+fn default_elevation() -> f32 {
+    0.5
+}
+fn default_cell_temperature() -> TemperatureBand {
+    TemperatureBand::Temperate
+}
+
 /// A single hex cell in the planet map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HexCell {
@@ -187,18 +198,31 @@ pub struct HexCell {
     pub terrain: Terrain,
     /// Surface biome class.
     pub biome: Biome,
+    /// Normalised elevation in `[0.0, 1.0]` — 0.0 = lowest basin, 1.0 = highest peak.
+    #[serde(default = "default_elevation")]
+    pub elevation: f32,
+    /// Per-cell surface-temperature band, derived from the parent body's band plus
+    /// per-cell latitude and elevation deltas.
+    #[serde(default = "default_cell_temperature")]
+    pub temperature: TemperatureBand,
     /// Resource deposits present in this cell (may be empty).
     pub deposits: Vec<Deposit>,
 }
 
 impl HexCell {
-    /// Construct a cell with no deposits.
+    /// Construct a cell with no deposits, mid-elevation, and Temperate band.
+    ///
+    /// Used by tests and edge-cost fixtures — production maps go through
+    /// [`PlanetMap::generate_for_body`], which populates elevation and
+    /// temperature deterministically.
     #[must_use]
     pub fn new(coord: HexCoord, terrain: Terrain, biome: Biome) -> Self {
         Self {
             coord,
             terrain,
             biome,
+            elevation: default_elevation(),
+            temperature: default_cell_temperature(),
             deposits: Vec::new(),
         }
     }
@@ -254,19 +278,42 @@ pub struct PlanetMap {
 }
 
 impl PlanetMap {
-    /// Generate a planet map deterministically from `seed` and `radius`.
+    /// Generate a planet map deterministically from `seed` and `radius`, assuming
+    /// a Temperate parent body.
     ///
-    /// All cells within the hex radius of the origin are generated.
-    /// Each cell receives a deterministic [`SiteId`] derived from the seed and coordinate.
+    /// Thin wrapper around [`Self::generate_for_body`] for callers that don't
+    /// yet know the parent body (bootstrap path, unit tests).
     #[must_use]
     pub fn generate(seed: u64, radius: u32) -> Self {
+        Self::generate_for_body(seed, radius, TemperatureBand::Temperate)
+    }
+
+    /// Generate a planet map deterministically from `seed`, `radius`, and the
+    /// parent body's `TemperatureBand`.
+    ///
+    /// Per-cell temperature is derived from the body band, per-cell latitude
+    /// (relative to a seed-oriented equator line through the origin), and
+    /// elevation. Higher latitudes and elevations shift the cell colder.
+    /// Elevation also biases terrain: peaks favour mountains/volcanic, basins
+    /// favour ocean/wetlands.
+    #[must_use]
+    pub fn generate_for_body(seed: u64, radius: u32, body_temperature: TemperatureBand) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let coords = HexCoord::origin().within_radius(radius);
         let mut cells = HashMap::with_capacity(coords.len());
         let mut sites = HashMap::with_capacity(coords.len());
 
+        let equator_normal = equator_normal(seed);
+
         for coord in &coords {
-            let cell = generate_cell(&mut rng, *coord, radius);
+            let cell = generate_cell(
+                &mut rng,
+                *coord,
+                radius,
+                seed,
+                body_temperature,
+                equator_normal,
+            );
             cells.insert(*coord, cell);
             let site_id = site_id_for_coord(seed, *coord);
             sites.insert(site_id, *coord);
@@ -520,7 +567,19 @@ fn site_id_for_coord(seed: u64, coord: HexCoord) -> SiteId {
 }
 
 /// Generate a single hex cell at `coord` using the given RNG.
-fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell {
+///
+/// `equator_normal` is the seed-derived unit normal to the equator line, used to
+/// project each hex into a latitude proxy in `[0.0, 1.0]`. `body_temperature`
+/// carries through as the baseline temperature band before latitude/elevation
+/// shifts.
+fn generate_cell(
+    rng: &mut ChaCha8Rng,
+    coord: HexCoord,
+    radius: u32,
+    seed: u64,
+    body_temperature: TemperatureBand,
+    equator_normal: (f32, f32),
+) -> HexCell {
     // Rough distance from centre as a fraction [0, 1].
     let dist_frac = if radius == 0 {
         0.0
@@ -531,20 +590,37 @@ fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell 
         }
     };
 
-    // Pick terrain based on position noise.
+    // Elevation is a spatial sinusoidal field plus a per-cell RNG jitter, so
+    // relief reads as coherent ridges/valleys but no two cells are identical.
+    let elevation = compute_elevation(seed, coord, rng);
+
+    // Latitude proxy: perpendicular distance from a seed-oriented equator line
+    // through the origin, normalised so poles sit at ~1.0.
+    let latitude_abs = cell_latitude_abs(coord, equator_normal, radius);
+
+    // Elevation biases the terrain roll: high elevation shifts toward
+    // Mountains/Volcanic (lower buckets); low elevation shifts toward
+    // Plains/Wetlands (higher buckets). Ocean is gated to low elevation only,
+    // so we don't spawn mountain-top lakes.
     let terrain_roll: f32 = rng.gen();
+    let bias = (elevation - 0.5) * 0.3;
+    let adjusted = (terrain_roll - bias).clamp(0.0, 1.0);
     let terrain = if dist_frac < 0.15 {
         // Near-polar regions favour flat plains.
         Terrain::Plains
-    } else if terrain_roll < 0.02 {
-        Terrain::Ocean
-    } else if terrain_roll < 0.08 {
+    } else if adjusted < 0.02 {
+        if elevation < 0.35 {
+            Terrain::Ocean
+        } else {
+            Terrain::Plains
+        }
+    } else if adjusted < 0.08 {
         Terrain::Volcanic
-    } else if terrain_roll < 0.20 {
+    } else if adjusted < 0.20 {
         Terrain::Mountains
-    } else if terrain_roll < 0.35 {
+    } else if adjusted < 0.35 {
         Terrain::Hills
-    } else if terrain_roll < 0.45 {
+    } else if adjusted < 0.45 {
         Terrain::Wetlands
     } else {
         Terrain::Plains
@@ -572,7 +648,11 @@ fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell 
         Biome::Jungle
     };
 
+    let temperature = cell_temperature(body_temperature, latitude_abs, elevation);
+
     let mut cell = HexCell::new(coord, terrain, biome);
+    cell.elevation = elevation;
+    cell.temperature = temperature;
 
     // Seed deposits with low probability.
     if !matches!(terrain, Terrain::Ocean) {
@@ -590,6 +670,106 @@ fn generate_cell(rng: &mut ChaCha8Rng, coord: HexCoord, radius: u32) -> HexCell 
     }
 
     cell
+}
+
+/// Compute an elevation in `[0.0, 1.0]` for `coord` on a map seeded with `seed`.
+///
+/// Blends a smooth seed-phase-shifted sinusoidal field (which gives coherent
+/// ridges) with a per-cell RNG jitter (which breaks up long uniform patches).
+/// The RNG roll ordering is preserved even when this function is refactored,
+/// so `PlanetMap::generate` determinism holds.
+fn compute_elevation(seed: u64, coord: HexCoord, rng: &mut ChaCha8Rng) -> f32 {
+    let phase_a = phase_from_seed(seed, 0);
+    let phase_b = phase_from_seed(seed, 8);
+    let phase_c = phase_from_seed(seed, 16);
+    #[allow(clippy::cast_precision_loss)]
+    let q = coord.q as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let r = coord.r as f32;
+    let ridge = (q * 0.35 + phase_a).sin();
+    let valley = (r * 0.35 + phase_b).sin();
+    let cross = ((q + r) * 0.20 + phase_c).sin();
+    let spatial = ((ridge + valley + cross) / 3.0 + 1.0) * 0.5;
+    let jitter: f32 = rng.gen();
+    (spatial * 0.7 + jitter * 0.3).clamp(0.0, 1.0)
+}
+
+fn phase_from_seed(seed: u64, byte_offset: u32) -> f32 {
+    #[allow(clippy::cast_precision_loss)]
+    let byte = ((seed >> byte_offset) & 0xff) as f32;
+    (byte / 255.0) * std::f32::consts::TAU
+}
+
+/// Unit normal to the seed-oriented equator line through the origin.
+///
+/// Returned as `(nx, ny)` in pointy-top hex-cartesian space. Multiplying a
+/// hex's cartesian position by this normal gives its signed perpendicular
+/// distance from the equator — the latitude proxy.
+fn equator_normal(seed: u64) -> (f32, f32) {
+    let mixed = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    #[allow(clippy::cast_precision_loss)]
+    let frac = ((mixed >> 32) as u32) as f32 / u32::MAX as f32;
+    let theta = frac * std::f32::consts::TAU;
+    (-theta.sin(), theta.cos())
+}
+
+/// Absolute latitude proxy for `coord`, in `[0.0, 1.0]`.
+///
+/// 0.0 = on the equator line; 1.0 = at the farthest hex from the equator on a
+/// map of the given radius.
+fn cell_latitude_abs(coord: HexCoord, normal: (f32, f32), radius: u32) -> f32 {
+    if radius == 0 {
+        return 0.0;
+    }
+    // Pointy-top axial → cartesian, unit hex size.
+    #[allow(clippy::cast_precision_loss)]
+    let x = SQRT_3 * (coord.q as f32) + (SQRT_3 * 0.5) * (coord.r as f32);
+    #[allow(clippy::cast_precision_loss)]
+    let y = 1.5 * (coord.r as f32);
+    let signed = x * normal.0 + y * normal.1;
+    #[allow(clippy::cast_precision_loss)]
+    let max = radius as f32 * SQRT_3;
+    (signed / max).abs().min(1.0)
+}
+
+/// Derive a per-cell temperature band from the parent body's band, latitude,
+/// and elevation.
+///
+/// Uses an ordinal warmth scale (`Extreme = -2` ... `Hot = 2`, monotonic
+/// cold→hot). High latitude and high elevation shift the cell colder. On this
+/// scale `Extreme` sits below `Frozen` — we treat the body-level `Extreme`
+/// band as "unlivably cold" for the purpose of per-cell derivation, which
+/// matches the 0-pts habitability weighting in [`crate::system::Body`].
+fn cell_temperature(body: TemperatureBand, latitude_abs: f32, elevation: f32) -> TemperatureBand {
+    let base: i32 = match body {
+        TemperatureBand::Extreme => -2,
+        TemperatureBand::Frozen => -1,
+        TemperatureBand::Cold => 0,
+        TemperatureBand::Temperate => 1,
+        TemperatureBand::Hot => 2,
+    };
+    let lat_shift = if latitude_abs >= 0.85 {
+        -2
+    } else if latitude_abs >= 0.55 {
+        -1
+    } else {
+        0
+    };
+    let elev_shift = if elevation >= 0.9 {
+        -2
+    } else if elevation >= 0.7 {
+        -1
+    } else {
+        0
+    };
+    let idx = (base + lat_shift + elev_shift).clamp(-2, 2);
+    match idx {
+        -2 => TemperatureBand::Extreme,
+        -1 => TemperatureBand::Frozen,
+        0 => TemperatureBand::Cold,
+        1 => TemperatureBand::Temperate,
+        _ => TemperatureBand::Hot,
+    }
 }
 
 /// Choose a deposit commodity influenced by biome.
@@ -1030,5 +1210,155 @@ mod tests {
         // Road < Pipeline < Rail (base values).
         assert!(InfraType::Road.base_throughput() < InfraType::Pipeline.base_throughput());
         assert!(InfraType::Pipeline.base_throughput() < InfraType::Rail.base_throughput());
+    }
+
+    // ── Elevation & temperature (issue #187) ─────────────────────────────────
+
+    #[test]
+    fn elevation_is_deterministic_per_seed_and_coord() {
+        let map1 = PlanetMap::generate(1234, 5);
+        let map2 = PlanetMap::generate(1234, 5);
+        for (coord, cell) in &map1.cells {
+            let other = map2.cells.get(coord).unwrap();
+            assert!(
+                (cell.elevation - other.elevation).abs() < 1e-6,
+                "elevation at {coord:?} must be deterministic"
+            );
+        }
+    }
+
+    #[test]
+    fn elevation_lies_in_unit_interval() {
+        let map = PlanetMap::generate(42, 6);
+        for cell in map.cells.values() {
+            assert!(
+                (0.0..=1.0).contains(&cell.elevation),
+                "elevation out of range at {:?}: {}",
+                cell.coord,
+                cell.elevation
+            );
+        }
+    }
+
+    #[test]
+    fn mountains_have_higher_mean_elevation_than_plains() {
+        // Statistical: aggregate across several seeds so the sample size is
+        // large enough for terrain-band means to separate cleanly.
+        let mut mountain_elevs: Vec<f32> = Vec::new();
+        let mut plains_elevs: Vec<f32> = Vec::new();
+        for seed in 0..8u64 {
+            let map = PlanetMap::generate(seed, 6);
+            for cell in map.cells.values() {
+                match cell.terrain {
+                    Terrain::Mountains => mountain_elevs.push(cell.elevation),
+                    Terrain::Plains => plains_elevs.push(cell.elevation),
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            !mountain_elevs.is_empty() && !plains_elevs.is_empty(),
+            "test needs samples of both terrains — got {} mountains, {} plains",
+            mountain_elevs.len(),
+            plains_elevs.len()
+        );
+        let mean = |xs: &[f32]| -> f32 {
+            #[allow(clippy::cast_precision_loss)]
+            let n = xs.len() as f32;
+            xs.iter().sum::<f32>() / n
+        };
+        let mm = mean(&mountain_elevs);
+        let pm = mean(&plains_elevs);
+        assert!(
+            mm > pm,
+            "mountains should skew higher than plains: mountains={mm}, plains={pm}"
+        );
+    }
+
+    #[test]
+    fn cell_temperature_defaults_to_body_band_near_equator() {
+        // At the origin (latitude ≈ 0) with mid-range elevation, no shift
+        // should apply, so cell temp equals body temp.
+        for body in [
+            TemperatureBand::Frozen,
+            TemperatureBand::Cold,
+            TemperatureBand::Temperate,
+            TemperatureBand::Hot,
+        ] {
+            let derived = cell_temperature(body, 0.0, 0.5);
+            assert_eq!(
+                derived, body,
+                "cell at equator+mid-elev must match body band, got {derived:?} for {body:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cell_temperature_shifts_colder_toward_poles() {
+        // A Temperate body at latitude 0.9 (2-band cold shift) lands at Frozen.
+        assert_eq!(
+            cell_temperature(TemperatureBand::Temperate, 0.9, 0.5),
+            TemperatureBand::Frozen
+        );
+        // A Temperate body at latitude 0.6 (1-band cold shift) lands at Cold.
+        assert_eq!(
+            cell_temperature(TemperatureBand::Temperate, 0.6, 0.5),
+            TemperatureBand::Cold
+        );
+        // A Hot body at latitude 0.6 (1-band cold shift) lands at Temperate.
+        assert_eq!(
+            cell_temperature(TemperatureBand::Hot, 0.6, 0.5),
+            TemperatureBand::Temperate
+        );
+        // High elevation compounds with high latitude — clamped at Extreme.
+        assert_eq!(
+            cell_temperature(TemperatureBand::Temperate, 0.9, 0.95),
+            TemperatureBand::Extreme
+        );
+    }
+
+    #[test]
+    fn cell_temperature_clamps_at_extreme_and_hot() {
+        // Extreme body cannot go colder than Extreme.
+        assert_eq!(
+            cell_temperature(TemperatureBand::Extreme, 0.9, 0.95),
+            TemperatureBand::Extreme
+        );
+        // Hot body at equator+valley stays Hot; no positive shift is defined.
+        assert_eq!(
+            cell_temperature(TemperatureBand::Hot, 0.0, 0.0),
+            TemperatureBand::Hot
+        );
+    }
+
+    #[test]
+    fn generate_for_body_carries_baseline_temperature() {
+        // A `Frozen` body's map should be mostly Frozen or colder — no Hot cells
+        // should ever appear since we only shift downward.
+        let map = PlanetMap::generate_for_body(9, 5, TemperatureBand::Frozen);
+        for cell in map.cells.values() {
+            assert!(
+                matches!(
+                    cell.temperature,
+                    TemperatureBand::Frozen | TemperatureBand::Extreme
+                ),
+                "Frozen body should not produce cell band {:?} at {:?}",
+                cell.temperature,
+                cell.coord
+            );
+        }
+    }
+
+    #[test]
+    fn generate_defaults_to_temperate_body() {
+        // Confirm the seed=X, radius=Y convenience matches an explicit Temperate call.
+        let a = PlanetMap::generate(77, 4);
+        let b = PlanetMap::generate_for_body(77, 4, TemperatureBand::Temperate);
+        for (coord, cell) in &a.cells {
+            let other = b.cells.get(coord).unwrap();
+            assert_eq!(cell.terrain, other.terrain);
+            assert_eq!(cell.temperature, other.temperature);
+            assert!((cell.elevation - other.elevation).abs() < 1e-6);
+        }
     }
 }
