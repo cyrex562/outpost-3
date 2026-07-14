@@ -243,7 +243,10 @@ impl HexCell {
 
     /// A simple suitability score used for landing site selection.
     ///
-    /// Higher is better.  Deposits increase the score; difficult terrain reduces it.
+    /// Higher is better. Deposits increase the score; difficult terrain
+    /// reduces it; a harsh per-cell temperature band (issue #190) scales the
+    /// whole score down, so an equatorial Temperate hex on a Cold body can
+    /// still outrank a polar hex with better terrain/deposits.
     #[must_use]
     pub fn suitability(&self) -> f32 {
         if !self.is_habitable() {
@@ -251,8 +254,31 @@ impl HexCell {
         }
         let base = 10.0 / self.terrain.difficulty();
         let deposit_bonus: f32 = self.deposits.iter().map(|d| d.richness * 5.0).sum();
-        base + deposit_bonus
+        (base + deposit_bonus) * temperature_suitability_factor(self.temperature)
     }
+}
+
+/// Suitability multiplier from a cell's surface temperature band, in
+/// `(0.0, 1.0]`.
+///
+/// Mirrors the relative ordering `Body::habitability` (issue #163) already
+/// uses at the body scale — Temperate is best, Extreme is worst — so a
+/// player reads the same "harsh climate" story at both the system map and
+/// the hex map. This is a soft penalty, not a hard block (issue #190 left
+/// hard-blocking colonisation on harsh cells to #183, which hasn't landed
+/// yet): a small floor keeps terrain/deposit differences visible even among
+/// Extreme-band cells rather than collapsing them all to an identical zero
+/// score.
+#[must_use]
+fn temperature_suitability_factor(temperature: TemperatureBand) -> f32 {
+    let points: f32 = match temperature {
+        TemperatureBand::Temperate => 30.0,
+        TemperatureBand::Cold => 20.0,
+        TemperatureBand::Hot => 15.0,
+        TemperatureBand::Frozen => 5.0,
+        TemperatureBand::Extreme => 0.0,
+    };
+    (points / 30.0).max(0.05)
 }
 
 // ─── PlanetMap ───────────────────────────────────────────────────────────────
@@ -1716,6 +1742,93 @@ mod tests {
             start.elapsed().as_millis() < 100,
             "planet map generation at radius 12 took {:?}, expected well under 100ms",
             start.elapsed()
+        );
+    }
+
+    // ── Per-cell temperature affects suitability (issue #190) ────────────────
+
+    fn cell_with_temperature(temperature: TemperatureBand) -> HexCell {
+        let mut cell = HexCell::new(HexCoord::origin(), Terrain::Plains, Biome::Grassland);
+        cell.temperature = temperature;
+        cell
+    }
+
+    #[test]
+    fn temperature_suitability_factor_peaks_at_temperate() {
+        for band in [
+            TemperatureBand::Extreme,
+            TemperatureBand::Frozen,
+            TemperatureBand::Cold,
+            TemperatureBand::Hot,
+        ] {
+            assert!(
+                temperature_suitability_factor(band)
+                    < temperature_suitability_factor(TemperatureBand::Temperate),
+                "{band:?} should score below Temperate"
+            );
+        }
+    }
+
+    #[test]
+    fn temperature_suitability_factor_matches_body_habitability_ordering() {
+        // Mirrors `Body::habitability`'s per-band ordering (issue #163):
+        // Temperate > Cold > Hot > Frozen > Extreme.
+        let t = temperature_suitability_factor(TemperatureBand::Temperate);
+        let cold = temperature_suitability_factor(TemperatureBand::Cold);
+        let hot = temperature_suitability_factor(TemperatureBand::Hot);
+        let frozen = temperature_suitability_factor(TemperatureBand::Frozen);
+        let extreme = temperature_suitability_factor(TemperatureBand::Extreme);
+        assert!(t > cold);
+        assert!(cold > hot);
+        assert!(hot > frozen);
+        assert!(frozen > extreme);
+    }
+
+    #[test]
+    fn temperature_suitability_factor_never_reaches_zero() {
+        // A soft penalty, not a hard block (#190 defers hard-blocking to
+        // #183) — Extreme cells must stay orderable against each other by
+        // terrain/deposits rather than all collapsing to an identical 0.0.
+        assert!(temperature_suitability_factor(TemperatureBand::Extreme) > 0.0);
+    }
+
+    #[test]
+    fn suitability_is_lower_on_harsher_temperature_bands() {
+        let temperate = cell_with_temperature(TemperatureBand::Temperate);
+        let cold = cell_with_temperature(TemperatureBand::Cold);
+        let frozen = cell_with_temperature(TemperatureBand::Frozen);
+        let extreme = cell_with_temperature(TemperatureBand::Extreme);
+
+        assert!(temperate.suitability() > cold.suitability());
+        assert!(cold.suitability() > frozen.suitability());
+        assert!(frozen.suitability() > extreme.suitability());
+    }
+
+    #[test]
+    fn suitability_temperature_penalty_does_not_affect_ocean_cells() {
+        // Ocean is never habitable regardless of temperature, so suitability
+        // must stay exactly 0.0 rather than picking up the temperature floor.
+        let mut ocean = HexCell::new(HexCoord::origin(), Terrain::Ocean, Biome::Ocean);
+        ocean.temperature = TemperatureBand::Extreme;
+        assert!(ocean.suitability().abs() < 1e-6);
+    }
+
+    #[test]
+    fn equatorial_temperate_site_can_outrank_richer_polar_extreme_site() {
+        // A modest Temperate hex should be able to beat a deposit-rich
+        // Extreme hex — the core scenario #190 calls out: "equatorial hexes
+        // on a Cold body may still be viable, polar hexes on a Temperate
+        // body may not."
+        let plain_temperate = cell_with_temperature(TemperatureBand::Temperate);
+
+        let mut rich_extreme = cell_with_temperature(TemperatureBand::Extreme);
+        rich_extreme.deposits.push(Deposit::new("iron", 1.0));
+
+        assert!(
+            plain_temperate.suitability() > rich_extreme.suitability(),
+            "temperate={} extreme+deposit={}",
+            plain_temperate.suitability(),
+            rich_extreme.suitability()
         );
     }
 }

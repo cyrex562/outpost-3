@@ -360,6 +360,20 @@ function onHexClick(hex: Positioned): void {
   emit('select', hex)
 }
 
+// Per-band tooltip copy for hexes whose temperature drags suitability down
+// (issue #190) — mirrors the ordering in `temperature_suitability_factor`
+// on the Rust side (Temperate is neutral; everything else is a penalty).
+const HARSH_CLIMATE_WARNING: Record<string, string> = {
+  Cold: 'Cold climate — reduced suitability',
+  Hot: 'Hot climate — reduced suitability',
+  Frozen: 'Frozen climate — much reduced suitability',
+  Extreme: 'Extreme climate — severely reduced suitability',
+}
+
+function harshClimateWarning(temperature: string): string | null {
+  return HARSH_CLIMATE_WARNING[temperature] ?? null
+}
+
 // ── Hover tooltip ─────────────────────────────────────────────────────────
 
 const hoveredHex = ref<Positioned | null>(null)
@@ -473,6 +487,9 @@ defineExpose({ focusSite, resetView })
       </div>
       <div class="tt-row" v-else-if="hoveredHex.occupied_by">
         <span class="tt-warn">Occupied by {{ hoveredHex.occupied_by }}</span>
+      </div>
+      <div class="tt-row" v-else-if="harshClimateWarning(hoveredHex.temperature)">
+        <span class="tt-warn">{{ harshClimateWarning(hoveredHex.temperature) }}</span>
       </div>
       <div v-if="hoveredHex.deposits.length" class="tt-deposits">
         <div
