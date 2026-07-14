@@ -187,7 +187,8 @@ const BIOME_COLOR: Record<string, string> = {
 
 function biomeColor(hex: PlanetHex): string {
   const base = hex.habitable ? BIOME_COLOR[hex.biome] ?? '#556' : BIOME_COLOR.Ocean
-  return applyElevationShading(base, hex.elevation)
+  const elevated = applyElevationShading(base, hex.elevation)
+  return applyTemperatureTint(elevated, hex.temperature)
 }
 
 /**
@@ -207,11 +208,47 @@ function applyElevationShading(hex: string, elevation: number): string {
   return `rgb(${r}, ${g}, ${b})`
 }
 
+// Per-band tint colour + blend strength. `Temperate` is the neutral
+// midpoint (no tint) — `TemperatureBand`'s ordinal scale (issue #187,
+// `map.rs::cell_temperature`) runs Extreme(coldest) < Frozen < Cold <
+// Temperate < Hot, so `Extreme` tints toward violet-blue rather than red.
+const TEMPERATURE_TINT: Record<string, { color: string; strength: number }> = {
+  Extreme: { color: '#3a1fb0', strength: 0.32 },
+  Frozen: { color: '#3aa0e6', strength: 0.22 },
+  Cold: { color: '#8fc8e6', strength: 0.1 },
+  Temperate: { color: '#8fc8e6', strength: 0 },
+  Hot: { color: '#e05a2a', strength: 0.22 },
+}
+
+/**
+ * Blend a subtle cool→warm tint over an already elevation-shaded colour so
+ * the thermal gradient reads at a glance without a hover (issue #191).
+ * Kept weak enough that biome colour and elevation shading still dominate.
+ */
+function applyTemperatureTint(rgbColor: string, temperature: string): string {
+  const tint = TEMPERATURE_TINT[temperature]
+  if (!tint || tint.strength <= 0) return rgbColor
+  const base = parseRgb(rgbColor)
+  const target = parseHex(tint.color)
+  if (!base || !target) return rgbColor
+  const t = tint.strength
+  const r = clamp255(base.r + (target.r - base.r) * t)
+  const g = clamp255(base.g + (target.g - base.g) * t)
+  const b = clamp255(base.b + (target.b - base.b) * t)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
 function parseHex(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#([0-9a-f]{6})$/i.exec(hex)
   if (!m) return null
   const n = parseInt(m[1], 16)
   return { r: (n >> 16) & 0xff, g: (n >> 8) & 0xff, b: n & 0xff }
+}
+
+function parseRgb(rgb: string): { r: number; g: number; b: number } | null {
+  const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(rgb)
+  if (m) return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) }
+  return parseHex(rgb)
 }
 
 function clamp255(v: number): number {
