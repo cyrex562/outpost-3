@@ -82,3 +82,41 @@ describe('PlanetHexMap temperature tint (#191)', () => {
     expect(frozen.b - frozen.r).toBeGreaterThan(hot.b - hot.r)
   })
 })
+
+describe('PlanetHexMap harsh-climate suitability warning (#190)', () => {
+  it('shows a climate warning in the tooltip for non-Temperate bands', async () => {
+    const hexes = [
+      makeHex({ q: 0, r: 0, site_id: 'frozen', temperature: 'Frozen' }),
+      makeHex({ q: 1, r: 0, site_id: 'temperate', temperature: 'Temperate' }),
+    ]
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap(hexes), selectedSite: null },
+    })
+    const groups = wrapper.findAll('g')
+
+    await groups[0].trigger('mouseenter')
+    expect(wrapper.find('.tt-warn').exists()).toBe(true)
+    expect(wrapper.find('.tt-warn').text()).toMatch(/climate/i)
+
+    await groups[1].trigger('mouseenter')
+    expect(wrapper.find('.tt-warn').exists()).toBe(false)
+  })
+
+  it('does not show a climate warning for impassable or occupied hexes even if harsh', async () => {
+    const hexes = [
+      makeHex({
+        q: 0,
+        r: 0,
+        site_id: 'ocean',
+        temperature: 'Extreme',
+        terrain: 'Ocean',
+        habitable: false,
+      }),
+    ]
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap(hexes), selectedSite: null },
+    })
+    await wrapper.find('g').trigger('mouseenter')
+    expect(wrapper.find('.tt-warn').text()).toBe('Impassable')
+  })
+})
