@@ -584,7 +584,7 @@ pub fn bootstrap(
 
     let _ = engine.apply(&Command::SeedPlanet {
         seed: planet_seed,
-        radius: 8,
+        radius: 12,
     });
 
     // Seed the star system from the loaded content pack. Falls back to

@@ -272,14 +272,34 @@ const legend = computed<{ commodity_id: string; color: string }[]>(() => {
     .map((id) => ({ commodity_id: id, color: depositColor(id) }))
 })
 
+/** Axial hex distance, matching the Rust `HexCoord::distance` cube-coordinate formula. */
+function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
+  const dq = Math.abs(a.q - b.q)
+  const dr = Math.abs(a.r - b.r)
+  const ds = Math.abs(-a.q - a.r - (-b.q - b.r))
+  return Math.max(dq, dr, ds)
+}
+
+// Minimum hex distance enforced between recommended sites so the top-N ring
+// doesn't cluster into a single corner of the map (issue #188). Mirrors the
+// greedy selection in `PlanetMap::top_landing_sites` on the Rust side.
+const TOP_SITE_MIN_DISTANCE = 3
+
 // Top-N habitable sites for the "recommended" highlight ring.
 const topSiteIds = computed<Set<string>>(() => {
   const n = props.highlightTopN ?? 3
-  const habitable = positioned.value
+  const candidates = positioned.value
     .filter((h) => h.habitable && h.occupied_by === null)
     .sort((a, b) => b.suitability - a.suitability)
-    .slice(0, n)
-  return new Set(habitable.map((h) => h.site_id))
+
+  const picked: Positioned[] = []
+  for (const hex of candidates) {
+    if (picked.length >= n) break
+    if (picked.every((p) => hexDistance(p, hex) >= TOP_SITE_MIN_DISTANCE)) {
+      picked.push(hex)
+    }
+  }
+  return new Set(picked.map((h) => h.site_id))
 })
 
 function isSelected(hex: Positioned): boolean {
