@@ -186,8 +186,36 @@ const BIOME_COLOR: Record<string, string> = {
 }
 
 function biomeColor(hex: PlanetHex): string {
-  if (!hex.habitable) return BIOME_COLOR.Ocean
-  return BIOME_COLOR[hex.biome] ?? '#556'
+  const base = hex.habitable ? BIOME_COLOR[hex.biome] ?? '#556' : BIOME_COLOR.Ocean
+  return applyElevationShading(base, hex.elevation)
+}
+
+/**
+ * Modulate a hex-fill colour by elevation to create subtle relief shading.
+ * Low basins darken, high peaks brighten — kept modest so the biome palette
+ * still dominates the read.
+ */
+function applyElevationShading(hex: string, elevation: number): string {
+  const rgb = parseHex(hex)
+  if (!rgb) return hex
+  // elevation 0.5 -> 1.0 (neutral); 0.0 -> 0.78 (dark valley); 1.0 -> 1.15 (bright peak).
+  const t = Math.max(0, Math.min(1, elevation))
+  const factor = 0.78 + t * 0.37
+  const r = clamp255(rgb.r * factor)
+  const g = clamp255(rgb.g * factor)
+  const b = clamp255(rgb.b * factor)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
+function parseHex(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return { r: (n >> 16) & 0xff, g: (n >> 8) & 0xff, b: n & 0xff }
+}
+
+function clamp255(v: number): number {
+  return Math.max(0, Math.min(255, Math.round(v)))
 }
 
 // Per-commodity colour palette for deposit dots. Unknown commodities fall
@@ -370,6 +398,14 @@ defineExpose({ focusSite, resetView })
     >
       <div class="tt-title">
         {{ hoveredHex.terrain }} · {{ hoveredHex.biome }}
+      </div>
+      <div class="tt-row">
+        <span class="tt-label">Temperature</span>
+        <span>{{ hoveredHex.temperature }}</span>
+      </div>
+      <div class="tt-row">
+        <span class="tt-label">Elevation</span>
+        <span>{{ (hoveredHex.elevation * 100).toFixed(0) }}%</span>
       </div>
       <div class="tt-row">
         <span class="tt-label">Suitability</span>

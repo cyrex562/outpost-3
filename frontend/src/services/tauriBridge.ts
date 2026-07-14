@@ -184,6 +184,8 @@ export interface PlanetHex {
   site_id: string
   terrain: string
   biome: string
+  elevation: number
+  temperature: string
   deposits: { commodity_id: string; richness: number }[]
   habitable: boolean
   suitability: number

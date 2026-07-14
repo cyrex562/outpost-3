@@ -1062,6 +1062,8 @@ pub struct PlanetHexWire {
     pub site_id: String,
     pub terrain: String,
     pub biome: String,
+    pub elevation: f32,
+    pub temperature: String,
     pub deposits: Vec<DepositWire>,
     pub habitable: bool,
     pub suitability: f32,
@@ -1169,6 +1171,8 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
                 site_id,
                 terrain: format!("{:?}", cell.terrain),
                 biome: format!("{:?}", cell.biome),
+                elevation: cell.elevation,
+                temperature: format!("{:?}", cell.temperature),
                 deposits: cell
                     .deposits
                     .iter()
