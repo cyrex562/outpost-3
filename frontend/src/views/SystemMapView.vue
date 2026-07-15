@@ -429,7 +429,7 @@ function foundColony(body?: SystemBody | null): void {
           <dt>Colonizable</dt>
           <dd>{{ selected.colonizable ? 'yes' : 'no' }}</dd>
           <dt>Atmosphere</dt>
-          <dd>{{ selected.atmosphere }}</dd>
+          <dd>{{ selected.atmosphere_density }}<template v-if="selected.atmosphere_hazard !== 'None'"> · {{ selected.atmosphere_hazard }}</template></dd>
           <dt>Temperature</dt>
           <dd>{{ selected.temperature }}</dd>
           <dt>Gravity</dt>

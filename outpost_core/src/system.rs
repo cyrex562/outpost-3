@@ -73,20 +73,48 @@ pub enum SystemRole {
     Unassigned,
 }
 
-/// Atmospheric composition band for a body.
+/// Atmospheric thickness/density band for a body (issue #197).
+///
+/// Orthogonal to [`AtmosphereHazard`] — a body's atmosphere is fully
+/// described by the pair, e.g. `Dense` + `Corrosive` (a Venus-like world),
+/// which a single flat enum couldn't represent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Atmosphere {
+pub enum AtmosphereDensity {
     /// No meaningful atmosphere (vacuum / trace).
-    None,
+    Vacuum,
     /// Very thin — supports rudimentary EVA operations only.
     Thin,
-    /// Human-breathable without heavy equipment.
+    /// Human-breathable pressure without heavy equipment.
     Breathable,
-    /// Thick / high-pressure but non-toxic.
+    /// Thick / high-pressure.
     Dense,
-    /// Chemically hostile (corrosive / poisonous).
+}
+
+impl AtmosphereDensity {
+    /// Whether this density supports unaided human breathing. Does not
+    /// account for [`AtmosphereHazard`] — a `Breathable`-density atmosphere
+    /// with a `Toxic` hazard is still lethal to breathe.
+    #[must_use]
+    pub fn is_breathable(self) -> bool {
+        matches!(self, Self::Breathable)
+    }
+}
+
+/// Chemical hazard band for a body's atmosphere (issue #197).
+///
+/// Orthogonal to [`AtmosphereDensity`]. See that type's doc comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AtmosphereHazard {
+    /// Chemically inert — no additional hazard beyond density.
+    None,
+    /// Corrosive to unshielded equipment and tissue.
+    Corrosive,
+    /// Poisonous — lethal without a sealed suit or habitat.
     Toxic,
+    /// Oxidizing and/or combustible — fire and explosion risk.
+    OxidizingCombustible,
 }
 
 /// Surface temperature band for a body.
@@ -117,8 +145,11 @@ pub enum RadiationLevel {
     High,
 }
 
-fn default_atmosphere() -> Atmosphere {
-    Atmosphere::None
+fn default_atmosphere_density() -> AtmosphereDensity {
+    AtmosphereDensity::Vacuum
+}
+fn default_atmosphere_hazard() -> AtmosphereHazard {
+    AtmosphereHazard::None
 }
 fn default_temperature() -> TemperatureBand {
     TemperatureBand::Temperate
@@ -223,9 +254,12 @@ pub struct Body {
     pub role: SystemRole,
     /// Distance from the system primary in arbitrary AU units (used for travel time).
     pub distance_au: f32,
-    /// Atmospheric composition band.
-    #[serde(default = "default_atmosphere")]
-    pub atmosphere: Atmosphere,
+    /// Atmospheric thickness/density band (issue #197).
+    #[serde(default = "default_atmosphere_density")]
+    pub atmosphere_density: AtmosphereDensity,
+    /// Atmospheric chemical hazard band (issue #197).
+    #[serde(default = "default_atmosphere_hazard")]
+    pub atmosphere_hazard: AtmosphereHazard,
     /// Surface temperature band.
     #[serde(default = "default_temperature")]
     pub temperature: TemperatureBand,
@@ -273,7 +307,8 @@ impl Body {
             kind,
             role: SystemRole::Unassigned,
             distance_au,
-            atmosphere: default_atmosphere(),
+            atmosphere_density: default_atmosphere_density(),
+            atmosphere_hazard: default_atmosphere_hazard(),
             temperature: default_temperature(),
             gravity_g: default_gravity_g(),
             radiation: default_radiation(),
@@ -291,16 +326,27 @@ impl Body {
     /// The score is a weighted sum of atmosphere / temperature / gravity /
     /// radiation contributions. It is deterministic from the attributes so it
     /// never drifts out of sync with authored content.
+    ///
+    /// Atmosphere's contribution (issue #197) is `density_points × hazard_multiplier`:
+    /// density carries the same 0-30 point scale the old flat `Atmosphere` enum
+    /// used, and hazard scales it down — `Toxic` always zeroes it out
+    /// regardless of density, matching the old enum's `Toxic => 0.0` exactly.
     #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn habitability(&self) -> u8 {
-        let atmo = match self.atmosphere {
-            Atmosphere::Breathable => 30.0,
-            Atmosphere::Thin => 15.0,
-            Atmosphere::Dense => 10.0,
-            Atmosphere::None => 5.0,
-            Atmosphere::Toxic => 0.0,
+        let density_points = match self.atmosphere_density {
+            AtmosphereDensity::Breathable => 30.0,
+            AtmosphereDensity::Thin => 15.0,
+            AtmosphereDensity::Dense => 10.0,
+            AtmosphereDensity::Vacuum => 5.0,
         };
+        let hazard_multiplier = match self.atmosphere_hazard {
+            AtmosphereHazard::None => 1.0,
+            AtmosphereHazard::Corrosive => 0.5,
+            AtmosphereHazard::OxidizingCombustible => 0.25,
+            AtmosphereHazard::Toxic => 0.0,
+        };
+        let atmo = density_points * hazard_multiplier;
         let temp = match self.temperature {
             TemperatureBand::Temperate => 30.0,
             TemperatureBand::Cold => 20.0,
@@ -719,8 +765,10 @@ pub enum SystemCommand {
     SetBodyAttributes {
         /// Target body.
         body_id: BodyId,
-        /// Atmospheric composition band.
-        atmosphere: Atmosphere,
+        /// Atmospheric thickness/density band (issue #197).
+        atmosphere_density: AtmosphereDensity,
+        /// Atmospheric chemical hazard band (issue #197).
+        atmosphere_hazard: AtmosphereHazard,
         /// Surface temperature band.
         temperature: TemperatureBand,
         /// Surface gravity as a fraction of Earth-g.
@@ -846,8 +894,10 @@ pub enum SystemEvent {
     BodyAttributesSet {
         /// Target body.
         body_id: BodyId,
-        /// Atmospheric composition band.
-        atmosphere: Atmosphere,
+        /// Atmospheric thickness/density band (issue #197).
+        atmosphere_density: AtmosphereDensity,
+        /// Atmospheric chemical hazard band (issue #197).
+        atmosphere_hazard: AtmosphereHazard,
         /// Surface temperature band.
         temperature: TemperatureBand,
         /// Surface gravity as a fraction of Earth-g.
@@ -1055,7 +1105,8 @@ pub fn apply_system_command(
 
         SystemCommand::SetBodyAttributes {
             body_id,
-            atmosphere,
+            atmosphere_density,
+            atmosphere_hazard,
             temperature,
             gravity_g,
             radiation,
@@ -1076,7 +1127,8 @@ pub fn apply_system_command(
                     subtype: *subtype,
                 });
             }
-            body.atmosphere = *atmosphere;
+            body.atmosphere_density = *atmosphere_density;
+            body.atmosphere_hazard = *atmosphere_hazard;
             body.temperature = *temperature;
             body.gravity_g = *gravity_g;
             body.radiation = *radiation;
@@ -1087,7 +1139,8 @@ pub fn apply_system_command(
             body.moon_count = *moon_count;
             Ok(vec![SystemEvent::BodyAttributesSet {
                 body_id: body_id.clone(),
-                atmosphere: *atmosphere,
+                atmosphere_density: *atmosphere_density,
+                atmosphere_hazard: *atmosphere_hazard,
                 temperature: *temperature,
                 gravity_g: *gravity_g,
                 radiation: *radiation,
@@ -1473,7 +1526,8 @@ mod tests {
     fn body_habitability_earthlike_high() {
         // Breathable + temperate + 1.0 g + low radiation → the maximum score.
         let mut body = Body::new("Earth", BodyKind::InnerPlanet, 1.0);
-        body.atmosphere = Atmosphere::Breathable;
+        body.atmosphere_density = AtmosphereDensity::Breathable;
+        body.atmosphere_hazard = AtmosphereHazard::None;
         body.temperature = TemperatureBand::Temperate;
         body.gravity_g = 1.0;
         body.radiation = RadiationLevel::Low;
@@ -1485,7 +1539,8 @@ mod tests {
     fn body_habitability_toxic_extreme_low() {
         // Toxic + extreme + 0 g + high radiation → the minimum score.
         let mut body = Body::new("Hellworld", BodyKind::InnerPlanet, 0.2);
-        body.atmosphere = Atmosphere::Toxic;
+        body.atmosphere_density = AtmosphereDensity::Dense;
+        body.atmosphere_hazard = AtmosphereHazard::Toxic;
         body.temperature = TemperatureBand::Extreme;
         body.gravity_g = 0.0;
         body.radiation = RadiationLevel::High;
@@ -1504,6 +1559,98 @@ mod tests {
         assert!(body.habitability_modifier() >= 1.0);
     }
 
+    // ── Atmosphere density × hazard formula (issue #197) ─────────────────────
+
+    fn body_with_atmosphere(density: AtmosphereDensity, hazard: AtmosphereHazard) -> Body {
+        let mut body = Body::new("Test", BodyKind::InnerPlanet, 1.0);
+        body.atmosphere_density = density;
+        body.atmosphere_hazard = hazard;
+        // Neutral non-atmosphere attributes so only the atmosphere term varies.
+        body.temperature = TemperatureBand::Temperate;
+        body.gravity_g = 1.0;
+        body.radiation = RadiationLevel::Low;
+        body
+    }
+
+    #[test]
+    fn toxic_hazard_zeroes_atmosphere_contribution_regardless_of_density() {
+        // Matches the old flat `Atmosphere::Toxic => 0.0` behaviour exactly,
+        // no matter which density it's paired with.
+        for density in [
+            AtmosphereDensity::Vacuum,
+            AtmosphereDensity::Thin,
+            AtmosphereDensity::Breathable,
+            AtmosphereDensity::Dense,
+        ] {
+            let body = body_with_atmosphere(density, AtmosphereHazard::Toxic);
+            // temp(30) + grav(20) + rad(20) = 70; atmo must contribute 0.
+            assert_eq!(
+                body.habitability(),
+                70,
+                "density {density:?} + Toxic hazard must contribute 0 atmo points"
+            );
+        }
+    }
+
+    #[test]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn hazard_free_atmosphere_reproduces_old_flat_enum_scores() {
+        // Pre-#197 point values for the states that existed before the split.
+        let cases: [(AtmosphereDensity, f32); 4] = [
+            (AtmosphereDensity::Vacuum, 5.0),
+            (AtmosphereDensity::Thin, 15.0),
+            (AtmosphereDensity::Breathable, 30.0),
+            (AtmosphereDensity::Dense, 10.0),
+        ];
+        for (density, expected_atmo) in cases {
+            let body = body_with_atmosphere(density, AtmosphereHazard::None);
+            // temp(30) + grav(20) + rad(20) = 70 baseline.
+            assert_eq!(
+                body.habitability(),
+                (70.0 + expected_atmo).round() as u8,
+                "density {density:?} + no hazard mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn density_and_hazard_are_independently_representable() {
+        // A Dense+Corrosive world (Venus-like) must score differently from
+        // Dense+None — the exact combination the old flat enum couldn't express.
+        let dense_none = body_with_atmosphere(AtmosphereDensity::Dense, AtmosphereHazard::None);
+        let dense_corrosive =
+            body_with_atmosphere(AtmosphereDensity::Dense, AtmosphereHazard::Corrosive);
+        assert!(dense_none.habitability() > dense_corrosive.habitability());
+
+        // Corrosive hazard applies the same multiplier regardless of density,
+        // so the *ratio* holds across different densities too.
+        let thin_none = body_with_atmosphere(AtmosphereDensity::Thin, AtmosphereHazard::None);
+        let thin_corrosive =
+            body_with_atmosphere(AtmosphereDensity::Thin, AtmosphereHazard::Corrosive);
+        assert!(thin_none.habitability() > thin_corrosive.habitability());
+    }
+
+    #[test]
+    fn oxidizing_combustible_scores_between_corrosive_and_toxic() {
+        let base = AtmosphereDensity::Breathable;
+        let none = body_with_atmosphere(base, AtmosphereHazard::None).habitability();
+        let corrosive = body_with_atmosphere(base, AtmosphereHazard::Corrosive).habitability();
+        let oxidizing =
+            body_with_atmosphere(base, AtmosphereHazard::OxidizingCombustible).habitability();
+        let toxic = body_with_atmosphere(base, AtmosphereHazard::Toxic).habitability();
+        assert!(none > corrosive);
+        assert!(corrosive > oxidizing);
+        assert!(oxidizing > toxic);
+    }
+
+    #[test]
+    fn breathable_density_is_breathable_helper() {
+        assert!(AtmosphereDensity::Breathable.is_breathable());
+        assert!(!AtmosphereDensity::Thin.is_breathable());
+        assert!(!AtmosphereDensity::Dense.is_breathable());
+        assert!(!AtmosphereDensity::Vacuum.is_breathable());
+    }
+
     #[test]
     fn set_body_attributes_overwrites_and_emits_event() {
         let (mut state, inner_id, _) = make_state_with_two_bodies();
@@ -1511,7 +1658,8 @@ mod tests {
             &mut state,
             &SystemCommand::SetBodyAttributes {
                 body_id: inner_id.clone(),
-                atmosphere: Atmosphere::Toxic,
+                atmosphere_density: AtmosphereDensity::Dense,
+                atmosphere_hazard: AtmosphereHazard::Toxic,
                 temperature: TemperatureBand::Extreme,
                 gravity_g: 2.5,
                 radiation: RadiationLevel::High,
@@ -1526,12 +1674,13 @@ mod tests {
         assert!(matches!(
             events[0],
             SystemEvent::BodyAttributesSet {
-                atmosphere: Atmosphere::Toxic,
+                atmosphere_hazard: AtmosphereHazard::Toxic,
                 ..
             }
         ));
         let body = &state.node_map.bodies[&inner_id];
-        assert_eq!(body.atmosphere, Atmosphere::Toxic);
+        assert_eq!(body.atmosphere_density, AtmosphereDensity::Dense);
+        assert_eq!(body.atmosphere_hazard, AtmosphereHazard::Toxic);
         assert_eq!(body.temperature, TemperatureBand::Extreme);
         assert!((body.gravity_g - 2.5).abs() < 1e-6);
         assert_eq!(body.radiation, RadiationLevel::High);
@@ -1549,7 +1698,8 @@ mod tests {
             &mut state,
             &SystemCommand::SetBodyAttributes {
                 body_id: inner_id,
-                atmosphere: Atmosphere::None,
+                atmosphere_density: AtmosphereDensity::Vacuum,
+                atmosphere_hazard: AtmosphereHazard::None,
                 temperature: TemperatureBand::Cold,
                 gravity_g: 2.4,
                 radiation: RadiationLevel::High,

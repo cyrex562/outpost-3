@@ -123,7 +123,10 @@ export interface SystemBody {
   role: string
   distance_au: number
   colonizable: boolean
-  atmosphere: string
+  /** Atmospheric thickness/density band (issue #197). */
+  atmosphere_density: string
+  /** Atmospheric chemical hazard band (issue #197). */
+  atmosphere_hazard: string
   temperature: string
   gravity_g: number
   radiation: string

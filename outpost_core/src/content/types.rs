@@ -269,9 +269,12 @@ pub struct SystemBodyDef {
     pub role: crate::system::SystemRole,
     /// Distance from the primary in AU.
     pub distance_au: f32,
-    /// Atmospheric composition band.
-    #[serde(default = "SystemBodyDef::default_atmosphere")]
-    pub atmosphere: crate::system::Atmosphere,
+    /// Atmospheric thickness/density band (issue #197).
+    #[serde(default = "SystemBodyDef::default_atmosphere_density")]
+    pub atmosphere_density: crate::system::AtmosphereDensity,
+    /// Atmospheric chemical hazard band (issue #197).
+    #[serde(default = "SystemBodyDef::default_atmosphere_hazard")]
+    pub atmosphere_hazard: crate::system::AtmosphereHazard,
     /// Surface temperature band.
     #[serde(default = "SystemBodyDef::default_temperature")]
     pub temperature: crate::system::TemperatureBand,
@@ -309,8 +312,11 @@ impl SystemBodyDef {
     fn default_role() -> crate::system::SystemRole {
         crate::system::SystemRole::Unassigned
     }
-    fn default_atmosphere() -> crate::system::Atmosphere {
-        crate::system::Atmosphere::None
+    fn default_atmosphere_density() -> crate::system::AtmosphereDensity {
+        crate::system::AtmosphereDensity::Vacuum
+    }
+    fn default_atmosphere_hazard() -> crate::system::AtmosphereHazard {
+        crate::system::AtmosphereHazard::None
     }
     fn default_temperature() -> crate::system::TemperatureBand {
         crate::system::TemperatureBand::Temperate
