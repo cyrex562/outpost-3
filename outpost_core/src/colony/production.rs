@@ -41,7 +41,7 @@ impl PowerGrid {
 // ─── Production results ───────────────────────────────────────────────────────
 
 /// A shortfall that limited production for one building this turn.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProductionShortfall {
     /// Human-readable description of what was short.
     pub reason: ShortfallReason,
@@ -51,6 +51,7 @@ pub struct ProductionShortfall {
 
 /// Category of shortfall limiting a building's production.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind")]
 pub enum ShortfallReason {
     /// One or more input commodities were insufficient.
     InputShort {
@@ -75,7 +76,7 @@ pub enum ShortfallReason {
 }
 
 /// Outcome of one building's production attempt this turn.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuildingProductionResult {
     /// Content-pack key of the building type.
     pub building_type: String,

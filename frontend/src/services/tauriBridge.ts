@@ -213,6 +213,52 @@ export interface PlanetMap {
   hexes: PlanetHex[]
 }
 
+export interface IngredientRow {
+  commodity_id: string
+  quantity: number
+}
+
+export interface RecipeRow {
+  recipe_id: string
+  name: string
+  inputs: IngredientRow[]
+  outputs: IngredientRow[]
+  cycle_sols: number
+}
+
+export interface ShortfallRow {
+  kind: 'input_short' | 'power_brownout' | 'labor_short' | 'maintenance_short'
+  commodity_id: string | null
+  effective_scale: number
+}
+
+export interface BuildingRunRow {
+  scale: number
+  is_full_production: boolean
+  shortfalls: ShortfallRow[]
+}
+
+export interface BuildingDetail {
+  building_type: string
+  name: string
+  description: string
+  category: string
+  slot_cost: number
+  power_delta: number
+  maintenance: IngredientRow[]
+  recipe: RecipeRow | null
+  last_run: BuildingRunRow | null
+}
+
+/** Full detail for one building type within a colony (issue #182). */
+export async function getBuildingDetail(colonyId: string, buildingType: string): Promise<BuildingDetail> {
+  const q = await query({ kind: 'building_detail', colony_id: colonyId, building_type: buildingType })
+  if (q.kind !== 'building_detail' || !q.data) {
+    throw new Error(`unexpected query result for building_detail: ${JSON.stringify(q)}`)
+  }
+  return q.data as BuildingDetail
+}
+
 export async function getPlanetMap(): Promise<PlanetMap> {
   return invoke<PlanetMap>('get_planet_map')
 }

@@ -22,6 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'assign-labour', buildingType: string, labour: number): void
+  (e: 'view-details', buildingType: string): void
 }>()
 
 /** Temporary labour values being edited (keyed by building_type). */
@@ -59,7 +60,13 @@ function assignLabour(buildingType: string): void {
         class="building-item"
         :data-testid="`building-row-${b.building_type}`"
       >
-        <span class="building-name">{{ b.building_type }}</span>
+        <button
+          class="building-name building-name-btn"
+          :data-testid="`view-details-${b.building_type}`"
+          @click="emit('view-details', b.building_type)"
+        >
+          {{ b.building_type }}
+        </button>
         <span
           class="building-status"
           :class="`status-${buildingStatus(b)}`"
@@ -118,6 +125,18 @@ function assignLabour(buildingType: string): void {
   flex-wrap: wrap;
 }
 .building-name { flex: 1 0 100px; }
+.building-name-btn {
+  background: none;
+  border: none;
+  color: #aab;
+  font-size: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline dotted;
+}
+.building-name-btn:hover { color: #cdd; }
 .building-meta { color: #668; font-size: 0.72rem; }
 .building-status { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; }
 .status-running { color: #6adba5; }

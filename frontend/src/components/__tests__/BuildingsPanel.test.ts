@@ -88,3 +88,19 @@ describe('BuildingsPanel labour assignment', () => {
     expect(wrapper.find('[data-testid="assign-labour-hydroponic_bay"]').attributes('disabled')).toBeDefined()
   })
 })
+
+describe('BuildingsPanel details HUD trigger (#182)', () => {
+  it('emits view-details with the building type when the name is clicked', async () => {
+    const wrapper = mount(BuildingsPanel, {
+      props: {
+        buildings: [makeRow({ building_type: 'research_lab' })],
+        slotsUsed: 1,
+        slotCapacity: 10,
+        labourAvailable: 9,
+        labourTotal: 10,
+      },
+    })
+    await wrapper.find('[data-testid="view-details-research_lab"]').trigger('click')
+    expect(wrapper.emitted('view-details')?.[0]).toEqual(['research_lab'])
+  })
+})
