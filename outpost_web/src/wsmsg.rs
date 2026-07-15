@@ -72,6 +72,13 @@ pub enum ClientCommand {
         /// Colony-sol turns required to complete.
         construction_turns: u32,
     },
+    /// Cancel a queued construction project and receive a 50% partial refund.
+    CancelConstruction {
+        /// Target colony UUID.
+        colony_id: String,
+        /// UUID of the construction project to cancel.
+        project_id: String,
+    },
     /// Assign labour to a production slot.
     AssignLabour {
         /// Target colony UUID.

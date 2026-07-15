@@ -18,6 +18,7 @@ export type Command =
       construction_turns: number
     }
   | { kind: 'assign_labour'; colony_id: string; slot: string; labour: number }
+  | { kind: 'cancel_construction'; colony_id: string; project_id: string }
   | {
       kind: 'set_directive'
       directive: {

@@ -85,6 +85,11 @@ pub enum ClientCommand {
         slot: String,
         labour: u64,
     },
+    /// Cancel a queued construction project and receive a 50% partial refund.
+    CancelConstruction {
+        colony_id: String,
+        project_id: String,
+    },
     ResearchTech {
         tech_id: String,
     },
@@ -724,6 +729,14 @@ pub fn apply_command(
             colony_id: parse_colony(&colony_id)?,
             slot,
             labour,
+        },
+        ClientCommand::CancelConstruction {
+            colony_id,
+            project_id,
+        } => Command::CancelConstruction {
+            colony_id: parse_colony(&colony_id)?,
+            project_id: Uuid::parse_str(&project_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad project_id: {project_id}")))?,
         },
         ClientCommand::ResearchTech { tech_id } => Command::ResearchTech { tech_id },
         ClientCommand::EnqueueResearch { tech_id } => Command::EnqueueResearch { tech_id },
