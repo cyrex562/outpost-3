@@ -263,7 +263,10 @@ async function finish(): Promise<void> {
       <div v-if="chosenBodyAttributes" class="body-strip" data-testid="body-strip">
         <div class="strip-item">
           <span class="strip-label">Atmosphere</span>
-          <span class="strip-value">{{ chosenBodyAttributes.atmosphere }}</span>
+          <span class="strip-value">
+            {{ chosenBodyAttributes.atmosphere_density
+            }}<template v-if="chosenBodyAttributes.atmosphere_hazard !== 'None'"> · {{ chosenBodyAttributes.atmosphere_hazard }}</template>
+          </span>
         </div>
         <div class="strip-item">
           <span class="strip-label">Temperature</span>

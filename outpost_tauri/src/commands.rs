@@ -660,7 +660,8 @@ fn seed_system_from_content(engine: &mut GameEngine) {
         let Some(id) = body_id else { continue };
         let _ = engine.apply(&Command::System(SystemCommand::SetBodyAttributes {
             body_id: id.clone(),
-            atmosphere: body.atmosphere,
+            atmosphere_density: body.atmosphere_density,
+            atmosphere_hazard: body.atmosphere_hazard,
             temperature: body.temperature,
             gravity_g: body.gravity_g,
             radiation: body.radiation,
@@ -916,7 +917,10 @@ pub struct SystemBodyWire {
     pub role: String,
     pub distance_au: f32,
     pub colonizable: bool,
-    pub atmosphere: String,
+    /// Atmospheric thickness/density band (issue #197).
+    pub atmosphere_density: String,
+    /// Atmospheric chemical hazard band (issue #197).
+    pub atmosphere_hazard: String,
     pub temperature: String,
     pub gravity_g: f32,
     pub radiation: String,
@@ -951,7 +955,8 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
                 b.kind,
                 BodyKind::InnerPlanet | BodyKind::Moon | BodyKind::AsteroidBelt
             ),
-            atmosphere: format!("{:?}", b.atmosphere),
+            atmosphere_density: format!("{:?}", b.atmosphere_density),
+            atmosphere_hazard: format!("{:?}", b.atmosphere_hazard),
             temperature: format!("{:?}", b.temperature),
             gravity_g: b.gravity_g,
             radiation: format!("{:?}", b.radiation),

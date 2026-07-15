@@ -3856,7 +3856,8 @@ mod tests {
         engine
             .apply(&Command::System(system::SystemCommand::SetBodyAttributes {
                 body_id: body_id.clone(),
-                atmosphere: system::Atmosphere::Toxic,
+                atmosphere_density: system::AtmosphereDensity::Dense,
+                atmosphere_hazard: system::AtmosphereHazard::Toxic,
                 temperature: system::TemperatureBand::Extreme,
                 gravity_g: 0.0,
                 radiation: system::RadiationLevel::High,
@@ -6454,7 +6455,8 @@ mod tests {
     /// planet map and add a body with the given attributes. Returns
     /// `(engine, site_id, body_id)` for a `FoundColonyAtSite` call.
     fn setup_engine_with_body_and_site(
-        atmosphere: system::Atmosphere,
+        atmosphere_density: system::AtmosphereDensity,
+        atmosphere_hazard: system::AtmosphereHazard,
         temperature: system::TemperatureBand,
         gravity_g: f32,
         radiation: system::RadiationLevel,
@@ -6492,7 +6494,8 @@ mod tests {
         engine
             .apply(&Command::System(system::SystemCommand::SetBodyAttributes {
                 body_id: body_id.clone(),
-                atmosphere,
+                atmosphere_density,
+                atmosphere_hazard,
                 temperature,
                 gravity_g,
                 radiation,
@@ -6510,7 +6513,8 @@ mod tests {
     #[test]
     fn found_colony_at_site_rejects_low_habitability_body() {
         let (mut engine, site_id, body_id) = setup_engine_with_body_and_site(
-            system::Atmosphere::Toxic,
+            system::AtmosphereDensity::Dense,
+            system::AtmosphereHazard::Toxic,
             system::TemperatureBand::Extreme,
             0.0,
             system::RadiationLevel::High,
@@ -6550,7 +6554,8 @@ mod tests {
     #[test]
     fn found_colony_at_site_allows_habitable_body_and_auto_links_it() {
         let (mut engine, site_id, body_id) = setup_engine_with_body_and_site(
-            system::Atmosphere::Breathable,
+            system::AtmosphereDensity::Breathable,
+            system::AtmosphereHazard::None,
             system::TemperatureBand::Temperate,
             1.0,
             system::RadiationLevel::Low,
@@ -6587,7 +6592,8 @@ mod tests {
     #[test]
     fn found_colony_at_site_allows_low_habitability_with_capability_unlocked() {
         let (mut engine, site_id, body_id) = setup_engine_with_body_and_site(
-            system::Atmosphere::Toxic,
+            system::AtmosphereDensity::Dense,
+            system::AtmosphereHazard::Toxic,
             system::TemperatureBand::Extreme,
             0.0,
             system::RadiationLevel::High,
@@ -6615,7 +6621,8 @@ mod tests {
     #[test]
     fn found_colony_at_site_rejects_unknown_body_id() {
         let (mut engine, site_id, _) = setup_engine_with_body_and_site(
-            system::Atmosphere::Breathable,
+            system::AtmosphereDensity::Breathable,
+            system::AtmosphereHazard::None,
             system::TemperatureBand::Temperate,
             1.0,
             system::RadiationLevel::Low,
@@ -6639,7 +6646,8 @@ mod tests {
         // body_id: None must behave exactly as it did before #183 — no gate,
         // no auto-link, no ColonyHomeBodySet event.
         let (mut engine, site_id, _) = setup_engine_with_body_and_site(
-            system::Atmosphere::Toxic,
+            system::AtmosphereDensity::Dense,
+            system::AtmosphereHazard::Toxic,
             system::TemperatureBand::Extreme,
             0.0,
             system::RadiationLevel::High,

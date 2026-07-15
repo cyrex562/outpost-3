@@ -5,13 +5,22 @@
 # 1:1 (name / kind / role / distance_au / attributes). `role` is optional; the
 # parser falls back to `unassigned`.
 #
-# Environmental attributes (atmosphere, temperature, gravity_g, radiation) are
-# used by `outpost_core::system::Body::habitability()` to derive a 0–100 rating
-# and a productivity modifier applied to colony output. See issue #163.
+# Environmental attributes (atmosphere_density, atmosphere_hazard, temperature,
+# gravity_g, radiation) are used by `outpost_core::system::Body::habitability()`
+# to derive a 0–100 rating and a productivity modifier applied to colony
+# output. See issue #163.
+#
+# `atmosphere_density` × `atmosphere_hazard` (issue #197) are two independent
+# axes — a body can be e.g. dense AND corrosive (a Venus-like world), which a
+# single flat "atmosphere" value couldn't express. Habitability's atmosphere
+# contribution is `density_points × hazard_multiplier`; `toxic` hazard always
+# zeroes it out regardless of density.
+#
 # Enums use snake_case tags:
-#   atmosphere:  none | thin | breathable | dense | toxic
-#   temperature: frozen | cold | temperate | hot | extreme
-#   radiation:   low | moderate | high
+#   atmosphere_density: vacuum | thin | breathable | dense
+#   atmosphere_hazard:  none | corrosive | toxic | oxidizing_combustible
+#   temperature:        frozen | cold | temperate | hot | extreme
+#   radiation:          low | moderate | high
 #
 # `subtype` (issue #196) is content-authoring guidance layered on top of the
 # above — it never changes habitability() itself, but it does bias which
@@ -42,7 +51,10 @@
       kind: inner_planet
       role: raw_extraction
       distance_au: 0.4
-      atmosphere: thin
+      atmosphere_density: thin
+      # Volcanic outgassing on a hot barren world — flavor coverage for the
+      # oxidizing_combustible hazard (issue #197).
+      atmosphere_hazard: oxidizing_combustible
       temperature: hot
       gravity_g: 0.62
       radiation: high
@@ -51,7 +63,8 @@
       kind: inner_planet
       role: population_hub
       distance_au: 0.7
-      atmosphere: breathable
+      atmosphere_density: breathable
+      atmosphere_hazard: none
       temperature: temperate
       gravity_g: 0.98
       radiation: low
@@ -60,7 +73,8 @@
       kind: inner_planet
       role: science
       distance_au: 1.1
-      atmosphere: thin
+      atmosphere_density: thin
+      atmosphere_hazard: none
       temperature: cold
       gravity_g: 0.85
       radiation: moderate
@@ -70,7 +84,8 @@
       kind: asteroid_belt
       role: raw_extraction
       distance_au: 2.4
-      atmosphere: none
+      atmosphere_density: vacuum
+      atmosphere_hazard: none
       temperature: frozen
       gravity_g: 0.05
       radiation: moderate
@@ -79,7 +94,10 @@
       kind: gas_giant
       role: fuel_production
       distance_au: 4.2
-      atmosphere: dense
+      atmosphere_density: dense
+      # Classic gas-giant flavor: ammonia/sulfur-compound clouds — coverage
+      # for the corrosive hazard (issue #197).
+      atmosphere_hazard: corrosive
       temperature: cold
       gravity_g: 2.4
       radiation: high
@@ -89,7 +107,8 @@
       kind: moon
       role: industry
       distance_au: 4.35
-      atmosphere: none
+      atmosphere_density: vacuum
+      atmosphere_hazard: none
       temperature: cold
       gravity_g: 0.18
       radiation: high
@@ -99,7 +118,8 @@
     - name: Selkin
       kind: inner_planet
       distance_au: 6.8
-      atmosphere: toxic
+      atmosphere_density: dense
+      atmosphere_hazard: toxic
       temperature: frozen
       gravity_g: 1.3
       radiation: moderate
@@ -116,7 +136,8 @@
       kind: inner_planet
       role: raw_extraction
       distance_au: 0.11
-      atmosphere: thin
+      atmosphere_density: thin
+      atmosphere_hazard: none
       temperature: hot
       gravity_g: 0.55
       radiation: high
@@ -126,7 +147,8 @@
       kind: inner_planet
       role: population_hub
       distance_au: 0.15
-      atmosphere: breathable
+      atmosphere_density: breathable
+      atmosphere_hazard: none
       temperature: temperate
       gravity_g: 0.95
       radiation: moderate
@@ -136,7 +158,8 @@
       kind: inner_planet
       role: science
       distance_au: 0.21
-      atmosphere: thin
+      atmosphere_density: thin
+      atmosphere_hazard: none
       temperature: temperate
       gravity_g: 0.9
       radiation: moderate
@@ -148,7 +171,8 @@
       kind: inner_planet
       role: industry
       distance_au: 0.28
-      atmosphere: dense
+      atmosphere_density: dense
+      atmosphere_hazard: none
       temperature: cold
       gravity_g: 1.15
       radiation: moderate
@@ -157,7 +181,8 @@
     - name: T-1e
       kind: inner_planet
       distance_au: 0.38
-      atmosphere: none
+      atmosphere_density: vacuum
+      atmosphere_hazard: none
       temperature: cold
       gravity_g: 0.72
       radiation: high
@@ -166,7 +191,8 @@
     - name: T-1f
       kind: inner_planet
       distance_au: 0.52
-      atmosphere: toxic
+      atmosphere_density: thin
+      atmosphere_hazard: toxic
       temperature: frozen
       gravity_g: 0.88
       radiation: high
@@ -175,7 +201,8 @@
     - name: T-1g
       kind: inner_planet
       distance_au: 0.71
-      atmosphere: none
+      atmosphere_density: vacuum
+      atmosphere_hazard: none
       temperature: frozen
       gravity_g: 0.6
       radiation: high
@@ -185,7 +212,8 @@
       kind: asteroid_belt
       role: raw_extraction
       distance_au: 1.9
-      atmosphere: none
+      atmosphere_density: vacuum
+      atmosphere_hazard: none
       temperature: frozen
       gravity_g: 0.04
       radiation: moderate
