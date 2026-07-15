@@ -13,6 +13,22 @@
 #   temperature: frozen | cold | temperate | hot | extreme
 #   radiation:   low | moderate | high
 #
+# `subtype` (issue #196) is content-authoring guidance layered on top of the
+# above — it never changes habitability() itself, but it does bias which
+# commodities spawn as hex-map deposits (see PlanetMap::generate_for_body_and_subtype
+# in outpost_core::map) and should be chosen consistent with the authored
+# attributes above it (e.g. `molten` pairs with hot/toxic/dense/high-radiation).
+# Valid subtype tags, and which `kind` each is valid on:
+#   rocky_barren_hot | rocky_barren_cold | molten | earth_like | ocean  → inner_planet only
+#   rocky | icy                                                        → inner_planet, moon, asteroid_belt
+#   gas_giant | ice_giant                                              → gas_giant only
+#   unclassified (default)                                             → any kind
+#
+# `tidally_locked` / `axial_tilt_deg` / `rotation_period_hours` / `moon_count`
+# / `parent_body` (issue #196) are flavor-only for now — no mechanical effect.
+# `parent_body` names another body's `name` in the same system (a `moon` of a
+# `moon`, not just of a planet/giant, is representable this way).
+#
 # Bootstrap picks the first authored system when no explicit id is passed —
 # selection UI can be layered on later without changing the schema.
 
@@ -30,6 +46,7 @@
       temperature: hot
       gravity_g: 0.62
       radiation: high
+      subtype: rocky_barren_hot
     - name: Kepler-B
       kind: inner_planet
       role: population_hub
@@ -38,6 +55,7 @@
       temperature: temperate
       gravity_g: 0.98
       radiation: low
+      subtype: earth_like
     - name: Kepler-C
       kind: inner_planet
       role: science
@@ -46,6 +64,8 @@
       temperature: cold
       gravity_g: 0.85
       radiation: moderate
+      subtype: rocky_barren_cold
+      axial_tilt_deg: 41.0
     - name: Ceres Belt
       kind: asteroid_belt
       role: raw_extraction
@@ -54,6 +74,7 @@
       temperature: frozen
       gravity_g: 0.05
       radiation: moderate
+      subtype: icy
     - name: Aurelian
       kind: gas_giant
       role: fuel_production
@@ -62,6 +83,8 @@
       temperature: cold
       gravity_g: 2.4
       radiation: high
+      subtype: ice_giant
+      moon_count: 1
     - name: Aurelian-Moon
       kind: moon
       role: industry
@@ -70,6 +93,9 @@
       temperature: cold
       gravity_g: 0.18
       radiation: high
+      subtype: icy
+      parent_body: Aurelian
+      tidally_locked: true
     - name: Selkin
       kind: inner_planet
       distance_au: 6.8
@@ -77,6 +103,8 @@
       temperature: frozen
       gravity_g: 1.3
       radiation: moderate
+      subtype: icy
+      rotation_period_hours: 960.0
 
 - id: trappist-1
   name: Trappist-1
@@ -92,6 +120,8 @@
       temperature: hot
       gravity_g: 0.55
       radiation: high
+      subtype: rocky_barren_hot
+      tidally_locked: true
     - name: T-1b
       kind: inner_planet
       role: population_hub
@@ -100,6 +130,8 @@
       temperature: temperate
       gravity_g: 0.95
       radiation: moderate
+      subtype: earth_like
+      tidally_locked: true
     - name: T-1c
       kind: inner_planet
       role: science
@@ -108,6 +140,10 @@
       temperature: temperate
       gravity_g: 0.9
       radiation: moderate
+      # Judgment call: thin (not breathable) atmosphere disqualifies this
+      # from earth_like despite the temperate band — see issue #196.
+      subtype: rocky_barren_cold
+      tidally_locked: true
     - name: T-1d
       kind: inner_planet
       role: industry
@@ -116,6 +152,8 @@
       temperature: cold
       gravity_g: 1.15
       radiation: moderate
+      subtype: rocky_barren_cold
+      tidally_locked: true
     - name: T-1e
       kind: inner_planet
       distance_au: 0.38
@@ -123,6 +161,8 @@
       temperature: cold
       gravity_g: 0.72
       radiation: high
+      subtype: rocky
+      tidally_locked: true
     - name: T-1f
       kind: inner_planet
       distance_au: 0.52
@@ -130,6 +170,8 @@
       temperature: frozen
       gravity_g: 0.88
       radiation: high
+      subtype: icy
+      tidally_locked: true
     - name: T-1g
       kind: inner_planet
       distance_au: 0.71
@@ -137,6 +179,8 @@
       temperature: frozen
       gravity_g: 0.6
       radiation: high
+      subtype: icy
+      tidally_locked: true
     - name: Outer Ring
       kind: asteroid_belt
       role: raw_extraction
@@ -145,3 +189,4 @@
       temperature: frozen
       gravity_g: 0.04
       radiation: moderate
+      subtype: icy

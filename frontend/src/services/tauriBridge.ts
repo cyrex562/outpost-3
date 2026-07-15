@@ -129,6 +129,14 @@ export interface SystemBody {
   radiation: string
   habitability: number
   habitability_modifier: number
+  /** Surface/composition archetype (issue #196) — flavor/authoring guidance, not a habitability input. */
+  subtype: string
+  tidally_locked: boolean
+  axial_tilt_deg: number
+  rotation_period_hours: number
+  moon_count: number
+  /** Display name of the body this one orbits, if any. */
+  parent_body_name: string | null
 }
 
 export async function getSystemBodies(): Promise<SystemBody[]> {

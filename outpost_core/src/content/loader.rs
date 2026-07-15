@@ -83,6 +83,35 @@ impl PackLoader {
             }
         }
 
+        // Issue #196: each body's subtype must be valid for its kind, and
+        // any authored `parent_body` must name another body in the same
+        // system (self-references rejected too — a body can't orbit itself).
+        for system in star_systems.values() {
+            let body_names: std::collections::HashSet<&str> =
+                system.bodies.iter().map(|b| b.name.as_str()).collect();
+            for body in &system.bodies {
+                if !body.subtype.compatible_with(&body.kind) {
+                    return Err(ContentError::IncompatiblePlanetarySubtype {
+                        file: "systems.yaml".to_string(),
+                        system_id: system.id.clone(),
+                        body_name: body.name.clone(),
+                        kind: body.kind.clone(),
+                        subtype: body.subtype,
+                    });
+                }
+                if let Some(parent_name) = &body.parent_body {
+                    if parent_name == &body.name || !body_names.contains(parent_name.as_str()) {
+                        return Err(ContentError::UnknownParentBodyRef {
+                            file: "systems.yaml".to_string(),
+                            system_id: system.id.clone(),
+                            body_name: body.name.clone(),
+                            parent_name: parent_name.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
         Ok(ContentRegistry {
             manifest,
             commodities,
@@ -204,7 +233,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::{BodyKind, SystemRole};
+    use crate::system::{BodyKind, PlanetarySubtype, SystemRole};
 
     fn minimal_pack_files(extra: &[(&str, &str)]) -> Vec<(String, String)> {
         let pack = "id: t\nname: T\nversion: '0.1.0'\n".to_string();
@@ -274,5 +303,124 @@ mod tests {
             .collect();
         let registry = PackLoader::load(&raw).expect("pack must parse without systems.yaml");
         assert_eq!(registry.star_systems().count(), 0);
+    }
+
+    // ── Planetary subtype + parent-body validation (issue #196) ──────────────
+
+    #[test]
+    fn systems_yaml_parses_subtype_and_parent_body() {
+        let systems = "\
+- id: kepler-186
+  name: Kepler-186
+  bodies:
+    - name: Aurelian
+      kind: gas_giant
+      distance_au: 4.2
+      subtype: ice_giant
+    - name: Aurelian-Moon
+      kind: moon
+      distance_au: 4.35
+      subtype: icy
+      parent_body: Aurelian
+      tidally_locked: true
+      moon_count: 0
+";
+        let owned = minimal_pack_files(&[("systems.yaml", systems)]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let registry = PackLoader::load(&raw).expect("systems must parse");
+        let kepler = registry.star_system("kepler-186").expect("kepler present");
+        assert_eq!(kepler.bodies[0].subtype, PlanetarySubtype::IceGiant);
+        assert_eq!(kepler.bodies[1].subtype, PlanetarySubtype::Icy);
+        assert_eq!(kepler.bodies[1].parent_body.as_deref(), Some("Aurelian"));
+        assert!(kepler.bodies[1].tidally_locked);
+    }
+
+    #[test]
+    fn systems_yaml_defaults_subtype_to_unclassified() {
+        let systems = "\
+- id: kepler-186
+  name: Kepler-186
+  bodies:
+    - name: Kepler-A
+      kind: inner_planet
+      distance_au: 0.4
+";
+        let owned = minimal_pack_files(&[("systems.yaml", systems)]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let registry = PackLoader::load(&raw).expect("systems must parse");
+        let kepler = registry.star_system("kepler-186").expect("kepler present");
+        assert_eq!(kepler.bodies[0].subtype, PlanetarySubtype::Unclassified);
+        assert_eq!(kepler.bodies[0].parent_body, None);
+    }
+
+    #[test]
+    fn incompatible_subtype_is_rejected() {
+        let systems = "\
+- id: kepler-186
+  name: Kepler-186
+  bodies:
+    - name: Kepler-A
+      kind: inner_planet
+      distance_au: 0.4
+      subtype: ice_giant
+";
+        let owned = minimal_pack_files(&[("systems.yaml", systems)]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let err =
+            PackLoader::load(&raw).expect_err("ice_giant on an inner_planet must be rejected");
+        assert!(matches!(
+            err,
+            ContentError::IncompatiblePlanetarySubtype { .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_parent_body_ref_is_rejected() {
+        let systems = "\
+- id: kepler-186
+  name: Kepler-186
+  bodies:
+    - name: Aurelian-Moon
+      kind: moon
+      distance_au: 4.35
+      parent_body: Nonexistent
+";
+        let owned = minimal_pack_files(&[("systems.yaml", systems)]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let err = PackLoader::load(&raw).expect_err("dangling parent_body must be rejected");
+        assert!(matches!(err, ContentError::UnknownParentBodyRef { .. }));
+    }
+
+    #[test]
+    fn self_referencing_parent_body_is_rejected() {
+        let systems = "\
+- id: kepler-186
+  name: Kepler-186
+  bodies:
+    - name: Aurelian
+      kind: gas_giant
+      distance_au: 4.2
+      parent_body: Aurelian
+";
+        let owned = minimal_pack_files(&[("systems.yaml", systems)]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let err =
+            PackLoader::load(&raw).expect_err("self-referencing parent_body must be rejected");
+        assert!(matches!(err, ContentError::UnknownParentBodyRef { .. }));
     }
 }

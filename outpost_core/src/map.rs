@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::colony::ColonyId;
-use crate::system::TemperatureBand;
+use crate::system::{PlanetarySubtype, TemperatureBand};
 use crate::trade::SiteId;
 
 /// Root-3, memoised for hex-to-cartesian conversion.
@@ -317,6 +317,24 @@ impl PlanetMap {
     /// Generate a planet map deterministically from `seed`, `radius`, and the
     /// parent body's `TemperatureBand`.
     ///
+    /// Thin wrapper around [`Self::generate_for_body_and_subtype`] with
+    /// [`PlanetarySubtype::Unclassified`] — identical output to a body whose
+    /// subtype hasn't been authored, and (by construction) identical to
+    /// [`PlanetarySubtype::EarthLike`] too, since neither biases deposit
+    /// generation (issue #196).
+    #[must_use]
+    pub fn generate_for_body(seed: u64, radius: u32, body_temperature: TemperatureBand) -> Self {
+        Self::generate_for_body_and_subtype(
+            seed,
+            radius,
+            body_temperature,
+            PlanetarySubtype::Unclassified,
+        )
+    }
+
+    /// Generate a planet map deterministically from `seed`, `radius`, the
+    /// parent body's `TemperatureBand`, and its [`PlanetarySubtype`].
+    ///
     /// Per-cell temperature is derived from the body band, per-cell latitude
     /// (relative to a seed-oriented equator line through the origin), and
     /// elevation. Higher latitudes and elevations shift the cell colder.
@@ -326,11 +344,18 @@ impl PlanetMap {
     /// Deposits are generated in two passes (issue #188): elevation is
     /// computed for every cell first, then a handful of per-commodity "vein
     /// centres" are placed (biased toward each commodity's preferred
-    /// elevation band), and finally each cell's deposit roll is biased by
-    /// proximity to the nearest vein — producing coherent ore fields instead
-    /// of independent per-cell noise.
+    /// elevation band and, per `planetary_subtype`, toward commodities that
+    /// archetype favours — see [`subtype_commodity_multiplier`]), and
+    /// finally each cell's deposit roll is biased by proximity to the
+    /// nearest vein — producing coherent ore fields instead of independent
+    /// per-cell noise.
     #[must_use]
-    pub fn generate_for_body(seed: u64, radius: u32, body_temperature: TemperatureBand) -> Self {
+    pub fn generate_for_body_and_subtype(
+        seed: u64,
+        radius: u32,
+        body_temperature: TemperatureBand,
+        planetary_subtype: PlanetarySubtype,
+    ) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let coords = HexCoord::origin().within_radius(radius);
         let mut cells = HashMap::with_capacity(coords.len());
@@ -346,7 +371,7 @@ impl PlanetMap {
 
         // Vein centres, keyed by commodity, placed after elevation is known
         // so elevation-band bias (e.g. iron on ridges) can steer placement.
-        let veins = place_veins(&mut rng, &coords, &elevations, radius);
+        let veins = place_veins(&mut rng, &coords, &elevations, radius, planetary_subtype);
 
         // Pass 2: terrain, biome, temperature, and deposits.
         for coord in &coords {
@@ -960,23 +985,78 @@ fn commodity_elevation_bias(commodity: &str) -> Option<f32> {
     }
 }
 
+/// Per-commodity vein-count multiplier for a body's [`PlanetarySubtype`]
+/// (issue #196), applied on top of [`vein_count_for_radius`].
+///
+/// `Unclassified` and `EarthLike` both return `1.0` for every commodity —
+/// deliberately, so a body with no subtype or an explicitly Earth-like one
+/// reproduces the #188 baseline exactly (see
+/// [`PlanetMap::generate_for_body`]'s doc comment). Every other subtype
+/// pushes some commodities up and others down; a multiplier can drive a
+/// commodity's vein count to zero, which is intended — e.g. no organics
+/// veins on a molten world.
+#[must_use]
+fn subtype_commodity_multiplier(subtype: PlanetarySubtype, commodity: &str) -> f32 {
+    match subtype {
+        PlanetarySubtype::Unclassified | PlanetarySubtype::EarthLike => 1.0,
+        PlanetarySubtype::Ocean => match commodity {
+            "water" | "water_ice" | "organics" => 2.0,
+            "iron" | "sulfur" | "geothermal_energy" => 0.5,
+            _ => 1.0,
+        },
+        PlanetarySubtype::Molten => match commodity {
+            "sulfur" | "rare_metals" | "geothermal_energy" => 2.0,
+            "water" | "water_ice" | "organics" => 0.0,
+            _ => 1.0,
+        },
+        PlanetarySubtype::Icy | PlanetarySubtype::IceGiant => match commodity {
+            "water_ice" | "methane" => 2.0,
+            "organics" | "sulfur" => 0.5,
+            _ => 1.0,
+        },
+        PlanetarySubtype::RockyBarrenHot
+        | PlanetarySubtype::RockyBarrenCold
+        | PlanetarySubtype::Rocky => match commodity {
+            "iron" | "silicates" | "rare_metals" => 1.6,
+            "water" | "organics" => 0.4,
+            _ => 1.0,
+        },
+        PlanetarySubtype::GasGiant => match commodity {
+            "methane" | "geothermal_energy" => 1.8,
+            _ => 1.0,
+        },
+    }
+}
+
 /// Place vein centres for every commodity in [`VEIN_COMMODITIES`].
 ///
 /// For commodities with an elevation preference, candidates are restricted
 /// to the half of `coords` closest to that preference before a centre is
 /// drawn, so e.g. iron veins land preferentially on ridges. Selection order
 /// (commodity list order, then draw order within a commodity) is fixed so
-/// the result is deterministic for a given `seed` + `radius`.
+/// the result is deterministic for a given `seed` + `radius` + `subtype`.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 fn place_veins(
     rng: &mut ChaCha8Rng,
     coords: &[HexCoord],
     elevations: &HashMap<HexCoord, f32>,
     radius: u32,
+    subtype: PlanetarySubtype,
 ) -> Vec<Vein> {
-    let count = vein_count_for_radius(radius);
-    let mut veins = Vec::with_capacity(count * VEIN_COMMODITIES.len());
+    let base_count = vein_count_for_radius(radius);
+    let mut veins = Vec::with_capacity(base_count * VEIN_COMMODITIES.len());
 
     for commodity in VEIN_COMMODITIES {
+        let multiplier = subtype_commodity_multiplier(subtype, commodity);
+        let count = ((base_count as f32) * multiplier).round() as usize;
+        if count == 0 {
+            continue;
+        }
+
         let mut pool: Vec<HexCoord> = coords.to_vec();
         if let Some(target) = commodity_elevation_bias(commodity) {
             pool.sort_by(|a, b| {
@@ -1829,6 +1909,131 @@ mod tests {
             "temperate={} extreme+deposit={}",
             plain_temperate.suitability(),
             rich_extreme.suitability()
+        );
+    }
+
+    // ── Planetary-subtype deposit bias (issue #196) ──────────────────────────
+
+    fn water_family_deposit_count(map: &PlanetMap) -> usize {
+        map.cells
+            .values()
+            .flat_map(|c| &c.deposits)
+            .filter(|d| matches!(d.commodity_id.as_str(), "water" | "water_ice"))
+            .count()
+    }
+
+    #[test]
+    fn earth_like_reproduces_unclassified_baseline_exactly() {
+        // Both map to a 1.0 multiplier for every commodity, so #196 must not
+        // change the map at all relative to a body with no subtype authored.
+        for seed in 0..5u64 {
+            let unclassified = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                10,
+                TemperatureBand::Temperate,
+                PlanetarySubtype::Unclassified,
+            );
+            let earth_like = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                10,
+                TemperatureBand::Temperate,
+                PlanetarySubtype::EarthLike,
+            );
+            assert_eq!(
+                unclassified.cells, earth_like.cells,
+                "seed {seed}: EarthLike must match Unclassified exactly"
+            );
+        }
+    }
+
+    #[test]
+    fn generate_for_body_matches_unclassified_subtype() {
+        // The pre-#196 entry point must still produce exactly what it did
+        // before — i.e. the same as explicitly requesting Unclassified.
+        for seed in 0..5u64 {
+            let via_old_api = PlanetMap::generate_for_body(seed, 10, TemperatureBand::Cold);
+            let via_new_api = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                10,
+                TemperatureBand::Cold,
+                PlanetarySubtype::Unclassified,
+            );
+            assert_eq!(via_old_api.cells, via_new_api.cells);
+        }
+    }
+
+    #[test]
+    fn ocean_subtype_yields_more_water_family_deposits_than_earth_like() {
+        let radius = 12;
+        let mut ocean_total = 0usize;
+        let mut earth_like_total = 0usize;
+        for seed in 0..10u64 {
+            let ocean = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                radius,
+                TemperatureBand::Temperate,
+                PlanetarySubtype::Ocean,
+            );
+            let earth_like = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                radius,
+                TemperatureBand::Temperate,
+                PlanetarySubtype::EarthLike,
+            );
+            ocean_total += water_family_deposit_count(&ocean);
+            earth_like_total += water_family_deposit_count(&earth_like);
+        }
+        assert!(
+            ocean_total > earth_like_total,
+            "ocean_total={ocean_total} should exceed earth_like_total={earth_like_total} across seeds 0-9"
+        );
+    }
+
+    #[test]
+    fn molten_subtype_produces_no_water_family_veins() {
+        // subtype_commodity_multiplier maps Molten's water/water_ice/organics
+        // to a 0.0 multiplier — no veins of those commodities should be
+        // placed, though the rare flat-rate "second deposit" background roll
+        // can still occasionally drop one via `pick_deposit_commodity`, so
+        // this asserts a low bound rather than exactly zero.
+        let radius = 12;
+        let mut molten_total = 0usize;
+        let mut earth_like_total = 0usize;
+        for seed in 0..10u64 {
+            let molten = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                radius,
+                TemperatureBand::Hot,
+                PlanetarySubtype::Molten,
+            );
+            let earth_like = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                radius,
+                TemperatureBand::Hot,
+                PlanetarySubtype::EarthLike,
+            );
+            molten_total += water_family_deposit_count(&molten);
+            earth_like_total += water_family_deposit_count(&earth_like);
+        }
+        assert!(
+            molten_total < earth_like_total,
+            "molten_total={molten_total} should be well below earth_like_total={earth_like_total} across seeds 0-9"
+        );
+    }
+
+    #[test]
+    fn subtype_aware_generation_stays_within_performance_budget() {
+        let start = std::time::Instant::now();
+        let _map = PlanetMap::generate_for_body_and_subtype(
+            1,
+            12,
+            TemperatureBand::Cold,
+            PlanetarySubtype::IceGiant,
+        );
+        assert!(
+            start.elapsed().as_millis() < 100,
+            "subtype-aware generation at radius 12 took {:?}, expected well under 100ms",
+            start.elapsed()
         );
     }
 }

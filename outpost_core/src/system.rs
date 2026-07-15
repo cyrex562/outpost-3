@@ -130,6 +130,86 @@ fn default_radiation() -> RadiationLevel {
     RadiationLevel::Low
 }
 
+/// Surface/composition archetype for a body, orthogonal to [`BodyKind`]
+/// (issue #196).
+///
+/// `BodyKind` says what a body broadly *is* (an inner planet, a gas giant,
+/// a moon, ...); `PlanetarySubtype` says what it's *made of* — content
+/// authoring guidance rather than a habitability input (see
+/// [`Body::habitability`], which is unchanged by this field). Not every
+/// variant is valid on every `BodyKind`; see [`PlanetarySubtype::compatible_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanetarySubtype {
+    /// No archetype authored yet — the neutral default. Never biases
+    /// downstream systems (e.g. [`crate::map::PlanetMap`] deposit
+    /// generation) any differently than [`PlanetarySubtype::EarthLike`].
+    Unclassified,
+    /// Rocky and airless-to-thin, baked by proximity to the primary.
+    RockyBarrenHot,
+    /// Rocky and airless-to-thin, chilled by distance from the primary.
+    RockyBarrenCold,
+    /// Active volcanism; typically hot, toxic, and dense-atmosphered.
+    Molten,
+    /// Breathable, temperate, broadly Earth-comparable.
+    EarthLike,
+    /// Water-dominant surface.
+    Ocean,
+    /// Bare rock, no strong thermal extreme — valid on inner planets,
+    /// moons, and asteroid-belt aggregates alike.
+    Rocky,
+    /// Ice-dominant composition — valid on inner planets, moons, and
+    /// asteroid-belt aggregates alike.
+    Icy,
+    /// A hydrogen/helium-dominated giant. Only valid on [`BodyKind::GasGiant`].
+    GasGiant,
+    /// A volatile-ice-dominated giant (methane/ammonia/water ice). Only
+    /// valid on [`BodyKind::GasGiant`].
+    IceGiant,
+}
+
+impl PlanetarySubtype {
+    /// Whether this subtype is a sensible archetype for a body of the
+    /// given `kind`. `Unclassified` is always compatible; `OrbitalStation`
+    /// (not a natural body) accepts only `Unclassified`.
+    #[must_use]
+    pub fn compatible_with(self, kind: &BodyKind) -> bool {
+        match self {
+            Self::Unclassified => true,
+            Self::RockyBarrenHot
+            | Self::RockyBarrenCold
+            | Self::Molten
+            | Self::EarthLike
+            | Self::Ocean => {
+                matches!(kind, BodyKind::InnerPlanet)
+            }
+            Self::Rocky | Self::Icy => {
+                matches!(
+                    kind,
+                    BodyKind::InnerPlanet | BodyKind::Moon | BodyKind::AsteroidBelt
+                )
+            }
+            Self::GasGiant | Self::IceGiant => matches!(kind, BodyKind::GasGiant),
+        }
+    }
+}
+
+fn default_subtype() -> PlanetarySubtype {
+    PlanetarySubtype::Unclassified
+}
+fn default_tidally_locked() -> bool {
+    false
+}
+fn default_axial_tilt_deg() -> f32 {
+    23.5
+}
+fn default_rotation_period_hours() -> f32 {
+    24.0
+}
+fn default_moon_count() -> u32 {
+    0
+}
+
 /// A celestial body in the system node map.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Body {
@@ -155,6 +235,32 @@ pub struct Body {
     /// Ambient radiation exposure level.
     #[serde(default = "default_radiation")]
     pub radiation: RadiationLevel,
+    /// Surface/composition archetype (issue #196). Content-authoring
+    /// guidance — never an input to [`Body::habitability`].
+    #[serde(default = "default_subtype")]
+    pub subtype: PlanetarySubtype,
+    /// Whether the body's rotation is locked to its orbital period (one
+    /// hemisphere permanently faces the primary). Flavor-only for now — no
+    /// habitability or production effect (issue #196).
+    #[serde(default = "default_tidally_locked")]
+    pub tidally_locked: bool,
+    /// Axial tilt in degrees. Flavor-only for now.
+    #[serde(default = "default_axial_tilt_deg")]
+    pub axial_tilt_deg: f32,
+    /// Rotation period in hours. Flavor-only for now; meaningless when
+    /// `tidally_locked` is `true` (rotation period equals orbital period).
+    #[serde(default = "default_rotation_period_hours")]
+    pub rotation_period_hours: f32,
+    /// Number of natural satellites orbiting this body. Flavor stat,
+    /// distinct from `parent_body` below (which records what *this* body
+    /// orbits, not what orbits it).
+    #[serde(default = "default_moon_count")]
+    pub moon_count: u32,
+    /// The body this one orbits, if any. Lets a `Moon`-kind body's parent
+    /// itself be a `Moon` (moon-of-a-moon) rather than only ever a planet
+    /// or giant — issue #196's "planet itself is a moon of another body".
+    #[serde(default)]
+    pub parent_body: Option<BodyId>,
 }
 
 impl Body {
@@ -171,6 +277,12 @@ impl Body {
             temperature: default_temperature(),
             gravity_g: default_gravity_g(),
             radiation: default_radiation(),
+            subtype: default_subtype(),
+            tidally_locked: default_tidally_locked(),
+            axial_tilt_deg: default_axial_tilt_deg(),
+            rotation_period_hours: default_rotation_period_hours(),
+            moon_count: default_moon_count(),
+            parent_body: None,
         }
     }
 
@@ -599,6 +711,30 @@ pub enum SystemCommand {
         gravity_g: f32,
         /// Ambient radiation exposure level.
         radiation: RadiationLevel,
+        /// Surface/composition archetype (issue #196).
+        subtype: PlanetarySubtype,
+        /// Whether rotation is tidally locked to the orbit.
+        tidally_locked: bool,
+        /// Axial tilt in degrees.
+        axial_tilt_deg: f32,
+        /// Rotation period in hours.
+        rotation_period_hours: f32,
+        /// Number of natural satellites orbiting this body.
+        moon_count: u32,
+    },
+    /// Link a body to the body it orbits (issue #196).
+    ///
+    /// Separate from [`SystemCommand::SetBodyAttributes`] because the
+    /// parent must already exist as a live [`Body`] with an assigned
+    /// [`BodyId`] — content loading resolves this in a second pass after
+    /// every body in a system has been added via
+    /// [`SystemCommand::AddBody`], so an authored body can name a parent
+    /// defined later in the same system.
+    SetBodyParent {
+        /// Target body.
+        body_id: BodyId,
+        /// The body `body_id` orbits.
+        parent_body: BodyId,
     },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
@@ -702,6 +838,23 @@ pub enum SystemEvent {
         gravity_g: f32,
         /// Ambient radiation exposure level.
         radiation: RadiationLevel,
+        /// Surface/composition archetype.
+        subtype: PlanetarySubtype,
+        /// Whether rotation is tidally locked to the orbit.
+        tidally_locked: bool,
+        /// Axial tilt in degrees.
+        axial_tilt_deg: f32,
+        /// Rotation period in hours.
+        rotation_period_hours: f32,
+        /// Number of natural satellites orbiting this body.
+        moon_count: u32,
+    },
+    /// A body was linked to the body it orbits.
+    BodyParentSet {
+        /// Target body.
+        body_id: BodyId,
+        /// The body `body_id` orbits.
+        parent_body: BodyId,
     },
     /// A shipping route was added between two bodies.
     ShippingRouteAdded {
@@ -802,6 +955,14 @@ pub enum SystemError {
     /// The referenced body does not exist.
     #[error("body not found: {0}")]
     BodyNotFound(BodyId),
+    /// The requested `PlanetarySubtype` isn't valid for the body's `BodyKind`.
+    #[error("planetary subtype {subtype:?} is not valid for body kind {kind:?}")]
+    IncompatiblePlanetarySubtype {
+        /// The body kind involved.
+        kind: BodyKind,
+        /// The rejected subtype.
+        subtype: PlanetarySubtype,
+    },
     /// The referenced megaproject does not exist.
     #[error("megaproject not found: {0}")]
     MegaprojectNotFound(MegaprojectId),
@@ -882,22 +1043,62 @@ pub fn apply_system_command(
             temperature,
             gravity_g,
             radiation,
+            subtype,
+            tidally_locked,
+            axial_tilt_deg,
+            rotation_period_hours,
+            moon_count,
         } => {
             let body = state
                 .node_map
                 .bodies
                 .get_mut(body_id)
                 .ok_or_else(|| SystemError::BodyNotFound(body_id.clone()))?;
+            if !subtype.compatible_with(&body.kind) {
+                return Err(SystemError::IncompatiblePlanetarySubtype {
+                    kind: body.kind.clone(),
+                    subtype: *subtype,
+                });
+            }
             body.atmosphere = *atmosphere;
             body.temperature = *temperature;
             body.gravity_g = *gravity_g;
             body.radiation = *radiation;
+            body.subtype = *subtype;
+            body.tidally_locked = *tidally_locked;
+            body.axial_tilt_deg = *axial_tilt_deg;
+            body.rotation_period_hours = *rotation_period_hours;
+            body.moon_count = *moon_count;
             Ok(vec![SystemEvent::BodyAttributesSet {
                 body_id: body_id.clone(),
                 atmosphere: *atmosphere,
                 temperature: *temperature,
                 gravity_g: *gravity_g,
                 radiation: *radiation,
+                subtype: *subtype,
+                tidally_locked: *tidally_locked,
+                axial_tilt_deg: *axial_tilt_deg,
+                rotation_period_hours: *rotation_period_hours,
+                moon_count: *moon_count,
+            }])
+        }
+
+        SystemCommand::SetBodyParent {
+            body_id,
+            parent_body,
+        } => {
+            if !state.node_map.bodies.contains_key(parent_body) {
+                return Err(SystemError::BodyNotFound(parent_body.clone()));
+            }
+            let body = state
+                .node_map
+                .bodies
+                .get_mut(body_id)
+                .ok_or_else(|| SystemError::BodyNotFound(body_id.clone()))?;
+            body.parent_body = Some(parent_body.clone());
+            Ok(vec![SystemEvent::BodyParentSet {
+                body_id: body_id.clone(),
+                parent_body: parent_body.clone(),
             }])
         }
 
@@ -1255,17 +1456,11 @@ mod tests {
     #[test]
     fn body_habitability_earthlike_high() {
         // Breathable + temperate + 1.0 g + low radiation → the maximum score.
-        let body = Body {
-            id: BodyId::new(),
-            name: "Earth".into(),
-            kind: BodyKind::InnerPlanet,
-            role: SystemRole::Unassigned,
-            distance_au: 1.0,
-            atmosphere: Atmosphere::Breathable,
-            temperature: TemperatureBand::Temperate,
-            gravity_g: 1.0,
-            radiation: RadiationLevel::Low,
-        };
+        let mut body = Body::new("Earth", BodyKind::InnerPlanet, 1.0);
+        body.atmosphere = Atmosphere::Breathable;
+        body.temperature = TemperatureBand::Temperate;
+        body.gravity_g = 1.0;
+        body.radiation = RadiationLevel::Low;
         assert_eq!(body.habitability(), 100);
         assert!((body.habitability_modifier() - 1.25).abs() < 1e-4);
     }
@@ -1273,17 +1468,11 @@ mod tests {
     #[test]
     fn body_habitability_toxic_extreme_low() {
         // Toxic + extreme + 0 g + high radiation → the minimum score.
-        let body = Body {
-            id: BodyId::new(),
-            name: "Hellworld".into(),
-            kind: BodyKind::InnerPlanet,
-            role: SystemRole::Unassigned,
-            distance_au: 0.2,
-            atmosphere: Atmosphere::Toxic,
-            temperature: TemperatureBand::Extreme,
-            gravity_g: 0.0,
-            radiation: RadiationLevel::High,
-        };
+        let mut body = Body::new("Hellworld", BodyKind::InnerPlanet, 0.2);
+        body.atmosphere = Atmosphere::Toxic;
+        body.temperature = TemperatureBand::Extreme;
+        body.gravity_g = 0.0;
+        body.radiation = RadiationLevel::High;
         assert_eq!(body.habitability(), 0);
         assert!((body.habitability_modifier() - 0.75).abs() < 1e-4);
     }
@@ -1310,6 +1499,11 @@ mod tests {
                 temperature: TemperatureBand::Extreme,
                 gravity_g: 2.5,
                 radiation: RadiationLevel::High,
+                subtype: PlanetarySubtype::Molten,
+                tidally_locked: true,
+                axial_tilt_deg: 5.0,
+                rotation_period_hours: 900.0,
+                moon_count: 2,
             },
         )
         .unwrap();
@@ -1325,6 +1519,65 @@ mod tests {
         assert_eq!(body.temperature, TemperatureBand::Extreme);
         assert!((body.gravity_g - 2.5).abs() < 1e-6);
         assert_eq!(body.radiation, RadiationLevel::High);
+        assert_eq!(body.subtype, PlanetarySubtype::Molten);
+        assert!(body.tidally_locked);
+        assert!((body.axial_tilt_deg - 5.0).abs() < 1e-6);
+        assert!((body.rotation_period_hours - 900.0).abs() < 1e-6);
+        assert_eq!(body.moon_count, 2);
+    }
+
+    #[test]
+    fn set_body_attributes_rejects_incompatible_subtype() {
+        let (mut state, inner_id, _) = make_state_with_two_bodies();
+        let result = apply_system_command(
+            &mut state,
+            &SystemCommand::SetBodyAttributes {
+                body_id: inner_id,
+                atmosphere: Atmosphere::None,
+                temperature: TemperatureBand::Cold,
+                gravity_g: 2.4,
+                radiation: RadiationLevel::High,
+                // GasGiant subtype on an InnerPlanet-kind body is invalid.
+                subtype: PlanetarySubtype::GasGiant,
+                tidally_locked: false,
+                axial_tilt_deg: 0.0,
+                rotation_period_hours: 10.0,
+                moon_count: 0,
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(SystemError::IncompatiblePlanetarySubtype { .. })
+        ));
+    }
+
+    #[test]
+    fn set_body_parent_links_and_emits_event() {
+        let (mut state, inner_id, outer_id) = make_state_with_two_bodies();
+        let events = apply_system_command(
+            &mut state,
+            &SystemCommand::SetBodyParent {
+                body_id: inner_id.clone(),
+                parent_body: outer_id.clone(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(events[0], SystemEvent::BodyParentSet { .. }));
+        assert_eq!(state.node_map.bodies[&inner_id].parent_body, Some(outer_id));
+    }
+
+    #[test]
+    fn set_body_parent_rejects_nonexistent_parent() {
+        let (mut state, inner_id, _) = make_state_with_two_bodies();
+        let bad_parent = BodyId::new();
+        let result = apply_system_command(
+            &mut state,
+            &SystemCommand::SetBodyParent {
+                body_id: inner_id,
+                parent_body: bad_parent,
+            },
+        );
+        assert!(matches!(result, Err(SystemError::BodyNotFound(_))));
     }
 
     #[test]
