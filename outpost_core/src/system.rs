@@ -328,7 +328,23 @@ impl Body {
     pub fn habitability_modifier(&self) -> f32 {
         0.75 + f32::from(self.habitability()) * 0.005
     }
+
+    /// Whether this body's habitability clears the founding threshold
+    /// without a tech-unlocked override (issue #183).
+    #[must_use]
+    pub fn meets_founding_threshold(&self) -> bool {
+        self.habitability() >= HABITABILITY_FOUNDING_THRESHOLD
+    }
 }
+
+/// Minimum [`Body::habitability`] score required to found a colony without
+/// the [`HARSH_WORLD_CAPABILITY_ID`] capability unlocked (issue #183).
+pub const HABITABILITY_FOUNDING_THRESHOLD: u8 = 30;
+
+/// Capability slug (see [`crate::tech::TechEffect::UnlockCapability`]) that
+/// overrides [`HABITABILITY_FOUNDING_THRESHOLD`], letting the player found
+/// on any body regardless of habitability score once researched.
+pub const HARSH_WORLD_CAPABILITY_ID: &str = "colonize_harsh_worlds";
 
 /// A directed edge in the system node map representing a shipping route.
 #[derive(Debug, Clone, Serialize, Deserialize)]

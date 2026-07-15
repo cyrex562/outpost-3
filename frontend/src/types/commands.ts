@@ -40,6 +40,8 @@ export type Command =
       site_id: string
       focus: string | null
       supplies_id?: string | null
+      /** Star-system body this site belongs to (issue #183). Omitting it skips the habitability gate. */
+      body_id?: string | null
     }
   | { kind: 'assign_colony_home_body'; colony_id: string; body_id: string }
 

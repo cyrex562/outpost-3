@@ -103,6 +103,10 @@ pub enum ClientCommand {
         focus: Option<String>,
         #[serde(default)]
         supplies_id: Option<String>,
+        /// Star-system body this site belongs to (issue #183). `None` skips
+        /// the habitability gate, preserving pre-#183 client behaviour.
+        #[serde(default)]
+        body_id: Option<String>,
     },
     /// Set an active preset (built-in) mid-game.
     SetDifficulty {
@@ -778,15 +782,24 @@ pub fn apply_command(
             site_id,
             focus,
             supplies_id,
+            body_id,
         } => {
             let uuid = Uuid::parse_str(&site_id)
                 .map_err(|_| CmdError::InvalidArg(format!("bad site_id: {site_id}")))?;
+            let body_id = body_id
+                .map(|b| {
+                    Uuid::parse_str(&b)
+                        .map(outpost_core::system::BodyId)
+                        .map_err(|_| CmdError::InvalidArg(format!("bad body_id: {b}")))
+                })
+                .transpose()?;
             Command::FoundColonyAtSite {
                 name,
                 starting_population,
                 site_id: SiteId(uuid),
                 focus,
                 supplies_id,
+                body_id,
             }
         }
         ClientCommand::SetDifficulty { preset } => Command::SetDifficulty {
@@ -1037,6 +1050,14 @@ pub struct ColonizeTargetWire {
     pub body_name: String,
     pub kind: String,
     pub distance_au: f32,
+    /// Body habitability score (0-100), issue #183.
+    pub habitability: u8,
+    /// Whether founding on this body is currently allowed — either the
+    /// habitability score clears `HABITABILITY_FOUNDING_THRESHOLD`, or the
+    /// player has unlocked `HARSH_WORLD_CAPABILITY_ID`. The wizard still
+    /// shows bodies below this so the player understands what's blocking
+    /// them (issue #183 UX decision), rather than hiding them outright.
+    pub can_found: bool,
 }
 
 #[tauri::command]
@@ -1045,6 +1066,10 @@ pub fn get_colonize_targets(
 ) -> CmdResult<Vec<ColonizeTargetWire>> {
     let guard = engine_state.engine.lock().unwrap();
     let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    let harsh_world_unlocked = engine
+        .state
+        .unlocked_capabilities
+        .contains(outpost_core::system::HARSH_WORLD_CAPABILITY_ID);
     let list = engine
         .state
         .system_state
@@ -1062,6 +1087,8 @@ pub fn get_colonize_targets(
             body_name: b.name.clone(),
             kind: format!("{:?}", b.kind),
             distance_au: b.distance_au,
+            habitability: b.habitability(),
+            can_found: b.meets_founding_threshold() || harsh_world_unlocked,
         })
         .collect();
     Ok(list)
