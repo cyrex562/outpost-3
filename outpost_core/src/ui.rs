@@ -90,6 +90,84 @@ pub struct ConstructionQueueRow {
     pub slot_cost: u32,
 }
 
+// ─── Building details HUD ──────────────────────────────────────────────────────
+
+/// Full detail bundle for one building type within a colony (issue #182).
+///
+/// Combines authored content-pack data (category, recipe flows, maintenance)
+/// with the building's most recent production outcome, if it has run at
+/// least once. `None` for both `recipe`/`last_run` means the building has no
+/// matching recipe (e.g. pure storage/habitat structures).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildingDetailData {
+    /// Content-pack key for the building type.
+    pub building_type: String,
+    /// Human-readable name.
+    pub name: String,
+    /// Short description from the content pack.
+    pub description: String,
+    /// Logical category (`Production`, `Storage`, `Housing`, `Power`, `Research`, `Other`).
+    pub category: String,
+    /// Number of build slots this building occupies.
+    pub slot_cost: u32,
+    /// Power delta per sol (negative = produced).
+    pub power_delta: f64,
+    /// Per-sol maintenance upkeep, if any.
+    pub maintenance: Vec<IngredientRow>,
+    /// The recipe this building runs, if it has one.
+    pub recipe: Option<RecipeRow>,
+    /// Outcome of the building's most recent production attempt, if it has
+    /// run at least once since the colony was founded.
+    pub last_run: Option<BuildingRunRow>,
+}
+
+/// A commodity id + quantity pair (construction cost, maintenance draw, or
+/// recipe flow line).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngredientRow {
+    /// Commodity identifier.
+    pub commodity_id: String,
+    /// Quantity consumed or produced per cycle.
+    pub quantity: f64,
+}
+
+/// A production recipe's input/output flows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipeRow {
+    /// Recipe identifier.
+    pub recipe_id: String,
+    /// Human-readable recipe name.
+    pub name: String,
+    /// Commodities consumed per cycle.
+    pub inputs: Vec<IngredientRow>,
+    /// Commodities produced per cycle.
+    pub outputs: Vec<IngredientRow>,
+    /// Duration in colony-sols per production cycle.
+    pub cycle_sols: u32,
+}
+
+/// The outcome of a building's most recent production attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildingRunRow {
+    /// Scale factor applied to inputs/outputs last turn, in `[0.0, 1.0]`.
+    pub scale: f64,
+    /// `true` if the building ran at full capacity with no shortfalls.
+    pub is_full_production: bool,
+    /// Shortfalls that reduced the scale below 1.0, if any.
+    pub shortfalls: Vec<ShortfallRow>,
+}
+
+/// A single shortfall reason + severity, shaped for direct UI display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortfallRow {
+    /// Shortfall category: `input_short`, `power_brownout`, `labor_short`, or `maintenance_short`.
+    pub kind: String,
+    /// The commodity id that was the tightest constraint, if applicable.
+    pub commodity_id: Option<String>,
+    /// The scale factor that was actually applied (`< 1.0` when short).
+    pub effective_scale: f64,
+}
+
 // ─── Planet hex map ───────────────────────────────────────────────────────────
 
 /// Complete data bundle for the planet hex map view (§8.1).

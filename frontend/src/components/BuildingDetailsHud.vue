@@ -1,0 +1,215 @@
+<script setup lang="ts">
+/**
+ * Building details HUD (issue #182) — a modal overlay showing a single
+ * building type's full production picture: category, recipe flows,
+ * maintenance upkeep, and the outcome of its most recent production
+ * attempt (scale + shortfalls, including a dedicated MaintenanceShort
+ * indicator surfacing #180's per-sol upkeep gate).
+ *
+ * Fetches fresh detail every time `buildingType` changes, since scale/
+ * shortfalls are per-sol and stale data would misrepresent the building's
+ * current state.
+ */
+
+import { ref, watch } from 'vue'
+import { getBuildingDetail, type BuildingDetail } from '@/services/tauriBridge'
+
+const props = defineProps<{
+  colonyId: string | null
+  /** `null` closes the HUD. */
+  buildingType: string | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'close'): void
+}>()
+
+const detail = ref<BuildingDetail | null>(null)
+const loading = ref(false)
+const error = ref<string | null>(null)
+
+async function load(): Promise<void> {
+  if (!props.colonyId || !props.buildingType) {
+    detail.value = null
+    return
+  }
+  loading.value = true
+  error.value = null
+  try {
+    detail.value = await getBuildingDetail(props.colonyId, props.buildingType)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    detail.value = null
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(() => [props.colonyId, props.buildingType], load, { immediate: true })
+
+function hasMaintenanceShort(d: BuildingDetail): boolean {
+  return d.last_run?.shortfalls.some((s) => s.kind === 'maintenance_short') ?? false
+}
+
+const SHORTFALL_LABELS: Record<string, string> = {
+  input_short: 'Input shortage',
+  power_brownout: 'Power brownout',
+  labor_short: 'Labour shortage',
+  maintenance_short: 'Maintenance shortage',
+}
+
+function shortfallLabel(kind: string): string {
+  return SHORTFALL_LABELS[kind] ?? kind
+}
+</script>
+
+<template>
+  <div
+    v-if="props.buildingType !== null"
+    class="hud-backdrop"
+    data-testid="building-details-hud"
+    @click.self="emit('close')"
+  >
+    <div class="hud-panel">
+      <div class="hud-header">
+        <h4 class="hud-title">{{ detail?.name ?? props.buildingType }}</h4>
+        <button class="btn-close" data-testid="close-details-hud" @click="emit('close')">×</button>
+      </div>
+
+      <div v-if="loading" class="hint">Loading…</div>
+      <div v-else-if="error" class="error" data-testid="building-details-error">{{ error }}</div>
+
+      <template v-else-if="detail">
+        <p v-if="detail.description" class="description">{{ detail.description }}</p>
+
+        <div class="meta-row">
+          <span class="meta-item">Category: {{ detail.category }}</span>
+          <span class="meta-item">Slots: {{ detail.slot_cost }}</span>
+          <span class="meta-item">Power: {{ detail.power_delta >= 0 ? '-' : '+' }}{{ Math.abs(detail.power_delta) }} kW</span>
+        </div>
+
+        <div
+          v-if="detail.last_run && hasMaintenanceShort(detail)"
+          class="maintenance-short-banner"
+          data-testid="maintenance-short-indicator"
+        >
+          MAINTENANCE SHORT
+        </div>
+
+        <section v-if="detail.last_run" class="section" data-testid="last-run-section">
+          <h5>Last Run</h5>
+          <p>Scale: {{ (detail.last_run.scale * 100).toFixed(0) }}%
+            <span v-if="detail.last_run.is_full_production" class="tag-full">Full production</span>
+          </p>
+          <ul v-if="detail.last_run.shortfalls.length > 0" class="shortfall-list">
+            <li
+              v-for="(s, i) in detail.last_run.shortfalls"
+              :key="i"
+              class="shortfall-item"
+              :class="{ 'shortfall-maintenance': s.kind === 'maintenance_short' }"
+              :data-testid="`shortfall-${s.kind}`"
+            >
+              {{ shortfallLabel(s.kind) }}<span v-if="s.commodity_id"> ({{ s.commodity_id }})</span>
+            </li>
+          </ul>
+        </section>
+        <p v-else class="hint">No production data yet — this building hasn't run a sol.</p>
+
+        <section v-if="detail.recipe" class="section" data-testid="recipe-section">
+          <h5>Recipe: {{ detail.recipe.name }}</h5>
+          <p class="flow-row">
+            <span class="flow-label">In:</span>
+            <span v-for="i in detail.recipe.inputs" :key="i.commodity_id" class="flow-item">
+              {{ i.commodity_id }} ×{{ i.quantity }}
+            </span>
+            <span v-if="detail.recipe.inputs.length === 0" class="hint">none</span>
+          </p>
+          <p class="flow-row">
+            <span class="flow-label">Out:</span>
+            <span v-for="i in detail.recipe.outputs" :key="i.commodity_id" class="flow-item">
+              {{ i.commodity_id }} ×{{ i.quantity }}
+            </span>
+          </p>
+          <p class="flow-row">Cycle: {{ detail.recipe.cycle_sols }} sol{{ detail.recipe.cycle_sols !== 1 ? 's' : '' }}</p>
+        </section>
+        <p v-else class="hint">No recipe (storage/habitat building).</p>
+
+        <section v-if="detail.maintenance.length > 0" class="section" data-testid="maintenance-section">
+          <h5>Maintenance (per sol)</h5>
+          <p class="flow-row">
+            <span v-for="i in detail.maintenance" :key="i.commodity_id" class="flow-item">
+              {{ i.commodity_id }} ×{{ i.quantity }}
+            </span>
+          </p>
+        </section>
+      </template>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.hud-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.hud-panel {
+  background: #0d0d15;
+  border: 1px solid #334;
+  border-radius: 4px;
+  padding: 1rem 1.25rem;
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  font-family: monospace;
+  color: #aab;
+}
+
+.hud-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.hud-title { color: #8cf; font-size: 1rem; margin: 0; }
+.btn-close {
+  background: none;
+  border: none;
+  color: #889;
+  font-size: 1.2rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.btn-close:hover { color: #cdd; }
+
+.hint { font-size: 0.78rem; color: #446; font-style: italic; }
+.error { font-size: 0.8rem; color: #e77; }
+.description { font-size: 0.8rem; color: #99a; margin: 0.25rem 0 0.75rem; }
+
+.meta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.75rem; color: #668; margin-bottom: 0.6rem; }
+
+.maintenance-short-banner {
+  background: #3a1a1a;
+  border: 1px solid #a55;
+  color: #f89;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.5rem;
+  border-radius: 3px;
+  margin-bottom: 0.6rem;
+}
+
+.section { margin-top: 0.75rem; }
+.section h5 { color: #789; font-size: 0.8rem; margin: 0 0 0.3rem; }
+
+.flow-row { font-size: 0.78rem; margin: 0.2rem 0; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: baseline; }
+.flow-label { color: #668; }
+.flow-item { color: #aab; background: #13131e; border: 1px solid #223; border-radius: 3px; padding: 0.1rem 0.35rem; }
+
+.tag-full { color: #6adba5; font-size: 0.72rem; margin-left: 0.4rem; }
+
+.shortfall-list { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.shortfall-item { font-size: 0.75rem; color: #eab764; }
+.shortfall-item.shortfall-maintenance { color: #f89; }
+</style>

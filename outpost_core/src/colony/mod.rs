@@ -62,6 +62,13 @@ pub struct Colony {
     /// (neutral) for colonies founded without a body reference.
     #[serde(default = "default_habitability_modifier")]
     pub habitability_modifier: f32,
+    /// Each operational building's most recent production outcome, keyed by
+    /// `building_type` (issue #182).
+    ///
+    /// Overwritten every sol by the turn processor's production step;
+    /// buildings with no matching recipe (pure storage/habitat) are absent.
+    #[serde(default)]
+    pub last_production: std::collections::HashMap<String, BuildingProductionResult>,
 }
 
 fn default_habitability_modifier() -> f32 {
@@ -82,6 +89,7 @@ impl Colony {
             terrain_id: None,
             home_body_id: None,
             habitability_modifier: default_habitability_modifier(),
+            last_production: std::collections::HashMap::new(),
         }
     }
 

@@ -16,11 +16,11 @@ use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
 use outpost_core::tech::load_tech_registry;
 use outpost_core::trade::SiteId;
 use outpost_core::{Command, Event, GameEngine, Query, QueryResult};
-use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tauri::{AppHandle, Manager, State};
+use uuid::Uuid;
 
 use crate::state::EngineState;
 
@@ -145,9 +145,18 @@ pub enum ClientQuery {
     CurrentSol,
     CurrentMonth,
     ListColonies,
-    ColonyStatus { colony_id: String },
-    ColonyScreen { colony_id: String },
+    ColonyStatus {
+        colony_id: String,
+    },
+    ColonyScreen {
+        colony_id: String,
+    },
     SystemResearchTotal,
+    /// Full detail for one building type within a colony (issue #182).
+    BuildingDetail {
+        colony_id: String,
+        building_type: String,
+    },
 }
 
 /// Wire event returned to the frontend. Matches `GameEvent` (snake_case, `kind`-tagged).
@@ -220,7 +229,9 @@ impl ServerEvent {
     fn from_core(event: &Event) -> Self {
         match event {
             Event::ColonySolAdvanced { sol } => Self::ColonySolAdvanced { sol: *sol },
-            Event::StrategicMonthAdvanced { month } => Self::StrategicMonthAdvanced { month: *month },
+            Event::StrategicMonthAdvanced { month } => {
+                Self::StrategicMonthAdvanced { month: *month }
+            }
             Event::ColonyFounded {
                 colony_id,
                 name,
@@ -316,7 +327,11 @@ impl ServerEvent {
                 habitability_modifier: *habitability_modifier,
             },
             other => Self::Unknown {
-                core_kind: format!("{other:?}").split_whitespace().next().unwrap_or("event").to_owned(),
+                core_kind: format!("{other:?}")
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("event")
+                    .to_owned(),
             },
         }
     }
@@ -383,10 +398,11 @@ fn load_embedded_content() -> Result<outpost_core::content::registry::ContentReg
     PackLoader::load(&raw).map_err(|e| CmdError::Content(e.to_string()))
 }
 
-fn load_content(content_dir: &Path) -> Result<outpost_core::content::registry::ContentRegistry, CmdError> {
+fn load_content(
+    content_dir: &Path,
+) -> Result<outpost_core::content::registry::ContentRegistry, CmdError> {
     let mut raw_owned: Vec<(String, String)> = Vec::new();
-    let entries =
-        std::fs::read_dir(content_dir).map_err(|e| CmdError::Content(e.to_string()))?;
+    let entries = std::fs::read_dir(content_dir).map_err(|e| CmdError::Content(e.to_string()))?;
     for entry in entries {
         let entry = entry.map_err(|e| CmdError::Content(e.to_string()))?;
         let path = entry.path();
@@ -396,8 +412,8 @@ fn load_content(content_dir: &Path) -> Result<outpost_core::content::registry::C
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_owned();
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| CmdError::Content(e.to_string()))?;
+            let text =
+                std::fs::read_to_string(&path).map_err(|e| CmdError::Content(e.to_string()))?;
             raw_owned.push((name, text));
         }
     }
@@ -447,18 +463,66 @@ pub struct KnobSpec {
 /// The `.0` is the wire id used both in [`KnobSpec::id`] and in the
 /// [`ClientCommand::SetCustomDifficulty::scalars`] map keys.
 const SLIDER_KNOBS: &[(&str, &str, ModifiableQuantityKey)] = &[
-    ("production_rate", "Production Rate", ModifiableQuantityKey::ProductionRateAll),
-    ("labor_efficiency", "Labor Efficiency", ModifiableQuantityKey::LaborEfficiency),
-    ("research_rate", "Research Rate", ModifiableQuantityKey::ResearchRate),
-    ("storage_capacity", "Storage Capacity", ModifiableQuantityKey::StorageCapacity),
-    ("population_growth", "Population Growth", ModifiableQuantityKey::PopulationGrowth),
-    ("stability_decay", "Stability Decay", ModifiableQuantityKey::StabilityRate),
-    ("hazard_probability", "Hazard Probability", ModifiableQuantityKey::HazardProbability),
-    ("slot_capacity", "Slot Capacity", ModifiableQuantityKey::SlotCapacity),
-    ("resource_consumption", "Resource Consumption", ModifiableQuantityKey::ResourceConsumption),
-    ("research_cost", "Research Cost", ModifiableQuantityKey::ResearchCost),
-    ("power_requirement", "Power Requirement", ModifiableQuantityKey::PowerRequirement),
-    ("maintenance_consumption", "Maintenance Consumption", ModifiableQuantityKey::MaintenanceConsumption),
+    (
+        "production_rate",
+        "Production Rate",
+        ModifiableQuantityKey::ProductionRateAll,
+    ),
+    (
+        "labor_efficiency",
+        "Labor Efficiency",
+        ModifiableQuantityKey::LaborEfficiency,
+    ),
+    (
+        "research_rate",
+        "Research Rate",
+        ModifiableQuantityKey::ResearchRate,
+    ),
+    (
+        "storage_capacity",
+        "Storage Capacity",
+        ModifiableQuantityKey::StorageCapacity,
+    ),
+    (
+        "population_growth",
+        "Population Growth",
+        ModifiableQuantityKey::PopulationGrowth,
+    ),
+    (
+        "stability_decay",
+        "Stability Decay",
+        ModifiableQuantityKey::StabilityRate,
+    ),
+    (
+        "hazard_probability",
+        "Hazard Probability",
+        ModifiableQuantityKey::HazardProbability,
+    ),
+    (
+        "slot_capacity",
+        "Slot Capacity",
+        ModifiableQuantityKey::SlotCapacity,
+    ),
+    (
+        "resource_consumption",
+        "Resource Consumption",
+        ModifiableQuantityKey::ResourceConsumption,
+    ),
+    (
+        "research_cost",
+        "Research Cost",
+        ModifiableQuantityKey::ResearchCost,
+    ),
+    (
+        "power_requirement",
+        "Power Requirement",
+        ModifiableQuantityKey::PowerRequirement,
+    ),
+    (
+        "maintenance_consumption",
+        "Maintenance Consumption",
+        ModifiableQuantityKey::MaintenanceConsumption,
+    ),
 ];
 
 /// Fixed anchor slider steps shared by every knob (issue #161 design decision).
@@ -543,7 +607,13 @@ fn custom_preset_dir(app: &AppHandle) -> Result<PathBuf, CmdError> {
 
 fn sanitize_preset_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ') { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .trim()
         .to_owned()
@@ -693,7 +763,9 @@ fn seed_system_from_content(engine: &mut GameEngine) {
             .iter()
             .find(|(_, b)| b.name == parent_name)
             .map(|(id, _)| id.clone());
-        let Some(parent_body) = parent_id else { continue };
+        let Some(parent_body) = parent_id else {
+            continue;
+        };
         let _ = engine.apply(&Command::System(SystemCommand::SetBodyParent {
             body_id,
             parent_body,
@@ -817,9 +889,7 @@ pub fn apply_command(
             hazards_enabled,
             maintenance_enabled: maintenance_enabled.unwrap_or(true),
         },
-        ClientCommand::SetHazardsEnabled { enabled } => {
-            Command::SetHazardsEnabled { enabled }
-        }
+        ClientCommand::SetHazardsEnabled { enabled } => Command::SetHazardsEnabled { enabled },
         ClientCommand::SetMaintenanceEnabled { enabled } => {
             Command::SetMaintenanceEnabled { enabled }
         }
@@ -858,6 +928,13 @@ pub fn run_query(
             colony_id: parse_colony(&colony_id)?,
         },
         ClientQuery::SystemResearchTotal => Query::SystemResearchTotal,
+        ClientQuery::BuildingDetail {
+            colony_id,
+            building_type,
+        } => Query::BuildingDetail {
+            colony_id: parse_colony(&colony_id)?,
+            building_type,
+        },
     };
 
     let result = engine.query(&core_query).map_err(CmdError::from)?;
@@ -866,8 +943,13 @@ pub fn run_query(
         QueryResult::Colonies(list) => serde_json::json!({ "kind": "colonies", "colonies": list }),
         QueryResult::ColonyStatus(s) => serde_json::json!({ "kind": "colony_status", "status": s }),
         QueryResult::Labour(l) => serde_json::json!({ "kind": "labour", "labour": l }),
-        QueryResult::ResearchTotal(t) => serde_json::json!({ "kind": "research_total", "total": t }),
+        QueryResult::ResearchTotal(t) => {
+            serde_json::json!({ "kind": "research_total", "total": t })
+        }
         QueryResult::ColonyScreen(d) => serde_json::json!({ "kind": "colony_screen", "data": d }),
+        QueryResult::BuildingDetail(d) => {
+            serde_json::json!({ "kind": "building_detail", "data": d })
+        }
         other => serde_json::json!({ "kind": "other", "debug": format!("{other:?}") }),
     };
     Ok(value)
@@ -892,12 +974,8 @@ pub fn save_game(path: String, engine_state: State<'_, EngineState>) -> CmdResul
 
 /// Load a previously saved game from a SQLite file.
 #[tauri::command]
-pub fn load_game(
-    path: String,
-    engine_state: State<'_, EngineState>,
-) -> CmdResult<SnapshotPayload> {
-    let db =
-        SnapshotDb::open(Path::new(&path)).map_err(|e| CmdError::Snapshot(e.to_string()))?;
+pub fn load_game(path: String, engine_state: State<'_, EngineState>) -> CmdResult<SnapshotPayload> {
+    let db = SnapshotDb::open(Path::new(&path)).map_err(|e| CmdError::Snapshot(e.to_string()))?;
     let game_state = db.load().map_err(|e| CmdError::Snapshot(e.to_string()))?;
     let mut engine = GameEngine::new();
     engine.state = game_state;
@@ -1143,7 +1221,11 @@ pub fn list_buildings(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Bui
             tech_prerequisite: b.tech_prerequisite.clone(),
         })
         .collect();
-    out.sort_by(|a, b| a.category.cmp(&b.category).then_with(|| a.name.cmp(&b.name)));
+    out.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(out)
 }
 
@@ -1227,11 +1309,8 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
         .ok_or_else(|| CmdError::Engine("no planet map — bootstrap first".into()))?;
 
     // Build reverse coord → site_id lookup so hex rows carry a site_id.
-    let coord_to_site: std::collections::HashMap<_, _> = pm
-        .sites
-        .iter()
-        .map(|(sid, coord)| (*coord, *sid))
-        .collect();
+    let coord_to_site: std::collections::HashMap<_, _> =
+        pm.sites.iter().map(|(sid, coord)| (*coord, *sid)).collect();
 
     // Reverse coord → colony_name lookup for the `occupied_by` field.
     let colony_names: std::collections::HashMap<_, _> = engine
@@ -1319,9 +1398,7 @@ pub fn list_saves(dir: String) -> CmdResult<Vec<String>> {
 /// difficulty scalar; toggles read `hazards_enabled` and the presence of an
 /// active `menace_state`.
 #[tauri::command]
-pub fn get_difficulty_knobs(
-    engine_state: State<'_, EngineState>,
-) -> CmdResult<Vec<KnobSpec>> {
+pub fn get_difficulty_knobs(engine_state: State<'_, EngineState>) -> CmdResult<Vec<KnobSpec>> {
     let guard = engine_state.engine.lock().unwrap();
     let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
     let state = &engine.state;
@@ -1357,7 +1434,11 @@ pub fn get_difficulty_knobs(
         min: 0.0,
         max: 1.0,
         preset_default_at_current_preset: 1.0,
-        current_value: if state.menace_state.is_some() { 1.0 } else { 0.0 },
+        current_value: if state.menace_state.is_some() {
+            1.0
+        } else {
+            0.0
+        },
     });
     specs.push(KnobSpec {
         id: "hazards_enabled".into(),
@@ -1428,8 +1509,8 @@ pub fn save_custom_preset(
         hazards_enabled,
         maintenance_enabled: maintenance_enabled.unwrap_or(true),
     };
-    let text = serde_yaml::to_string(&preset)
-        .map_err(|e| CmdError::Snapshot(format!("yaml: {e}")))?;
+    let text =
+        serde_yaml::to_string(&preset).map_err(|e| CmdError::Snapshot(format!("yaml: {e}")))?;
     let path = dir.join(format!("{sanitized}.yaml"));
     std::fs::write(&path, text).map_err(|e| CmdError::Snapshot(e.to_string()))
 }

@@ -614,6 +614,13 @@ pub enum Query {
     },
     /// Return the planet hex map data (all hexes, colony nodes, infrastructure).
     PlanetMap,
+    /// Return full detail for one building type within a colony (issue #182).
+    BuildingDetail {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// Content-pack key of the building type.
+        building_type: String,
+    },
     /// Return the interrupt digest from the most recent advance run.
     ///
     /// Returns an empty digest when no advance has been run yet.
@@ -647,6 +654,8 @@ pub enum QueryResult {
     ColonyScreen(ui::ColonyScreenData),
     /// Planet hex map data bundle.
     PlanetMap(ui::PlanetMapData),
+    /// Full detail for one building type within a colony.
+    BuildingDetail(ui::BuildingDetailData),
     /// Interrupt digest from the most recent advance run.
     InterruptDigest(ui::InterruptDigestData),
     /// Current time-control state.
@@ -1676,6 +1685,11 @@ impl GameEngine {
                                 });
                             }
                         }
+                        colony.last_production = prod_outcome
+                            .building_results
+                            .into_iter()
+                            .map(|r| (r.building_type.clone(), r))
+                            .collect();
                     }
                 }
 
@@ -3338,6 +3352,99 @@ impl GameEngine {
                 }))
             }
 
+            Query::BuildingDetail {
+                colony_id,
+                building_type,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let registry = self.state.registry.as_ref().ok_or_else(|| {
+                    EngineError::InvalidArgument("no content registry loaded".into())
+                })?;
+                let def = registry
+                    .buildings()
+                    .find(|b| &b.id == building_type)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "unknown building type: {building_type}"
+                        ))
+                    })?;
+
+                let recipe = registry
+                    .recipes()
+                    .find(|r| &r.building == building_type)
+                    .map(|r| ui::RecipeRow {
+                        recipe_id: r.id.clone(),
+                        name: r.name.clone(),
+                        inputs: r
+                            .inputs
+                            .iter()
+                            .map(|i| ui::IngredientRow {
+                                commodity_id: i.id.clone(),
+                                quantity: i.quantity,
+                            })
+                            .collect(),
+                        outputs: r
+                            .outputs
+                            .iter()
+                            .map(|i| ui::IngredientRow {
+                                commodity_id: i.id.clone(),
+                                quantity: i.quantity,
+                            })
+                            .collect(),
+                        cycle_sols: r.cycle_sols,
+                    });
+
+                let last_run = self.state.colonies[idx]
+                    .last_production
+                    .get(building_type)
+                    .map(|r| ui::BuildingRunRow {
+                        scale: r.scale,
+                        is_full_production: r.is_full_production(),
+                        shortfalls: r
+                            .shortfalls
+                            .iter()
+                            .map(|s| {
+                                let (kind, commodity_id) = match &s.reason {
+                                    colony::ShortfallReason::InputShort { commodity_id } => {
+                                        ("input_short", Some(commodity_id.clone()))
+                                    }
+                                    colony::ShortfallReason::PowerBrownout => {
+                                        ("power_brownout", None)
+                                    }
+                                    colony::ShortfallReason::LaborShort => ("labor_short", None),
+                                    colony::ShortfallReason::MaintenanceShort { commodity_id } => {
+                                        ("maintenance_short", Some(commodity_id.clone()))
+                                    }
+                                };
+                                ui::ShortfallRow {
+                                    kind: kind.to_string(),
+                                    commodity_id,
+                                    effective_scale: s.effective_scale,
+                                }
+                            })
+                            .collect(),
+                    });
+
+                Ok(QueryResult::BuildingDetail(ui::BuildingDetailData {
+                    building_type: def.id.clone(),
+                    name: def.name.clone(),
+                    description: def.description.clone(),
+                    category: format!("{:?}", def.category),
+                    slot_cost: def.slot_cost,
+                    power_delta: def.power_delta,
+                    maintenance: def
+                        .maintenance
+                        .iter()
+                        .map(|i| ui::IngredientRow {
+                            commodity_id: i.id.clone(),
+                            quantity: i.quantity,
+                        })
+                        .collect(),
+                    recipe,
+                    last_run,
+                }))
+            }
+
             Query::InterruptDigest => {
                 let digest =
                     self.last_advance_digest
@@ -4724,6 +4831,24 @@ mod tests {
     }
 
     #[test]
+    fn last_production_persisted_on_colony_after_advance_sol() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let last_production = &engine.state.colonies[idx].last_production;
+        assert!(
+            last_production.contains_key("research_lab"),
+            "expected last_production to contain an entry for research_lab, got {last_production:?}"
+        );
+        let result = &last_production["research_lab"];
+        assert_eq!(result.building_type, "research_lab");
+        assert!(result.scale > 0.0);
+    }
+
+    #[test]
     fn research_drains_from_colony_into_system_pool_correctly() {
         let mut engine = GameEngine::with_seed(1);
         let _colony_id = setup_science_colony(&mut engine);
@@ -5541,6 +5666,55 @@ mod tests {
             colony_id: uuid::Uuid::new_v4(),
         });
         assert!(matches!(result, Err(EngineError::ColonyNotFound(_))));
+    }
+
+    /// Query::BuildingDetail returns recipe + last-run data after production runs.
+    #[test]
+    fn query_building_detail_returns_recipe_and_last_run() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let result = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "research_lab".into(),
+            })
+            .unwrap();
+        match result {
+            QueryResult::BuildingDetail(data) => {
+                assert_eq!(data.building_type, "research_lab");
+                let recipe = data.recipe.expect("research_lab should have a recipe");
+                assert!(!recipe.outputs.is_empty());
+                let last_run = data.last_run.expect("research_lab should have run once");
+                assert!(last_run.scale > 0.0);
+            }
+            other => panic!("expected BuildingDetail, got {other:?}"),
+        }
+    }
+
+    /// Query::BuildingDetail errors on an unknown building type.
+    #[test]
+    fn query_building_detail_unknown_building_returns_error() {
+        let mut engine = GameEngine::with_seed(0);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "UI Test Colony".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        engine.state.registry = Some(research_registry());
+
+        let result = engine.query(&Query::BuildingDetail {
+            colony_id,
+            building_type: "not_a_real_building".into(),
+        });
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
     }
 
     /// Query::PlanetMap returns colony nodes for colonies founded at sites.
