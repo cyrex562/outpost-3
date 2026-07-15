@@ -3786,6 +3786,11 @@ mod tests {
                 temperature: system::TemperatureBand::Extreme,
                 gravity_g: 0.0,
                 radiation: system::RadiationLevel::High,
+                subtype: system::PlanetarySubtype::Molten,
+                tidally_locked: false,
+                axial_tilt_deg: 23.5,
+                rotation_period_hours: 24.0,
+                moon_count: 0,
             }))
             .unwrap();
         let events = engine

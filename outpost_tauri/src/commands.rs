@@ -632,6 +632,12 @@ fn seed_system_from_content(engine: &mut GameEngine) {
     else {
         return;
     };
+
+    // Pass 1: add every body and its authored attributes/role. `parent_body`
+    // is deferred to pass 2 (below) since it may name a body that hasn't
+    // been added yet — content validation (issue #196) only guarantees the
+    // name resolves *somewhere* in this system, not that it comes earlier.
+    let mut pending_parents: Vec<(outpost_core::system::BodyId, String)> = Vec::new();
     for body in &system.bodies {
         let _ = engine.apply(&Command::System(SystemCommand::AddBody {
             name: body.name.clone(),
@@ -654,13 +660,39 @@ fn seed_system_from_content(engine: &mut GameEngine) {
             temperature: body.temperature,
             gravity_g: body.gravity_g,
             radiation: body.radiation,
+            subtype: body.subtype,
+            tidally_locked: body.tidally_locked,
+            axial_tilt_deg: body.axial_tilt_deg,
+            rotation_period_hours: body.rotation_period_hours,
+            moon_count: body.moon_count,
         }));
         if !matches!(body.role, SystemRole::Unassigned) {
             let _ = engine.apply(&Command::System(SystemCommand::AssignRole {
-                body_id: id,
+                body_id: id.clone(),
                 role: body.role.clone(),
             }));
         }
+        if let Some(parent_name) = &body.parent_body {
+            pending_parents.push((id, parent_name.clone()));
+        }
+    }
+
+    // Pass 2: resolve authored parent-body names now that every body in the
+    // system has a live BodyId.
+    for (body_id, parent_name) in pending_parents {
+        let parent_id = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .iter()
+            .find(|(_, b)| b.name == parent_name)
+            .map(|(id, _)| id.clone());
+        let Some(parent_body) = parent_id else { continue };
+        let _ = engine.apply(&Command::System(SystemCommand::SetBodyParent {
+            body_id,
+            parent_body,
+        }));
     }
 }
 
@@ -877,6 +909,15 @@ pub struct SystemBodyWire {
     pub radiation: String,
     pub habitability: u8,
     pub habitability_modifier: f32,
+    /// Surface/composition archetype (issue #196). Flavor/authoring
+    /// guidance — not a habitability input.
+    pub subtype: String,
+    pub tidally_locked: bool,
+    pub axial_tilt_deg: f32,
+    pub rotation_period_hours: f32,
+    pub moon_count: u32,
+    /// Display name of the body this one orbits, if any.
+    pub parent_body_name: Option<String>,
 }
 
 /// Return the current list of system bodies with rendering hints.
@@ -884,11 +925,8 @@ pub struct SystemBodyWire {
 pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<SystemBodyWire>> {
     let guard = engine_state.engine.lock().unwrap();
     let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
-    let bodies: Vec<SystemBodyWire> = engine
-        .state
-        .system_state
-        .node_map
-        .bodies
+    let node_bodies = &engine.state.system_state.node_map.bodies;
+    let bodies: Vec<SystemBodyWire> = node_bodies
         .values()
         .map(|b| SystemBodyWire {
             id: b.id.0.to_string(),
@@ -906,6 +944,16 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
             radiation: format!("{:?}", b.radiation),
             habitability: b.habitability(),
             habitability_modifier: b.habitability_modifier(),
+            subtype: format!("{:?}", b.subtype),
+            tidally_locked: b.tidally_locked,
+            axial_tilt_deg: b.axial_tilt_deg,
+            rotation_period_hours: b.rotation_period_hours,
+            moon_count: b.moon_count,
+            parent_body_name: b
+                .parent_body
+                .as_ref()
+                .and_then(|pid| node_bodies.get(pid))
+                .map(|p| p.name.clone()),
         })
         .collect();
     Ok(bodies)

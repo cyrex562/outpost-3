@@ -281,6 +281,28 @@ pub struct SystemBodyDef {
     /// Ambient radiation exposure level.
     #[serde(default = "SystemBodyDef::default_radiation")]
     pub radiation: crate::system::RadiationLevel,
+    /// Surface/composition archetype (issue #196). Defaults to
+    /// `Unclassified`, which never biases downstream systems.
+    #[serde(default = "SystemBodyDef::default_subtype")]
+    pub subtype: crate::system::PlanetarySubtype,
+    /// Whether rotation is tidally locked to the orbit. Flavor-only.
+    #[serde(default)]
+    pub tidally_locked: bool,
+    /// Axial tilt in degrees. Flavor-only.
+    #[serde(default = "SystemBodyDef::default_axial_tilt_deg")]
+    pub axial_tilt_deg: f32,
+    /// Rotation period in hours. Flavor-only.
+    #[serde(default = "SystemBodyDef::default_rotation_period_hours")]
+    pub rotation_period_hours: f32,
+    /// Number of natural satellites orbiting this body. Flavor stat.
+    #[serde(default)]
+    pub moon_count: u32,
+    /// Display `name` of the body this one orbits, if any, resolved to a
+    /// live `BodyId` after every body in the system has been seeded (see
+    /// `outpost_tauri::commands::seed_system_from_content`). Lets a `Moon`
+    /// authored earlier in the file name a parent authored later.
+    #[serde(default)]
+    pub parent_body: Option<String>,
 }
 
 impl SystemBodyDef {
@@ -298,6 +320,15 @@ impl SystemBodyDef {
     }
     fn default_radiation() -> crate::system::RadiationLevel {
         crate::system::RadiationLevel::Low
+    }
+    fn default_subtype() -> crate::system::PlanetarySubtype {
+        crate::system::PlanetarySubtype::Unclassified
+    }
+    fn default_axial_tilt_deg() -> f32 {
+        23.5
+    }
+    fn default_rotation_period_hours() -> f32 {
+        24.0
     }
 }
 

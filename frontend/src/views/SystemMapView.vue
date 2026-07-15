@@ -443,6 +443,17 @@ function foundColony(body?: SystemBody | null): void {
               ({{ formatModifier(selected.habitability_modifier) }} productivity)
             </span>
           </dd>
+          <dt>Subtype</dt>
+          <dd>{{ selected.subtype }}</dd>
+          <dt v-if="selected.parent_body_name">Orbits</dt>
+          <dd v-if="selected.parent_body_name">{{ selected.parent_body_name }}</dd>
+          <dt>Rotation</dt>
+          <dd>
+            {{ selected.tidally_locked ? 'Tidally locked' : `${selected.rotation_period_hours.toFixed(1)}h period` }},
+            {{ selected.axial_tilt_deg.toFixed(1) }}° tilt
+          </dd>
+          <dt v-if="selected.moon_count > 0">Moons</dt>
+          <dd v-if="selected.moon_count > 0">{{ selected.moon_count }}</dd>
         </dl>
         <button
           v-if="selected.colonizable"

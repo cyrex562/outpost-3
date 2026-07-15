@@ -64,4 +64,39 @@ pub enum ContentError {
         /// The unresolved commodity id.
         commodity_id: String,
     },
+
+    /// A `SystemBodyDef`'s `subtype` isn't valid for its `kind` (issue #196).
+    #[error(
+        "{file}: system '{system_id}' body '{body_name}' has subtype '{subtype:?}', \
+         which is not valid for body kind '{kind:?}'"
+    )]
+    IncompatiblePlanetarySubtype {
+        /// Source file name.
+        file: String,
+        /// Star system id.
+        system_id: String,
+        /// Body display name.
+        body_name: String,
+        /// The body kind involved.
+        kind: crate::system::BodyKind,
+        /// The rejected subtype.
+        subtype: crate::system::PlanetarySubtype,
+    },
+
+    /// A `SystemBodyDef`'s `parent_body` doesn't name another body in the
+    /// same star system (issue #196).
+    #[error(
+        "{file}: system '{system_id}' body '{body_name}' has parent_body \
+         '{parent_name}', which does not match any other body in the same system"
+    )]
+    UnknownParentBodyRef {
+        /// Source file name.
+        file: String,
+        /// Star system id.
+        system_id: String,
+        /// Body display name.
+        body_name: String,
+        /// The unresolved parent body name.
+        parent_name: String,
+    },
 }
