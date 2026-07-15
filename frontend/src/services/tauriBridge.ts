@@ -164,6 +164,10 @@ export interface ColonizeTarget {
   body_name: string
   kind: string
   distance_au: number
+  /** Body habitability score (0-100), issue #183. */
+  habitability: number
+  /** Whether founding here is currently allowed (score clears the threshold, or the harsh-world capability is unlocked). */
+  can_found: boolean
 }
 
 export async function getColonizeTargets(): Promise<ColonizeTarget[]> {

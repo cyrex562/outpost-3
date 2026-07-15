@@ -171,6 +171,18 @@ pub enum Command {
         /// colonist and scale linearly with `starting_population`.
         #[serde(default)]
         supplies_id: Option<String>,
+        /// Star-system body this site belongs to, if known (issue #183).
+        ///
+        /// When present, founding is gated on
+        /// [`system::Body::meets_founding_threshold`] (unless the player has
+        /// unlocked [`system::HARSH_WORLD_CAPABILITY_ID`]), and on success the
+        /// colony is auto-linked to the body exactly as
+        /// [`Command::AssignColonyHomeBody`] would — that command remains
+        /// separately callable (e.g. to re-link) but is no longer required
+        /// for the gate to apply. `None` skips the gate entirely, preserving
+        /// existing callers that don't have body context.
+        #[serde(default)]
+        body_id: Option<system::BodyId>,
     },
     /// Link a colony to its home system body and inherit the body's
     /// habitability-derived productivity modifier (issue #163).
@@ -1247,6 +1259,19 @@ pub enum EngineError {
     /// A colony already occupies the hex cell at the requested site.
     #[error("site is already occupied")]
     SiteOccupied,
+    /// The target body's habitability score is below the founding threshold
+    /// and the player hasn't unlocked the harsh-world capability (issue #183).
+    #[error(
+        "body habitability {score} is below the founding threshold of {threshold} \
+         (research a tech that unlocks '{}' to override)",
+        system::HARSH_WORLD_CAPABILITY_ID
+    )]
+    HabitabilityBelowThreshold {
+        /// The body's actual habitability score.
+        score: u8,
+        /// The minimum score required without the capability override.
+        threshold: u8,
+    },
     /// A command was submitted after the game has been won.
     ///
     /// The player must activate sandbox-continue mode via
@@ -2076,6 +2101,7 @@ impl GameEngine {
                 site_id,
                 focus,
                 supplies_id,
+                body_id,
             } => {
                 if name.trim().is_empty() {
                     return Err(EngineError::InvalidArgument(
@@ -2109,6 +2135,37 @@ impl GameEngine {
                 if pm.colonies.iter().any(|n| n.coord == coord) {
                     return Err(EngineError::SiteOccupied);
                 }
+                // Issue #183: gate on the parent body's habitability score
+                // before any mutation, unless the harsh-world capability is
+                // unlocked. `home_body_modifier` carries the computed
+                // productivity modifier forward so the auto-link below
+                // doesn't need to look the body up a second time.
+                let home_body_modifier = match body_id {
+                    Some(bid) => {
+                        let body = self
+                            .state
+                            .system_state
+                            .node_map
+                            .bodies
+                            .get(bid)
+                            .ok_or_else(|| {
+                                EngineError::InvalidArgument(format!("body not found: {bid}"))
+                            })?;
+                        if !body.meets_founding_threshold()
+                            && !self
+                                .state
+                                .unlocked_capabilities
+                                .contains(system::HARSH_WORLD_CAPABILITY_ID)
+                        {
+                            return Err(EngineError::HabitabilityBelowThreshold {
+                                score: body.habitability(),
+                                threshold: system::HABITABILITY_FOUNDING_THRESHOLD,
+                            });
+                        }
+                        Some(body.habitability_modifier())
+                    }
+                    None => None,
+                };
                 // Resolve the supply package (if any) up front so an unknown id
                 // is reported before any mutation happens.
                 let supplies = if let Some(id) = supplies_id.as_deref() {
@@ -2153,7 +2210,7 @@ impl GameEngine {
                         }
                     }
                 }
-                Ok(vec![
+                let mut events = vec![
                     Event::ColonyFoundedAtSite {
                         colony_id,
                         name: name.clone(),
@@ -2166,7 +2223,24 @@ impl GameEngine {
                         q: coord.q,
                         r: coord.r,
                     },
-                ])
+                ];
+                // Auto-link the home body now that the gate has passed —
+                // equivalent to a follow-up Command::AssignColonyHomeBody,
+                // which remains separately callable but is no longer
+                // required for this to take effect.
+                if let (Some(bid), Some(modifier)) = (body_id, home_body_modifier) {
+                    let idx = self
+                        .find_colony_index(colony_id)
+                        .expect("colony was just inserted");
+                    self.state.colonies[idx].home_body_id = Some(bid.clone());
+                    self.state.colonies[idx].habitability_modifier = modifier;
+                    events.push(Event::ColonyHomeBodySet {
+                        colony_id,
+                        body_id: bid.clone(),
+                        habitability_modifier: modifier,
+                    });
+                }
+                Ok(events)
             }
 
             Command::AssignColonyHomeBody { colony_id, body_id } => {
@@ -5504,6 +5578,7 @@ mod tests {
                 site_id: site_a,
                 focus: None,
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
         engine
@@ -5513,6 +5588,7 @@ mod tests {
                 site_id: site_b,
                 focus: None,
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
 
@@ -5692,6 +5768,7 @@ mod tests {
                 site_id: site,
                 focus: Some("mining".into()),
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
 
@@ -6250,6 +6327,7 @@ mod tests {
             site_id: trade::SiteId::new(),
             focus: None,
             supplies_id: None,
+            body_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::NoPlanetMap)),
@@ -6316,6 +6394,7 @@ mod tests {
             site_id: trade::SiteId::new(), // random UUID — not in map
             focus: None,
             supplies_id: None,
+            body_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::SiteNotFound(_))),
@@ -6352,6 +6431,7 @@ mod tests {
                 site_id,
                 focus: Some("mining".into()),
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
 
@@ -6368,6 +6448,216 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::ColonyPlacedOnMap { q, r, .. } if *q == best_coord.q && *r == best_coord.r)));
+    }
+
+    /// Shared setup for the habitability-gate tests (issue #183): seed a
+    /// planet map and add a body with the given attributes. Returns
+    /// `(engine, site_id, body_id)` for a `FoundColonyAtSite` call.
+    fn setup_engine_with_body_and_site(
+        atmosphere: system::Atmosphere,
+        temperature: system::TemperatureBand,
+        gravity_g: f32,
+        radiation: system::RadiationLevel,
+    ) -> (GameEngine, SiteId, system::BodyId) {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                radius: 3,
+            })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let best_coord = pm
+            .best_landing_site()
+            .expect("map must have habitable cells");
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == best_coord)
+            .map(|(id, _)| id)
+            .expect("best landing site must have a SiteId");
+        let _ = pm;
+
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Target".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.0,
+            }))
+            .unwrap();
+        let body_id = match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        };
+        engine
+            .apply(&Command::System(system::SystemCommand::SetBodyAttributes {
+                body_id: body_id.clone(),
+                atmosphere,
+                temperature,
+                gravity_g,
+                radiation,
+                subtype: system::PlanetarySubtype::Unclassified,
+                tidally_locked: false,
+                axial_tilt_deg: 23.5,
+                rotation_period_hours: 24.0,
+                moon_count: 0,
+            }))
+            .unwrap();
+
+        (engine, site_id, body_id)
+    }
+
+    #[test]
+    fn found_colony_at_site_rejects_low_habitability_body() {
+        let (mut engine, site_id, body_id) = setup_engine_with_body_and_site(
+            system::Atmosphere::Toxic,
+            system::TemperatureBand::Extreme,
+            0.0,
+            system::RadiationLevel::High,
+        );
+        let body = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .get(&body_id)
+            .unwrap();
+        assert_eq!(
+            body.habitability(),
+            0,
+            "fixture must be a 0-habitability body"
+        );
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Doomed".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            body_id: Some(body_id),
+        });
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::HabitabilityBelowThreshold { score: 0, .. })
+            ),
+            "expected HabitabilityBelowThreshold, got {result:?}"
+        );
+        // No mutation should have happened — the gate fires before any state change.
+        assert_eq!(engine.state.colonies.len(), 0);
+    }
+
+    #[test]
+    fn found_colony_at_site_allows_habitable_body_and_auto_links_it() {
+        let (mut engine, site_id, body_id) = setup_engine_with_body_and_site(
+            system::Atmosphere::Breathable,
+            system::TemperatureBand::Temperate,
+            1.0,
+            system::RadiationLevel::Low,
+        );
+        let expected_modifier = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .get(&body_id)
+            .unwrap()
+            .habitability_modifier();
+
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Eden".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyHomeBodySet { .. })));
+        assert_eq!(engine.state.colonies.len(), 1);
+        let colony = &engine.state.colonies[0];
+        assert_eq!(colony.home_body_id, Some(body_id));
+        assert!((colony.habitability_modifier - expected_modifier).abs() < 1e-4);
+    }
+
+    #[test]
+    fn found_colony_at_site_allows_low_habitability_with_capability_unlocked() {
+        let (mut engine, site_id, body_id) = setup_engine_with_body_and_site(
+            system::Atmosphere::Toxic,
+            system::TemperatureBand::Extreme,
+            0.0,
+            system::RadiationLevel::High,
+        );
+        engine
+            .state
+            .unlocked_capabilities
+            .insert(system::HARSH_WORLD_CAPABILITY_ID.to_string());
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Grit City".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            body_id: Some(body_id),
+        });
+        assert!(
+            result.is_ok(),
+            "harsh-world capability should override the gate: {result:?}"
+        );
+        assert_eq!(engine.state.colonies.len(), 1);
+    }
+
+    #[test]
+    fn found_colony_at_site_rejects_unknown_body_id() {
+        let (mut engine, site_id, _) = setup_engine_with_body_and_site(
+            system::Atmosphere::Breathable,
+            system::TemperatureBand::Temperate,
+            1.0,
+            system::RadiationLevel::Low,
+        );
+        let bogus_body_id = system::BodyId::new();
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Ghost".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            body_id: Some(bogus_body_id),
+        });
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+        assert_eq!(engine.state.colonies.len(), 0);
+    }
+
+    #[test]
+    fn found_colony_at_site_without_body_id_skips_gate() {
+        // body_id: None must behave exactly as it did before #183 — no gate,
+        // no auto-link, no ColonyHomeBodySet event.
+        let (mut engine, site_id, _) = setup_engine_with_body_and_site(
+            system::Atmosphere::Toxic,
+            system::TemperatureBand::Extreme,
+            0.0,
+            system::RadiationLevel::High,
+        );
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Unlinked".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                body_id: None,
+            })
+            .unwrap();
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyHomeBodySet { .. })));
+        assert_eq!(engine.state.colonies[0].home_body_id, None);
     }
 
     #[test]
@@ -6396,6 +6686,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
 
@@ -6406,6 +6697,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: None,
+            body_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::SiteOccupied)),
@@ -6466,6 +6758,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: Some("standard".into()),
+                body_id: None,
             })
             .unwrap();
 
@@ -6521,6 +6814,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: Some("nonexistent".into()),
+            body_id: None,
         });
         assert!(
             matches!(result, Err(EngineError::InvalidArgument(_))),
@@ -6574,6 +6868,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
 
@@ -6751,6 +7046,7 @@ mod tests {
                 site_id: site_a,
                 focus: None,
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
         let colony_a = events_a
@@ -6771,6 +7067,7 @@ mod tests {
                 site_id: site_b,
                 focus: None,
                 supplies_id: None,
+                body_id: None,
             })
             .unwrap();
         let colony_b = events_b

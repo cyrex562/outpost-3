@@ -165,6 +165,7 @@ async function finish(): Promise<void> {
           site_id: site,
           focus: null,
           supplies_id: chosenSupplyId.value,
+          body_id: chosenBody.value?.body_id ?? null,
         }
       : {
           kind: 'found_colony',
@@ -173,7 +174,9 @@ async function finish(): Promise<void> {
         },
   )
   if (events.length === 0) {
-    error.value = 'Colony founding rejected — check engine state.'
+    // gameStore.toastMessage carries the actual rejection reason (e.g. the
+    // habitability-threshold message from issue #183) when the command fails.
+    error.value = gameStore.toastMessage ?? 'Colony founding rejected — check engine state.'
     return
   }
   const founded = events.find((e) => e.kind === 'colony_founded') as
@@ -236,11 +239,15 @@ async function finish(): Promise<void> {
           v-for="b in bodies"
           :key="b.body_id"
           class="body-card"
-          :class="{ selected: chosenBody?.body_id === b.body_id }"
+          :class="{ selected: chosenBody?.body_id === b.body_id, 'below-threshold': !b.can_found }"
+          :data-testid="`body-card-${b.body_id}`"
           @click="chosenBody = b"
         >
           <div class="body-name">{{ b.body_name }}</div>
-          <div class="body-meta">{{ b.kind }} · {{ b.distance_au.toFixed(2) }} AU</div>
+          <div class="body-meta">{{ b.kind }} · {{ b.distance_au.toFixed(2) }} AU · habitability {{ b.habitability }}/100</div>
+          <div v-if="!b.can_found" class="body-warning" :data-testid="`body-warning-${b.body_id}`">
+            Below habitability threshold — founding here will be rejected unless a harsh-world tech is researched.
+          </div>
         </button>
       </div>
       <p v-if="bodies.length === 0" class="hint">No colonizable bodies detected.</p>
@@ -515,8 +522,11 @@ async function finish(): Promise<void> {
 }
 .body-card:hover { background: #1a1a2a; }
 .body-card.selected { border-color: #468; background: #182030; color: #8cf; }
+.body-card.below-threshold { border-color: #632; }
+.body-card.below-threshold.selected { border-color: #a53; background: #241417; color: #d88; }
 .body-name { font-weight: bold; }
 .body-meta { font-size: 0.75rem; color: #667; }
+.body-warning { font-size: 0.7rem; color: #d88; font-style: italic; margin-top: 0.15rem; }
 
 /* Step 2 layout */
 .body-strip {

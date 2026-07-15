@@ -158,6 +158,26 @@
     - resource_id: research_data
       amount: 75.0
 
+- id: planetary_life_support
+  name: Planetary Life Support Engineering
+  description: >
+    Closed-loop atmosphere processing, radiation shielding, and thermal
+    regulation systems robust enough to found colonies on worlds that would
+    otherwise be uninhabitable (issue #183).
+  category: life_sciences
+  tier: 3
+  research_cost: 1800.0
+  research_time_ticks: 700
+  prerequisites:
+    - hydroponics
+    - advanced_materials
+  effects:
+    - type: unlock_capability
+      capability_id: colonize_harsh_worlds
+  resource_costs:
+    - resource_id: research_data
+      amount: 90.0
+
 # Tier 4: Placeholder for Alpha Expansion
 
 - id: quantum_computing
