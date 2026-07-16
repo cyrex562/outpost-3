@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS game_state (
 /// from YAML at runtime) are excluded; the caller must reload them after
 /// [`Snapshot::load`] returns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 struct FullStateBlob {
     // ── Turn counters ────────────────────────────────────────────────────────
     sol: u64,

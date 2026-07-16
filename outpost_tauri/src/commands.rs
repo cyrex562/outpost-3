@@ -109,6 +109,10 @@ pub enum ClientCommand {
         focus: Option<String>,
         #[serde(default)]
         supplies_id: Option<String>,
+        /// Explicit per-commodity starter-supply amounts (issue #167).
+        /// When present, overrides the `supplies_id` package scaling.
+        #[serde(default)]
+        supply_overrides: Option<Vec<(String, f64)>>,
         /// Star-system body this site belongs to (issue #183). `None` skips
         /// the habitability gate, preserving pre-#183 client behaviour.
         #[serde(default)]
@@ -885,6 +889,7 @@ pub fn apply_command(
             site_id,
             focus,
             supplies_id,
+            supply_overrides,
             body_id,
         } => {
             let uuid = Uuid::parse_str(&site_id)
@@ -902,6 +907,7 @@ pub fn apply_command(
                 site_id: SiteId(uuid),
                 focus,
                 supplies_id,
+                supply_overrides,
                 body_id,
             }
         }

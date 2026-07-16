@@ -1,0 +1,200 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import FoundColonyWizardView from '@/views/FoundColonyWizardView.vue'
+import type { Command } from '@/types/commands'
+import type { GameEvent } from '@/types/gameEvents'
+
+const getColonizeTargets = vi.fn()
+const getSystemBodies = vi.fn()
+const listBuildings = vi.fn()
+const getPlanetMap = vi.fn()
+const listSupplyPackages = vi.fn()
+
+vi.mock('@/services/tauriBridge', () => ({
+  getColonizeTargets: () => getColonizeTargets(),
+  getSystemBodies: () => getSystemBodies(),
+  listBuildings: () => listBuildings(),
+  getPlanetMap: () => getPlanetMap(),
+  listSupplyPackages: () => listSupplyPackages(),
+}))
+
+const routerPush = vi.fn()
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+  useRoute: () => ({ query: {} }),
+}))
+
+const sendCommand = vi.fn<[Command], Promise<GameEvent[]>>()
+const refreshColonyScreen = vi.fn()
+vi.mock('@/stores/game', () => ({
+  useGameStore: () => ({
+    sendCommand: (cmd: Command) => sendCommand(cmd),
+    busy: false,
+    selectedColonyId: null,
+    toastMessage: null,
+    refreshColonyScreen: (id?: string | null) => refreshColonyScreen(id),
+  }),
+}))
+
+const BODY = {
+  body_id: 'mars',
+  body_name: 'Mars',
+  kind: 'Rocky',
+  distance_au: 1.5,
+  habitability: 80,
+  can_found: true,
+}
+
+const HEX = {
+  q: 0,
+  r: 0,
+  site_id: 'site-0',
+  terrain: 'Plains',
+  biome: 'Grassland',
+  elevation: 0.5,
+  temperature: 'Temperate',
+  deposits: [],
+  habitable: true,
+  suitability: 90,
+  occupied_by: null,
+}
+
+const BUILDING_A = {
+  id: 'water_well',
+  name: 'Water Well',
+  description: 'Pumps water.',
+  category: 'extraction',
+  slot_cost: 1,
+  labor_per_turn: 1,
+  construction_turns: 2,
+  construction_cost: [],
+  tech_prerequisite: null,
+}
+
+const BUILDING_B = {
+  id: 'hydroponic_bay',
+  name: 'Hydroponic Bay',
+  description: 'Grows food.',
+  category: 'agriculture',
+  slot_cost: 2,
+  labor_per_turn: 1,
+  construction_turns: 3,
+  construction_cost: [],
+  tech_prerequisite: null,
+}
+
+const SUPPLY_PACKAGE = {
+  id: 'standard',
+  name: 'Standard',
+  description: 'A balanced loadout.',
+  commodities: [
+    ['water', 50],
+    ['food_ration', 20],
+  ] as [string, number][],
+}
+
+/** Mount the wizard and drive it through step 1 (body) and step 2 (site), landing on step 3. */
+async function mountAtStep3() {
+  getColonizeTargets.mockResolvedValue([BODY])
+  getSystemBodies.mockResolvedValue([])
+  listBuildings.mockResolvedValue([BUILDING_A, BUILDING_B])
+  getPlanetMap.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
+  listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
+
+  const wrapper = mount(FoundColonyWizardView, {
+    global: { stubs: { teleport: true } },
+  })
+  await flushPromises()
+
+  await wrapper.find('[data-testid="body-card-mars"]').trigger('click')
+  await wrapper.find('.btn.primary').trigger('click') // Next -> step 2
+  await wrapper.find('g').trigger('click') // select the only hex
+  await wrapper.find('.btn.primary').trigger('click') // Next -> step 3
+
+  return wrapper
+}
+
+describe('FoundColonyWizardView step 3 loadout (#167)', () => {
+  beforeEach(() => {
+    getColonizeTargets.mockReset()
+    getSystemBodies.mockReset()
+    listBuildings.mockReset()
+    getPlanetMap.mockReset()
+    listSupplyPackages.mockReset()
+    routerPush.mockReset()
+    sendCommand.mockReset()
+    refreshColonyScreen.mockReset()
+  })
+
+  it('pre-fills supply spinners from the default preset, scaled to starting population', async () => {
+    const wrapper = await mountAtStep3()
+
+    // startingPop defaults to 100, matching the preset's per-100 baseline exactly.
+    const water = wrapper.find('[data-testid="supply-amount-water"]')
+    const food = wrapper.find('[data-testid="supply-amount-food_ration"]')
+    expect((water.element as HTMLInputElement).value).toBe('50')
+    expect((food.element as HTMLInputElement).value).toBe('20')
+  })
+
+  it('rescales supply spinners when a different preset is picked after changing population', async () => {
+    const wrapper = await mountAtStep3()
+
+    await wrapper.find('[data-testid="population-input"]').setValue(200)
+    await wrapper.find('[data-testid="supply-preset-standard"]').trigger('click')
+
+    const water = wrapper.find('[data-testid="supply-amount-water"]')
+    expect((water.element as HTMLInputElement).value).toBe('100')
+  })
+
+  it('updates the budget preview as building counts change, and flags over-budget', async () => {
+    const wrapper = await mountAtStep3()
+
+    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
+    let preview = wrapper.find('[data-testid="budget-preview"]')
+    expect(preview.text()).toContain('1 / 5')
+    expect(preview.classes()).not.toContain('over')
+
+    // 1 water_well (1 slot) + 3 hydroponic_bay (2 slots each) = 7 > 5.
+    await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
+    await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
+    await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
+
+    preview = wrapper.find('[data-testid="budget-preview"]')
+    expect(preview.text()).toContain('7 / 5')
+    expect(preview.classes()).toContain('over')
+  })
+
+  it('sends supply_overrides and queues N construction commands, omitting zeroed-out commodities', async () => {
+    const wrapper = await mountAtStep3()
+
+    // Zero out food_ration, and queue 2x water_well.
+    await wrapper.find('[data-testid="supply-amount-food_ration"]').setValue(0)
+    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
+    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
+
+    sendCommand.mockImplementation(async (cmd: Command) => {
+      if (cmd.kind === 'found_colony_at_site') {
+        return [{ kind: 'colony_founded', colony_id: 'colony-1' } as unknown as GameEvent]
+      }
+      return []
+    })
+
+    await wrapper.find('.btn.primary').trigger('click') // Next -> step 4
+    await wrapper.find('.btn.primary').trigger('click') // Found Colony
+    await flushPromises()
+
+    const foundCall = sendCommand.mock.calls.find(([cmd]) => cmd.kind === 'found_colony_at_site')
+    expect(foundCall).toBeTruthy()
+    const foundCmd = foundCall![0] as Extract<Command, { kind: 'found_colony_at_site' }>
+    expect(foundCmd.starting_population).toBe(100)
+    expect(foundCmd.supply_overrides).toEqual([['water', 50]])
+
+    const queueCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'queue_construction')
+    expect(queueCalls.length).toBe(2)
+    for (const [cmd] of queueCalls) {
+      expect((cmd as Extract<Command, { kind: 'queue_construction' }>).building_type).toBe('water_well')
+    }
+
+    expect(routerPush).toHaveBeenCalledWith('/colony')
+  })
+})

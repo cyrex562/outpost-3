@@ -278,7 +278,7 @@ pub struct DefaultDirectiveDef {
 pub struct SystemBodyDef {
     /// Display name.
     pub name: String,
-    /// Body kind (mirrors `outpost_core::system::BodyKind` snake_case tags).
+    /// Body kind (mirrors `outpost_core::system::BodyKind` `snake_case` tags).
     pub kind: crate::system::BodyKind,
     /// Assigned system-role. Defaults to `Unassigned` when omitted.
     #[serde(default = "SystemBodyDef::default_role")]

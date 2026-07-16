@@ -45,7 +45,7 @@ const chosenBodyAttributes = computed<SystemBody | null>(() => {
   return systemBodies.value.find((b) => b.id === chosenBody.value?.body_id) ?? null
 })
 
-// Step 3: choose starting buildings + supply package
+// Step 3: population, per-commodity supplies, per-building counts (issue #167)
 const buildings = ref<BuildingOption[]>([])
 /**
  * Buildings selectable at founding — tech-gated buildings can't be
@@ -54,13 +54,66 @@ const buildings = ref<BuildingOption[]>([])
  * (issue #166).
  */
 const starterBuildings = computed(() => buildings.value.filter((b) => !b.tech_prerequisite))
-const chosenBuildings = ref<Set<string>>(new Set())
+/** Number of each building type to queue at founding. Keyed by building id. */
+const buildingCounts = ref<Record<string, number>>({})
 const supplyPackages = ref<SupplyPackage[]>([])
 const chosenSupplyId = ref<string | null>(null)
+/**
+ * Per-commodity starting-supply amount, pre-filled from the chosen preset's
+ * defaults (scaled to `startingPop`) and freely editable from there — the
+ * preset becomes a starting point, not a fixed tier (issue #167).
+ */
+const supplyAmounts = ref<Record<string, number>>({})
 
-// Step 4: name + population
+/**
+ * Colony starting build-slot budget. Mirrors `outpost_core::colony::BASE_SLOT_CAPACITY`
+ * — every new colony starts with this many slots before any tech bonuses.
+ * Used only for the wizard's real-time preview; the engine is the actual
+ * source of truth and independently rejects over-budget `QueueConstruction`
+ * calls with `EngineError::SlotCapacityExceeded`.
+ */
+const BASE_SLOT_CAPACITY = 5
+
+// Colonist headcount, seeded into the new colony's population pool.
 const colonyName = ref('Alpha Base')
 const startingPop = ref(100)
+
+/** (Re)fill `supplyAmounts` from a preset's per-100-colonist defaults, scaled to `startingPop`. */
+function applyPresetDefaults(presetId: string | null): void {
+  const pkg = supplyPackages.value.find((p) => p.id === presetId)
+  const amounts: Record<string, number> = {}
+  if (pkg) {
+    for (const [commodityId, per100] of pkg.commodities) {
+      amounts[commodityId] = Math.round((per100 * startingPop.value) / 100)
+    }
+  }
+  supplyAmounts.value = amounts
+}
+
+function selectPreset(presetId: string): void {
+  chosenSupplyId.value = presetId
+  applyPresetDefaults(presetId)
+}
+
+/** Total build slots the currently-chosen building counts would consume. */
+const totalSlotCost = computed(() =>
+  starterBuildings.value.reduce(
+    (sum, b) => sum + (buildingCounts.value[b.id] ?? 0) * b.slot_cost,
+    0,
+  ),
+)
+/** Total labor/turn the currently-chosen building counts would consume. */
+const totalLaborPerTurn = computed(() =>
+  starterBuildings.value.reduce(
+    (sum, b) => sum + (buildingCounts.value[b.id] ?? 0) * b.labor_per_turn,
+    0,
+  ),
+)
+const overBudget = computed(() => totalSlotCost.value > BASE_SLOT_CAPACITY)
+/** Number of buildings queued (sum of all per-building counts). */
+const totalBuildingCount = computed(() =>
+  Object.values(buildingCounts.value).reduce((sum, n) => sum + n, 0),
+)
 
 onMounted(async () => {
   try {
@@ -71,7 +124,8 @@ onMounted(async () => {
     supplyPackages.value = await listSupplyPackages()
     // Default the supply pick to a "Standard"-named package if present, else the first.
     const std = supplyPackages.value.find((p) => p.id === 'standard' || p.name.toLowerCase() === 'standard')
-    chosenSupplyId.value = std?.id ?? supplyPackages.value[0]?.id ?? null
+    const defaultPresetId = std?.id ?? supplyPackages.value[0]?.id ?? null
+    if (defaultPresetId) selectPreset(defaultPresetId)
 
     // If the wizard was launched from a body's "Found Colony Here" button,
     // the id lands in the `body` query. Preselect and skip step 1.
@@ -96,9 +150,9 @@ const canAdvance = computed(() => {
     case 2:
       return chosenHex.value !== null && chosenHex.value.habitable
     case 3:
-      return chosenBuildings.value.size > 0
+      return startingPop.value > 0 && totalBuildingCount.value > 0 && !overBudget.value
     case 4:
-      return colonyName.value.trim().length > 0 && startingPop.value > 0
+      return colonyName.value.trim().length > 0
     default:
       return false
   }
@@ -153,16 +207,31 @@ function back(): void {
   else router.push('/system')
 }
 
-function toggleBuilding(id: string): void {
-  const s = new Set(chosenBuildings.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
-  chosenBuildings.value = s
+/** Adjust a building's queued count by `delta`, clamped to zero. */
+function adjustBuildingCount(id: string, delta: number): void {
+  const current = buildingCounts.value[id] ?? 0
+  const next = Math.max(0, current + delta)
+  buildingCounts.value = { ...buildingCounts.value, [id]: next }
+}
+
+function setBuildingCount(id: string, value: number): void {
+  const next = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+  buildingCounts.value = { ...buildingCounts.value, [id]: next }
+}
+
+function setSupplyAmount(commodityId: string, value: number): void {
+  const next = Number.isFinite(value) ? Math.max(0, value) : 0
+  supplyAmounts.value = { ...supplyAmounts.value, [commodityId]: next }
 }
 
 async function finish(): Promise<void> {
   error.value = null
   const site = chosenHex.value?.site_id ?? ''
+  // Only forward amounts the player actually set (>0) as overrides — zeroed
+  // commodities simply aren't seeded, same as a preset that omits them.
+  const supplyOverrides: [string, number][] = Object.entries(supplyAmounts.value).filter(
+    ([, qty]) => qty > 0,
+  )
   const events = await gameStore.sendCommand(
     site
       ? {
@@ -172,6 +241,7 @@ async function finish(): Promise<void> {
           site_id: site,
           focus: null,
           supplies_id: chosenSupplyId.value,
+          supply_overrides: supplyOverrides.length > 0 ? supplyOverrides : null,
           body_id: chosenBody.value?.body_id ?? null,
         }
       : {
@@ -204,18 +274,25 @@ async function finish(): Promise<void> {
         body_id: chosenBody.value.body_id,
       })
     }
-    for (const bid of chosenBuildings.value) {
+    for (const [bid, count] of Object.entries(buildingCounts.value)) {
+      if (count <= 0) continue
       const b = buildings.value.find((x) => x.id === bid)
       if (!b) continue
-      await gameStore.sendCommand({
-        kind: 'queue_construction',
-        colony_id: founded.colony_id,
-        building_type: b.id,
-        slot_cost: b.slot_cost,
-        labor_per_turn: b.labor_per_turn,
-        construction_cost: b.construction_cost,
-        construction_turns: b.construction_turns,
-      })
+      // Queue N separate construction projects — the engine's existing
+      // per-call slot-capacity check (`EngineError::SlotCapacityExceeded`)
+      // is what actually enforces the starter build-slot budget; the
+      // wizard's running total is just a preview of that same rule.
+      for (let i = 0; i < count; i += 1) {
+        await gameStore.sendCommand({
+          kind: 'queue_construction',
+          colony_id: founded.colony_id,
+          building_type: b.id,
+          slot_cost: b.slot_cost,
+          labor_per_turn: b.labor_per_turn,
+          construction_cost: b.construction_cost,
+          construction_turns: b.construction_turns,
+        })
+      }
     }
     // If no starting buildings were queued, the selection change fires the
     // watcher which triggers a refresh. Await it explicitly here so that by
@@ -354,54 +431,75 @@ async function finish(): Promise<void> {
 
     <!-- Step 3: loadout -->
     <section v-else-if="step === 3" class="panel">
-      <p class="hint">Choose starting buildings and a supply package.</p>
+      <p class="hint">Set colonist headcount, tune starting supplies, and queue starting buildings.</p>
 
-      <h4 class="sub-title">Supply package</h4>
-      <div class="supply-grid" v-if="supplyPackages.length > 0">
-        <label
+      <h4 class="sub-title">Colonists</h4>
+      <div class="pop-row">
+        <input
+          v-model.number="startingPop"
+          type="range"
+          min="10"
+          max="1000"
+          step="10"
+          class="pop-slider"
+          data-testid="population-slider"
+        />
+        <input
+          v-model.number="startingPop"
+          type="number"
+          min="1"
+          class="input pop-input"
+          data-testid="population-input"
+        />
+        <span class="pop-label">colonists</span>
+      </div>
+
+      <h4 class="sub-title">Starting supplies</h4>
+      <div class="preset-row" v-if="supplyPackages.length > 0">
+        <span class="preset-label">Preset:</span>
+        <button
           v-for="pkg in supplyPackages"
           :key="pkg.id"
-          class="supply-card"
+          type="button"
+          class="preset-chip"
           :class="{ selected: chosenSupplyId === pkg.id }"
+          :data-testid="`supply-preset-${pkg.id}`"
+          @click="selectPreset(pkg.id)"
         >
+          {{ pkg.name }}
+        </button>
+        <span class="hint preset-hint">(presets pre-fill the spinners below — tweak freely from there)</span>
+      </div>
+      <div class="supply-spinner-grid" v-if="Object.keys(supplyAmounts).length > 0">
+        <div v-for="(qty, commodityId) in supplyAmounts" :key="commodityId" class="supply-spinner">
+          <span class="supply-spinner-label">{{ commodityId }}</span>
           <input
-            type="radio"
-            name="supply-pkg"
-            :checked="chosenSupplyId === pkg.id"
-            @change="chosenSupplyId = pkg.id"
+            type="number"
+            min="0"
+            class="input supply-spinner-input"
+            :value="qty"
+            :data-testid="`supply-amount-${commodityId}`"
+            @change="setSupplyAmount(commodityId, ($event.target as HTMLInputElement).valueAsNumber)"
           />
-          <div class="supply-info">
-            <div class="supply-name">{{ pkg.name }}</div>
-            <div class="supply-desc">{{ pkg.description || '—' }}</div>
-            <div class="supply-cost">
-              at {{ startingPop }} colonists:
-              <span
-                v-for="(c, i) in pkg.commodities"
-                :key="i"
-                class="cost-chip"
-              >
-                {{ (c[1] * startingPop / 100).toFixed(0) }} {{ c[0] }}
-              </span>
-            </div>
-          </div>
-        </label>
+        </div>
       </div>
       <div v-else class="hint">No supply packages authored in this content pack.</div>
 
       <h4 class="sub-title">Starting buildings</h4>
+      <div class="budget-preview" data-testid="budget-preview" :class="{ over: overBudget }">
+        Build slots: <strong>{{ totalSlotCost }} / {{ BASE_SLOT_CAPACITY }}</strong>
+        · Labor/turn: <strong>{{ totalLaborPerTurn }}</strong>
+        · Buildings queued: <strong>{{ totalBuildingCount }}</strong>
+        <span v-if="overBudget" class="budget-warning">— exceeds the starter build-slot budget</span>
+      </div>
 
       <div class="building-grid">
-        <label
+        <div
           v-for="b in starterBuildings"
           :key="b.id"
           class="building-card"
-          :class="{ selected: chosenBuildings.has(b.id) }"
+          :class="{ selected: (buildingCounts[b.id] ?? 0) > 0 }"
         >
-          <input
-            type="checkbox"
-            :checked="chosenBuildings.has(b.id)"
-            @change="toggleBuilding(b.id)"
-          />
           <div class="building-info">
             <div class="building-name">{{ b.name }}</div>
             <div class="building-cat">{{ b.category }}</div>
@@ -415,8 +513,34 @@ async function finish(): Promise<void> {
                 {{ c[1] }} {{ c[0] }}
               </span>
             </div>
+            <div class="building-count-row">
+              <button
+                type="button"
+                class="count-btn"
+                :data-testid="`building-minus-${b.id}`"
+                @click="adjustBuildingCount(b.id, -1)"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                min="0"
+                class="input count-input"
+                :value="buildingCounts[b.id] ?? 0"
+                :data-testid="`building-count-${b.id}`"
+                @change="setBuildingCount(b.id, ($event.target as HTMLInputElement).valueAsNumber)"
+              />
+              <button
+                type="button"
+                class="count-btn"
+                :data-testid="`building-plus-${b.id}`"
+                @click="adjustBuildingCount(b.id, 1)"
+              >
+                +
+              </button>
+            </div>
           </div>
-        </label>
+        </div>
         <div v-if="starterBuildings.length === 0" class="hint">
           No starter buildings available in the loaded content pack.
         </div>
@@ -430,10 +554,6 @@ async function finish(): Promise<void> {
         Name
         <input v-model="colonyName" class="input" />
       </label>
-      <label class="field">
-        Starting population
-        <input v-model.number="startingPop" class="input" type="number" min="1" />
-      </label>
       <div class="summary">
         <div>Body: <strong>{{ chosenBody?.body_name }}</strong></div>
         <div v-if="chosenHex">
@@ -442,15 +562,16 @@ async function finish(): Promise<void> {
             {{ chosenHex.biome }} · {{ chosenHex.terrain }} ({{ chosenHex.q }}, {{ chosenHex.r }})
           </strong>
         </div>
+        <div>Colonists: <strong>{{ startingPop }}</strong></div>
         <div>
-          Supply:
+          Supply preset:
           <strong>
             {{
-              supplyPackages.find((p) => p.id === chosenSupplyId)?.name ?? 'none'
+              supplyPackages.find((p) => p.id === chosenSupplyId)?.name ?? 'custom'
             }}
           </strong>
         </div>
-        <div>Buildings: <strong>{{ chosenBuildings.size }}</strong></div>
+        <div>Buildings queued: <strong>{{ totalBuildingCount }}</strong> ({{ totalSlotCost }} / {{ BASE_SLOT_CAPACITY }} slots)</div>
       </div>
     </section>
 
@@ -632,6 +753,66 @@ async function finish(): Promise<void> {
   gap: 0.25rem;
   flex-wrap: wrap;
 }
+
+.pop-row { display: flex; align-items: center; gap: 0.6rem; }
+.pop-slider { flex: 1; accent-color: #468; }
+.pop-input { width: 90px; }
+.pop-label { color: #667; font-size: 0.8rem; }
+
+.preset-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.preset-label { color: #667; font-size: 0.78rem; }
+.preset-chip {
+  background: #14141e;
+  border: 1px solid #334;
+  border-radius: 3px;
+  color: #aab;
+  padding: 0.3rem 0.6rem;
+  font-family: monospace;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.preset-chip:hover { background: #1a1a2a; }
+.preset-chip.selected { border-color: #468; background: #182030; color: #8cf; }
+.preset-hint { margin-left: 0.3rem; }
+
+.supply-spinner-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.4rem; }
+.supply-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  background: #14141e;
+  border: 1px solid #223;
+  border-radius: 3px;
+  padding: 0.35rem 0.5rem;
+}
+.supply-spinner-label { color: #aab; font-size: 0.78rem; }
+.supply-spinner-input { width: 80px; }
+
+.budget-preview {
+  background: #14141e;
+  border: 1px solid #334;
+  border-radius: 3px;
+  padding: 0.4rem 0.6rem;
+  color: #aab;
+  font-size: 0.8rem;
+}
+.budget-preview.over { border-color: #a53; color: #d88; }
+.budget-warning { color: #d66; margin-left: 0.4rem; }
+
+.building-count-row { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; }
+.count-btn {
+  background: #1a1a28;
+  border: 1px solid #446;
+  border-radius: 3px;
+  color: #aac;
+  width: 1.6rem;
+  height: 1.6rem;
+  font-family: monospace;
+  cursor: pointer;
+}
+.count-btn:hover { background: #22223a; }
+.count-input { width: 60px; }
 
 .building-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.5rem; }
 .building-card {

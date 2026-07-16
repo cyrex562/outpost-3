@@ -86,6 +86,7 @@ pub struct CargoDeliveryRecord {
 /// Owns all live simulation sub-state. Persistence (`SQLite` snapshots) is
 /// handled outside this struct between turns — never written during a turn.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GameState {
     /// All colonies under player management.
     pub colonies: Vec<Colony>,
