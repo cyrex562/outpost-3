@@ -1,6 +1,7 @@
 # Commodities used in the component-tier balance check — inputs mirror
-# content/base/commodities.yaml's processed metals (issue #207), outputs
-# are the new component-tier commodities (issue #208).
+# content/base/commodities.yaml's processed metals (issue #207) and
+# plastics (issue #210, wired into fabricate_electronic_components),
+# outputs are the new component-tier commodities (issue #208).
 - id: structural_metal
   name: Structural Metal
   category: metal
@@ -20,6 +21,11 @@
   name: Refractory Metal
   category: metal
   base_value: 100.0
+
+- id: plastics
+  name: Plastics
+  category: chemical
+  base_value: 20.0
 
 - id: mechanical_components
   name: Mechanical Components

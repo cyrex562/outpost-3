@@ -118,10 +118,11 @@
   name: Electronic Components
   description: >
     Conductive- and precious-metal circuitry for control systems and
-    instrumentation. Real electronics manufacturing also needs semiconductor
-    feedstock; this recipe is metals-only until #216 (carbon & semiconductor
-    materials) ships, at which point it should be updated to consume
-    `semiconductors` (issue #208).
+    instrumentation, now cased/insulated with plastics (issue #210, closing
+    the gap #208 left open). Real electronics manufacturing also needs
+    semiconductor feedstock; this recipe still lacks that until #216
+    (carbon & semiconductor materials) ships, at which point it should be
+    updated to also consume `semiconductors`.
   category: manufactured
   phase: solid
   base_value: 90.0
@@ -163,6 +164,53 @@
   category: luxury_good
   phase: solid
   base_value: 350.0
+  tradeable: true
+
+- id: hydrocarbons
+  name: Hydrocarbons
+  description: >
+    Crude oil/natural-gas family feedstock, pumped from subsurface
+    deposits — the raw input for the fuel/plastics/chemicals refining
+    chain (issue #210).
+  category: raw_material
+  phase: liquid
+  base_value: 12.0
+  tradeable: true
+
+- id: fuel
+  name: Fuel
+  description: >
+    Refined hydrocarbon fuel — powers vehicles and high-tier generators.
+    No engine mechanic currently consumes it (no vehicle/expedition-cost or
+    generator-fuel system exists yet); producible and tradeable now, wired
+    up to a real consumer once one of those mechanics lands (issue #210).
+  category: chemical
+  phase: liquid
+  base_value: 30.0
+  tradeable: true
+
+- id: plastics
+  name: Plastics
+  description: >
+    Refined hydrocarbon polymer feedstock — feeds electronic-component and
+    other manufacturing recipes. Now a required input to
+    `electronic_components` alongside conductive/precious metal (issue
+    #210, closing the gap #208 left for this).
+  category: chemical
+  phase: solid
+  base_value: 20.0
+  tradeable: true
+
+- id: chemicals
+  name: Chemicals
+  description: >
+    Refined industrial chemicals — feeds manufacturing recipes and,
+    optionally, life-support processes. No life-support recipe consumes it
+    yet in this iteration (issue #210); a plausible future tie-in per
+    #166's life_support building category.
+  category: chemical
+  phase: liquid
+  base_value: 25.0
   tradeable: true
 
 - id: power_cell

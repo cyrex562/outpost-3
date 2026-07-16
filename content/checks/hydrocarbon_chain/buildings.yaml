@@ -1,0 +1,10 @@
+# Buildings used in the hydrocarbon-chain balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: hydrocarbon_well
+  name: Hydrocarbon Well
+  category: extraction
+
+- id: petrochemical_plant
+  name: Petrochemical Plant
+  category: processing

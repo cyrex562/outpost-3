@@ -1,0 +1,20 @@
+# Commodities used in the hydrocarbon-chain balance check.
+- id: hydrocarbons
+  name: Hydrocarbons
+  category: raw_material
+  base_value: 12.0
+
+- id: fuel
+  name: Fuel
+  category: chemical
+  base_value: 30.0
+
+- id: plastics
+  name: Plastics
+  category: chemical
+  base_value: 20.0
+
+- id: chemicals
+  name: Chemicals
+  category: chemical
+  base_value: 25.0

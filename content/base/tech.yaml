@@ -51,6 +51,7 @@
     buildings:
       - structural_mine
       - conductive_mine
+      - hydrocarbon_well
     bonuses:
       - mining_efficiency_10_percent
 
@@ -74,6 +75,7 @@
       - refinery
       - precious_mine
       - precious_refinery
+      - petrochemical_plant
     resources:
       - steel
       - titanium

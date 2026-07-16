@@ -1,0 +1,18 @@
+# Colony configuration for the hydrocarbon-chain balance check.
+#
+# Two hydrocarbon wells (18/sol) feeding three petrochemical-plant
+# instances, one per refining recipe (10/sol combined demand). No
+# imports — everything produced on-site.
+buildings:
+  - building_id: hydrocarbon_well
+    recipe_id: pump_hydrocarbons
+  - building_id: hydrocarbon_well
+    recipe_id: pump_hydrocarbons
+  - building_id: petrochemical_plant
+    recipe_id: refine_fuel
+  - building_id: petrochemical_plant
+    recipe_id: refine_plastics
+  - building_id: petrochemical_plant
+    recipe_id: refine_chemicals
+
+imports: []

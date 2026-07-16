@@ -770,7 +770,8 @@ mod tests {
             .buildings
             .push(PlacedBuilding::new("solar_array_mk1", 1));
 
-        // Seed generous processed-metal stock for all three new recipes.
+        // Seed generous processed-metal (and #210 plastics) stock for all
+        // three new recipes.
         engine.state.colonies[idx]
             .pool
             .deposit("structural_metal", 100.0);
@@ -783,6 +784,7 @@ mod tests {
         engine.state.colonies[idx]
             .pool
             .deposit("refractory_metal", 100.0);
+        engine.state.colonies[idx].pool.deposit("plastics", 100.0);
 
         engine
             .apply(&Command::SetActiveRecipe {
@@ -899,6 +901,91 @@ mod tests {
         assert!(
             engine.state.colonies[idx].pool.amount("luxury_goods") > 0.0,
             "manufactory should produce luxury_goods after switching to craft_luxury_goods"
+        );
+    }
+
+    /// Real-engine proof that the petrochemical plant's hydrocarbon-refining
+    /// recipes (#210) actually work against the real content pack: seed
+    /// hydrocarbons, switch `petrochemical_plant` through all three recipes,
+    /// and confirm each one produces its corresponding processed commodity.
+    #[test]
+    fn petrochemical_plant_recipe_selection_produces_each_output_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Petrochemical Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("petrochemical_plant", 2));
+        // Power source — petrochemical_plant alone demands 13kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.state.colonies[idx]
+            .pool
+            .deposit("hydrocarbons", 100.0);
+
+        // Default (no active_recipes entry) should be refine_chemicals
+        // (sorts first alphabetically among the plant's three recipes).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("chemicals") > 0.0,
+            "petrochemical_plant should default to refine_chemicals with no active_recipes entry"
+        );
+        assert_eq!(engine.state.colonies[idx].pool.amount("fuel"), 0.0);
+        assert_eq!(engine.state.colonies[idx].pool.amount("plastics"), 0.0);
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "petrochemical_plant".into(),
+                recipe_id: "refine_fuel".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("fuel") > 0.0,
+            "petrochemical_plant should produce fuel after switching to refine_fuel"
+        );
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "petrochemical_plant".into(),
+                recipe_id: "refine_plastics".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("plastics") > 0.0,
+            "petrochemical_plant should produce plastics after switching to refine_plastics"
         );
     }
 

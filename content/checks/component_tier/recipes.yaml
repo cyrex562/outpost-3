@@ -22,6 +22,8 @@
       quantity: 2.0
     - id: precious_metal
       quantity: 1.0
+    - id: plastics
+      quantity: 2.0
   outputs:
     - id: electronic_components
       quantity: 1.0
