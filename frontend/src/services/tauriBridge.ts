@@ -250,7 +250,10 @@ export interface BuildingDetail {
   slot_cost: number
   power_delta: number
   maintenance: IngredientRow[]
+  /** The recipe this building actually runs right now (active selection, or the deterministic default). */
   recipe: RecipeRow | null
+  /** Every recipe authored for this building type (issue #166). Empty unless there's a real choice (more than one). */
+  available_recipes: RecipeRow[]
   last_run: BuildingRunRow | null
 }
 
@@ -261,6 +264,18 @@ export async function getBuildingDetail(colonyId: string, buildingType: string):
     throw new Error(`unexpected query result for building_detail: ${JSON.stringify(q)}`)
   }
   return q.data as BuildingDetail
+}
+
+/** Select which recipe a building type runs in this colony (issue #166). */
+export async function setActiveRecipe(colonyId: string, buildingType: string, recipeId: string): Promise<GameEvent[]> {
+  return invoke<GameEvent[]>('apply_command', {
+    command: {
+      kind: 'set_active_recipe',
+      colony_id: colonyId,
+      building_type: buildingType,
+      recipe_id: recipeId,
+    },
+  })
 }
 
 export async function getPlanetMap(): Promise<PlanetMap> {

@@ -69,6 +69,16 @@ pub struct Colony {
     /// buildings with no matching recipe (pure storage/habitat) are absent.
     #[serde(default)]
     pub last_production: std::collections::HashMap<String, BuildingProductionResult>,
+    /// Player-selected active recipe per `building_type`, for buildings with
+    /// more than one authored recipe (issue #166).
+    ///
+    /// Applies to every instance of that building type in this colony —
+    /// recipe selection is colony-wide per type, not per placed instance.
+    /// Absent entries fall back to the first authored recipe for the type
+    /// (the pre-#166 deterministic default), so single-recipe buildings need
+    /// no entry here at all.
+    #[serde(default)]
+    pub active_recipes: std::collections::HashMap<String, String>,
 }
 
 fn default_habitability_modifier() -> f32 {
@@ -90,6 +100,7 @@ impl Colony {
             home_body_id: None,
             habitability_modifier: default_habitability_modifier(),
             last_production: std::collections::HashMap::new(),
+            active_recipes: std::collections::HashMap::new(),
         }
     }
 

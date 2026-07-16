@@ -105,7 +105,7 @@ impl NeedsConfig {
         Self {
             needs: vec![
                 NeedDef {
-                    commodity_id: "food".into(),
+                    commodity_id: "food_ration".into(),
                     scaling: NeedScaling::PerCapita { rate: 0.1 },
                     weight: 1.0,
                 },

@@ -1,0 +1,59 @@
+# Recipes used in the bootstrap-colony balance check — rates mirror
+# content/base/recipes.yaml exactly for the 4 flow-representable needs.
+- id: pump_water
+  name: Pump Water
+  building: water_well
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 24.0
+
+- id: grow_rations
+  name: Grow Rations
+  building: hydroponic_bay
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 2.0
+  outputs:
+    - id: food_ration
+      quantity: 12.0
+
+- id: scrub_oxygen
+  name: Scrub Oxygen
+  building: life_support_module
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 7.0
+
+- id: generate_power_solar_mk1
+  name: Generate Power (Solar Mk1)
+  building: solar_array_mk1
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+
+# Synthetic sink: models a 100-colonist population's per-capita draw from
+# outpost_core::needs::NeedsConfig::default_survival() (food_ration 0.1,
+# water 0.15, oxygen 0.05, power 0.2 per colonist per sol). No output — a
+# pure consumer, same trick used to represent fixed demand in this static
+# flow-balance tool.
+- id: colonist_consumption
+  name: Colonist Consumption (100 colonists)
+  building: colonist_life_support
+  cycle_sols: 1
+  inputs:
+    - id: food_ration
+      quantity: 10.0
+    - id: water
+      quantity: 15.0
+    - id: oxygen
+      quantity: 5.0
+    - id: power
+      quantity: 20.0
+  outputs: []

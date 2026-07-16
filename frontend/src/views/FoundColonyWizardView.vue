@@ -47,6 +47,13 @@ const chosenBodyAttributes = computed<SystemBody | null>(() => {
 
 // Step 3: choose starting buildings + supply package
 const buildings = ref<BuildingOption[]>([])
+/**
+ * Buildings selectable at founding — tech-gated buildings can't be
+ * researched yet at this point in a new game, so offering them here would
+ * let the player queue construction they can never actually complete
+ * (issue #166).
+ */
+const starterBuildings = computed(() => buildings.value.filter((b) => !b.tech_prerequisite))
 const chosenBuildings = ref<Set<string>>(new Set())
 const supplyPackages = ref<SupplyPackage[]>([])
 const chosenSupplyId = ref<string | null>(null)
@@ -385,7 +392,7 @@ async function finish(): Promise<void> {
 
       <div class="building-grid">
         <label
-          v-for="b in buildings"
+          v-for="b in starterBuildings"
           :key="b.id"
           class="building-card"
           :class="{ selected: chosenBuildings.has(b.id) }"
@@ -408,13 +415,10 @@ async function finish(): Promise<void> {
                 {{ c[1] }} {{ c[0] }}
               </span>
             </div>
-            <div v-if="b.tech_prerequisite" class="building-tech">
-              requires: {{ b.tech_prerequisite }}
-            </div>
           </div>
         </label>
-        <div v-if="buildings.length === 0" class="hint">
-          No buildings available in the loaded content pack.
+        <div v-if="starterBuildings.length === 0" class="hint">
+          No starter buildings available in the loaded content pack.
         </div>
       </div>
     </section>
