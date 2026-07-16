@@ -726,6 +726,104 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the fabricator's new component recipes (#208)
+    /// actually work against the real content pack: seed processed metals,
+    /// switch `fabricator` through each of the three new recipes, and
+    /// confirm each one produces its corresponding component commodity.
+    #[test]
+    fn fabricator_recipe_selection_produces_each_component_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Fabricator Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("fabricator", 2));
+        // Power source — fabricator alone demands 14kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        // Seed generous processed-metal stock for all three new recipes.
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_metal", 100.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("conductive_metal", 100.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("precious_metal", 100.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("refractory_metal", 100.0);
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "fabricator".into(),
+                recipe_id: "fabricate_mechanical_components".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("mechanical_components") > 0.0,
+            "fabricator should produce mechanical_components after switching to fabricate_mechanical_components"
+        );
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "fabricator".into(),
+                recipe_id: "fabricate_electronic_components".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("electronic_components") > 0.0,
+            "fabricator should produce electronic_components after switching to fabricate_electronic_components"
+        );
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "fabricator".into(),
+                recipe_id: "fabricate_alloys".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("alloys") > 0.0,
+            "fabricator should produce alloys after switching to fabricate_alloys"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

@@ -104,6 +104,39 @@
   base_value: 100.0
   tradeable: true
 
+- id: mechanical_components
+  name: Mechanical Components
+  description: >
+    Machined structural/conductive-metal parts — gears, housings, fasteners —
+    used in mid-tier manufacturing recipes (issue #208).
+  category: manufactured
+  phase: solid
+  base_value: 60.0
+  tradeable: true
+
+- id: electronic_components
+  name: Electronic Components
+  description: >
+    Conductive- and precious-metal circuitry for control systems and
+    instrumentation. Real electronics manufacturing also needs semiconductor
+    feedstock; this recipe is metals-only until #216 (carbon & semiconductor
+    materials) ships, at which point it should be updated to consume
+    `semiconductors` (issue #208).
+  category: manufactured
+  phase: solid
+  base_value: 90.0
+  tradeable: true
+
+- id: alloys
+  name: Alloys
+  description: >
+    Structural/refractory-metal composite blend for high-tier construction
+    and advanced buildings (issue #208).
+  category: manufactured
+  phase: solid
+  base_value: 80.0
+  tradeable: true
+
 - id: power_cell
   name: Power Cell
   description: >

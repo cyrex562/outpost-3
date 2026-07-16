@@ -1,0 +1,10 @@
+id: component-tier-check
+name: Component Tier Balance Check
+version: '0.1.0'
+description: >
+  Proves the three new component chains added in issue #208
+  (mechanical_components, electronic_components, alloys) each close,
+  given a generous external supply of #207's processed metals as imports
+  (this bundle tests the fabricator's component recipes in isolation, not
+  the upstream mining/refining chains — those are covered by
+  content/checks/metal_categories).
