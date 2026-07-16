@@ -130,6 +130,7 @@
       - physics_lab
       - refractory_mine
       - refractory_foundry
+      - manufactory
     bonuses:
       - production_efficiency_25_percent
       - labor_requirement_minus_20_percent

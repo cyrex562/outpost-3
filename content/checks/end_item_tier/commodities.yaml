@@ -1,0 +1,27 @@
+# Commodities used in the end-item-tier balance check — inputs mirror
+# content/base/commodities.yaml's components (issue #208) and precious
+# metal (issue #207); outputs are the new end-item commodities (issue #209).
+- id: mechanical_components
+  name: Mechanical Components
+  category: consumer_good
+  base_value: 60.0
+
+- id: electronic_components
+  name: Electronic Components
+  category: consumer_good
+  base_value: 90.0
+
+- id: precious_metal
+  name: Precious Metal
+  category: metal
+  base_value: 150.0
+
+- id: consumer_goods
+  name: Consumer Goods
+  category: consumer_good
+  base_value: 120.0
+
+- id: luxury_goods
+  name: Luxury Goods
+  category: luxury_good
+  base_value: 350.0

@@ -1,0 +1,6 @@
+# Buildings used in the end-item-tier balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: manufactory
+  name: Manufactory
+  category: processing

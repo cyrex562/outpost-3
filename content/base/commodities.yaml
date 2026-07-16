@@ -137,6 +137,34 @@
   base_value: 80.0
   tradeable: true
 
+- id: consumer_goods
+  name: Consumer Goods
+  description: >
+    Generic finished goods assembled from mechanical/electronic components —
+    tools, appliances, everyday manufactured items. A tradeable end-item
+    sink; not yet wired into the needs/stability system (issue #209 —
+    deferred: adding a mandatory per-capita need here would require
+    re-tuning every existing colony config and balance-harness bundle,
+    since no starter building produces it. Revisit once there's real
+    playtesting signal on the right weight relative to survival needs).
+  category: consumer_good
+  phase: solid
+  base_value: 120.0
+  tradeable: true
+
+- id: luxury_goods
+  name: Luxury Goods
+  description: >
+    High-value finished goods gated behind precious metal — the user's own
+    reference point is "whiskey or alcohol in general": one commodity id
+    covers whatever the colony is narratively producing (aged spirits, fine
+    textiles, art), matching the category-not-SKU principle from #207.
+    Same trade-sink status as consumer_goods for now (issue #209).
+  category: luxury_good
+  phase: solid
+  base_value: 350.0
+  tradeable: true
+
 - id: power_cell
   name: Power Cell
   description: >

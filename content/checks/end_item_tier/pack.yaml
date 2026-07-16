@@ -1,0 +1,10 @@
+id: end-item-tier-check
+name: End-Item Tier Balance Check
+version: '0.1.0'
+description: >
+  Proves the two new end-item chains added in issue #209 (consumer_goods,
+  luxury_goods) each close, given a generous external supply of #208's
+  components and #207's precious_metal as imports (this bundle tests the
+  manufactory's recipes in isolation, not the upstream component/metal
+  chains — those are covered by content/checks/component_tier and
+  content/checks/metal_categories).
