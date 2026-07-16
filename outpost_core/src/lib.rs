@@ -2176,7 +2176,9 @@ impl GameEngine {
                                 threshold: system::HABITABILITY_FOUNDING_THRESHOLD,
                             });
                         }
-                        Some(body.habitability_modifier())
+                        Some(body.habitability_modifier_with_mitigations(
+                            &self.state.habitability_mitigations,
+                        ))
                     }
                     None => None,
                 };
@@ -2268,7 +2270,8 @@ impl GameEngine {
                     .ok_or_else(|| {
                         EngineError::InvalidArgument(format!("body not found: {body_id}"))
                     })?;
-                let modifier = body.habitability_modifier();
+                let modifier = body
+                    .habitability_modifier_with_mitigations(&self.state.habitability_mitigations);
                 let colony = &mut self.state.colonies[idx];
                 colony.home_body_id = Some(body_id.clone());
                 colony.habitability_modifier = modifier;

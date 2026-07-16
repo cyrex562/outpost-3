@@ -208,6 +208,11 @@ pub struct GameState {
     // ── M8: Field expeditions (issue #103) ───────────────────────────────
     /// All field expeditions launched this campaign (active and terminal).
     pub expeditions: Vec<crate::expedition::Expedition>,
+
+    // ── Tech-driven habitability mitigation (issue #185) ─────────────────
+    /// Habitability attributes mitigated by completed tech, applied globally
+    /// (retroactively) to every colony with a linked home body.
+    pub habitability_mitigations: HashSet<crate::system::HabitabilityAttribute>,
 }
 
 impl GameState {
@@ -254,6 +259,7 @@ impl GameState {
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
             expeditions: Vec::new(),
+            habitability_mitigations: HashSet::new(),
         }
     }
 
@@ -419,6 +425,7 @@ impl TurnProcessor {
     ///
     /// Called after each research-turn completion to wire unlocks and bonuses.
     pub fn apply_tech_effects(state: &mut GameState, effects: &[TechEffect]) {
+        let mut mitigation_added = false;
         for effect in effects {
             match effect {
                 TechEffect::UnlockBuilding { building_id } => {
@@ -441,7 +448,37 @@ impl TurnProcessor {
                         *value,
                     ));
                 }
+                TechEffect::MitigateAttribute { attribute } => {
+                    mitigation_added |= state.habitability_mitigations.insert(*attribute);
+                }
             }
+        }
+        if mitigation_added {
+            Self::recompute_habitability_modifiers(state);
+        }
+    }
+
+    /// Recompute `habitability_modifier` for every colony with a linked home
+    /// body, folding in `state.habitability_mitigations` (issue #185).
+    ///
+    /// Applies retroactively — colonies founded before a mitigating tech
+    /// completed are updated immediately, matching how other global tech
+    /// unlocks (capabilities, buildings) already take effect for existing
+    /// colonies rather than only future ones.
+    fn recompute_habitability_modifiers(state: &mut GameState) {
+        let mitigations = &state.habitability_mitigations;
+        let updates: Vec<(usize, f32)> = state
+            .colonies
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                let body_id = c.home_body_id.clone()?;
+                let body = state.system_state.node_map.bodies.get(&body_id)?;
+                Some((i, body.habitability_modifier_with_mitigations(mitigations)))
+            })
+            .collect();
+        for (i, modifier) in updates {
+            state.colonies[i].habitability_modifier = modifier;
         }
     }
 
@@ -751,6 +788,60 @@ mod tests {
         assert!(
             (sum - 0.20).abs() < 1e-4,
             "expected 0.20 bonus in accumulator, got {sum}"
+        );
+    }
+
+    #[test]
+    fn mitigation_tech_retroactively_recomputes_existing_colony_modifier() {
+        use crate::system::{Body, BodyKind, HabitabilityAttribute, RadiationLevel};
+
+        let mut state = GameState::new();
+        let mut body = Body::new("Harsh World", BodyKind::InnerPlanet, 1.0);
+        body.radiation = RadiationLevel::High;
+        let base_modifier = body.habitability_modifier();
+        let body_id = state.system_state.node_map.add_body(body);
+
+        // Colony founded (and linked) *before* the mitigating tech completes —
+        // this is the retroactivity case (issue #185).
+        state.add_colony(Colony::new("Outpost"), 100);
+        state.colonies[0].home_body_id = Some(body_id.clone());
+        state.colonies[0].habitability_modifier = base_modifier;
+
+        let tech_id = "radiation_shielding".to_string();
+        let defs = vec![TechDef {
+            id: tech_id.clone(),
+            display_name: "Radiation Shielding".to_string(),
+            prerequisites: vec![],
+            research_cost: 5.0,
+            effects: vec![TechEffect::MitigateAttribute {
+                attribute: HabitabilityAttribute::Radiation,
+            }],
+            ..TechDef::default()
+        }];
+        state.tech_state.set_current_project(tech_id);
+        state.tech_registry = Some(TechRegistry::build(defs).unwrap());
+        state.research_pool.deposit(10.0);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        assert!(state
+            .habitability_mitigations
+            .contains(&HabitabilityAttribute::Radiation));
+
+        let body_after = state.system_state.node_map.bodies.get(&body_id).unwrap();
+        let mut mitigations = std::collections::HashSet::new();
+        mitigations.insert(HabitabilityAttribute::Radiation);
+        let expected_modifier = body_after.habitability_modifier_with_mitigations(&mitigations);
+
+        assert!(
+            (state.colonies[0].habitability_modifier - expected_modifier).abs() < 1e-6,
+            "expected retroactively-recomputed modifier {expected_modifier}, got {}",
+            state.colonies[0].habitability_modifier
+        );
+        assert!(
+            state.colonies[0].habitability_modifier > base_modifier,
+            "mitigating High radiation should raise the modifier above the un-mitigated baseline"
         );
     }
 

@@ -47,7 +47,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 2: `populations.count` changed from INTEGER to REAL.
 /// Schema version 3: full `GameState` blob added (`state_json` column); `sandbox_mode` stored in blob.
 /// Schema version 4: `expeditions` field added to `FullStateBlob`.
-pub const SCHEMA_VERSION: u32 = 4;
+/// Schema version 5: `habitability_mitigations` field added to `FullStateBlob` (issue #185).
+pub const SCHEMA_VERSION: u32 = 5;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,10 @@ struct FullStateBlob {
     // ── #180 Maintenance ──────────────────────────────────────────────────────
     #[serde(default = "default_true")]
     maintenance_enabled: bool,
+
+    // ── #185 Tech-driven habitability mitigation ────────────────────────────
+    #[serde(default)]
+    habitability_mitigations: HashSet<crate::system::HabitabilityAttribute>,
 }
 
 fn default_true() -> bool {
@@ -199,6 +204,7 @@ impl FullStateBlob {
             hazards_enabled: state.hazards_enabled,
             last_menace_definition: state.last_menace_definition.clone(),
             maintenance_enabled: state.maintenance_enabled,
+            habitability_mitigations: state.habitability_mitigations.clone(),
         }
     }
 
@@ -242,6 +248,7 @@ impl FullStateBlob {
             hazards_enabled: self.hazards_enabled,
             last_menace_definition: self.last_menace_definition,
             maintenance_enabled: self.maintenance_enabled,
+            habitability_mitigations: self.habitability_mitigations,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,

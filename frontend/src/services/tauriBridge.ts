@@ -132,6 +132,10 @@ export interface SystemBody {
   radiation: string
   habitability: number
   habitability_modifier: number
+  /** Habitability score after tech-driven mitigations are applied (issue #185); equals `habitability` when none apply. */
+  habitability_effective: number
+  /** Habitability modifier after tech-driven mitigations are applied (issue #185); equals `habitability_modifier` when none apply. */
+  habitability_modifier_effective: number
   /** Surface/composition archetype (issue #196) — flavor/authoring guidance, not a habitability input. */
   subtype: string
   tidally_locked: boolean

@@ -46,6 +46,16 @@ pub enum TechEffect {
         /// Additive modifier value (e.g. `0.20` for +20 %).
         value: f32,
     },
+    /// Cancels one [`crate::system::HabitabilityAttribute`]'s penalty across
+    /// every colony linked to a body (issue #185).
+    ///
+    /// Applied retroactively: colonies founded before this tech completed are
+    /// recomputed immediately, matching how [`TechEffect::UnlockCapability`]
+    /// already applies globally rather than only to future colonies.
+    MitigateAttribute {
+        /// The habitability input this tech treats as its best band.
+        attribute: crate::system::HabitabilityAttribute,
+    },
 }
 
 /// Authored technology definition — stored in content pack files.

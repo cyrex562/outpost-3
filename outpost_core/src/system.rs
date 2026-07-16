@@ -145,6 +145,27 @@ pub enum RadiationLevel {
     High,
 }
 
+/// A single habitability-scoring input that a tech effect can mitigate
+/// (issue #185).
+///
+/// Mitigating an attribute treats it as its best band for
+/// [`Body::habitability_with_mitigations`] purposes only — the body's
+/// underlying attribute value is never changed. Gravity is intentionally
+/// excluded: it is a continuous `f32`, not one of the small fixed enums the
+/// other three inputs use, so "cancel the penalty" isn't well-defined for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HabitabilityAttribute {
+    /// Treats [`AtmosphereDensity`] as [`AtmosphereDensity::Breathable`].
+    AtmosphereDensity,
+    /// Treats [`AtmosphereHazard`] as [`AtmosphereHazard::None`].
+    AtmosphereHazard,
+    /// Treats [`TemperatureBand`] as [`TemperatureBand::Temperate`].
+    Temperature,
+    /// Treats [`RadiationLevel`] as [`RadiationLevel::Low`].
+    Radiation,
+}
+
 fn default_atmosphere_density() -> AtmosphereDensity {
     AtmosphereDensity::Vacuum
 }
@@ -332,35 +353,66 @@ impl Body {
     /// used, and hazard scales it down — `Toxic` always zeroes it out
     /// regardless of density, matching the old enum's `Toxic => 0.0` exactly.
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn habitability(&self) -> u8 {
-        let density_points = match self.atmosphere_density {
-            AtmosphereDensity::Breathable => 30.0,
-            AtmosphereDensity::Thin => 15.0,
-            AtmosphereDensity::Dense => 10.0,
-            AtmosphereDensity::Vacuum => 5.0,
+        self.habitability_with_mitigations(&std::collections::HashSet::new())
+    }
+
+    /// Composite habitability score (0–100), as [`Self::habitability`], but
+    /// treating every attribute in `mitigations` as its best band (issue #185).
+    ///
+    /// Used to apply tech-driven mitigation (e.g. radiation shielding) without
+    /// altering the body's underlying attributes — the base score stays
+    /// authoritative and available via [`Self::habitability`].
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn habitability_with_mitigations(
+        &self,
+        mitigations: &std::collections::HashSet<HabitabilityAttribute>,
+    ) -> u8 {
+        let density_points = if mitigations.contains(&HabitabilityAttribute::AtmosphereDensity) {
+            30.0
+        } else {
+            match self.atmosphere_density {
+                AtmosphereDensity::Breathable => 30.0,
+                AtmosphereDensity::Thin => 15.0,
+                AtmosphereDensity::Dense => 10.0,
+                AtmosphereDensity::Vacuum => 5.0,
+            }
         };
-        let hazard_multiplier = match self.atmosphere_hazard {
-            AtmosphereHazard::None => 1.0,
-            AtmosphereHazard::Corrosive => 0.5,
-            AtmosphereHazard::OxidizingCombustible => 0.25,
-            AtmosphereHazard::Toxic => 0.0,
+        let hazard_multiplier = if mitigations.contains(&HabitabilityAttribute::AtmosphereHazard) {
+            1.0
+        } else {
+            match self.atmosphere_hazard {
+                AtmosphereHazard::None => 1.0,
+                AtmosphereHazard::Corrosive => 0.5,
+                AtmosphereHazard::OxidizingCombustible => 0.25,
+                AtmosphereHazard::Toxic => 0.0,
+            }
         };
         let atmo = density_points * hazard_multiplier;
-        let temp = match self.temperature {
-            TemperatureBand::Temperate => 30.0,
-            TemperatureBand::Cold => 20.0,
-            TemperatureBand::Hot => 15.0,
-            TemperatureBand::Frozen => 5.0,
-            TemperatureBand::Extreme => 0.0,
+        let temp = if mitigations.contains(&HabitabilityAttribute::Temperature) {
+            30.0
+        } else {
+            match self.temperature {
+                TemperatureBand::Temperate => 30.0,
+                TemperatureBand::Cold => 20.0,
+                TemperatureBand::Hot => 15.0,
+                TemperatureBand::Frozen => 5.0,
+                TemperatureBand::Extreme => 0.0,
+            }
         };
-        // Gravity contributes up to 20 pts, peaking near 1.0 g.
+        // Gravity contributes up to 20 pts, peaking near 1.0 g. Not
+        // mitigable — see [`HabitabilityAttribute`]'s doc comment.
         let g = self.gravity_g.clamp(0.0, 3.0);
         let grav = (20.0 - (g - 1.0).abs() * 20.0).max(0.0);
-        let rad = match self.radiation {
-            RadiationLevel::Low => 20.0,
-            RadiationLevel::Moderate => 10.0,
-            RadiationLevel::High => 0.0,
+        let rad = if mitigations.contains(&HabitabilityAttribute::Radiation) {
+            20.0
+        } else {
+            match self.radiation {
+                RadiationLevel::Low => 20.0,
+                RadiationLevel::Moderate => 10.0,
+                RadiationLevel::High => 0.0,
+            }
         };
         (atmo + temp + grav + rad).round().clamp(0.0, 100.0) as u8
     }
@@ -373,6 +425,16 @@ impl Body {
     #[must_use]
     pub fn habitability_modifier(&self) -> f32 {
         0.75 + f32::from(self.habitability()) * 0.005
+    }
+
+    /// [`Self::habitability_modifier`], but computed from
+    /// [`Self::habitability_with_mitigations`] (issue #185).
+    #[must_use]
+    pub fn habitability_modifier_with_mitigations(
+        &self,
+        mitigations: &std::collections::HashSet<HabitabilityAttribute>,
+    ) -> f32 {
+        0.75 + f32::from(self.habitability_with_mitigations(mitigations)) * 0.005
     }
 
     /// Whether this body's habitability clears the founding threshold
@@ -1546,6 +1608,77 @@ mod tests {
         body.radiation = RadiationLevel::High;
         assert_eq!(body.habitability(), 0);
         assert!((body.habitability_modifier() - 0.75).abs() < 1e-4);
+    }
+
+    #[test]
+    fn habitability_with_mitigations_no_mitigations_matches_base_score() {
+        let mut body = Body::new("Hellworld", BodyKind::InnerPlanet, 0.2);
+        body.atmosphere_density = AtmosphereDensity::Dense;
+        body.atmosphere_hazard = AtmosphereHazard::Toxic;
+        body.temperature = TemperatureBand::Extreme;
+        body.gravity_g = 0.0;
+        body.radiation = RadiationLevel::High;
+        assert_eq!(
+            body.habitability_with_mitigations(&std::collections::HashSet::new()),
+            body.habitability()
+        );
+    }
+
+    #[test]
+    fn mitigating_radiation_cancels_only_the_radiation_penalty() {
+        // High radiation costs 20 pts vs the best band (issue #185). Mitigating
+        // it should raise the score by exactly that much and leave every other
+        // attribute's contribution untouched.
+        let mut body = Body::new("Hellworld", BodyKind::InnerPlanet, 0.2);
+        body.atmosphere_density = AtmosphereDensity::Dense;
+        body.atmosphere_hazard = AtmosphereHazard::Toxic;
+        body.temperature = TemperatureBand::Extreme;
+        body.gravity_g = 0.0;
+        body.radiation = RadiationLevel::High;
+        let base = body.habitability();
+
+        let mut mitigations = std::collections::HashSet::new();
+        mitigations.insert(HabitabilityAttribute::Radiation);
+        let mitigated = body.habitability_with_mitigations(&mitigations);
+
+        assert_eq!(mitigated, base + 20);
+        // The body's own attribute is untouched — base score is unaffected.
+        assert_eq!(body.habitability(), base);
+    }
+
+    #[test]
+    fn mitigating_atmosphere_hazard_cancels_toxic_zero_out() {
+        // Toxic hazard zeroes atmosphere contribution regardless of density
+        // (hazard_multiplier = 0.0). Mitigating AtmosphereHazard restores the
+        // full density-based points.
+        let mut body = Body::new("Toxic World", BodyKind::InnerPlanet, 1.0);
+        body.atmosphere_density = AtmosphereDensity::Breathable; // 30 pts base
+        body.atmosphere_hazard = AtmosphereHazard::Toxic; // ×0.0
+        body.temperature = TemperatureBand::Temperate;
+        body.gravity_g = 1.0;
+        body.radiation = RadiationLevel::Low;
+        assert_eq!(body.habitability(), 70); // 0 (atmo) + 30 + 20 + 20
+
+        let mut mitigations = std::collections::HashSet::new();
+        mitigations.insert(HabitabilityAttribute::AtmosphereHazard);
+        assert_eq!(body.habitability_with_mitigations(&mitigations), 100);
+    }
+
+    #[test]
+    fn habitability_modifier_with_mitigations_matches_score_formula() {
+        let mut body = Body::new("Hellworld", BodyKind::InnerPlanet, 0.2);
+        body.atmosphere_density = AtmosphereDensity::Dense;
+        body.atmosphere_hazard = AtmosphereHazard::Toxic;
+        body.temperature = TemperatureBand::Extreme;
+        body.gravity_g = 0.0;
+        body.radiation = RadiationLevel::High;
+
+        let mut mitigations = std::collections::HashSet::new();
+        mitigations.insert(HabitabilityAttribute::Radiation);
+        mitigations.insert(HabitabilityAttribute::Temperature);
+        let score = body.habitability_with_mitigations(&mitigations);
+        let modifier = body.habitability_modifier_with_mitigations(&mitigations);
+        assert!((modifier - (0.75 + f32::from(score) * 0.005)).abs() < 1e-6);
     }
 
     #[test]

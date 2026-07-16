@@ -1004,6 +1004,12 @@ pub struct SystemBodyWire {
     pub radiation: String,
     pub habitability: u8,
     pub habitability_modifier: f32,
+    /// Habitability score after tech-driven mitigations are applied (issue
+    /// #185). Equal to `habitability` when no mitigation applies.
+    pub habitability_effective: u8,
+    /// Habitability modifier after tech-driven mitigations are applied
+    /// (issue #185). Equal to `habitability_modifier` when no mitigation applies.
+    pub habitability_modifier_effective: f32,
     /// Surface/composition archetype (issue #196). Flavor/authoring
     /// guidance — not a habitability input.
     pub subtype: String,
@@ -1040,6 +1046,11 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
             radiation: format!("{:?}", b.radiation),
             habitability: b.habitability(),
             habitability_modifier: b.habitability_modifier(),
+            habitability_effective: b
+                .habitability_with_mitigations(&engine.state.habitability_mitigations),
+            habitability_modifier_effective: b.habitability_modifier_with_mitigations(
+                &engine.state.habitability_mitigations,
+            ),
             subtype: format!("{:?}", b.subtype),
             tidally_locked: b.tidally_locked,
             axial_tilt_deg: b.axial_tilt_deg,
