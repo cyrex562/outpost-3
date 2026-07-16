@@ -437,10 +437,18 @@ function foundColony(body?: SystemBody | null): void {
           <dt>Radiation</dt>
           <dd>{{ selected.radiation }}</dd>
           <dt>Habitability</dt>
-          <dd>
-            {{ selected.habitability }} / 100
-            <span class="modifier" :class="habitabilityTone(selected.habitability_modifier)">
-              ({{ formatModifier(selected.habitability_modifier) }} productivity)
+          <dd data-testid="habitability-value">
+            <template v-if="selected.habitability_effective !== selected.habitability">
+              {{ selected.habitability }} → <strong>{{ selected.habitability_effective }}</strong> / 100
+            </template>
+            <template v-else>
+              {{ selected.habitability }} / 100
+            </template>
+            <span class="modifier" :class="habitabilityTone(selected.habitability_modifier_effective)">
+              ({{ formatModifier(selected.habitability_modifier_effective) }} productivity)
+            </span>
+            <span v-if="selected.habitability_effective !== selected.habitability" class="mitigation-hint">
+              tech mitigation applied
             </span>
           </dd>
           <dt>Subtype</dt>
@@ -560,5 +568,6 @@ function foundColony(body?: SystemBody | null): void {
 .modifier.bonus { color: #6c9; }
 .modifier.neutral { color: #778; }
 .modifier.penalty { color: #d86; }
+.mitigation-hint { display: block; font-size: 0.68rem; color: #6c9; font-style: italic; margin-top: 0.1rem; }
 .err { color: #d66; font-size: 0.8rem; }
 </style>

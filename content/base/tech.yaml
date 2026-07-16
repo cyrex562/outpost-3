@@ -178,6 +178,26 @@
     - resource_id: research_data
       amount: 90.0
 
+- id: radiation_shielding
+  name: Radiation Shielding
+  description: >
+    Hardened habitat plating and shielded life-support conduits that cancel
+    a linked colony's radiation penalty on its habitability score, regardless
+    of the home body's actual radiation level. Applies retroactively to
+    every colony already linked to a body when researched (issue #185).
+  category: life_sciences
+  tier: 3
+  research_cost: 1200.0
+  research_time_ticks: 500
+  prerequisites:
+    - advanced_materials
+  effects:
+    - type: mitigate_attribute
+      attribute: radiation
+  resource_costs:
+    - resource_id: research_data
+      amount: 60.0
+
 # Tier 4: Placeholder for Alpha Expansion
 
 - id: quantum_computing
