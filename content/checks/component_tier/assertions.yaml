@@ -1,0 +1,49 @@
+# Assertions for the component-tier balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   structural_metal:    6.0 imported − (3.0 mech + 1.5 alloys)   = +1.5/sol
+#   conductive_metal:    4.0 imported − (2.0 mech + 1.0 elec)     = +1.0/sol
+#   precious_metal:      1.0 imported − 0.5 elec                  = +0.5/sol
+#   refractory_metal:    1.5 imported − 1.0 alloys                = +0.5/sol
+#   mechanical_components: 2.0 produced (1/1 sol)                 = +2.0/sol
+#   electronic_components: 0.5 produced (1/2 sols)                = +0.5/sol
+#   alloys:                1.0 produced (2/2 sols)                = +1.0/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: structural_metal
+  expect: closed
+  min_net: 1.0
+  label: structural-metal-not-in-deficit
+
+- commodity: conductive_metal
+  expect: closed
+  min_net: 0.5
+  label: conductive-metal-not-in-deficit
+
+- commodity: precious_metal
+  expect: closed
+  min_net: 0.25
+  label: precious-metal-not-in-deficit
+
+- commodity: refractory_metal
+  expect: closed
+  min_net: 0.25
+  label: refractory-metal-not-in-deficit
+
+- commodity: mechanical_components
+  expect: closed
+  min_net: 1.0
+  label: mechanical-components-surplus
+
+- commodity: electronic_components
+  expect: closed
+  min_net: 0.25
+  label: electronic-components-surplus
+
+- commodity: alloys
+  expect: closed
+  min_net: 0.5
+  label: alloys-surplus

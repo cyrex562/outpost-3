@@ -1,0 +1,6 @@
+# Buildings used in the component-tier balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: fabricator
+  name: Fabricator
+  category: processing

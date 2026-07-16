@@ -314,7 +314,10 @@
 
 - id: fabricator
   name: Fabricator
-  description: Automated assembly line turning components into finished power cells.
+  description: >
+    Automated assembly line. Assembles power cells by default, and can be
+    switched to fabricate mechanical components, electronic components, or
+    alloys from refined metal (issue #208).
   category: processing
   power_delta: 14.0
   worker_slots: 2

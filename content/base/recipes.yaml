@@ -225,6 +225,51 @@
     - id: power_cell
       quantity: 3.0
 
+# Fabricator recipes below deliberately use a "fabricate_" prefix (sorts
+# after "assemble_power_cells") so adding them doesn't change the
+# fabricator's deterministic default recipe for existing colonies that
+# never called SetActiveRecipe (issue #166's recipe-selection invariant,
+# reused in #207/#208).
+
+- id: fabricate_mechanical_components
+  name: Fabricate Mechanical Components
+  building: fabricator
+  cycle_sols: 1
+  inputs:
+    - id: structural_metal
+      quantity: 3.0
+    - id: conductive_metal
+      quantity: 2.0
+  outputs:
+    - id: mechanical_components
+      quantity: 2.0
+
+- id: fabricate_electronic_components
+  name: Fabricate Electronic Components
+  building: fabricator
+  cycle_sols: 2
+  inputs:
+    - id: conductive_metal
+      quantity: 2.0
+    - id: precious_metal
+      quantity: 1.0
+  outputs:
+    - id: electronic_components
+      quantity: 1.0
+
+- id: fabricate_alloys
+  name: Fabricate Alloys
+  building: fabricator
+  cycle_sols: 2
+  inputs:
+    - id: structural_metal
+      quantity: 3.0
+    - id: refractory_metal
+      quantity: 2.0
+  outputs:
+    - id: alloys
+      quantity: 2.0
+
 - id: generate_power_fusion
   name: Generate Power (Fusion)
   building: fusion_reactor_prototype
