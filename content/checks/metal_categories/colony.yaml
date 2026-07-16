@@ -1,0 +1,19 @@
+# Colony configuration for the metal-categories balance check.
+#
+# One mine + one refining building per new category. No imports —
+# everything must be produced on-site.
+buildings:
+  - building_id: conductive_mine
+    recipe_id: mine_conductive_ore
+  - building_id: refinery
+    recipe_id: smelt_conductive_ore
+  - building_id: precious_mine
+    recipe_id: mine_precious_ore
+  - building_id: precious_refinery
+    recipe_id: refine_precious_ore
+  - building_id: refractory_mine
+    recipe_id: mine_refractory_ore
+  - building_id: refractory_foundry
+    recipe_id: refine_refractory_ore
+
+imports: []

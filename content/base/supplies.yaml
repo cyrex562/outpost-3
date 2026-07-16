@@ -16,7 +16,7 @@
       quantity: 150.0
     - id: food_ration
       quantity: 100.0
-    - id: iron_plate
+    - id: structural_metal
       quantity: 5.0
     - id: power_cell
       quantity: 5.0
@@ -31,7 +31,7 @@
       quantity: 400.0
     - id: food_ration
       quantity: 300.0
-    - id: iron_plate
+    - id: structural_metal
       quantity: 50.0
     - id: power_cell
       quantity: 20.0
@@ -46,7 +46,7 @@
       quantity: 900.0
     - id: food_ration
       quantity: 600.0
-    - id: iron_plate
+    - id: structural_metal
       quantity: 150.0
     - id: power_cell
       quantity: 60.0

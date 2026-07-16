@@ -1,0 +1,26 @@
+# Buildings used in the metal-categories balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: conductive_mine
+  name: Conductive Mine
+  category: extraction
+
+- id: refinery
+  name: Refinery
+  category: processing
+
+- id: precious_mine
+  name: Precious Mine
+  category: extraction
+
+- id: precious_refinery
+  name: Precious Refinery
+  category: processing
+
+- id: refractory_mine
+  name: Refractory Mine
+  category: extraction
+
+- id: refractory_foundry
+  name: Refractory Foundry
+  category: processing

@@ -1,0 +1,7 @@
+id: metal-categories-check
+name: Metal Categories Balance Check
+version: '0.1.0'
+description: >
+  Proves the three new metal-category chains added in issue #207
+  (conductive, precious, refractory) each close: one mine + one refining
+  building per category, no imports — everything produced on-site.

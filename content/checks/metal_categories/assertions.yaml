@@ -1,0 +1,43 @@
+# Assertions for the metal-categories balance check.
+#
+# Expected net rates (production - consumption):
+#   conductive_ore:   8 mined - 4 refined  = +4/sol
+#   conductive_metal: 3 produced           = +3/sol
+#   precious_ore:      3 mined - 1.5 refined = +1.5/sol
+#   precious_metal:    1 produced (2/2 sols) = +1/sol
+#   refractory_ore:    4 mined - 2 refined   = +2/sol
+#   refractory_metal:  1 produced (2/2 sols) = +1/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: conductive_ore
+  expect: closed
+  min_net: 2.0
+  label: conductive-ore-not-in-deficit
+
+- commodity: conductive_metal
+  expect: closed
+  min_net: 1.0
+  label: conductive-metal-surplus
+
+- commodity: precious_ore
+  expect: closed
+  min_net: 1.0
+  label: precious-ore-not-in-deficit
+
+- commodity: precious_metal
+  expect: closed
+  min_net: 0.5
+  label: precious-metal-surplus
+
+- commodity: refractory_ore
+  expect: closed
+  min_net: 1.0
+  label: refractory-ore-not-in-deficit
+
+- commodity: refractory_metal
+  expect: closed
+  min_net: 0.5
+  label: refractory-metal-surplus

@@ -24,7 +24,7 @@
   slot_cost: 1
   construction_turns: 2
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 10.0
 
 - id: hydroponic_bay
@@ -36,7 +36,7 @@
   power_delta: 5.0
   worker_slots: 1
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 10.0
 
 - id: smelter
@@ -46,7 +46,7 @@
   power_delta: 10.0
   worker_slots: 2
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 20.0
 
 - id: research_lab
@@ -61,7 +61,7 @@
   slot_cost: 1
   construction_turns: 4
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 30.0
 
 - id: basic_habitat
@@ -76,7 +76,7 @@
   slot_cost: 1
   construction_turns: 2
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 15.0
 
 - id: solar_array_mk1
@@ -89,7 +89,7 @@
   slot_cost: 1
   construction_turns: 2
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 12.0
 
 - id: life_support_module
@@ -105,13 +105,13 @@
   slot_cost: 1
   construction_turns: 2
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 15.0
 
 # ── Tier 1 (basic_construction / basic_power / resource_extraction) ────────
 
-- id: iron_mine
-  name: Iron Mine
+- id: structural_mine
+  name: Structural Mine
   description: >
     Open-pit extraction of surface iron deposits. Yields waste rock
     alongside ore — bulky but sellable, not just discarded tailings.
@@ -123,7 +123,7 @@
   construction_turns: 3
   tech_prerequisite: resource_extraction
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 15.0
 
 - id: wind_turbine
@@ -137,8 +137,24 @@
   construction_turns: 2
   tech_prerequisite: basic_power
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 10.0
+
+- id: conductive_mine
+  name: Conductive Mine
+  description: >
+    Open-pit extraction of copper/aluminum-family deposits — feedstock for
+    power and electronics manufacturing (issue #207).
+  category: extraction
+  power_delta: 6.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: structural_metal
+      quantity: 15.0
 
 - id: warehouse
   name: Warehouse
@@ -153,7 +169,7 @@
   construction_turns: 2
   tech_prerequisite: basic_construction
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 15.0
 
 # ── Tier 2 (advanced_materials / hydroponics / improved_solar) ─────────────
@@ -169,7 +185,7 @@
   construction_turns: 5
   tech_prerequisite: advanced_materials
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 40.0
     - id: components
       quantity: 10.0
@@ -177,10 +193,11 @@
 - id: refinery
   name: Refinery
   description: >
-    Flexible metalworking facility — can either smelt ore into plate at a
-    better rate than the base smelter, or fabricate plate into machined
-    components. Runs one recipe at a time; switch it from the colony view
-    (issue #166 recipe selection).
+    Flexible metalworking facility — smelt structural ore into metal at a
+    better rate than the base smelter, fabricate metal into machined
+    components, or refine conductive ore into conductive metal. Runs one
+    recipe at a time; switch it from the colony view (issue #166 recipe
+    selection; conductive recipe added in #207).
   category: processing
   power_delta: 12.0
   worker_slots: 2
@@ -189,8 +206,42 @@
   construction_turns: 5
   tech_prerequisite: advanced_materials
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 35.0
+
+- id: precious_mine
+  name: Precious Mine
+  description: >
+    Careful, low-yield extraction of gold/platinum/rare-earth-family
+    deposits — rare and valuable (issue #207).
+  category: extraction
+  power_delta: 8.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: advanced_materials
+  construction_cost:
+    - id: structural_metal
+      quantity: 30.0
+
+- id: precious_refinery
+  name: Precious Refinery
+  description: >
+    Slow, careful refining of precious ore into precious metal — small
+    batches, high value per unit (issue #207).
+  category: processing
+  power_delta: 10.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: advanced_materials
+  construction_cost:
+    - id: structural_metal
+      quantity: 30.0
+    - id: components
+      quantity: 5.0
 
 - id: water_treatment_plant
   name: Water Treatment Plant
@@ -203,7 +254,7 @@
   construction_turns: 3
   tech_prerequisite: hydroponics
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 25.0
 
 - id: solar_array_mk2
@@ -217,12 +268,49 @@
   construction_turns: 3
   tech_prerequisite: improved_solar
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 30.0
     - id: components
       quantity: 5.0
 
 # ── Tier 3 (automation / fusion_basics / planetary_life_support) ───────────
+
+- id: refractory_mine
+  name: Refractory Mine
+  description: >
+    Strip-mining of titanium/tungsten-family deposits — moderately rare,
+    requires industrial-scale automation to extract economically
+    (issue #207).
+  category: extraction
+  power_delta: 10.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 35.0
+    - id: components
+      quantity: 5.0
+
+- id: refractory_foundry
+  name: Refractory Foundry
+  description: >
+    Energy-intensive foundry refining refractory ore into high-strength,
+    high-temperature metal for advanced-tier construction (issue #207).
+  category: processing
+  power_delta: 16.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 45.0
+    - id: components
+      quantity: 15.0
 
 - id: fabricator
   name: Fabricator
@@ -235,7 +323,7 @@
   construction_turns: 5
   tech_prerequisite: automation
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 40.0
     - id: components
       quantity: 15.0
@@ -251,7 +339,7 @@
   construction_turns: 6
   tech_prerequisite: fusion_basics
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 60.0
     - id: components
       quantity: 30.0
@@ -267,7 +355,7 @@
   construction_turns: 6
   tech_prerequisite: planetary_life_support
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 60.0
     - id: components
       quantity: 20.0
@@ -285,7 +373,7 @@
   construction_turns: 4
   tech_prerequisite: planetary_life_support
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 35.0
     - id: components
       quantity: 10.0
@@ -304,7 +392,7 @@
   construction_turns: 4
   tech_prerequisite: automation
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 30.0
 
 - id: sensor_array
@@ -321,7 +409,7 @@
   construction_turns: 3
   tech_prerequisite: automation
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 25.0
     - id: components
       quantity: 5.0
@@ -339,7 +427,7 @@
   construction_turns: 5
   tech_prerequisite: automation
   construction_cost:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 45.0
     - id: components
       quantity: 15.0

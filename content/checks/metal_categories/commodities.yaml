@@ -1,0 +1,30 @@
+# Commodities used in the metal-categories balance check.
+- id: conductive_ore
+  name: Conductive Ore
+  category: metallic_ore
+  base_value: 15.0
+
+- id: conductive_metal
+  name: Conductive Metal
+  category: metal
+  base_value: 35.0
+
+- id: precious_ore
+  name: Precious Ore
+  category: metallic_ore
+  base_value: 60.0
+
+- id: precious_metal
+  name: Precious Metal
+  category: metal
+  base_value: 150.0
+
+- id: refractory_ore
+  name: Refractory Ore
+  category: metallic_ore
+  base_value: 40.0
+
+- id: refractory_metal
+  name: Refractory Metal
+  category: metal
+  base_value: 100.0

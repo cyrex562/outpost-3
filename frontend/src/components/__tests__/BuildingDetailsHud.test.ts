@@ -91,14 +91,14 @@ describe('BuildingDetailsHud (#182)', () => {
     const recipeA = {
       recipe_id: 'refine_ore_to_plate',
       name: 'Refine Ore to Plate',
-      inputs: [{ commodity_id: 'iron_ore', quantity: 5 }],
-      outputs: [{ commodity_id: 'iron_plate', quantity: 4 }],
+      inputs: [{ commodity_id: 'structural_ore', quantity: 5 }],
+      outputs: [{ commodity_id: 'structural_metal', quantity: 4 }],
       cycle_sols: 1,
     }
     const recipeB = {
       recipe_id: 'refine_plate_to_components',
       name: 'Refine Plate to Components',
-      inputs: [{ commodity_id: 'iron_plate', quantity: 3 }],
+      inputs: [{ commodity_id: 'structural_metal', quantity: 3 }],
       outputs: [{ commodity_id: 'components', quantity: 2 }],
       cycle_sols: 2,
     }
