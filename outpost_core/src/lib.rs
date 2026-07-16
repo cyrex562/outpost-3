@@ -2296,7 +2296,6 @@ impl GameEngine {
                     // starting_population is a headcount well below 2^52; the
                     // precision loss clippy warns about is unreachable here.
                     #[allow(clippy::cast_precision_loss)]
-                    #[allow(clippy::cast_precision_loss)]
                     let scale = (*starting_population as f64) / 100.0;
                     let mut resolved = Vec::with_capacity(overrides.len());
                     for (id, qty) in overrides {
