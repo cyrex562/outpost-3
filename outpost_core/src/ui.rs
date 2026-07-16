@@ -114,8 +114,14 @@ pub struct BuildingDetailData {
     pub power_delta: f64,
     /// Per-sol maintenance upkeep, if any.
     pub maintenance: Vec<IngredientRow>,
-    /// The recipe this building runs, if it has one.
+    /// The recipe this building actually runs right now — `active_recipes`'
+    /// selection if set, else the deterministic default (issue #166).
     pub recipe: Option<RecipeRow>,
+    /// Every recipe authored for this building type, in the order a player
+    /// could select between them (issue #166). Empty for buildings with at
+    /// most one recipe — `recipe` alone covers that case; a selector only
+    /// makes sense once there's a real choice.
+    pub available_recipes: Vec<RecipeRow>,
     /// Outcome of the building's most recent production attempt, if it has
     /// run at least once since the colony was founded.
     pub last_run: Option<BuildingRunRow>,

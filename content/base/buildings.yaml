@@ -1,10 +1,49 @@
-# Building definitions for the base-colony pack.
+# Building definitions for the base-colony pack (issue #166).
+#
+# Categories: extraction, processing, power, housing, life_support, research,
+# storage, services, defense. Buildings with no `tech_prerequisite` are the
+# starter set, buildable immediately at colony founding — together they form
+# a closed bootstrap loop (water, food, oxygen, housing, power, research) with
+# no tech required; see content/checks/bootstrap_colony/ for the balance-
+# harness proof. Everything else is gated by `tech_prerequisite` and unlocked
+# progressively via content/base/tech.yaml.
+#
+# Buildings with no recipe are intentionally passive (pure power_delta/slot
+# infrastructure) — each one below says why in its description.
+
+# ── Starter set (no tech_prerequisite) ──────────────────────────────────────
+
+- id: water_well
+  name: Water Well
+  description: >
+    Draws groundwater or subsurface ice to the surface. The colony's most
+    basic water source — available from first landing.
+  category: extraction
+  power_delta: 4.0
+  worker_slots: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: iron_plate
+      quantity: 10.0
+
+- id: hydroponic_bay
+  name: Hydroponic Bay
+  description: >
+    Sealed growing chamber that produces food rations from water
+    under artificial lighting.
+  category: extraction
+  power_delta: 5.0
+  worker_slots: 1
+  construction_cost:
+    - id: iron_plate
+      quantity: 10.0
 
 - id: smelter
   name: Smelter
   description: Converts raw metallic ore into refined plate stock.
-  category: production
-  power_delta: -10.0
+  category: processing
+  power_delta: 10.0
   worker_slots: 2
   construction_cost:
     - id: iron_plate
@@ -17,7 +56,7 @@
     consuming labor and power.  Science is pooled system-wide
     and spent to unlock technologies (Phase 4b).
   category: research
-  power_delta: -8.0
+  power_delta: 8.0
   worker_slots: 3
   slot_cost: 1
   construction_turns: 4
@@ -25,14 +64,282 @@
     - id: iron_plate
       quantity: 30.0
 
-- id: hydroponic_bay
-  name: Hydroponic Bay
+- id: basic_habitat
+  name: Basic Habitat
   description: >
-    Sealed growing chamber that produces food rations from water
-    under artificial lighting.
-  category: production
-  power_delta: -5.0
+    Minimal pressurized bunks — the colony's first housing, available at
+    founding so a landing party always has somewhere to shelter.
+  category: housing
+  power_delta: 1.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: iron_plate
+      quantity: 15.0
+
+- id: solar_array_mk1
+  name: Solar Array Mk1
+  description: Basic photovoltaic panel array. The colony's first power source.
+  category: power
+  power_delta: -20.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: iron_plate
+      quantity: 12.0
+
+- id: life_support_module
+  name: Life Support Module
+  description: >
+    Compact atmosphere scrubber/generator — cheap, low-output baseline
+    oxygen supply available from first landing. See atmospheric_harvester
+    for a higher-throughput upgrade.
+  category: life_support
+  power_delta: 3.0
   worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: iron_plate
+      quantity: 15.0
+
+# ── Tier 1 (basic_construction / basic_power / resource_extraction) ────────
+
+- id: iron_mine
+  name: Iron Mine
+  description: >
+    Open-pit extraction of surface iron deposits. Yields waste rock
+    alongside ore — bulky but sellable, not just discarded tailings.
+  category: extraction
+  power_delta: 6.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: iron_plate
+      quantity: 15.0
+
+- id: wind_turbine
+  name: Wind Turbine
+  description: Mechanical turbine harvesting atmospheric wind energy.
+  category: power
+  power_delta: -6.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_power
   construction_cost:
     - id: iron_plate
       quantity: 10.0
+
+- id: warehouse
+  name: Warehouse
+  description: >
+    Bulk storage bay. No active recipe — it is passive infrastructure
+    reserved as a future hook for pool-capacity bonuses.
+  category: storage
+  power_delta: 0.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: iron_plate
+      quantity: 15.0
+
+# ── Tier 2 (advanced_materials / hydroponics / improved_solar) ─────────────
+
+- id: apartment_block
+  name: Apartment Block
+  description: Multi-story pressurized housing, far denser than basic bunks.
+  category: housing
+  power_delta: 4.0
+  worker_slots: 1
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: advanced_materials
+  construction_cost:
+    - id: iron_plate
+      quantity: 40.0
+    - id: components
+      quantity: 10.0
+
+- id: refinery
+  name: Refinery
+  description: >
+    Flexible metalworking facility — can either smelt ore into plate at a
+    better rate than the base smelter, or fabricate plate into machined
+    components. Runs one recipe at a time; switch it from the colony view
+    (issue #166 recipe selection).
+  category: processing
+  power_delta: 12.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: advanced_materials
+  construction_cost:
+    - id: iron_plate
+      quantity: 35.0
+
+- id: water_treatment_plant
+  name: Water Treatment Plant
+  description: Recycling filtration plant — far higher water throughput than a well.
+  category: life_support
+  power_delta: 6.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: hydroponics
+  construction_cost:
+    - id: iron_plate
+      quantity: 25.0
+
+- id: solar_array_mk2
+  name: Solar Array Mk2
+  description: High-efficiency panel array with tracking mounts.
+  category: power
+  power_delta: -20.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: improved_solar
+  construction_cost:
+    - id: iron_plate
+      quantity: 30.0
+    - id: components
+      quantity: 5.0
+
+# ── Tier 3 (automation / fusion_basics / planetary_life_support) ───────────
+
+- id: fabricator
+  name: Fabricator
+  description: Automated assembly line turning components into finished power cells.
+  category: processing
+  power_delta: 14.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: automation
+  construction_cost:
+    - id: iron_plate
+      quantity: 40.0
+    - id: components
+      quantity: 15.0
+
+- id: fusion_reactor_prototype
+  name: Fusion Reactor Prototype
+  description: Experimental fusion plant — by far the colony's largest power source.
+  category: power
+  power_delta: -60.0
+  worker_slots: 1
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 6
+  tech_prerequisite: fusion_basics
+  construction_cost:
+    - id: iron_plate
+      quantity: 60.0
+    - id: components
+      quantity: 30.0
+
+- id: habitat_dome
+  name: Habitat Dome
+  description: Large pressurized dome habitat — the colony's highest-capacity housing.
+  category: housing
+  power_delta: 10.0
+  worker_slots: 1
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 6
+  tech_prerequisite: planetary_life_support
+  construction_cost:
+    - id: iron_plate
+      quantity: 60.0
+    - id: components
+      quantity: 20.0
+
+- id: atmospheric_harvester
+  name: Atmospheric Harvester
+  description: >
+    High-throughput atmosphere processor. Captures trace minerals as a
+    byproduct alongside its primary oxygen output.
+  category: life_support
+  power_delta: 8.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: planetary_life_support
+  construction_cost:
+    - id: iron_plate
+      quantity: 35.0
+    - id: components
+      quantity: 10.0
+
+- id: trade_depot
+  name: Trade Depot
+  description: >
+    Administrative hub for inter-colony commerce. No active recipe yet —
+    reserved as a hook for future trade/logistics bonuses (services
+    category placeholder, issue #166).
+  category: services
+  power_delta: 3.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: automation
+  construction_cost:
+    - id: iron_plate
+      quantity: 30.0
+
+- id: sensor_array
+  name: Sensor Array
+  description: >
+    Long-range detection and perimeter monitoring. No active recipe yet —
+    reserved as a hook for a future menace/defense mechanic (defense
+    category placeholder, issue #166).
+  category: defense
+  power_delta: 5.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: automation
+  construction_cost:
+    - id: iron_plate
+      quantity: 25.0
+    - id: components
+      quantity: 5.0
+
+- id: physics_lab
+  name: Physics Lab
+  description: >
+    Advanced research facility. Trades power cells for a much faster
+    research rate than the base research lab.
+  category: research
+  power_delta: 16.0
+  worker_slots: 3
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: automation
+  construction_cost:
+    - id: iron_plate
+      quantity: 45.0
+    - id: components
+      quantity: 15.0

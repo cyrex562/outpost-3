@@ -4,9 +4,12 @@ import BuildingDetailsHud from '@/components/BuildingDetailsHud.vue'
 import type { BuildingDetail } from '@/services/tauriBridge'
 
 const getBuildingDetail = vi.fn<[string, string], Promise<BuildingDetail>>()
+const setActiveRecipe = vi.fn<[string, string, string], Promise<unknown>>()
 
 vi.mock('@/services/tauriBridge', () => ({
   getBuildingDetail: (colonyId: string, buildingType: string) => getBuildingDetail(colonyId, buildingType),
+  setActiveRecipe: (colonyId: string, buildingType: string, recipeId: string) =>
+    setActiveRecipe(colonyId, buildingType, recipeId),
 }))
 
 function makeDetail(overrides: Partial<BuildingDetail>): BuildingDetail {
@@ -25,6 +28,7 @@ function makeDetail(overrides: Partial<BuildingDetail>): BuildingDetail {
       outputs: [{ commodity_id: 'research', quantity: 2 }],
       cycle_sols: 1,
     },
+    available_recipes: [],
     last_run: {
       scale: 1.0,
       is_full_production: true,
@@ -72,6 +76,64 @@ describe('BuildingDetailsHud (#182)', () => {
 
     expect(wrapper.find('[data-testid="maintenance-short-indicator"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="shortfall-maintenance_short"]').exists()).toBe(true)
+  })
+
+  it('shows no recipe selector when there is only one recipe', async () => {
+    getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
+    const wrapper = mount(BuildingDetailsHud, {
+      props: { colonyId: 'colony-1', buildingType: 'research_lab' },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="recipe-selector"]').exists()).toBe(false)
+  })
+
+  it('shows a recipe selector and switches the active recipe (#166)', async () => {
+    const recipeA = {
+      recipe_id: 'refine_ore_to_plate',
+      name: 'Refine Ore to Plate',
+      inputs: [{ commodity_id: 'iron_ore', quantity: 5 }],
+      outputs: [{ commodity_id: 'iron_plate', quantity: 4 }],
+      cycle_sols: 1,
+    }
+    const recipeB = {
+      recipe_id: 'refine_plate_to_components',
+      name: 'Refine Plate to Components',
+      inputs: [{ commodity_id: 'iron_plate', quantity: 3 }],
+      outputs: [{ commodity_id: 'components', quantity: 2 }],
+      cycle_sols: 2,
+    }
+    getBuildingDetail.mockResolvedValueOnce(
+      makeDetail({
+        building_type: 'refinery',
+        name: 'Refinery',
+        recipe: recipeA,
+        available_recipes: [recipeA, recipeB],
+      }),
+    )
+    const wrapper = mount(BuildingDetailsHud, {
+      props: { colonyId: 'colony-1', buildingType: 'refinery' },
+    })
+    await flushPromises()
+
+    const select = wrapper.find('[data-testid="recipe-select"]')
+    expect(select.exists()).toBe(true)
+    const options = select.findAll('option').map((o) => o.attributes('value'))
+    expect(options).toEqual(['refine_ore_to_plate', 'refine_plate_to_components'])
+
+    getBuildingDetail.mockResolvedValueOnce(
+      makeDetail({
+        building_type: 'refinery',
+        name: 'Refinery',
+        recipe: recipeB,
+        available_recipes: [recipeA, recipeB],
+      }),
+    )
+    setActiveRecipe.mockResolvedValueOnce([])
+    await select.setValue('refine_plate_to_components')
+    await flushPromises()
+
+    expect(setActiveRecipe).toHaveBeenCalledWith('colony-1', 'refinery', 'refine_plate_to_components')
+    expect(wrapper.text()).toContain('Refine Plate to Components')
   })
 
   it('emits close when the backdrop is clicked', async () => {

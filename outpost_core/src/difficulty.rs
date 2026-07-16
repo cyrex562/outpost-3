@@ -564,7 +564,7 @@ mod tests {
 
         let cfg = NeedsConfig::default_survival();
         let mut pool_normal = ColonyPool::new();
-        pool_normal.deposit("food", 1_000.0);
+        pool_normal.deposit("food_ration", 1_000.0);
         pool_normal.deposit("water", 1_000.0);
         pool_normal.deposit("oxygen", 1_000.0);
         pool_normal.deposit("power", 1_000.0);
@@ -579,13 +579,13 @@ mod tests {
         let food_normal = report_normal
             .needs
             .iter()
-            .find(|n| n.commodity_id == "food")
+            .find(|n| n.commodity_id == "food_ration")
             .map(|n| n.consumed)
             .unwrap();
         let food_brutal = report_brutal
             .needs
             .iter()
-            .find(|n| n.commodity_id == "food")
+            .find(|n| n.commodity_id == "food_ration")
             .map(|n| n.consumed)
             .unwrap();
         assert!(
@@ -680,10 +680,28 @@ mod tests {
         pool_normal.deposit("ore", 100.0);
         let mut pool_hard = pool_normal.clone();
 
-        let normal =
-            process_production_scaled(&mut pool_normal, &placed, 10.0, &reg, 1.0, 1.0, true, 1.0);
-        let hard =
-            process_production_scaled(&mut pool_hard, &placed, 10.0, &reg, 2.0, 1.0, true, 1.0);
+        let normal = process_production_scaled(
+            &mut pool_normal,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
+        let hard = process_production_scaled(
+            &mut pool_hard,
+            &placed,
+            10.0,
+            &reg,
+            2.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
 
         assert!(
             hard.power_grid.demand > normal.power_grid.demand,

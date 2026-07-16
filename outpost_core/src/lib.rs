@@ -133,6 +133,20 @@ pub enum Command {
         /// Number of labour units to assign.
         labour: u64,
     },
+    /// Select which recipe a building type runs in this colony (issue #166).
+    ///
+    /// Applies to every instance of `building_type` in the colony — recipe
+    /// selection is colony-wide per type, not per placed instance. Errors if
+    /// `recipe_id` doesn't name a recipe belonging to `building_type` in the
+    /// loaded content registry.
+    SetActiveRecipe {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// Building type to set the active recipe for.
+        building_type: String,
+        /// Recipe id to activate; must have `recipe.building == building_type`.
+        recipe_id: String,
+    },
     /// Register or replace a directive for a colony.
     SetDirective {
         /// The directive to register.
@@ -762,6 +776,15 @@ pub enum Event {
         slot: String,
         /// Number of labour units assigned.
         labour: u64,
+    },
+    /// A building type's active recipe was set (issue #166).
+    ActiveRecipeSet {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// Building type the recipe applies to.
+        building_type: String,
+        /// The newly-active recipe id.
+        recipe_id: String,
     },
     /// Needs resolution completed for a colony this sol.
     NeedsResolved {
@@ -1673,6 +1696,7 @@ impl GameEngine {
                             maintenance_scalar,
                             maintenance_enabled,
                             colony.habitability_modifier,
+                            &colony.active_recipes,
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -2049,6 +2073,37 @@ impl GameEngine {
                     colony_id: *colony_id,
                     slot: slot.clone(),
                     labour: *labour,
+                }])
+            }
+
+            Command::SetActiveRecipe {
+                colony_id,
+                building_type,
+                recipe_id,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                if let Some(registry) = &self.state.registry {
+                    let recipe =
+                        registry
+                            .recipes()
+                            .find(|r| &r.id == recipe_id)
+                            .ok_or_else(|| {
+                                EngineError::InvalidArgument(format!("unknown recipe: {recipe_id}"))
+                            })?;
+                    if &recipe.building != building_type {
+                        return Err(EngineError::InvalidArgument(format!(
+                            "recipe '{recipe_id}' belongs to building '{}', not '{building_type}'",
+                            recipe.building
+                        )));
+                    }
+                }
+                self.state.colonies[idx]
+                    .active_recipes
+                    .insert(building_type.clone(), recipe_id.clone());
+                Ok(vec![Event::ActiveRecipeSet {
+                    colony_id: *colony_id,
+                    building_type: building_type.clone(),
+                    recipe_id: recipe_id.clone(),
                 }])
             }
 
@@ -3372,30 +3427,46 @@ impl GameEngine {
                         ))
                     })?;
 
-                let recipe = registry
+                let to_recipe_row = |r: &content::types::RecipeDef| ui::RecipeRow {
+                    recipe_id: r.id.clone(),
+                    name: r.name.clone(),
+                    inputs: r
+                        .inputs
+                        .iter()
+                        .map(|i| ui::IngredientRow {
+                            commodity_id: i.id.clone(),
+                            quantity: i.quantity,
+                        })
+                        .collect(),
+                    outputs: r
+                        .outputs
+                        .iter()
+                        .map(|i| ui::IngredientRow {
+                            commodity_id: i.id.clone(),
+                            quantity: i.quantity,
+                        })
+                        .collect(),
+                    cycle_sols: r.cycle_sols,
+                };
+
+                let active_recipes = &self.state.colonies[idx].active_recipes;
+                let recipe = colony::production::recipe_for_building(
+                    building_type,
+                    active_recipes,
+                    registry,
+                )
+                .map(to_recipe_row);
+
+                let mut available_recipes: Vec<&content::types::RecipeDef> = registry
                     .recipes()
-                    .find(|r| &r.building == building_type)
-                    .map(|r| ui::RecipeRow {
-                        recipe_id: r.id.clone(),
-                        name: r.name.clone(),
-                        inputs: r
-                            .inputs
-                            .iter()
-                            .map(|i| ui::IngredientRow {
-                                commodity_id: i.id.clone(),
-                                quantity: i.quantity,
-                            })
-                            .collect(),
-                        outputs: r
-                            .outputs
-                            .iter()
-                            .map(|i| ui::IngredientRow {
-                                commodity_id: i.id.clone(),
-                                quantity: i.quantity,
-                            })
-                            .collect(),
-                        cycle_sols: r.cycle_sols,
-                    });
+                    .filter(|r| &r.building == building_type)
+                    .collect();
+                available_recipes.sort_by(|a, b| a.id.cmp(&b.id));
+                let available_recipes: Vec<ui::RecipeRow> = if available_recipes.len() > 1 {
+                    available_recipes.into_iter().map(to_recipe_row).collect()
+                } else {
+                    Vec::new()
+                };
 
                 let last_run = self.state.colonies[idx]
                     .last_production
@@ -3444,6 +3515,7 @@ impl GameEngine {
                         })
                         .collect(),
                     recipe,
+                    available_recipes,
                     last_run,
                 }))
             }
@@ -4510,6 +4582,65 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, EngineError::ColonyNotFound(_)));
+    }
+
+    // ── SetActiveRecipe (issue #166) ──
+
+    #[test]
+    fn set_active_recipe_succeeds_and_persists_on_colony() {
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+
+        let events = engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "research_lab".into(),
+                recipe_id: "conduct_research".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            &events[0],
+            Event::ActiveRecipeSet { building_type, recipe_id, .. }
+                if building_type == "research_lab" && recipe_id == "conduct_research"
+        ));
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx]
+                .active_recipes
+                .get("research_lab"),
+            Some(&"conduct_research".to_string())
+        );
+    }
+
+    #[test]
+    fn set_active_recipe_rejects_recipe_belonging_to_a_different_building() {
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+
+        let err = engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "solar_array".into(),
+                recipe_id: "conduct_research".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn set_active_recipe_rejects_unknown_recipe_id() {
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+
+        let err = engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "research_lab".into(),
+                recipe_id: "not_a_real_recipe".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
     }
 
     // ── Query ──
@@ -5695,6 +5826,90 @@ mod tests {
             }
             other => panic!("expected BuildingDetail, got {other:?}"),
         }
+    }
+
+    /// Query::BuildingDetail's `available_recipes` is empty for a
+    /// single-recipe building (research_lab) and lists every recipe,
+    /// deterministically sorted by id, for a multi-recipe one (issue #166).
+    #[test]
+    fn query_building_detail_available_recipes_reflects_recipe_count() {
+        use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+
+        // Single-recipe building: available_recipes stays empty.
+        let result = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "research_lab".into(),
+            })
+            .unwrap();
+        let QueryResult::BuildingDetail(data) = result else {
+            panic!()
+        };
+        assert!(data.available_recipes.is_empty());
+        assert_eq!(data.recipe.unwrap().recipe_id, "conduct_research");
+
+        // Add a second building with two recipes to the same registry.
+        let mut registry = engine.state.registry.clone().unwrap();
+        registry.insert_building(BuildingDef {
+            id: "refinery".into(),
+            name: "Refinery".into(),
+            description: String::new(),
+            category: BuildingCategory::Processing,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        registry.insert_recipe(RecipeDef {
+            id: "refine_b".into(),
+            name: "Refine B".into(),
+            building: "refinery".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "gadget".into(),
+                quantity: 1.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        registry.insert_recipe(RecipeDef {
+            id: "refine_a".into(),
+            name: "Refine A".into(),
+            building: "refinery".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "alloy".into(),
+                quantity: 1.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        engine.state.registry = Some(registry);
+
+        let result = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "refinery".into(),
+            })
+            .unwrap();
+        let QueryResult::BuildingDetail(data) = result else {
+            panic!()
+        };
+        let ids: Vec<&str> = data
+            .available_recipes
+            .iter()
+            .map(|r| r.recipe_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["refine_a", "refine_b"], "must be sorted by id");
+        // No active_recipes entry set yet — falls back to the sorted-first default.
+        assert_eq!(data.recipe.unwrap().recipe_id, "refine_a");
     }
 
     /// Query::BuildingDetail errors on an unknown building type.

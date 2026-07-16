@@ -1,0 +1,18 @@
+# Colony configuration for the bootstrap-colony balance check.
+#
+# One of each of the 5 starter survival buildings (all default 5 build
+# slots), plus the synthetic 100-colonist consumption sink. No imports —
+# everything must be produced on-site by the starter set.
+buildings:
+  - building_id: water_well
+    recipe_id: pump_water
+  - building_id: hydroponic_bay
+    recipe_id: grow_rations
+  - building_id: life_support_module
+    recipe_id: scrub_oxygen
+  - building_id: solar_array_mk1
+    recipe_id: generate_power_solar_mk1
+  - building_id: colonist_life_support
+    recipe_id: colonist_consumption
+
+imports: []

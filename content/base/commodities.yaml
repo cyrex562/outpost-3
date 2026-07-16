@@ -59,3 +59,68 @@
   tradeable: false
   tier: advanced
   weight: 0.0
+
+- id: oxygen
+  name: Oxygen
+  description: >
+    Breathable atmosphere stock, harvested or scrubbed for the colony's
+    life-support system. Consumed per capita each sol (issue #166).
+  category: consumable
+  phase: gas
+  base_value: 6.0
+  tradeable: false
+  weight: 0.2
+
+- id: housing
+  name: Housing Capacity
+  description: >
+    Abstract unit of livable space. Not consumed — the colony pool just
+    needs to hold at least one unit per colonist (issue #166).
+  category: virtual
+  phase: solid
+  base_value: 0.0
+  tradeable: false
+  weight: 0.0
+
+- id: power
+  name: Power
+  description: >
+    Electricity routed to habitat life-support systems. Distinct from a
+    building's power_delta (which feeds the industrial grid ratio) — this
+    is the population's per-capita household draw (issue #166).
+  category: energy
+  phase: solid
+  base_value: 0.0
+  tradeable: false
+  weight: 0.0
+
+- id: components
+  name: Components
+  description: >
+    Machined parts fabricated from refined metal, used in higher-tier
+    manufacturing recipes.
+  category: manufactured
+  phase: solid
+  base_value: 40.0
+  tradeable: true
+
+- id: waste_rock
+  name: Waste Rock
+  description: >
+    Low-value tailings and overburden from mining operations. Bulky but
+    cheap; a byproduct rather than a primary extraction target.
+  category: raw_material
+  phase: solid
+  base_value: 1.0
+  tradeable: true
+  weight: 2.0
+
+- id: trace_minerals
+  name: Trace Minerals
+  description: >
+    Low-concentration rare elements captured as a byproduct of
+    atmospheric extraction.
+  category: raw_material
+  phase: solid
+  base_value: 15.0
+  tradeable: true

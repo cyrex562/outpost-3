@@ -1,4 +1,29 @@
-# Production recipe definitions for the base-colony pack.
+# Production recipe definitions for the base-colony pack (issue #166).
+#
+# Passive/infrastructure buildings (warehouse, trade_depot, sensor_array) are
+# intentionally absent — see their descriptions in buildings.yaml for why.
+
+# ── Starter set ──────────────────────────────────────────────────────────────
+
+- id: pump_water
+  name: Pump Water
+  building: water_well
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 24.0
+
+- id: grow_rations
+  name: Grow Rations
+  building: hydroponic_bay
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 2.0
+  outputs:
+    - id: food_ration
+      quantity: 12.0
 
 - id: smelt_iron
   name: Smelt Iron
@@ -22,13 +47,159 @@
     - id: research
       quantity: 5.0
 
-- id: grow_rations
-  name: Grow Rations
-  building: hydroponic_bay
-  cycle_sols: 3
+- id: house_colonists_basic
+  name: House Colonists (Basic)
+  building: basic_habitat
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: housing
+      quantity: 110.0
+
+- id: generate_power_solar_mk1
+  name: Generate Power (Solar Mk1)
+  building: solar_array_mk1
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+
+- id: scrub_oxygen
+  name: Scrub Oxygen
+  building: life_support_module
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 7.0
+
+# ── Tier 1 ───────────────────────────────────────────────────────────────────
+
+- id: mine_iron_ore
+  name: Mine Iron Ore
+  building: iron_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: iron_ore
+      quantity: 10.0
+    - id: waste_rock
+      quantity: 3.0
+
+- id: generate_power_wind
+  name: Generate Power (Wind)
+  building: wind_turbine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 6.0
+
+# ── Tier 2 ───────────────────────────────────────────────────────────────────
+
+- id: house_colonists_apartment
+  name: House Colonists (Apartment)
+  building: apartment_block
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: housing
+      quantity: 30.0
+
+# Refinery: two recipes, one building — the recipe-selection mechanic
+# (issue #166). "refine_ore_to_plate" sorts before "refine_plate_to_components"
+# alphabetically, so it's the deterministic default when the player hasn't
+# picked one via Command::SetActiveRecipe.
+- id: refine_ore_to_plate
+  name: Refine Ore to Plate
+  building: refinery
+  cycle_sols: 1
   inputs:
-    - id: water
+    - id: iron_ore
+      quantity: 5.0
+  outputs:
+    - id: iron_plate
+      quantity: 4.0
+
+- id: refine_plate_to_components
+  name: Refine Plate to Components
+  building: refinery
+  cycle_sols: 2
+  inputs:
+    - id: iron_plate
       quantity: 3.0
   outputs:
-    - id: food_ration
-      quantity: 5.0
+    - id: components
+      quantity: 2.0
+
+- id: treat_water
+  name: Treat Water
+  building: water_treatment_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 35.0
+
+- id: generate_power_solar_mk2
+  name: Generate Power (Solar Mk2)
+  building: solar_array_mk2
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 20.0
+
+# ── Tier 3 ───────────────────────────────────────────────────────────────────
+
+- id: assemble_power_cells
+  name: Assemble Power Cells
+  building: fabricator
+  cycle_sols: 2
+  inputs:
+    - id: components
+      quantity: 2.0
+  outputs:
+    - id: power_cell
+      quantity: 3.0
+
+- id: generate_power_fusion
+  name: Generate Power (Fusion)
+  building: fusion_reactor_prototype
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 60.0
+
+- id: house_colonists_dome
+  name: House Colonists (Dome)
+  building: habitat_dome
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: housing
+      quantity: 60.0
+
+- id: harvest_atmosphere
+  name: Harvest Atmosphere
+  building: atmospheric_harvester
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 15.0
+    - id: trace_minerals
+      quantity: 2.0
+
+- id: conduct_advanced_research
+  name: Conduct Advanced Research
+  building: physics_lab
+  cycle_sols: 1
+  inputs:
+    - id: power_cell
+      quantity: 2.0
+  outputs:
+    - id: research
+      quantity: 15.0

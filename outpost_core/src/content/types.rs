@@ -122,7 +122,9 @@ fn default_cycle_sols() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildingCategory {
-    /// Produces commodities from inputs.
+    /// Produces commodities from inputs. Legacy/generic — prefer
+    /// [`BuildingCategory::Extraction`] or [`BuildingCategory::Processing`]
+    /// for new buildings (issue #166).
     Production,
     /// Stores commodities.
     Storage,
@@ -132,6 +134,20 @@ pub enum BuildingCategory {
     Power,
     /// Research facility.
     Research,
+    /// Pulls raw resources from the environment (mines, wells, farms) with
+    /// little or no commodity input (issue #166).
+    Extraction,
+    /// Refines or manufactures raw resources into higher-value commodities
+    /// (issue #166).
+    Processing,
+    /// Atmosphere, water, and other habitat-sustaining infrastructure
+    /// (issue #166).
+    LifeSupport,
+    /// Colony/system defense and security (issue #166).
+    Defense,
+    /// Administrative, commercial, and other non-production colony services
+    /// (issue #166).
+    Services,
     /// Generic / uncategorised.
     Other,
 }

@@ -1,0 +1,20 @@
+# Commodities used in the bootstrap-colony balance check.
+- id: water
+  name: Water
+  category: consumable
+  base_value: 5.0
+
+- id: food_ration
+  name: Food Ration
+  category: consumable
+  base_value: 8.0
+
+- id: oxygen
+  name: Oxygen
+  category: consumable
+  base_value: 6.0
+
+- id: power
+  name: Power
+  category: energy
+  base_value: 0.0

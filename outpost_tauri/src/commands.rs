@@ -85,6 +85,12 @@ pub enum ClientCommand {
         slot: String,
         labour: u64,
     },
+    /// Select which recipe a building type runs in this colony (issue #166).
+    SetActiveRecipe {
+        colony_id: String,
+        building_type: String,
+        recipe_id: String,
+    },
     /// Cancel a queued construction project and receive a 50% partial refund.
     CancelConstruction {
         colony_id: String,
@@ -193,6 +199,12 @@ pub enum ServerEvent {
         slot: String,
         labour: u64,
     },
+    /// A building type's active recipe was set (issue #166).
+    ActiveRecipeSet {
+        colony_id: String,
+        building_type: String,
+        recipe_id: String,
+    },
     NeedsResolved {
         colony_id: String,
         composite_satisfaction: f32,
@@ -287,6 +299,15 @@ impl ServerEvent {
                 colony_id: colony_id.to_string(),
                 slot: slot.clone(),
                 labour: *labour,
+            },
+            Event::ActiveRecipeSet {
+                colony_id,
+                building_type,
+                recipe_id,
+            } => Self::ActiveRecipeSet {
+                colony_id: colony_id.to_string(),
+                building_type: building_type.clone(),
+                recipe_id: recipe_id.clone(),
             },
             Event::NeedsResolved {
                 colony_id,
@@ -839,6 +860,15 @@ pub fn apply_command(
             slot,
             labour,
         },
+        ClientCommand::SetActiveRecipe {
+            colony_id,
+            building_type,
+            recipe_id,
+        } => Command::SetActiveRecipe {
+            colony_id: parse_colony(&colony_id)?,
+            building_type,
+            recipe_id,
+        },
         ClientCommand::CancelConstruction {
             colony_id,
             project_id,
@@ -1048,9 +1078,8 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
             habitability_modifier: b.habitability_modifier(),
             habitability_effective: b
                 .habitability_with_mitigations(&engine.state.habitability_mitigations),
-            habitability_modifier_effective: b.habitability_modifier_with_mitigations(
-                &engine.state.habitability_mitigations,
-            ),
+            habitability_modifier_effective: b
+                .habitability_modifier_with_mitigations(&engine.state.habitability_mitigations),
             subtype: format!("{:?}", b.subtype),
             tidally_locked: b.tidally_locked,
             axial_tilt_deg: b.axial_tilt_deg,

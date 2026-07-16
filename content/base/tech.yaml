@@ -18,8 +18,10 @@
   research_time_ticks: 50
   prerequisites: []
   unlocks:
+    # basic_habitat, solar_array_mk1, and other survival basics ship in the
+    # starter set (no tech_prerequisite at all) as of issue #166 — only
+    # warehouse is actually gated behind this tech.
     buildings:
-      - basic_habitat
       - warehouse
     bonuses:
       - construction_speed_10_percent
@@ -34,7 +36,7 @@
   prerequisites: []
   unlocks:
     buildings:
-      - solar_array_mk1
+      - wind_turbine
     bonuses: []
 
 - id: resource_extraction
@@ -63,8 +65,11 @@
   prerequisites:
     - resource_extraction
   unlocks:
+    # smelter ships in the starter set (issue #166) — advanced_materials
+    # gates the denser tier-2 housing and the multi-recipe refinery instead.
     buildings:
-      - smelter
+      - apartment_block
+      - refinery
     resources:
       - steel
       - titanium
@@ -80,10 +85,10 @@
   prerequisites:
     - basic_construction
   unlocks:
+    # hydroponic_bay ships in the starter set (issue #166) — hydroponics
+    # gates the higher-throughput water_treatment_plant instead.
     buildings:
-      # Base pack ships `hydroponic_bay` (singular); the other referenced
-      # building ids below are placeholders until #150 fleshes out buildings.
-      - hydroponic_bay
+      - water_treatment_plant
     bonuses:
       - food_production_15_percent
 
@@ -114,6 +119,11 @@
   prerequisites:
     - advanced_materials
   unlocks:
+    buildings:
+      - fabricator
+      - trade_depot
+      - sensor_array
+      - physics_lab
     bonuses:
       - production_efficiency_25_percent
       - labor_requirement_minus_20_percent
@@ -174,6 +184,10 @@
   effects:
     - type: unlock_capability
       capability_id: colonize_harsh_worlds
+  unlocks:
+    buildings:
+      - habitat_dome
+      - atmospheric_harvester
   resource_costs:
     - resource_id: research_data
       amount: 90.0

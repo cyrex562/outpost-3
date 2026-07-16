@@ -157,6 +157,7 @@ pub fn process_production(
         1.0,
         true,
         1.0,
+        &std::collections::HashMap::new(),
     )
 }
 
@@ -174,7 +175,7 @@ pub fn process_production(
 /// #163) — used to fold in the colony's habitability modifier. Inputs and
 /// maintenance draws are unaffected so worlds that are hard to live on still
 /// consume the same feedstock but yield less product.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn process_production_scaled(
     pool: &mut ColonyPool,
     buildings: &[(String, u32)],
@@ -184,9 +185,10 @@ pub fn process_production_scaled(
     maintenance_scalar: f32,
     maintenance_enabled: bool,
     productivity_multiplier: f32,
+    active_recipes: &std::collections::HashMap<String, String>,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
-    let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar);
+    let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
     let brownout_ratio = power_grid.supply_ratio();
 
     // ── Step 2: compute labor ratio ──────────────────────────────────────────
@@ -229,7 +231,7 @@ pub fn process_production_scaled(
         let Some(bdef) = registry.building(building_type) else {
             continue; // unknown building type — skip
         };
-        let recipe = first_recipe_for_building(building_type, registry);
+        let recipe = recipe_for_building(building_type, active_recipes, registry);
         let has_maintenance = maintenance_enabled && !bdef.maintenance.is_empty();
 
         // Buildings with neither a recipe nor an active maintenance list stay
@@ -363,6 +365,7 @@ fn compute_power_grid_scaled(
     buildings: &[(String, u32)],
     registry: &ContentRegistry,
     power_scalar: f32,
+    active_recipes: &std::collections::HashMap<String, String>,
 ) -> PowerGrid {
     let mut capacity = 0.0f64;
     let mut demand = 0.0f64;
@@ -379,7 +382,7 @@ fn compute_power_grid_scaled(
             demand += bdef.power_delta * mul;
         }
         // Recipe power draw adds to demand.
-        if let Some(recipe) = first_recipe_for_building(building_type, registry) {
+        if let Some(recipe) = recipe_for_building(building_type, active_recipes, registry) {
             demand += recipe.power_draw * mul;
         }
     }
@@ -446,11 +449,45 @@ fn compute_effective_input_ratio(
 }
 
 /// Return the first recipe whose `building` field matches `building_type`.
+/// Deterministic default recipe for a building type when no active selection
+/// applies: the lexicographically smallest recipe id among matches.
+///
+/// `ContentRegistry` stores recipes in a `HashMap`, so iteration order is
+/// otherwise unspecified — for a building with only one recipe this is moot,
+/// but as of issue #166 some buildings expose more than one, and picking an
+/// arbitrary hash-order "first" would make the default unpredictable across
+/// runs.
 fn first_recipe_for_building<'r>(
     building_type: &str,
     registry: &'r ContentRegistry,
 ) -> Option<&'r RecipeDef> {
-    registry.recipes().find(|r| r.building == building_type)
+    registry
+        .recipes()
+        .filter(|r| r.building == building_type)
+        .min_by(|a, b| a.id.cmp(&b.id))
+}
+
+/// Resolve the recipe a building instance actually runs (issue #166).
+///
+/// If `active_recipes` names a recipe for this `building_type` and that
+/// recipe both exists and actually belongs to this building, it wins;
+/// otherwise falls back to [`first_recipe_for_building`] (the pre-#166
+/// deterministic default — the first authored recipe for the type). This
+/// keeps single-recipe buildings working with no player action needed.
+pub(crate) fn recipe_for_building<'r>(
+    building_type: &str,
+    active_recipes: &std::collections::HashMap<String, String>,
+    registry: &'r ContentRegistry,
+) -> Option<&'r RecipeDef> {
+    if let Some(recipe_id) = active_recipes.get(building_type) {
+        if let Some(recipe) = registry
+            .recipes()
+            .find(|r| &r.id == recipe_id && r.building == building_type)
+        {
+            return Some(recipe);
+        }
+    }
+    first_recipe_for_building(building_type, registry)
 }
 
 /// Returns true if there is at least one recipe for the given building type.
@@ -855,8 +892,17 @@ mod tests {
         let mut pool = ColonyPool::new(); // empty — no spare_parts
 
         let placed = buildings(&["solar_array", "advanced_smelter"]);
-        let outcome =
-            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true, 1.0);
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
 
         let smelter = outcome
             .building_results
@@ -899,6 +945,7 @@ mod tests {
             1.0,
             true,
             1.0,
+            &std::collections::HashMap::new(),
         );
 
         let mut pool_harsh = ColonyPool::new();
@@ -912,6 +959,7 @@ mod tests {
             2.0,
             true,
             1.0,
+            &std::collections::HashMap::new(),
         );
 
         let get_scale = |o: &ProductionStepOutcome, ty: &str| -> f64 {
@@ -943,8 +991,17 @@ mod tests {
         let mut pool = ColonyPool::new(); // empty pool
 
         let placed = buildings(&["solar_array", "advanced_smelter"]);
-        let outcome =
-            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, false, 1.0);
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            false,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
 
         let smelter = outcome
             .building_results
@@ -1026,8 +1083,17 @@ mod tests {
         pool.deposit("scrap", 0.3); // less than combined demand of 1.5
 
         let placed = buildings(&["solar_array", "recycler"]);
-        let outcome =
-            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true, 1.0);
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
 
         let recycler = outcome
             .building_results
@@ -1059,8 +1125,17 @@ mod tests {
         pool.deposit("iron_ore", 100.0);
 
         let placed = buildings(&["solar_array", "mine", "smelter"]);
-        let outcome =
-            process_production_scaled(&mut pool, &placed, 10.0_f32, &reg, 1.0, 1.0, true, 1.0);
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
 
         for res in &outcome.building_results {
             assert!(
@@ -1085,8 +1160,17 @@ mod tests {
         pool.deposit("iron_ore", 10.0);
 
         let placed = buildings(&["solar_array", "smelter"]);
-        let outcome =
-            process_production_scaled(&mut pool, &placed, 100.0_f32, &reg, 1.0, 1.0, true, 1.25);
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.25,
+            &std::collections::HashMap::new(),
+        );
 
         let smelt = outcome
             .building_results
@@ -1120,11 +1204,116 @@ mod tests {
         pool.deposit("iron_ore", 10.0);
 
         let placed = buildings(&["solar_array", "smelter"]);
-        process_production_scaled(&mut pool, &placed, 100.0_f32, &reg, 1.0, 1.0, true, 0.75);
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            0.75,
+            &std::collections::HashMap::new(),
+        );
         assert!(
             (pool.amount("iron_plate") - 0.75).abs() < 1e-6,
             "expected 0.75 iron_plate at 0.75× productivity, got {}",
             pool.amount("iron_plate")
         );
+    }
+
+    /// A building hosting two authored recipes (issue #166).
+    fn make_registry_with_two_recipes() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "refinery".into(),
+            name: "Refinery".into(),
+            description: String::new(),
+            category: BuildingCategory::Processing,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "refine_alloy".into(),
+            name: "Refine Alloy".into(),
+            building: "refinery".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "alloy".into(),
+                quantity: 5.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "refine_gadget".into(),
+            name: "Refine Gadget".into(),
+            building: "refinery".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "gadget".into(),
+                quantity: 3.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        reg
+    }
+
+    #[test]
+    fn recipe_selection_defaults_to_first_recipe_when_unset() {
+        let reg = make_registry_with_two_recipes();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["refinery"]);
+
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+        );
+
+        assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
+        assert_eq!(pool.amount("gadget"), 0.0);
+    }
+
+    #[test]
+    fn recipe_selection_honors_active_recipe() {
+        let reg = make_registry_with_two_recipes();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["refinery"]);
+        let mut active = std::collections::HashMap::new();
+        active.insert("refinery".to_string(), "refine_gadget".to_string());
+
+        process_production_scaled(&mut pool, &placed, 10.0, &reg, 1.0, 1.0, true, 1.0, &active);
+
+        assert_eq!(pool.amount("alloy"), 0.0);
+        assert!((pool.amount("gadget") - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recipe_selection_falls_back_when_active_recipe_belongs_to_another_building() {
+        let reg = make_registry_with_two_recipes();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["refinery"]);
+        let mut active = std::collections::HashMap::new();
+        // Points at a recipe id that doesn't belong to "refinery" — must fall
+        // back to the first authored recipe rather than silently no-op.
+        active.insert("refinery".to_string(), "mine_ore".to_string());
+
+        process_production_scaled(&mut pool, &placed, 10.0, &reg, 1.0, 1.0, true, 1.0, &active);
+
+        assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
     }
 }

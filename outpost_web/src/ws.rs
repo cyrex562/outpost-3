@@ -566,6 +566,84 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the starter (no-tech-prerequisite) building set
+    /// sustains a freshly-founded colony at the wizard's default starting
+    /// population, using only `Colony::slot_capacity`'s default 5 build
+    /// slots (issue #166). Exercises `GameEngine::apply` end-to-end —
+    /// production, the power grid, and needs resolution — rather than the
+    /// static flow-balance harness, since only the live engine models
+    /// housing capacity and stability dynamics.
+    #[test]
+    fn bootstrap_starter_buildings_sustain_default_starting_population() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::needs::NeedsConfig;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+        engine.state.needs_config = Some(NeedsConfig::default_survival());
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Bootstrap Test".into(),
+                starting_population: 100, // matches FoundColonyWizardView's default
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        // Fill all 5 default build slots with the starter buildings that
+        // cover the 5 survival needs — bypasses the construction queue's
+        // multi-sol build time, matching the established test pattern for
+        // isolating production/needs behavior from construction timing.
+        for building_type in [
+            "water_well",
+            "hydroponic_bay",
+            "life_support_module",
+            "solar_array_mk1",
+            "basic_habitat",
+        ] {
+            engine.state.colonies[idx]
+                .buildings
+                .push(PlacedBuilding::new(building_type, 1));
+        }
+        assert_eq!(engine.state.colonies[idx].slots_used(), 5);
+
+        // Advance 20 sols and confirm the colony doesn't spiral: stability
+        // stays healthy and population never declines below its starting
+        // count — the actual bar for "the starter set bootstraps the
+        // colony," not just "doesn't hit exactly zero."
+        for _ in 0..20 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let final_stability = engine.state.populations[idx].stability;
+        let final_population = engine.state.populations[idx].count;
+        assert!(
+            final_stability > 0.6,
+            "starter set should keep stability healthy, got {final_stability}"
+        );
+        assert!(
+            final_population >= 100.0,
+            "starter set should not let population decline, got {final_population}"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

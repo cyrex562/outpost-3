@@ -1,0 +1,22 @@
+# Buildings used in the bootstrap-colony balance check — the 5 starter
+# buildings that cover food/water/oxygen/power, mirroring content/base/
+# exactly, plus a synthetic population sink (see pack.yaml).
+- id: water_well
+  name: Water Well
+  category: extraction
+
+- id: hydroponic_bay
+  name: Hydroponic Bay
+  category: extraction
+
+- id: life_support_module
+  name: Life Support Module
+  category: life_support
+
+- id: solar_array_mk1
+  name: Solar Array Mk1
+  category: power
+
+- id: colonist_life_support
+  name: Colonist Life Support (population sink)
+  category: other

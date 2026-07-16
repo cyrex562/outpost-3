@@ -12,7 +12,7 @@
  */
 
 import { ref, watch } from 'vue'
-import { getBuildingDetail, type BuildingDetail } from '@/services/tauriBridge'
+import { getBuildingDetail, setActiveRecipe, type BuildingDetail } from '@/services/tauriBridge'
 
 const props = defineProps<{
   colonyId: string | null
@@ -27,6 +27,7 @@ const emit = defineEmits<{
 const detail = ref<BuildingDetail | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const switching = ref(false)
 
 async function load(): Promise<void> {
   if (!props.colonyId || !props.buildingType) {
@@ -46,6 +47,19 @@ async function load(): Promise<void> {
 }
 
 watch(() => [props.colonyId, props.buildingType], load, { immediate: true })
+
+async function switchRecipe(recipeId: string): Promise<void> {
+  if (!props.colonyId || !props.buildingType || switching.value) return
+  switching.value = true
+  try {
+    await setActiveRecipe(props.colonyId, props.buildingType, recipeId)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    switching.value = false
+  }
+}
 
 function hasMaintenanceShort(d: BuildingDetail): boolean {
   return d.last_run?.shortfalls.some((s) => s.kind === 'maintenance_short') ?? false
@@ -117,6 +131,21 @@ function shortfallLabel(kind: string): string {
 
         <section v-if="detail.recipe" class="section" data-testid="recipe-section">
           <h5>Recipe: {{ detail.recipe.name }}</h5>
+          <div v-if="detail.available_recipes.length > 1" class="recipe-selector" data-testid="recipe-selector">
+            <label class="hint" for="recipe-select">Switch recipe:</label>
+            <select
+              id="recipe-select"
+              class="recipe-select"
+              data-testid="recipe-select"
+              :value="detail.recipe.recipe_id"
+              :disabled="switching"
+              @change="switchRecipe(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="r in detail.available_recipes" :key="r.recipe_id" :value="r.recipe_id">
+                {{ r.name }}
+              </option>
+            </select>
+          </div>
           <p class="flow-row">
             <span class="flow-label">In:</span>
             <span v-for="i in detail.recipe.inputs" :key="i.commodity_id" class="flow-item">
@@ -202,6 +231,18 @@ function shortfallLabel(kind: string): string {
 
 .section { margin-top: 0.75rem; }
 .section h5 { color: #789; font-size: 0.8rem; margin: 0 0 0.3rem; }
+
+.recipe-selector { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; }
+.recipe-select {
+  background: #13131e;
+  border: 1px solid #334;
+  border-radius: 3px;
+  color: #cdd;
+  padding: 0.15rem 0.35rem;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+.recipe-select:disabled { opacity: 0.5; }
 
 .flow-row { font-size: 0.78rem; margin: 0.2rem 0; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: baseline; }
 .flow-label { color: #668; }
