@@ -644,6 +644,88 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the recipe-selection mechanic (#166) and the
+    /// new conductive-metal category (#207) actually work together against
+    /// the real content pack: mine conductive ore, switch `refinery` off
+    /// its default structural recipe onto `smelt_conductive_ore`, and
+    /// confirm conductive_metal — not structural_metal — comes out.
+    #[test]
+    fn refinery_recipe_selection_produces_conductive_metal_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Refinery Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("conductive_mine", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("refinery", 2));
+        // Power source — conductive_mine + refinery together demand 18kW,
+        // and neither is exempt from brownout throttling (only Power-
+        // category buildings are).
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+        // Seed structural_ore so the default recipe (refine_ore_to_plate)
+        // has something to consume on the first sol.
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 100.0);
+
+        // Default (no active_recipes entry) should be the structural recipe.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("structural_metal") > 0.0,
+            "refinery should default to refine_ore_to_plate with no active_recipes entry"
+        );
+        assert_eq!(
+            engine.state.colonies[idx].pool.amount("conductive_metal"),
+            0.0
+        );
+
+        // Switch to the conductive recipe.
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "refinery".into(),
+                recipe_id: "smelt_conductive_ore".into(),
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("conductive_metal") > 0.0,
+            "refinery should produce conductive_metal after switching its active recipe"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

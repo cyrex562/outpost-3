@@ -21,20 +21,87 @@
   base_value: 8.0
   tradeable: true
 
-- id: iron_ore
-  name: Iron Ore
-  description: Raw iron ore extracted from surface deposits.
+- id: structural_ore
+  name: Structural Ore
+  description: >
+    Iron/nickel-family ore extracted from surface deposits — abundant,
+    cheap, high-volume. The colony's primary construction feedstock
+    (issue #207; formerly "iron_ore").
   category: metallic_ore
   phase: solid
   base_value: 10.0
   tradeable: true
 
-- id: iron_plate
-  name: Iron Plate
-  description: Refined iron sheeting produced by the smelter.
+- id: structural_metal
+  name: Structural Metal
+  description: >
+    Refined structural-grade sheeting produced by the smelter or refinery.
+    Used in nearly every building's construction cost (issue #207;
+    formerly "iron_plate").
   category: metal
   phase: solid
   base_value: 25.0
+  tradeable: true
+
+- id: conductive_ore
+  name: Conductive Ore
+  description: >
+    Copper/aluminum-family ore, mined for its electrical conductivity.
+    Feedstock for power and electronics infrastructure (issue #207).
+  category: metallic_ore
+  phase: solid
+  base_value: 15.0
+  tradeable: true
+
+- id: conductive_metal
+  name: Conductive Metal
+  description: >
+    Refined high-conductivity metal, used in power and electronics
+    manufacturing (issue #207).
+  category: metal
+  phase: solid
+  base_value: 35.0
+  tradeable: true
+
+- id: precious_ore
+  name: Precious Ore
+  description: >
+    Gold/platinum/rare-earth-family ore — low yield, high value. Feedstock
+    for high-tier electronics, luxury goods, and currency (issue #207).
+  category: metallic_ore
+  phase: solid
+  base_value: 60.0
+  tradeable: true
+
+- id: precious_metal
+  name: Precious Metal
+  description: >
+    Refined precious metal, carefully processed in small batches
+    (issue #207).
+  category: metal
+  phase: solid
+  base_value: 150.0
+  tradeable: true
+
+- id: refractory_ore
+  name: Refractory Ore
+  description: >
+    Titanium/tungsten-family ore, prized for high-temperature and
+    high-strength applications. Harder to process than structural ore
+    (issue #207).
+  category: metallic_ore
+  phase: solid
+  base_value: 40.0
+  tradeable: true
+
+- id: refractory_metal
+  name: Refractory Metal
+  description: >
+    Refined refractory-grade metal — energy-intensive to produce, used in
+    advanced-tier construction and equipment (issue #207).
+  category: metal
+  phase: solid
+  base_value: 100.0
   tradeable: true
 
 - id: power_cell

@@ -30,10 +30,10 @@
   building: smelter
   cycle_sols: 2
   inputs:
-    - id: iron_ore
+    - id: structural_ore
       quantity: 2.0
   outputs:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 1.0
 
 - id: conduct_research
@@ -76,13 +76,13 @@
 
 # ── Tier 1 ───────────────────────────────────────────────────────────────────
 
-- id: mine_iron_ore
-  name: Mine Iron Ore
-  building: iron_mine
+- id: mine_structural_ore
+  name: Mine Structural Ore
+  building: structural_mine
   cycle_sols: 1
   inputs: []
   outputs:
-    - id: iron_ore
+    - id: structural_ore
       quantity: 10.0
     - id: waste_rock
       quantity: 3.0
@@ -107,19 +107,20 @@
     - id: housing
       quantity: 30.0
 
-# Refinery: two recipes, one building — the recipe-selection mechanic
-# (issue #166). "refine_ore_to_plate" sorts before "refine_plate_to_components"
-# alphabetically, so it's the deterministic default when the player hasn't
-# picked one via Command::SetActiveRecipe.
+# Refinery: three recipes, one building — the recipe-selection mechanic
+# (issue #166; conductive recipe added in #207). "refine_ore_to_plate" sorts
+# before "refine_plate_to_components" and "smelt_conductive_ore"
+# alphabetically, so it stays the deterministic default when the player
+# hasn't picked one via Command::SetActiveRecipe.
 - id: refine_ore_to_plate
   name: Refine Ore to Plate
   building: refinery
   cycle_sols: 1
   inputs:
-    - id: iron_ore
+    - id: structural_ore
       quantity: 5.0
   outputs:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 4.0
 
 - id: refine_plate_to_components
@@ -127,10 +128,50 @@
   building: refinery
   cycle_sols: 2
   inputs:
-    - id: iron_plate
+    - id: structural_metal
       quantity: 3.0
   outputs:
     - id: components
+      quantity: 2.0
+
+- id: smelt_conductive_ore
+  name: Smelt Conductive Ore
+  building: refinery
+  cycle_sols: 1
+  inputs:
+    - id: conductive_ore
+      quantity: 4.0
+  outputs:
+    - id: conductive_metal
+      quantity: 3.0
+
+- id: mine_conductive_ore
+  name: Mine Conductive Ore
+  building: conductive_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: conductive_ore
+      quantity: 8.0
+
+- id: mine_precious_ore
+  name: Mine Precious Ore
+  building: precious_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: precious_ore
+      quantity: 3.0
+
+- id: refine_precious_ore
+  name: Refine Precious Ore
+  building: precious_refinery
+  cycle_sols: 2
+  inputs:
+    - id: precious_ore
+      quantity: 3.0
+  outputs:
+    - id: precious_metal
       quantity: 2.0
 
 - id: treat_water
@@ -152,6 +193,26 @@
       quantity: 20.0
 
 # ── Tier 3 ───────────────────────────────────────────────────────────────────
+
+- id: mine_refractory_ore
+  name: Mine Refractory Ore
+  building: refractory_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: refractory_ore
+      quantity: 4.0
+
+- id: refine_refractory_ore
+  name: Refine Refractory Ore
+  building: refractory_foundry
+  cycle_sols: 2
+  inputs:
+    - id: refractory_ore
+      quantity: 4.0
+  outputs:
+    - id: refractory_metal
+      quantity: 2.0
 
 - id: assemble_power_cells
   name: Assemble Power Cells

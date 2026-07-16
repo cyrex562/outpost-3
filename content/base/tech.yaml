@@ -49,7 +49,8 @@
   prerequisites: []
   unlocks:
     buildings:
-      - iron_mine
+      - structural_mine
+      - conductive_mine
     bonuses:
       - mining_efficiency_10_percent
 
@@ -67,9 +68,12 @@
   unlocks:
     # smelter ships in the starter set (issue #166) — advanced_materials
     # gates the denser tier-2 housing and the multi-recipe refinery instead.
+    # precious_mine/precious_refinery added in #207.
     buildings:
       - apartment_block
       - refinery
+      - precious_mine
+      - precious_refinery
     resources:
       - steel
       - titanium
@@ -124,6 +128,8 @@
       - trade_depot
       - sensor_array
       - physics_lab
+      - refractory_mine
+      - refractory_foundry
     bonuses:
       - production_efficiency_25_percent
       - labor_requirement_minus_20_percent
