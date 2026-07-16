@@ -37,6 +37,11 @@ package-lock.json
 # Coverage reports (generated, not committed)
 coverage/
 
+# Playwright (generated, not committed)
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
 # Database files
 *.db
 *.db-shm
