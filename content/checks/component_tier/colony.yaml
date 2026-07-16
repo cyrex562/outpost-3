@@ -21,3 +21,5 @@ imports:
     rate: 1.0
   - commodity_id: refractory_metal
     rate: 1.5
+  - commodity_id: plastics
+    rate: 2.0

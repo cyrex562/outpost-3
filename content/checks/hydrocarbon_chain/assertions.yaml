@@ -1,0 +1,31 @@
+# Assertions for the hydrocarbon-chain balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   hydrocarbons: 18.0 mined (2 wells) - (4.0 fuel + 3.0 plastics + 3.0 chemicals) = +8.0/sol
+#   fuel:          3.0 produced (3/1 sol)                                          = +3.0/sol
+#   plastics:      2.0 produced (2/1 sol)                                          = +2.0/sol
+#   chemicals:     2.0 produced (2/1 sol)                                          = +2.0/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: hydrocarbons
+  expect: closed
+  min_net: 4.0
+  label: hydrocarbons-not-in-deficit
+
+- commodity: fuel
+  expect: closed
+  min_net: 1.0
+  label: fuel-surplus
+
+- commodity: plastics
+  expect: closed
+  min_net: 1.0
+  label: plastics-surplus
+
+- commodity: chemicals
+  expect: closed
+  min_net: 1.0
+  label: chemicals-surplus

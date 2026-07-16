@@ -1,0 +1,43 @@
+# Recipes used in the hydrocarbon-chain balance check — rates mirror
+# content/base/recipes.yaml exactly.
+- id: pump_hydrocarbons
+  name: Pump Hydrocarbons
+  building: hydrocarbon_well
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: hydrocarbons
+      quantity: 9.0
+
+- id: refine_fuel
+  name: Refine Fuel
+  building: petrochemical_plant
+  cycle_sols: 1
+  inputs:
+    - id: hydrocarbons
+      quantity: 4.0
+  outputs:
+    - id: fuel
+      quantity: 3.0
+
+- id: refine_plastics
+  name: Refine Plastics
+  building: petrochemical_plant
+  cycle_sols: 1
+  inputs:
+    - id: hydrocarbons
+      quantity: 3.0
+  outputs:
+    - id: plastics
+      quantity: 2.0
+
+- id: refine_chemicals
+  name: Refine Chemicals
+  building: petrochemical_plant
+  cycle_sols: 1
+  inputs:
+    - id: hydrocarbons
+      quantity: 3.0
+  outputs:
+    - id: chemicals
+      quantity: 2.0

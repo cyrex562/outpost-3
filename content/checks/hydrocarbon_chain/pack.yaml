@@ -1,0 +1,11 @@
+id: hydrocarbon-chain-check
+name: Hydrocarbon Chain Balance Check
+version: '0.1.0'
+description: >
+  Proves the hydrocarbon chain added in issue #210 (hydrocarbons → fuel /
+  plastics / chemicals) closes end-to-end: two hydrocarbon wells feeding
+  three petrochemical-plant instances (one per refining recipe), no
+  imports — everything produced on-site, mirroring
+  content/checks/metal_categories's self-contained style since
+  hydrocarbons is this issue's new raw material (unlike component_tier /
+  end_item_tier, which import already-established upstream commodities).
