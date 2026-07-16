@@ -40,6 +40,12 @@ export type Command =
       site_id: string
       focus: string | null
       supplies_id?: string | null
+      /**
+       * Explicit per-commodity starter-supply amounts (issue #167). When
+       * present, replaces the `supplies_id` package's per-100-colonist
+       * scaling with these exact absolute quantities.
+       */
+      supply_overrides?: [string, number][] | null
       /** Star-system body this site belongs to (issue #183). Omitting it skips the habitability gate. */
       body_id?: string | null
     }

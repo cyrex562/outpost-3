@@ -76,6 +76,14 @@ const POPULATION_WARNING_ETA: u32 = 10;
 /// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
 pub const DEFAULT_SEED: u64 = 0;
 
+/// Cargo-capacity stand-in for [`Command::FoundColonyAtSite`]'s
+/// `supply_overrides` (issue #167, open design question: "bounded by a
+/// cargo capacity?"). Each per-commodity override is capped at this many
+/// times the largest per-100-colonist amount authored for that commodity
+/// across all [`content::types::SupplyPackage`]s, scaled by
+/// `starting_population / 100.0`.
+pub const MAX_SUPPLY_OVERRIDE_MULTIPLE: f64 = 3.0;
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /// A command submitted to the engine from the outside world.
@@ -185,6 +193,22 @@ pub enum Command {
         /// colonist and scale linearly with `starting_population`.
         #[serde(default)]
         supplies_id: Option<String>,
+        /// Explicit per-commodity starter-supply amounts (issue #167).
+        ///
+        /// When present these **replace** the `supplies_id` package scaling
+        /// entirely — the wizard pre-fills its per-commodity spinners from a
+        /// package's defaults (scaled by `starting_population`), the player
+        /// tweaks them, and the final absolute amounts are sent here. Each
+        /// commodity id must appear in at least one authored
+        /// [`content::types::SupplyPackage`] and each amount is capped at
+        /// [`MAX_SUPPLY_OVERRIDE_MULTIPLE`] times the largest per-100-colonist
+        /// amount authored for that commodity across all packages (scaled by
+        /// `starting_population / 100.0`) — a stand-in "cargo capacity" bound
+        /// per issue #167's open design question. `supplies_id` may still be
+        /// sent alongside this for display/analytics but is not consulted
+        /// for seeding when overrides are present.
+        #[serde(default)]
+        supply_overrides: Option<Vec<(String, f64)>>,
         /// Star-system body this site belongs to, if known (issue #183).
         ///
         /// When present, founding is gated on
@@ -2172,6 +2196,7 @@ impl GameEngine {
                 site_id,
                 focus,
                 supplies_id,
+                supply_overrides,
                 body_id,
             } => {
                 if name.trim().is_empty() {
@@ -2240,8 +2265,58 @@ impl GameEngine {
                     None => None,
                 };
                 // Resolve the supply package (if any) up front so an unknown id
-                // is reported before any mutation happens.
-                let supplies = if let Some(id) = supplies_id.as_deref() {
+                // is reported before any mutation happens. `supply_overrides`
+                // (issue #167), when present, takes precedence and is
+                // validated against a per-commodity cargo-capacity cap
+                // derived from the loaded supply packages.
+                let supplies = if let Some(overrides) = supply_overrides.as_deref() {
+                    let registry = self.state.registry.as_ref().ok_or_else(|| {
+                        EngineError::InvalidArgument(
+                            "no content registry loaded — cannot validate supply_overrides".into(),
+                        )
+                    })?;
+                    // Largest authored per-100-colonist amount for each
+                    // commodity, across all packages — the cap basis.
+                    let mut max_per_100: std::collections::HashMap<&str, f64> =
+                        std::collections::HashMap::new();
+                    for pkg in registry.supply_packages() {
+                        for ing in &pkg.commodities {
+                            let slot = max_per_100.entry(ing.id.as_str()).or_insert(0.0);
+                            if ing.quantity > *slot {
+                                *slot = ing.quantity;
+                            }
+                        }
+                    }
+                    // starting_population is a headcount well below 2^52; the
+                    // precision loss clippy warns about is unreachable here.
+                    #[allow(clippy::cast_precision_loss)]
+                    let scale = (*starting_population as f64) / 100.0;
+                    let mut resolved = Vec::with_capacity(overrides.len());
+                    for (id, qty) in overrides {
+                        if *qty < 0.0 {
+                            return Err(EngineError::InvalidArgument(format!(
+                                "supply override for '{id}' must not be negative"
+                            )));
+                        }
+                        let cap_per_100 =
+                            max_per_100.get(id.as_str()).copied().ok_or_else(|| {
+                                EngineError::InvalidArgument(format!(
+                                    "unknown commodity in supply_overrides: {id}"
+                                ))
+                            })?;
+                        let cap = cap_per_100 * MAX_SUPPLY_OVERRIDE_MULTIPLE * scale;
+                        if *qty > cap {
+                            return Err(EngineError::InvalidArgument(format!(
+                                "supply override for '{id}' ({qty}) exceeds cargo capacity cap ({cap})"
+                            )));
+                        }
+                        resolved.push(content::types::Ingredient {
+                            id: id.clone(),
+                            quantity: *qty,
+                        });
+                    }
+                    Some((resolved, true))
+                } else if let Some(id) = supplies_id.as_deref() {
                     let registry = self.state.registry.as_ref().ok_or_else(|| {
                         EngineError::InvalidArgument(
                             "no content registry loaded — cannot resolve supplies_id".into(),
@@ -2250,7 +2325,7 @@ impl GameEngine {
                     let pkg = registry.supply_package(id).ok_or_else(|| {
                         EngineError::InvalidArgument(format!("unknown supplies_id: {id}"))
                     })?;
-                    Some(pkg.commodities.clone())
+                    Some((pkg.commodities.clone(), false))
                 } else {
                     None
                 };
@@ -2269,15 +2344,21 @@ impl GameEngine {
                 pm_mut
                     .place_colony(colony_id, coord)
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
-                // Seed the starter supplies (per-100-colonist quantities are
-                // scaled linearly by starting_population).
-                if let Some(ings) = supplies {
+                // Seed the starter supplies. Package-derived amounts are
+                // per-100-colonist and scaled linearly by starting_population;
+                // `supply_overrides` amounts (issue #167) are already
+                // absolute final quantities and are deposited as-is.
+                if let Some((ings, already_absolute)) = supplies {
                     let scale = (*starting_population as f64) / 100.0;
                     let idx = self
                         .find_colony_index(colony_id)
                         .expect("colony was just inserted");
                     for ing in &ings {
-                        let qty = ing.quantity * scale;
+                        let qty = if already_absolute {
+                            ing.quantity
+                        } else {
+                            ing.quantity * scale
+                        };
                         if qty > 0.0 {
                             self.state.colonies[idx].pool.deposit(&ing.id, qty);
                         }
@@ -5993,6 +6074,7 @@ mod tests {
                 site_id: site_a,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -6003,6 +6085,7 @@ mod tests {
                 site_id: site_b,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -6183,6 +6266,7 @@ mod tests {
                 site_id: site,
                 focus: Some("mining".into()),
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -6742,6 +6826,7 @@ mod tests {
             site_id: trade::SiteId::new(),
             focus: None,
             supplies_id: None,
+            supply_overrides: None,
             body_id: None,
         });
         assert!(
@@ -6809,6 +6894,7 @@ mod tests {
             site_id: trade::SiteId::new(), // random UUID — not in map
             focus: None,
             supplies_id: None,
+            supply_overrides: None,
             body_id: None,
         });
         assert!(
@@ -6846,6 +6932,7 @@ mod tests {
                 site_id,
                 focus: Some("mining".into()),
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -6952,6 +7039,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: None,
+            supply_overrides: None,
             body_id: Some(body_id),
         });
         assert!(
@@ -6990,6 +7078,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -7023,6 +7112,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: None,
+            supply_overrides: None,
             body_id: Some(body_id),
         });
         assert!(
@@ -7049,6 +7139,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: None,
+            supply_overrides: None,
             body_id: Some(bogus_body_id),
         });
         assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
@@ -7073,6 +7164,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -7108,6 +7200,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -7119,6 +7212,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: None,
+            supply_overrides: None,
             body_id: None,
         });
         assert!(
@@ -7180,6 +7274,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: Some("standard".into()),
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -7196,6 +7291,207 @@ mod tests {
             "expected 600 food_ration, got {}",
             colony.pool.amount("food_ration")
         );
+    }
+
+    /// Issue #167: explicit `supply_overrides` deposit the exact absolute
+    /// amounts sent, bypassing the per-100-colonist package scaling — this is
+    /// what lets the wizard's per-commodity spinners produce arbitrary
+    /// player-tweaked quantities rather than only fixed package tiers.
+    #[test]
+    fn found_colony_at_site_seeds_pool_from_supply_overrides() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let commodities_yaml = "\
+- id: water
+  name: Water
+  category: consumable
+  base_value: 1.0
+- id: food_ration
+  name: Food Ration
+  category: consumable
+  base_value: 1.0
+";
+        let supplies_yaml = "\
+- id: standard
+  name: Standard
+  commodities:
+    - id: water
+      quantity: 400.0
+    - id: food_ration
+      quantity: 300.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("commodities.yaml", commodities_yaml),
+            ("supplies.yaml", supplies_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        // Player tweaked the "standard" preset's spinners to arbitrary
+        // absolute amounts before founding.
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Alpha".into(),
+                starting_population: 200,
+                site_id,
+                focus: None,
+                supplies_id: Some("standard".into()),
+                supply_overrides: Some(vec![("water".into(), 500.0), ("food_ration".into(), 50.0)]),
+                body_id: None,
+            })
+            .unwrap();
+
+        let colony = &engine.state.colonies[0];
+        assert!(
+            (colony.pool.amount("water") - 500.0).abs() < 0.001,
+            "expected exact override 500 water, got {}",
+            colony.pool.amount("water")
+        );
+        assert!(
+            (colony.pool.amount("food_ration") - 50.0).abs() < 0.001,
+            "expected exact override 50 food_ration, got {}",
+            colony.pool.amount("food_ration")
+        );
+    }
+
+    /// Issue #167: a `supply_overrides` amount beyond the cargo-capacity cap
+    /// (`MAX_SUPPLY_OVERRIDE_MULTIPLE` × largest authored per-100 amount,
+    /// scaled by population) is rejected before any mutation.
+    #[test]
+    fn found_colony_at_site_rejects_supply_override_over_cap() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let commodities_yaml = "\
+- id: water
+  name: Water
+  category: consumable
+  base_value: 1.0
+";
+        let supplies_yaml = "\
+- id: standard
+  name: Standard
+  commodities:
+    - id: water
+      quantity: 400.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("commodities.yaml", commodities_yaml),
+            ("supplies.yaml", supplies_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        // Cap at pop 100 is 400 * 3.0 * 1.0 = 1200; 1201 must be rejected.
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Alpha".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: Some(vec![("water".into(), 1201.0)]),
+            body_id: None,
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected InvalidArgument for over-cap override, got {result:?}"
+        );
+        // No colony should have been created — rejection happens before mutation.
+        assert!(engine.state.colonies.is_empty());
+    }
+
+    /// Issue #167: `supply_overrides` referencing a commodity id absent from
+    /// every authored `SupplyPackage` is rejected rather than silently
+    /// depositing an unbounded/unknown commodity.
+    #[test]
+    fn found_colony_at_site_rejects_unknown_supply_override_commodity() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let commodities_yaml = "\
+- id: water
+  name: Water
+  category: consumable
+  base_value: 1.0
+- id: exotic_gas
+  name: Exotic Gas
+  category: consumable
+  base_value: 1.0
+";
+        let supplies_yaml = "\
+- id: standard
+  name: Standard
+  commodities:
+    - id: water
+      quantity: 400.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("commodities.yaml", commodities_yaml),
+            ("supplies.yaml", supplies_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Alpha".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: Some(vec![("exotic_gas".into(), 10.0)]),
+            body_id: None,
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected InvalidArgument for unknown supply-override commodity, got {result:?}"
+        );
+        assert!(engine.state.colonies.is_empty());
     }
 
     #[test]
@@ -7236,6 +7532,7 @@ mod tests {
             site_id,
             focus: None,
             supplies_id: Some("nonexistent".into()),
+            supply_overrides: None,
             body_id: None,
         });
         assert!(
@@ -7290,6 +7587,7 @@ mod tests {
                 site_id,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -7468,6 +7766,7 @@ mod tests {
                 site_id: site_a,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
@@ -7489,6 +7788,7 @@ mod tests {
                 site_id: site_b,
                 focus: None,
                 supplies_id: None,
+                supply_overrides: None,
                 body_id: None,
             })
             .unwrap();
