@@ -824,6 +824,84 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the manufactory's end-item recipes (#209)
+    /// actually work against the real content pack: seed components and
+    /// precious metal, switch `manufactory` through both new recipes, and
+    /// confirm each one produces its corresponding end-item commodity.
+    #[test]
+    fn manufactory_recipe_selection_produces_each_end_item_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Manufactory Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("manufactory", 2));
+        // Power source — manufactory alone demands 16kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        // Seed generous component/metal stock for both new recipes.
+        engine.state.colonies[idx]
+            .pool
+            .deposit("mechanical_components", 100.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("electronic_components", 100.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("precious_metal", 100.0);
+
+        // Default (no active_recipes entry) should be assemble_consumer_goods
+        // (sorts first alphabetically among the manufactory's recipes).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("consumer_goods") > 0.0,
+            "manufactory should default to assemble_consumer_goods with no active_recipes entry"
+        );
+        assert_eq!(engine.state.colonies[idx].pool.amount("luxury_goods"), 0.0);
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "manufactory".into(),
+                recipe_id: "craft_luxury_goods".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("luxury_goods") > 0.0,
+            "manufactory should produce luxury_goods after switching to craft_luxury_goods"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

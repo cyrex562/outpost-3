@@ -1,0 +1,20 @@
+# Colony configuration for the end-item-tier balance check.
+#
+# Two manufactory instances, one per new recipe (issue #166's
+# recipe-selection mechanic lets a single building type run different
+# recipes on different building instances). Components and precious metal
+# are supplied via generous imports rather than produced on-site — see
+# pack.yaml.
+buildings:
+  - building_id: manufactory
+    recipe_id: assemble_consumer_goods
+  - building_id: manufactory
+    recipe_id: craft_luxury_goods
+
+imports:
+  - commodity_id: mechanical_components
+    rate: 4.0
+  - commodity_id: electronic_components
+    rate: 2.0
+  - commodity_id: precious_metal
+    rate: 1.0

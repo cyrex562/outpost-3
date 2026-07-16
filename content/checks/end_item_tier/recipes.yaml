@@ -1,0 +1,27 @@
+# Recipes used in the end-item-tier balance check — rates mirror
+# content/base/recipes.yaml exactly.
+- id: assemble_consumer_goods
+  name: Assemble Consumer Goods
+  building: manufactory
+  cycle_sols: 1
+  inputs:
+    - id: mechanical_components
+      quantity: 3.0
+    - id: electronic_components
+      quantity: 1.0
+  outputs:
+    - id: consumer_goods
+      quantity: 2.0
+
+- id: craft_luxury_goods
+  name: Craft Luxury Goods
+  building: manufactory
+  cycle_sols: 3
+  inputs:
+    - id: precious_metal
+      quantity: 2.0
+    - id: electronic_components
+      quantity: 1.0
+  outputs:
+    - id: luxury_goods
+      quantity: 1.0

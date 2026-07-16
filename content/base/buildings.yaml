@@ -331,6 +331,26 @@
     - id: components
       quantity: 15.0
 
+- id: manufactory
+  name: Manufactory
+  description: >
+    Finishing line for end items — assembles consumer goods from mechanical
+    and electronic components, or crafts luxury goods from precious metal
+    and electronic components. Runs one recipe at a time; switch it from
+    the colony view (issue #166 recipe selection; issue #209).
+  category: processing
+  power_delta: 16.0
+  worker_slots: 3
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 45.0
+    - id: mechanical_components
+      quantity: 15.0
+
 - id: fusion_reactor_prototype
   name: Fusion Reactor Prototype
   description: Experimental fusion plant — by far the colony's largest power source.
