@@ -1386,6 +1386,12 @@ impl GameEngine {
     ///
     /// Returns [`EngineError`] when the command cannot be applied in the
     /// current engine state.
+    ///
+    /// # Panics
+    ///
+    /// Panics only on an internal invariant violation: if a colony index
+    /// lookup immediately following a successful colony insertion fails to
+    /// find that same colony, which should be impossible.
     #[allow(clippy::too_many_lines)]
     pub fn apply(&mut self, cmd: &Command) -> Result<Vec<Event>, EngineError> {
         // Block all commands once victory is recorded, unless sandbox-continue is active.
@@ -2290,6 +2296,7 @@ impl GameEngine {
                     // starting_population is a headcount well below 2^52; the
                     // precision loss clippy warns about is unreachable here.
                     #[allow(clippy::cast_precision_loss)]
+                    #[allow(clippy::cast_precision_loss)]
                     let scale = (*starting_population as f64) / 100.0;
                     let mut resolved = Vec::with_capacity(overrides.len());
                     for (id, qty) in overrides {
@@ -2349,6 +2356,7 @@ impl GameEngine {
                 // `supply_overrides` amounts (issue #167) are already
                 // absolute final quantities and are deposited as-is.
                 if let Some((ings, already_absolute)) = supplies {
+                    #[allow(clippy::cast_precision_loss)]
                     let scale = (*starting_population as f64) / 100.0;
                     let idx = self
                         .find_colony_index(colony_id)

@@ -175,7 +175,11 @@ pub fn process_production(
 /// #163) — used to fold in the colony's habitability modifier. Inputs and
 /// maintenance draws are unaffected so worlds that are hard to live on still
 /// consume the same feedstock but yield less product.
-#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::implicit_hasher,
+    clippy::too_many_lines
+)]
 pub fn process_production_scaled(
     pool: &mut ColonyPool,
     buildings: &[(String, u32)],
