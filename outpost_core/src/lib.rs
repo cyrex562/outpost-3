@@ -2082,20 +2082,22 @@ impl GameEngine {
                 recipe_id,
             } => {
                 let idx = self.find_colony_index(*colony_id)?;
-                if let Some(registry) = &self.state.registry {
-                    let recipe =
-                        registry
-                            .recipes()
-                            .find(|r| &r.id == recipe_id)
-                            .ok_or_else(|| {
-                                EngineError::InvalidArgument(format!("unknown recipe: {recipe_id}"))
-                            })?;
-                    if &recipe.building != building_type {
-                        return Err(EngineError::InvalidArgument(format!(
-                            "recipe '{recipe_id}' belongs to building '{}', not '{building_type}'",
-                            recipe.building
-                        )));
-                    }
+                let registry = self.state.registry.as_ref().ok_or_else(|| {
+                    EngineError::InvalidArgument(
+                        "no content registry loaded — cannot validate recipe selection".into(),
+                    )
+                })?;
+                let recipe = registry
+                    .recipes()
+                    .find(|r| &r.id == recipe_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!("unknown recipe: {recipe_id}"))
+                    })?;
+                if &recipe.building != building_type {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "recipe '{recipe_id}' belongs to building '{}', not '{building_type}'",
+                        recipe.building
+                    )));
                 }
                 self.state.colonies[idx]
                     .active_recipes
@@ -4641,6 +4643,26 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn set_active_recipe_rejects_when_no_registry_loaded() {
+        // Guards against silently accepting an unvalidated recipe_id/building_type
+        // pair when self.state.registry is None (issue #166 regression).
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = found_colony_id(&mut engine, "No Registry", 10);
+
+        let err = engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "research_lab".into(),
+                recipe_id: "conduct_research".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(engine.state.colonies[idx].active_recipes.is_empty());
     }
 
     // ── Query ──
