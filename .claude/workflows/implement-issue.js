@@ -1,11 +1,13 @@
 export const meta = {
   name: 'implement-issue',
-  description: 'Pick next open GitHub issue, implement it in Rust, run tests, and create a PR',
+  description: 'Pick next open GitHub issue, implement it in Rust, run tests, review, judge, and ship a PR',
   phases: [
     { title: 'Select', detail: 'Choose next open issue respecting phase order and dependencies' },
-    { title: 'Implement', detail: 'Write Rust code satisfying the issue spec' },
-    { title: 'Test', detail: 'cargo test + clippy + fmt check + harness check if applicable' },
-    { title: 'Ship', detail: 'Push branch, create PR, merge on green' },
+    { title: 'Implement', detail: 'Write Rust/Vue code satisfying the issue spec' },
+    { title: 'Test', detail: 'cargo test + clippy + fmt + frontend (vitest/type-check/build/playwright) + harness check if applicable' },
+    { title: 'Review', detail: 'Haiku/Sonnet code-review subagent audits the diff' },
+    { title: 'Judge', detail: 'Haiku subagent independently confirms acceptance criteria are met' },
+    { title: 'Ship', detail: 'Push branch, create PR, auto-merge only if tests + review + judge all pass' },
   ],
 }
 
@@ -237,6 +239,10 @@ log(`   Tests: ${impl.test_count}`)
 // ---------------------------------------------------------------------------
 phase('Test')
 
+const touchedFrontend = (impl.files_created || [])
+  .concat(impl.files_modified || [])
+  .some((f) => f.startsWith('frontend/'))
+
 const TEST_SCHEMA = {
   type: 'object',
   properties: {
@@ -245,6 +251,12 @@ const TEST_SCHEMA = {
     cargo_fmt_passed: { type: 'boolean' },
     harness_passed: { type: 'boolean' },
     harness_applicable: { type: 'boolean' },
+    frontend_applicable: { type: 'boolean' },
+    frontend_type_check_passed: { type: 'boolean' },
+    frontend_unit_passed: { type: 'boolean' },
+    frontend_build_passed: { type: 'boolean' },
+    frontend_e2e_passed: { type: 'boolean' },
+    frontend_e2e_applicable: { type: 'boolean' },
     all_passed: { type: 'boolean' },
     failure_details: { type: 'string' },
   },
@@ -252,7 +264,8 @@ const TEST_SCHEMA = {
 }
 
 const testResult = await agent(
-  `You are verifying that the implementation of issue #${selection.issue_number} passes all quality checks.
+  `You are verifying that the implementation of issue #${selection.issue_number} passes all quality checks
+defined in CLAUDE.md's "Definition of Done" table.
 
 The implementation is on branch \`${selection.branch_name}\`.
 
@@ -267,11 +280,23 @@ Run the following checks in order. Fix any failures before reporting (up to 3 at
 3. \`cargo fmt --check --all 2>&1\`
    If fmt fails, run \`cargo fmt --all\` then re-check. Report cargo_fmt_passed.
 
-4. Check if the issue is Phase 3 or later AND a \`content/checks/\` bundle exists for it.
+4. Check if a \`content/checks/\` bundle exists for this issue.
    If so, run: \`cargo run --bin outpost_harness -- check content/checks/ 2>&1\`
    Report harness_applicable and harness_passed.
 
-After all checks pass, stage any fmt fixes with a new commit (do NOT amend):
+5. Frontend gates — this diff ${touchedFrontend ? 'DOES' : 'does NOT'} touch \`frontend/src/\`.
+   Set frontend_applicable=${touchedFrontend}. If applicable, from the \`frontend/\` directory run, in order:
+   - \`npm run type-check 2>&1\` — report frontend_type_check_passed
+   - \`npm run test:unit -- --run 2>&1\` — report frontend_unit_passed
+   - \`npm run build 2>&1\` — report frontend_build_passed
+   - If the diff affects a user-facing flow (new screen, new command wiring, changed navigation),
+     add or update a Playwright spec under \`frontend/e2e/\` covering the new behavior, then run
+     \`npm run test:e2e 2>&1\`. Set frontend_e2e_applicable=true and report frontend_e2e_passed.
+     If the change has no user-facing surface, set frontend_e2e_applicable=false and skip it —
+     say so explicitly in failure_details rather than silently omitting the field.
+   If not applicable, set all four frontend_* passed fields to true (vacuously) and frontend_e2e_applicable=false.
+
+After all checks pass, stage any fmt/lint fixes with a new commit (do NOT amend):
 \`git add -A && git diff --cached --quiet || git commit -m "chore: apply cargo fmt fixes"\`
 
 If any check cannot be made green after 3 attempts, set all_passed=false and describe the failure in failure_details.
@@ -292,7 +317,107 @@ log(`   clippy: ${testResult.cargo_clippy_passed}`)
 log(`   fmt: ${testResult.cargo_fmt_passed}`)
 
 // ---------------------------------------------------------------------------
-// Phase 4 — Ship
+// Phase 4 — Review
+// ---------------------------------------------------------------------------
+phase('Review')
+
+const REVIEW_SCHEMA = {
+  type: 'object',
+  properties: {
+    blocking_findings: { type: 'array', items: { type: 'string' } },
+    non_blocking_notes: { type: 'array', items: { type: 'string' } },
+    fixed_blocking_findings: { type: 'boolean' },
+    clean: { type: 'boolean' },
+    summary: { type: 'string' },
+  },
+  required: ['blocking_findings', 'non_blocking_notes', 'clean', 'summary'],
+}
+
+// Sonnet for anything touching simulation logic in outpost_core; Haiku for
+// smaller/mechanical diffs (frontend-only, content-pack-only, docs) — see
+// CLAUDE.md "Automated Review & Validation".
+const touchedCore = (impl.files_created || [])
+  .concat(impl.files_modified || [])
+  .some((f) => f.startsWith('outpost_core/'))
+const reviewModel = touchedCore ? 'claude-sonnet-5' : 'claude-haiku-4-5-20251001'
+
+let review = await agent(
+  `You are an independent code-review agent auditing the diff for issue #${selection.issue_number} —
+"${selection.title}" — on branch \`${selection.branch_name}\` (run \`git diff origin/${DEFAULT_BRANCH}...HEAD\`
+to see it).
+
+Review against CLAUDE.md's "Rust Best Practices" and "Critical Rules" sections (read that file first):
+- Correctness bugs, unhandled edge cases, panics on reachable input
+- Violations of the architecture rules (zero I/O in outpost_core, content-as-data, drive-interface-only
+  mutation, SQLite snapshot-only, no simulation logic leaking into outpost_tauri/outpost_web)
+- Missing doc comments on new public items
+- Unjustified new external dependencies in outpost_core
+
+Classify findings as blocking (real bugs, panics, architecture violations — must be fixed before shipping)
+or non-blocking (style nits, optional simplifications — note and skip).
+
+If you find blocking issues, fix them yourself, then re-verify (re-run the relevant \`cargo test\`/\`clippy\`
+commands) and set fixed_blocking_findings=true. Set clean=true only when there are no remaining blocking
+findings.
+
+Return a StructuredOutput with your findings.`,
+  { label: 'code-review', phase: 'Review', schema: REVIEW_SCHEMA, model: reviewModel }
+)
+
+if (!review) {
+  log('⚠️ Review agent returned null — treating as unresolved, will not auto-merge')
+  review = { clean: false, blocking_findings: ['review agent failed to return a result'], non_blocking_notes: [], summary: '' }
+}
+
+log(review.clean ? '✅ Code review clean' : `⚠️ Code review found ${review.blocking_findings.length} blocking finding(s)`)
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Judge
+// ---------------------------------------------------------------------------
+phase('Judge')
+
+const JUDGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    criteria_checked: { type: 'array', items: { type: 'string' } },
+    criteria_met: { type: 'array', items: { type: 'boolean' } },
+    all_met: { type: 'boolean' },
+    reasoning: { type: 'string' },
+  },
+  required: ['criteria_checked', 'criteria_met', 'all_met', 'reasoning'],
+}
+
+// Deliberately a separate, blind agent call — it must not see `review`'s
+// findings so its verdict isn't anchored by the reviewer's framing.
+let judge = await agent(
+  `You are an independent judge verifying that issue #${selection.issue_number} — "${selection.title}" —
+is actually done, not just that its tests pass.
+
+Issue body (extract the "Done when" / acceptance-criteria bullets from this):
+${selection.body}
+
+The implementation is on branch \`${selection.branch_name}\` (run \`git diff origin/${DEFAULT_BRANCH}...HEAD\`
+to see it, and read the changed test files to see what they actually assert).
+
+For each acceptance-criterion bullet in the issue, determine independently whether the diff and its tests
+genuinely satisfy it — not just that some test with a plausible name exists, but that the test's assertions
+would actually fail if the criterion were violated. List each criterion you checked and whether it's met.
+
+Return a StructuredOutput with your verdict.`,
+  { label: 'judge', phase: 'Judge', schema: JUDGE_SCHEMA, model: 'claude-haiku-4-5-20251001' }
+)
+
+if (!judge) {
+  log('⚠️ Judge agent returned null — treating as unresolved, will not auto-merge')
+  judge = { all_met: false, criteria_checked: [], criteria_met: [], reasoning: 'judge agent failed to return a result' }
+}
+
+log(judge.all_met ? '✅ Judge confirms acceptance criteria met' : '⚠️ Judge found unmet acceptance criteria')
+
+const gateGreen = testResult.all_passed && review.clean && judge.all_met
+
+// ---------------------------------------------------------------------------
+// Phase 6 — Ship
 // ---------------------------------------------------------------------------
 phase('Ship')
 
@@ -302,13 +427,26 @@ const SHIP_SCHEMA = {
     pushed: { type: 'boolean' },
     pr_url: { type: 'string' },
     pr_number: { type: 'number' },
-    merged: { type: 'boolean' },
+    pr_created: { type: 'boolean' },
   },
-  required: ['pushed', 'pr_url', 'pr_number', 'merged'],
+  required: ['pushed', 'pr_url', 'pr_number', 'pr_created'],
 }
 
+const reviewSection = `## Review
+
+**Code review** (${reviewModel}): ${review.clean ? '✅ clean' : `⚠️ ${review.blocking_findings.length} blocking finding(s)`}
+${review.blocking_findings.length ? review.blocking_findings.map((f) => `- [blocking] ${f}`).join('\n') + '\n' : ''}${review.non_blocking_notes.length ? review.non_blocking_notes.map((f) => `- [note] ${f}`).join('\n') + '\n' : ''}${review.summary}
+
+**Judge** (haiku): ${judge.all_met ? '✅ acceptance criteria met' : '⚠️ unmet acceptance criteria'}
+${judge.criteria_checked.map((c, i) => `- [${judge.criteria_met[i] ? 'x' : ' '}] ${c}`).join('\n')}
+${judge.reasoning}`
+
+// Always push + open the PR — the review/judge findings above go straight
+// into the PR description regardless of whether the gate is green, so a
+// human skimming later can see what was checked. Merging is a separate,
+// gated step below (never done inside this agent call).
 const ship = await agent(
-  `You are creating and merging a pull request for issue #${selection.issue_number} — "${selection.title}".
+  `You are creating a pull request for issue #${selection.issue_number} — "${selection.title}".
 
 Branch: \`${selection.branch_name}\`
 Base: \`${DEFAULT_BRANCH}\`
@@ -323,33 +461,73 @@ Steps:
    - title: "${selection.title}"
    - base: "${DEFAULT_BRANCH}"
    - head: "${selection.branch_name}"
-   - body: include:
+   - body: include, in order:
      - "Closes #${selection.issue_number}"
      - Summary of what was implemented (from: ${impl ? impl.summary : '(see commit)'})
-     - Test plan: list the cargo test cases added
-     - Phase label: ${selection.phase_label}
+     - Test plan: list the cargo test / vitest / Playwright cases added
+     - The following "## Review" section VERBATIM (do not paraphrase it):
 
-3. Use (mcp__github__merge_pull_request) to merge with method "squash".
+${reviewSection}
 
-4. After merge, close issue #${selection.issue_number} on GitHub using (mcp__github__issue_write) method "update" with state "closed" and state_reason "completed".
+Do NOT merge the PR — that happens in a separate step only if the gate is green.
 
-5. Delete the local branch: \`git checkout ${DEFAULT_BRANCH} && git branch -d ${selection.branch_name}\`
-
-Return a StructuredOutput with push/PR/merge results.`,
-  { label: 'ship', phase: 'Ship', schema: SHIP_SCHEMA }
+Return a StructuredOutput with push/PR-creation results.`,
+  { label: 'open-pr', phase: 'Ship', schema: SHIP_SCHEMA }
 )
 
-if (!ship || !ship.merged) {
-  log(`⚠️ Ship stage incomplete — manual PR/merge may be needed`)
-  return { success: false, stage: 'ship', selection, impl, testResult, ship }
+if (!ship || !ship.pr_created) {
+  log(`⚠️ PR creation failed — manual push/PR may be needed`)
+  return { success: false, stage: 'ship', selection, impl, testResult, review, judge, ship }
 }
 
-log(`🚀 Shipped!`)
+log(`📬 PR opened: ${ship.pr_url}`)
+
+if (!gateGreen) {
+  log(`⏸️  Gate not green (tests=${testResult.all_passed}, review=${review.clean}, judge=${judge.all_met}) — leaving PR open for human review, not merging`)
+  return {
+    success: true,
+    merged: false,
+    issue_number: selection.issue_number,
+    title: selection.title,
+    branch: selection.branch_name,
+    pr_url: ship.pr_url,
+    review,
+    judge,
+  }
+}
+
+const MERGE_SCHEMA = {
+  type: 'object',
+  properties: { merged: { type: 'boolean' } },
+  required: ['merged'],
+}
+
+const merge = await agent(
+  `Merge pull request #${ship.pr_number} in ${OWNER}/${REPO} (branch \`${selection.branch_name}\` → \`${DEFAULT_BRANCH}\`).
+
+Tests, code review, and judge all passed — this PR is gated green per CLAUDE.md's auto-merge policy.
+
+Steps:
+1. Use (mcp__github__merge_pull_request) to merge with method "squash".
+2. After merge, close issue #${selection.issue_number} using (mcp__github__issue_write) method "update" with
+   state "closed" and state_reason "completed".
+3. Delete the local branch: \`git checkout ${DEFAULT_BRANCH} && git branch -d ${selection.branch_name}\`
+
+Return a StructuredOutput with the merge result.`,
+  { label: 'merge', phase: 'Ship', schema: MERGE_SCHEMA }
+)
+
+if (!merge || !merge.merged) {
+  log(`⚠️ Merge failed — PR is open and gated green, merge manually`)
+  return { success: true, merged: false, issue_number: selection.issue_number, title: selection.title, branch: selection.branch_name, pr_url: ship.pr_url, review, judge }
+}
+
+log(`🚀 Shipped and merged!`)
 log(`   PR: ${ship.pr_url}`)
-log(`   Merged: ${ship.merged}`)
 
 return {
   success: true,
+  merged: true,
   issue_number: selection.issue_number,
   title: selection.title,
   branch: selection.branch_name,
@@ -357,4 +535,6 @@ return {
   files_created: impl ? impl.files_created : [],
   files_modified: impl ? impl.files_modified : [],
   test_count: impl ? impl.test_count : 0,
+  review,
+  judge,
 }
