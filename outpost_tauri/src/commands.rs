@@ -660,6 +660,7 @@ pub fn bootstrap(
     custom_menace_enabled: Option<bool>,
     custom_hazards_enabled: Option<bool>,
     custom_maintenance_enabled: Option<bool>,
+    system_seed: Option<u64>,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<SnapshotPayload> {
     let registry = if content_dir.is_empty() || content_dir == "embedded" {
@@ -686,14 +687,22 @@ pub fn bootstrap(
         });
     }
 
+    // Procedurally generate the star system (issue #199) — the bootstrap
+    // default, replacing the content pack's authored systems.yaml scenarios
+    // (still available separately via `seed_system_from_content` for a
+    // future hand-authored-scenario picker). Independent seed from the
+    // planet map by default; falls back to `planet_seed` when the caller
+    // doesn't supply one, matching the only behavior a single-seed caller
+    // could have meant.
+    let _ = engine.apply(&Command::System(SystemCommand::GenerateSystem {
+        seed: system_seed.unwrap_or(planet_seed),
+    }));
+
     let _ = engine.apply(&Command::SeedPlanet {
         seed: planet_seed,
         radius: 12,
     });
 
-    // Seed the star system from the loaded content pack. Falls back to
-    // an empty system if the pack ships no `systems.yaml`.
-    seed_system_from_content(&mut engine);
     load_embedded_tech(&mut engine);
 
     let snap = build_snapshot(&engine);
@@ -722,6 +731,14 @@ fn load_embedded_tech(engine: &mut GameEngine) {
 ///
 /// Assigned roles land on the body via a follow-up
 /// [`SystemCommand::AssignRole`] since `AddBody` sets `Unassigned` by default.
+///
+/// Not called from the live `bootstrap` command as of issue #199 —
+/// procedural generation (`Command::System(SystemCommand::GenerateSystem)`)
+/// is the default there now. Kept (not deleted) because #199 explicitly
+/// demotes `content/base/systems.yaml`'s authored scenarios to "optional,
+/// selectable later" rather than removing them — this is the loader a
+/// future scenario-picker command would call.
+#[allow(dead_code)]
 fn seed_system_from_content(engine: &mut GameEngine) {
     let Some(system) = engine
         .state

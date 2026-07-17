@@ -43,6 +43,7 @@ pub mod predicate;
 pub mod research;
 pub mod snapshot;
 pub mod system;
+pub mod system_gen;
 pub mod tech;
 pub mod trade;
 pub mod turn;

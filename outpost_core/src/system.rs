@@ -935,6 +935,17 @@ pub enum SystemCommand {
         /// Replacement modifier list.
         modifiers: Vec<BodyModifier>,
     },
+    /// Procedurally generate a star system from a seed (issue #199),
+    /// replacing every existing body in the node map.
+    ///
+    /// Mirrors [`crate::Command::SeedPlanet`]'s "overwrite any previously
+    /// seeded state" semantics, but scoped to the system-command surface
+    /// (see [`crate::system_gen::generate_system`] for the generator and
+    /// its playability guarantee).
+    GenerateSystem {
+        /// Deterministic seed — same seed always produces the same system.
+        seed: u64,
+    },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
         /// Origin body.
@@ -1063,6 +1074,14 @@ pub enum SystemEvent {
         body_id: BodyId,
         /// New modifier list.
         modifiers: Vec<BodyModifier>,
+    },
+    /// A star system was procedurally generated (issue #199), replacing
+    /// every previously existing body.
+    SystemGenerated {
+        /// The seed used to generate this system.
+        seed: u64,
+        /// Ids of every generated body, in generation order.
+        body_ids: Vec<BodyId>,
     },
     /// A shipping route was added between two bodies.
     ShippingRouteAdded {
@@ -1323,6 +1342,19 @@ pub fn apply_system_command(
             Ok(vec![SystemEvent::BodyModifiersSet {
                 body_id: body_id.clone(),
                 modifiers: modifiers.clone(),
+            }])
+        }
+
+        SystemCommand::GenerateSystem { seed } => {
+            state.node_map.bodies.clear();
+            let generated = crate::system_gen::generate_system(*seed);
+            let body_ids: Vec<BodyId> = generated
+                .into_iter()
+                .map(|body| state.node_map.add_body(body))
+                .collect();
+            Ok(vec![SystemEvent::SystemGenerated {
+                seed: *seed,
+                body_ids,
             }])
         }
 
@@ -2020,6 +2052,35 @@ mod tests {
             },
         );
         assert!(matches!(result, Err(SystemError::BodyNotFound(_))));
+    }
+
+    #[test]
+    fn generate_system_populates_node_map_and_reports_body_ids() {
+        let mut state = SystemState::new();
+        let events =
+            apply_system_command(&mut state, &SystemCommand::GenerateSystem { seed: 7 }).unwrap();
+        let SystemEvent::SystemGenerated { seed, body_ids } = &events[0] else {
+            panic!("expected SystemGenerated");
+        };
+        assert_eq!(*seed, 7);
+        assert!(!body_ids.is_empty());
+        assert_eq!(body_ids.len(), state.node_map.bodies.len());
+        for id in body_ids {
+            assert!(state.node_map.bodies.contains_key(id));
+        }
+    }
+
+    #[test]
+    fn generate_system_replaces_any_existing_bodies() {
+        let (mut state, inner_id, outer_id) = make_state_with_two_bodies();
+        assert_eq!(state.node_map.bodies.len(), 2);
+        apply_system_command(&mut state, &SystemCommand::GenerateSystem { seed: 3 }).unwrap();
+        // The two hand-added bodies must be gone — generation
+        // wholesale-replaces the node map, mirroring Command::SeedPlanet's
+        // "overwrite any previously seeded map" semantics.
+        assert!(!state.node_map.bodies.contains_key(&inner_id));
+        assert!(!state.node_map.bodies.contains_key(&outer_id));
+        assert!(!state.node_map.bodies.is_empty());
     }
 
     #[test]
