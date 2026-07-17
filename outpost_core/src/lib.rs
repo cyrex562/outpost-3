@@ -3914,9 +3914,37 @@ impl GameEngine {
         // All colonies are player-controlled — player volume equals total.
         let player_traded = total_traded.clone();
 
+        // Economic output: base_value-weighted sum of this turn's actual
+        // production across every colony (issue #212 — base_value's first
+        // mechanical consumer). For each building that produced this turn,
+        // look up the recipe it ran and value each output at
+        // `quantity * scale * commodity.base_value`. Static/authored
+        // base_value only — no supply/demand pricing (deferred per #212's
+        // design decision). Zero when no registry is loaded (e.g. tests
+        // that construct `GameState` directly).
+        let total_output: f64 = self.state.registry.as_ref().map_or(0.0, |registry| {
+            self.state
+                .colonies
+                .iter()
+                .flat_map(|colony| colony.last_production.values())
+                .filter_map(|result| registry.recipe(&result.recipe_id).map(|r| (result, r)))
+                .map(|(result, recipe)| {
+                    recipe
+                        .outputs
+                        .iter()
+                        .map(|output| {
+                            let base_value =
+                                registry.commodity(&output.id).map_or(0.0, |c| c.base_value);
+                            output.quantity * result.scale * base_value
+                        })
+                        .sum::<f64>()
+                })
+                .sum()
+        });
+
         victory::VictorySnapshot {
             expedition_launched: self.state.expedition_launched,
-            total_output: 0,
+            total_output: total_output as u64,
             total_population: self
                 .state
                 .populations
@@ -7607,6 +7635,133 @@ mod tests {
         assert_eq!(node.q, coord.q);
         assert_eq!(node.r, coord.r);
         assert_eq!(node.name, "Node Colony");
+    }
+
+    /// A minimal registry with one power-free-to-check building that turns
+    /// water into more water-valued output, so `total_output` (issue #212)
+    /// has something nonzero to compute: a `water_well` producing `water`
+    /// (`base_value: 5.0`) each sol, plus a solar array so it isn't
+    /// power-starved.
+    fn economic_output_registry() -> crate::content::ContentRegistry {
+        use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+        let mut reg = crate::content::ContentRegistry::default();
+
+        reg.insert_building(BuildingDef {
+            id: "solar_array".into(),
+            name: "Solar Array".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: -100.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+
+        reg.insert_building(BuildingDef {
+            id: "water_well".into(),
+            name: "Water Well".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 4.0,
+            worker_slots: 1,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+
+        reg.insert_commodity(crate::content::types::CommodityDef {
+            id: "water".into(),
+            name: "Water".into(),
+            description: String::new(),
+            category: "consumable".into(),
+            phase: crate::content::types::Phase::Liquid,
+            base_value: 5.0,
+            tradeable: true,
+            tier: crate::content::types::CommodityTier::Basic,
+            weight: 1.0,
+        });
+
+        reg.insert_recipe(RecipeDef {
+            id: "pump_water".into(),
+            name: "Pump Water".into(),
+            building: "water_well".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "water".into(),
+                quantity: 24.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 4.0,
+        });
+
+        reg
+    }
+
+    /// Real-engine proof that `base_value` now drives the `EconomicMilestone`
+    /// victory condition's `total_output` (issue #212): a colony producing
+    /// 24 water/sol at `base_value: 5.0` should report `total_output >= 120`
+    /// once `Command::EvaluateVictory` runs, not the old hardcoded zero.
+    #[test]
+    fn economic_milestone_reflects_base_value_weighted_production() {
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(economic_output_registry());
+        engine.state.victory_state =
+            victory::VictoryState::new(vec![victory::VictoryCondition::EconomicMilestone {
+                target_output: 100,
+            }]);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Economic Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("solar_array", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("water_well", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let events = engine.apply(&Command::EvaluateVictory).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::VictoryAchieved { .. })),
+            "24 water/sol * base_value 5.0 = 120 should clear target_output 100, got events: {events:?}"
+        );
+
+        let QueryResult::VictoryStatus(progress) = engine.query(&Query::VictoryStatus).unwrap()
+        else {
+            panic!("expected VictoryStatus result");
+        };
+        let economic = progress
+            .iter()
+            .find(|p| {
+                matches!(
+                    p.condition,
+                    victory::VictoryCondition::EconomicMilestone { .. }
+                )
+            })
+            .expect("EconomicMilestone condition must be tracked");
+        assert!(
+            economic.current >= 120,
+            "expected total_output >= 120 (24 water * 5.0 base_value), got {}",
+            economic.current
+        );
     }
 
     #[test]
