@@ -163,11 +163,9 @@
   name: Electronic Components
   description: >
     Conductive- and precious-metal circuitry for control systems and
-    instrumentation, now cased/insulated with plastics (issue #210, closing
-    the gap #208 left open). Real electronics manufacturing also needs
-    semiconductor feedstock; this recipe still lacks that until #216
-    (carbon & semiconductor materials) ships, at which point it should be
-    updated to also consume `semiconductors`.
+    instrumentation, cased/insulated with plastics (issue #210) and now
+    built on real semiconductor feedstock (issue #216, closing the gap
+    #208 left open).
   category: manufactured
   phase: solid
   base_value: 90.0
@@ -417,3 +415,52 @@
   base_value: 2.0
   tradeable: true
   weight: 1.5
+
+- id: carbon
+  name: Carbon
+  description: >
+    Atmosphere-captured elemental carbon — a byproduct of
+    `atmospheric_harvester`'s `harvest_atmosphere` recipe (issue #166)
+    alongside its primary oxygen output, rather than a new dedicated
+    extractor (issue #216). Feedstock for `carbon_composites`.
+  category: raw_material
+  phase: solid
+  base_value: 8.0
+  tradeable: true
+
+- id: semiconductor_ore
+  name: Semiconductor Ore
+  description: >
+    Silicon-family raw feedstock, mined separately from `carbon` (issue
+    #216 judgment call: kept as its own commodity rather than merged
+    into `carbon`, since it feeds a chemically and functionally distinct
+    downstream chain — electronics, not structural composites — matching
+    the use-case-differentiated category principle from #207's metal
+    families).
+  category: metallic_ore
+  phase: solid
+  base_value: 30.0
+  tradeable: true
+
+- id: carbon_composites
+  name: Carbon Composites
+  description: >
+    Carbon fiber/graphene composite — a lightweight high-strength
+    alternative/complement to `refractory_metal`/`alloys` (#207/#208)
+    for advanced construction (issue #216).
+  category: manufactured
+  phase: solid
+  base_value: 140.0
+  tradeable: true
+
+- id: semiconductors
+  name: Semiconductors
+  description: >
+    Refined silicon-family semiconductor material — critical input for
+    real electronics manufacturing (issue #216). Closes the gap #208
+    left open: `electronic_components` now requires this alongside
+    conductive/precious metal and plastics.
+  category: manufactured
+  phase: solid
+  base_value: 200.0
+  tradeable: true

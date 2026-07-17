@@ -1,0 +1,45 @@
+# Recipes used in the carbon-semiconductor balance check — rates mirror
+# content/base/recipes.yaml exactly.
+- id: harvest_atmosphere
+  name: Harvest Atmosphere
+  building: atmospheric_harvester
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 15.0
+    - id: trace_minerals
+      quantity: 2.0
+    - id: carbon
+      quantity: 3.0
+
+- id: mine_semiconductor_ore
+  name: Mine Semiconductor Ore
+  building: semiconductor_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: semiconductor_ore
+      quantity: 5.0
+
+- id: synthesize_carbon_composites
+  name: Synthesize Carbon Composites
+  building: refractory_foundry
+  cycle_sols: 2
+  inputs:
+    - id: carbon
+      quantity: 4.0
+  outputs:
+    - id: carbon_composites
+      quantity: 2.0
+
+- id: refine_semiconductors
+  name: Refine Semiconductors
+  building: semiconductor_fab
+  cycle_sols: 2
+  inputs:
+    - id: semiconductor_ore
+      quantity: 4.0
+  outputs:
+    - id: semiconductors
+      quantity: 2.0

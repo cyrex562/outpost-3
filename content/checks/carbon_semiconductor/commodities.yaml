@@ -1,0 +1,30 @@
+# Commodities used in the carbon-semiconductor balance check.
+- id: oxygen
+  name: Oxygen
+  category: consumable
+  base_value: 6.0
+
+- id: trace_minerals
+  name: Trace Minerals
+  category: raw_material
+  base_value: 15.0
+
+- id: carbon
+  name: Carbon
+  category: raw_material
+  base_value: 8.0
+
+- id: semiconductor_ore
+  name: Semiconductor Ore
+  category: metallic_ore
+  base_value: 30.0
+
+- id: carbon_composites
+  name: Carbon Composites
+  category: manufactured
+  base_value: 140.0
+
+- id: semiconductors
+  name: Semiconductors
+  category: manufactured
+  base_value: 200.0

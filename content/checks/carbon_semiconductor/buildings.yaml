@@ -1,0 +1,18 @@
+# Buildings used in the carbon-semiconductor balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: atmospheric_harvester
+  name: Atmospheric Harvester
+  category: life_support
+
+- id: semiconductor_mine
+  name: Semiconductor Mine
+  category: extraction
+
+- id: refractory_foundry
+  name: Refractory Foundry
+  category: processing
+
+- id: semiconductor_fab
+  name: Semiconductor Fab
+  category: processing

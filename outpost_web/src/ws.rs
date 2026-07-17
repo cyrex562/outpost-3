@@ -770,8 +770,8 @@ mod tests {
             .buildings
             .push(PlacedBuilding::new("solar_array_mk1", 1));
 
-        // Seed generous processed-metal (and #210 plastics) stock for all
-        // three new recipes.
+        // Seed generous processed-metal (and #210 plastics, #216
+        // semiconductors) stock for all three new recipes.
         engine.state.colonies[idx]
             .pool
             .deposit("structural_metal", 100.0);
@@ -785,6 +785,9 @@ mod tests {
             .pool
             .deposit("refractory_metal", 100.0);
         engine.state.colonies[idx].pool.deposit("plastics", 100.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("semiconductors", 100.0);
 
         engine
             .apply(&Command::SetActiveRecipe {
@@ -1311,6 +1314,148 @@ mod tests {
         assert!(
             engine.state.colonies[idx].pool.amount("nuclear_fuel") > 0.0,
             "nuclear_refinery should produce nuclear_fuel from fissile_ore"
+        );
+    }
+
+    /// Real-engine proof that `atmospheric_harvester`'s carbon byproduct
+    /// (#216) and `refractory_foundry`'s new `synthesize_carbon_composites`
+    /// recipe actually work together against the real content pack: the
+    /// foundry's default recipe stays `refine_refractory_ore` (#207's
+    /// invariant, untouched by this issue), and switching it produces
+    /// carbon_composites from harvested carbon.
+    #[test]
+    fn carbon_composites_chain_produces_carbon_composites_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Carbon Composites Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("atmospheric_harvester", 1));
+        // Power source — atmospheric_harvester alone demands 8kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("carbon") > 0.0,
+            "atmospheric_harvester should produce carbon alongside oxygen/trace_minerals"
+        );
+
+        engine.state.colonies[idx].pool.deposit("carbon", 100.0);
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("refractory_foundry", 2));
+        // refractory_foundry alone demands 16kW; swap to a bigger array.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk2", 1));
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "refractory_foundry".into(),
+                recipe_id: "synthesize_carbon_composites".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("carbon_composites") > 0.0,
+            "refractory_foundry should produce carbon_composites after switching to synthesize_carbon_composites"
+        );
+    }
+
+    /// Real-engine proof that the semiconductor_mine -> semiconductor_fab
+    /// chain (#216) actually works against the real content pack, closing
+    /// the gap #208 left open for electronic_components.
+    #[test]
+    fn semiconductor_chain_produces_semiconductors_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Semiconductor Chain Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("semiconductor_mine", 1));
+        // Power source — semiconductor_mine alone demands 7kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("semiconductor_ore") > 0.0,
+            "semiconductor_mine should produce semiconductor_ore"
+        );
+
+        engine.state.colonies[idx]
+            .pool
+            .deposit("semiconductor_ore", 100.0);
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("semiconductor_fab", 2));
+        // semiconductor_fab alone demands 18kW; swap to a bigger array.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk2", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("semiconductors") > 0.0,
+            "semiconductor_fab should produce semiconductors from semiconductor_ore"
         );
     }
 

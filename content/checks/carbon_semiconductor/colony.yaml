@@ -1,0 +1,16 @@
+# Colony configuration for the carbon-semiconductor balance check.
+#
+# One atmospheric_harvester (carbon byproduct) + one semiconductor_mine
+# feeding one refractory_foundry (carbon_composites recipe) + one
+# semiconductor_fab. No imports — everything produced on-site.
+buildings:
+  - building_id: atmospheric_harvester
+    recipe_id: harvest_atmosphere
+  - building_id: semiconductor_mine
+    recipe_id: mine_semiconductor_ore
+  - building_id: refractory_foundry
+    recipe_id: synthesize_carbon_composites
+  - building_id: semiconductor_fab
+    recipe_id: refine_semiconductors
+
+imports: []

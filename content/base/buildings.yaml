@@ -224,6 +224,23 @@
     - id: structural_metal
       quantity: 20.0
 
+- id: semiconductor_mine
+  name: Semiconductor Mine
+  description: >
+    Extraction of silicon-family ore deposits, kept separate from carbon
+    capture since it feeds a distinct electronics chain rather than
+    construction composites (issue #216).
+  category: extraction
+  power_delta: 7.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+
 # ── Tier 2 (advanced_materials / hydroponics / improved_solar) ─────────────
 
 - id: apartment_block
@@ -425,7 +442,10 @@
   name: Refractory Foundry
   description: >
     Energy-intensive foundry refining refractory ore into high-strength,
-    high-temperature metal for advanced-tier construction (issue #207).
+    high-temperature metal for advanced-tier construction (issue #207),
+    or synthesizing carbon into carbon composites as an alternative
+    advanced-construction material (issue #216). Runs one recipe at a
+    time; switch it from the colony view (issue #166 recipe selection).
   category: processing
   power_delta: 16.0
   worker_slots: 2
@@ -438,6 +458,25 @@
       quantity: 45.0
     - id: components
       quantity: 15.0
+
+- id: semiconductor_fab
+  name: Semiconductor Fab
+  description: >
+    Precision clean-room facility refining semiconductor ore into
+    electronics-grade semiconductors (issue #216). Gated at the same
+    tier as the fabricator that consumes them in electronic_components.
+  category: processing
+  power_delta: 18.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 45.0
+    - id: components
+      quantity: 20.0
 
 - id: fabricator
   name: Fabricator
@@ -513,8 +552,9 @@
 - id: atmospheric_harvester
   name: Atmospheric Harvester
   description: >
-    High-throughput atmosphere processor. Captures trace minerals as a
-    byproduct alongside its primary oxygen output.
+    High-throughput atmosphere processor. Captures trace minerals and
+    carbon (issue #216) as byproducts alongside its primary oxygen
+    output.
   category: life_support
   power_delta: 8.0
   worker_slots: 1
