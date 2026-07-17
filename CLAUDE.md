@@ -130,7 +130,7 @@ A feature, bugfix, or refactor is complete only when **all applicable tiers belo
 | Frontend type-check | `npm run type-check` (in `frontend/`) | Same as above |
 | Frontend build | `npm run build` (in `frontend/`) | Same as above |
 | End-to-end | `npm run test:e2e` (in `frontend/`) | Any change that affects a user-facing flow (new screen, new command wiring, changed navigation) — add or update a Playwright spec under `frontend/e2e/` covering the new behavior, don't just rely on existing specs still passing |
-| Balance harness | `cargo run --bin outpost_harness -- check content/checks/` | Any change to `content/` packs with a matching `content/checks/<name>/` bundle |
+| Balance harness | `cargo run --bin harness -- check content/checks/<name>` | Any change to `content/` packs with a matching `content/checks/<name>/` bundle |
 
 `outpost_tauri` cannot be built or type-checked in every environment (it needs WebKit2GTK system libs) — when that's the case, say so explicitly rather than silently skipping verification, and rely on `cargo build -p outpost_tauri`/`cargo check -p outpost_tauri` wherever it *is* available (e.g. CI, or a local dev machine) as part of the gate.
 
