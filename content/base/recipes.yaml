@@ -24,6 +24,8 @@
   outputs:
     - id: food_ration
       quantity: 12.0
+    - id: biomass
+      quantity: 3.0
 
 - id: smelt_iron
   name: Smelt Iron
@@ -226,6 +228,31 @@
   outputs:
     - id: water
       quantity: 35.0
+
+# Food processing plant: two recipes, one building — the recipe-selection
+# mechanic (issue #166, issue #211). Both consume the biomass byproduct
+# from hydroponic_bay's grow_rations recipe.
+- id: ferment_protein_rations
+  name: Ferment Protein Rations
+  building: food_processing_plant
+  cycle_sols: 1
+  inputs:
+    - id: biomass
+      quantity: 5.0
+  outputs:
+    - id: protein_rations
+      quantity: 3.0
+
+- id: press_produce_rations
+  name: Press Produce Rations
+  building: food_processing_plant
+  cycle_sols: 1
+  inputs:
+    - id: biomass
+      quantity: 4.0
+  outputs:
+    - id: produce_rations
+      quantity: 3.0
 
 - id: generate_power_solar_mk2
   name: Generate Power (Solar Mk2)

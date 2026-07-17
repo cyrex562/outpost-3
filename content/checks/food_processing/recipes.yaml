@@ -1,0 +1,23 @@
+# Recipes used in the food-processing balance check — rates mirror
+# content/base/recipes.yaml exactly.
+- id: ferment_protein_rations
+  name: Ferment Protein Rations
+  building: food_processing_plant
+  cycle_sols: 1
+  inputs:
+    - id: biomass
+      quantity: 5.0
+  outputs:
+    - id: protein_rations
+      quantity: 3.0
+
+- id: press_produce_rations
+  name: Press Produce Rations
+  building: food_processing_plant
+  cycle_sols: 1
+  inputs:
+    - id: biomass
+      quantity: 4.0
+  outputs:
+    - id: produce_rations
+      quantity: 3.0

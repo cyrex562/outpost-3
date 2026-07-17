@@ -989,6 +989,79 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the food processing plant's distinct-foodstuff
+    /// recipes (#211) actually work against the real content pack: seed
+    /// biomass, confirm the default recipe produces protein_rations (not
+    /// produce_rations), then switch via SetActiveRecipe and confirm
+    /// produce_rations comes out instead.
+    #[test]
+    fn food_processing_plant_recipe_selection_produces_each_foodstuff_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Food Processing Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("food_processing_plant", 1));
+        // Power source — food_processing_plant alone demands 7kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.state.colonies[idx].pool.deposit("biomass", 100.0);
+
+        // Default (no active_recipes entry) should be ferment_protein_rations
+        // (sorts first alphabetically among the plant's two recipes).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("protein_rations") > 0.0,
+            "food_processing_plant should default to ferment_protein_rations with no active_recipes entry"
+        );
+        assert_eq!(
+            engine.state.colonies[idx].pool.amount("produce_rations"),
+            0.0
+        );
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "food_processing_plant".into(),
+                recipe_id: "press_produce_rations".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("produce_rations") > 0.0,
+            "food_processing_plant should produce produce_rations after switching to press_produce_rations"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

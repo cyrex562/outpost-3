@@ -3,6 +3,8 @@
 # Expected net rates at population=100 with the 5 starter buildings:
 #   water:      24 produced − (2 hydroponic + 15 colonists) = +7/sol
 #   food_ration: 12 produced − 10 colonists                 = +2/sol
+#   biomass:     3 produced (grow_rations byproduct, issue #211), no
+#                starter-set consumer                        = +3/sol
 #   oxygen:      7 produced − 5 colonists                   = +2/sol
 #   power:      24 produced − 20 colonists                  = +4/sol
 #
@@ -21,6 +23,11 @@
   expect: closed
   min_net: 1.0
   label: food-ration-surplus-at-least-1-per-sol
+
+- commodity: biomass
+  expect: closed
+  min_net: 1.0
+  label: biomass-byproduct-surplus
 
 - commodity: oxygen
   expect: closed

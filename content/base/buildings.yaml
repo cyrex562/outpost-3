@@ -273,6 +273,24 @@
     - id: structural_metal
       quantity: 25.0
 
+- id: food_processing_plant
+  name: Food Processing Plant
+  description: >
+    Processes hydroponic biomass into distinct foodstuffs — protein
+    rations or produce rations — beyond the staple food_ration. Runs one
+    recipe at a time; switch it from the colony view (issue #166 recipe
+    selection; issue #211).
+  category: extraction
+  power_delta: 7.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: hydroponics
+  construction_cost:
+    - id: structural_metal
+      quantity: 25.0
+
 - id: solar_array_mk2
   name: Solar Array Mk2
   description: High-efficiency panel array with tracking mounts.

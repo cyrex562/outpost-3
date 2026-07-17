@@ -1,0 +1,15 @@
+# Colony configuration for the food-processing balance check.
+#
+# Two food_processing_plant instances, one per recipe (issue #166's
+# recipe-selection mechanic lets a single building type run different
+# recipes on different building instances). Biomass is supplied via a
+# generous import rather than grown on-site — see pack.yaml.
+buildings:
+  - building_id: food_processing_plant
+    recipe_id: ferment_protein_rations
+  - building_id: food_processing_plant
+    recipe_id: press_produce_rations
+
+imports:
+  - commodity_id: biomass
+    rate: 12.0

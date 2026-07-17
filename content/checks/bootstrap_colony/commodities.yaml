@@ -9,6 +9,11 @@
   category: consumable
   base_value: 8.0
 
+- id: biomass
+  name: Biomass
+  category: raw_material
+  base_value: 4.0
+
 - id: oxygen
   name: Oxygen
   category: consumable

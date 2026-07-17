@@ -19,6 +19,8 @@
   outputs:
     - id: food_ration
       quantity: 12.0
+    - id: biomass
+      quantity: 3.0
 
 - id: scrub_oxygen
   name: Scrub Oxygen
