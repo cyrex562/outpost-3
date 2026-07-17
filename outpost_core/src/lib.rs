@@ -2705,7 +2705,9 @@ impl GameEngine {
                 amount,
             } => {
                 let idx = self.find_colony_index(*colony_id)?;
-                let granted = self.state.colonies[idx].pool.deposit(commodity_id, *amount);
+                let granted = self.state.colonies[idx]
+                    .pool
+                    .deposit(commodity_id, amount.max(0.0));
                 Ok(vec![Event::DebugResourcesGranted {
                     colony_id: *colony_id,
                     commodity_id: commodity_id.clone(),
@@ -5917,6 +5919,42 @@ mod tests {
             amount: 100.0,
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn debug_grant_colony_resources_clamps_negative_amount_to_zero() {
+        let mut engine = GameEngine::with_seed(0);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Debug Colony".into(),
+                starting_population: 10,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let before = engine.state.colonies[0].pool.amount("structural_ore");
+        let events = engine
+            .apply(&Command::DebugGrantColonyResources {
+                colony_id,
+                commodity_id: "structural_ore".into(),
+                amount: -500.0,
+            })
+            .unwrap();
+        let after = engine.state.colonies[0].pool.amount("structural_ore");
+
+        assert!(
+            (after - before).abs() < 1e-9,
+            "negative amount must not drain the pool: before={before} after={after}"
+        );
+        match &events[0] {
+            Event::DebugResourcesGranted { amount, .. } => {
+                assert!((*amount).abs() < 1e-9, "granted amount should clamp to 0");
+            }
+            other => panic!("expected DebugResourcesGranted, got {other:?}"),
+        }
     }
 
     /// A colony with an empty mask never causes an interrupt halt.
