@@ -96,7 +96,7 @@ pub fn generate_system(seed: u64) -> Vec<Body> {
     let giant_count = rng.gen_range(0..=2u32);
     for i in 0..giant_count {
         let giant_name = format!("Giant-{}", i + 1);
-        let giant = generate_body(
+        let mut giant = generate_body(
             &mut rng,
             giant_name.clone(),
             &BodyKind::GasGiant,
@@ -104,9 +104,11 @@ pub fn generate_system(seed: u64) -> Vec<Body> {
         );
         let giant_id = giant.id.clone();
         let giant_distance = giant.distance_au;
-        bodies.push(giant);
 
         let moon_count = rng.gen_range(0..=2u32);
+        giant.moon_count = moon_count;
+        bodies.push(giant);
+
         for m in 0..moon_count {
             let moon_distance = giant_distance + rng.gen_range(0.02..0.15);
             let mut moon = generate_body(
@@ -469,6 +471,24 @@ mod tests {
                         body.name
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn gas_giant_moon_count_matches_attached_moons() {
+        for seed in 0..32u64 {
+            let bodies = generate_system(seed);
+            for giant in bodies.iter().filter(|b| b.kind == BodyKind::GasGiant) {
+                let attached = bodies
+                    .iter()
+                    .filter(|b| b.parent_body.as_ref() == Some(&giant.id))
+                    .count();
+                assert_eq!(
+                    giant.moon_count as usize, attached,
+                    "seed {seed}: {} reports moon_count {} but has {attached} attached moons",
+                    giant.name, giant.moon_count
+                );
             }
         }
     }
