@@ -145,6 +145,7 @@ impl DifficultyGradeTable {
 /// - Hard: noticeable penalties across production and growth.
 /// - Brutal: harsh penalties reflecting near-unforgiving pressure.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn default_grade_table() -> DifficultyGradeTable {
     let mut table = DifficultyGradeTable::new();
 
@@ -267,6 +268,26 @@ pub fn default_grade_table() -> DifficultyGradeTable {
         normal: 1.00,
         hard: 1.15,
         brutal: 1.30,
+    });
+
+    // Deposit abundance (issue #232) — harder difficulty means leaner system
+    // generation; easier difficulty is more generous. Coverage (every curated
+    // commodity existing *somewhere*) is unaffected by this — only how
+    // generous the placed deposits read; see `system_gen::generate_system`'s
+    // doc comment. Sandbox intentionally goes well past 1.0 ("effectively
+    // abundant") per the user's "could be made infinite at some difficulty
+    // levels" framing — modeled as a large generosity multiplier rather than
+    // literal infinite/unlimited stock, since deposits carry no depletion
+    // mechanic to make "infinite" a meaningful distinct state (see this
+    // module's PR description for why true infinite-deposit gating is
+    // explicitly deferred, not built here).
+    table.add_row(DifficultyGradeRow {
+        quantity: ModifiableQuantity::DepositAbundance,
+        sandbox: 3.00,
+        easy: 1.50,
+        normal: 1.00,
+        hard: 0.70,
+        brutal: 0.50,
     });
 
     table
@@ -525,6 +546,18 @@ mod tests {
                 "{q:?} should be 1.0 at Normal, got {n}"
             );
         }
+    }
+
+    #[test]
+    fn sandbox_deposit_abundance_is_more_generous_than_brutal() {
+        let table = default_grade_table();
+        let q = ModifiableQuantity::DepositAbundance;
+        let sandbox = table.build_scalar(DifficultyPreset::Sandbox).scalar_for(&q);
+        let brutal = table.build_scalar(DifficultyPreset::Brutal).scalar_for(&q);
+        assert!(
+            sandbox > brutal,
+            "Sandbox deposit abundance ({sandbox}) must exceed Brutal ({brutal})"
+        );
     }
 
     #[test]

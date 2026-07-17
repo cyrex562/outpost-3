@@ -694,8 +694,13 @@ pub fn bootstrap(
     // planet map by default; falls back to `planet_seed` when the caller
     // doesn't supply one, matching the only behavior a single-seed caller
     // could have meant.
+    let abundance_scalar = engine
+        .state
+        .difficulty_scalar
+        .scalar_for(&ModifiableQuantity::DepositAbundance);
     let _ = engine.apply(&Command::System(SystemCommand::GenerateSystem {
         seed: system_seed.unwrap_or(planet_seed),
+        abundance_scalar,
     }));
 
     let _ = engine.apply(&Command::SeedPlanet {
