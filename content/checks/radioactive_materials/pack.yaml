@@ -1,0 +1,10 @@
+id: radioactive-materials-check
+name: Radioactive Materials Balance Check
+version: '0.1.0'
+description: >
+  Proves the radioactive materials chain added in issue #215
+  (fissile_ore -> nuclear_fuel -> fission power) closes end-to-end: one
+  fissile_mine feeding one nuclear_refinery feeding one fission_reactor.
+  No imports — everything produced on-site, mirroring
+  content/checks/metal_categories's self-contained style since these
+  are this issue's new raw/processed materials.

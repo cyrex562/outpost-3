@@ -53,6 +53,7 @@
       - conductive_mine
       - hydrocarbon_well
       - gas_extractor
+      - fissile_mine
     bonuses:
       - mining_efficiency_10_percent
 
@@ -77,6 +78,7 @@
       - precious_mine
       - precious_refinery
       - petrochemical_plant
+      - nuclear_refinery
     resources:
       - steel
       - titanium
@@ -113,6 +115,7 @@
   unlocks:
     buildings:
       - solar_array_mk2
+      - fission_reactor
     bonuses:
       - power_generation_20_percent
 

@@ -1,0 +1,13 @@
+# Colony configuration for the radioactive-materials balance check.
+#
+# One fissile_mine feeding one nuclear_refinery feeding one
+# fission_reactor. No imports — everything produced on-site.
+buildings:
+  - building_id: fissile_mine
+    recipe_id: mine_fissile_ore
+  - building_id: nuclear_refinery
+    recipe_id: refine_nuclear_fuel
+  - building_id: fission_reactor
+    recipe_id: generate_power_fission
+
+imports: []

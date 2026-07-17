@@ -1,0 +1,20 @@
+# Commodities used in the radioactive-materials balance check.
+- id: fissile_ore
+  name: Fissile Ore
+  category: metallic_ore
+  base_value: 50.0
+
+- id: nuclear_fuel
+  name: Nuclear Fuel
+  category: metal
+  base_value: 120.0
+
+- id: power
+  name: Power
+  category: energy
+  base_value: 0.0
+
+- id: radioactive_waste
+  name: Radioactive Waste
+  category: raw_material
+  base_value: 2.0

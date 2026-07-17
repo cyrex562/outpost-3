@@ -1,0 +1,14 @@
+# Buildings used in the radioactive-materials balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: fissile_mine
+  name: Fissile Mine
+  category: extraction
+
+- id: nuclear_refinery
+  name: Nuclear Refinery
+  category: processing
+
+- id: fission_reactor
+  name: Fission Reactor
+  category: power
