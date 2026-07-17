@@ -322,6 +322,10 @@ pub struct SystemBodyDef {
     /// authored earlier in the file name a parent authored later.
     #[serde(default)]
     pub parent_body: Option<String>,
+    /// Per-category production modifiers (issue #184) — mirrors
+    /// `outpost_core::system::Body::modifiers`.
+    #[serde(default)]
+    pub modifiers: Vec<crate::system::BodyModifier>,
 }
 
 impl SystemBodyDef {

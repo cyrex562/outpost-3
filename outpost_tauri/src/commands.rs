@@ -772,6 +772,12 @@ fn seed_system_from_content(engine: &mut GameEngine) {
                 role: body.role.clone(),
             }));
         }
+        if !body.modifiers.is_empty() {
+            let _ = engine.apply(&Command::System(SystemCommand::SetBodyModifiers {
+                body_id: id.clone(),
+                modifiers: body.modifiers.clone(),
+            }));
+        }
         if let Some(parent_name) = &body.parent_body {
             pending_parents.push((id, parent_name.clone()));
         }
@@ -1055,6 +1061,9 @@ pub struct SystemBodyWire {
     pub moon_count: u32,
     /// Display name of the body this one orbits, if any.
     pub parent_body_name: Option<String>,
+    /// Per-category production modifiers (issue #184) — category name to
+    /// multiplier, e.g. `("power_output", 1.3)`. Empty when unauthored.
+    pub category_modifiers: Vec<(String, f32)>,
 }
 
 /// Return the current list of system bodies with rendering hints.
@@ -1096,6 +1105,11 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
                 .as_ref()
                 .and_then(|pid| node_bodies.get(pid))
                 .map(|p| p.name.clone()),
+            category_modifiers: b
+                .modifiers
+                .iter()
+                .map(|m| (format!("{:?}", m.category), m.multiplier))
+                .collect(),
         })
         .collect();
     Ok(bodies)

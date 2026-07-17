@@ -88,6 +88,11 @@ function habitabilityTone(mod: number): 'bonus' | 'neutral' | 'penalty' {
   return 'neutral'
 }
 
+/** `"FoodYield"` -> `"Food Yield"` — category_modifiers ships Rust Debug-formatted enum names (issue #184). */
+function formatYieldCategory(category: string): string {
+  return category.replace(/([a-z])([A-Z])/g, '$1 $2')
+}
+
 const orbitRadii = computed(() =>
   bodies.value.map((b) => b.distance_au * WORLD_SCALE),
 )
@@ -451,6 +456,19 @@ function foundColony(body?: SystemBody | null): void {
               tech mitigation applied
             </span>
           </dd>
+          <template v-if="selected.category_modifiers.length > 0">
+            <dt>Yield modifiers</dt>
+            <dd data-testid="category-modifiers">
+              <span
+                v-for="[category, multiplier] in selected.category_modifiers"
+                :key="category"
+                class="modifier-chip"
+                :class="habitabilityTone(multiplier)"
+              >
+                {{ formatYieldCategory(category) }} {{ formatModifier(multiplier) }}
+              </span>
+            </dd>
+          </template>
           <dt>Subtype</dt>
           <dd>{{ selected.subtype }}</dd>
           <dt v-if="selected.parent_body_name">Orbits</dt>
@@ -569,5 +587,17 @@ function foundColony(body?: SystemBody | null): void {
 .modifier.neutral { color: #778; }
 .modifier.penalty { color: #d86; }
 .mitigation-hint { display: block; font-size: 0.68rem; color: #6c9; font-style: italic; margin-top: 0.1rem; }
+.modifier-chip {
+  display: inline-block;
+  background: #14141e;
+  border: 1px solid #334;
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.7rem;
+  margin: 0.1rem 0.25rem 0.1rem 0;
+}
+.modifier-chip.bonus { border-color: #365; color: #6c9; }
+.modifier-chip.neutral { border-color: #334; color: #778; }
+.modifier-chip.penalty { border-color: #632; color: #d86; }
 .err { color: #d66; font-size: 0.8rem; }
 </style>

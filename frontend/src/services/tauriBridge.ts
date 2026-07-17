@@ -158,6 +158,8 @@ export interface SystemBody {
   moon_count: number
   /** Display name of the body this one orbits, if any. */
   parent_body_name: string | null
+  /** Per-category production modifiers (issue #184) — category name to multiplier, e.g. `["PowerOutput", 1.35]`. Empty when unauthored. */
+  category_modifiers: [string, number][]
 }
 
 export async function getSystemBodies(): Promise<SystemBody[]> {

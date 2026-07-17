@@ -616,6 +616,12 @@ fn seed_system_from_content(engine: &mut GameEngine) {
                 role: body.role.clone(),
             }));
         }
+        if !body.modifiers.is_empty() {
+            let _ = engine.apply(&Command::System(SystemCommand::SetBodyModifiers {
+                body_id: id.clone(),
+                modifiers: body.modifiers.clone(),
+            }));
+        }
         if let Some(parent_name) = &body.parent_body {
             pending_parents.push((id, parent_name.clone()));
         }

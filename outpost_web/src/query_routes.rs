@@ -367,6 +367,9 @@ pub struct SystemBodyWire {
     pub moon_count: u32,
     /// Display name of the body this one orbits, if any.
     pub parent_body_name: Option<String>,
+    /// Per-category production modifiers (issue #184) — category name to
+    /// multiplier, e.g. `("power_output", 1.3)`. Empty when unauthored.
+    pub category_modifiers: Vec<(String, f32)>,
 }
 
 /// `GET /api/system-bodies` — every body in the system, with rendering hints.
@@ -413,6 +416,11 @@ pub async fn get_system_bodies(State(state): State<AppState>) -> impl IntoRespon
                 .as_ref()
                 .and_then(|pid| node_bodies.get(pid))
                 .map(|p| p.name.clone()),
+            category_modifiers: b
+                .modifiers
+                .iter()
+                .map(|m| (format!("{:?}", m.category), m.multiplier))
+                .collect(),
         })
         .collect();
     Json(bodies)

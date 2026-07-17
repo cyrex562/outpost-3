@@ -40,6 +40,17 @@
 #
 # Bootstrap picks the first authored system when no explicit id is passed —
 # selection UI can be layered on later without changing the schema.
+#
+# `modifiers` (issue #184) are optional per-category production modifiers,
+# layered *multiplicatively* on top of the habitability-derived modifier
+# above — a body can be simultaneously hard to live on (low habitability)
+# and exceptionally rich for one production category. Each entry is
+# `{ category, multiplier }`; `multiplier: 1.0` is neutral so omitting the
+# field entirely (the common case) is equivalent to an empty list. Valid
+# categories: food_yield | industry_yield | science_yield | power_output.
+# Authored here loosely following each body's `role` — `role` itself has no
+# mechanical effect (see the comment above it), so a modifier is what
+# actually makes a "raw_extraction" or "science" designation felt in play.
 
 - id: kepler-186
   name: Kepler-186
@@ -69,6 +80,11 @@
       gravity_g: 0.98
       radiation: low
       subtype: earth_like
+      # Earth-like and temperate — fertile growing conditions beyond what
+      # habitability alone captures.
+      modifiers:
+        - category: food_yield
+          multiplier: 1.2
     - name: Kepler-C
       kind: inner_planet
       role: science
@@ -80,6 +96,9 @@
       radiation: moderate
       subtype: rocky_barren_cold
       axial_tilt_deg: 41.0
+      modifiers:
+        - category: science_yield
+          multiplier: 1.3
     - name: Ceres Belt
       kind: asteroid_belt
       role: raw_extraction
@@ -90,6 +109,9 @@
       gravity_g: 0.05
       radiation: moderate
       subtype: icy
+      modifiers:
+        - category: industry_yield
+          multiplier: 1.25
     - name: Aurelian
       kind: gas_giant
       role: fuel_production
@@ -103,6 +125,12 @@
       radiation: high
       subtype: ice_giant
       moon_count: 1
+      # Abundant fusion-fuel-family volatiles — elevated power_output
+      # despite the world itself being uninhabitable (dense/corrosive/high
+      # radiation drag habitability_modifier well below neutral).
+      modifiers:
+        - category: power_output
+          multiplier: 1.35
     - name: Aurelian-Moon
       kind: moon
       role: industry
@@ -115,6 +143,9 @@
       subtype: icy
       parent_body: Aurelian
       tidally_locked: true
+      modifiers:
+        - category: industry_yield
+          multiplier: 1.15
     - name: Selkin
       kind: inner_planet
       distance_au: 6.8
@@ -167,6 +198,9 @@
       # from earth_like despite the temperate band — see issue #196.
       subtype: rocky_barren_cold
       tidally_locked: true
+      modifiers:
+        - category: science_yield
+          multiplier: 1.3
     - name: T-1d
       kind: inner_planet
       role: industry
@@ -178,6 +212,9 @@
       radiation: moderate
       subtype: rocky_barren_cold
       tidally_locked: true
+      modifiers:
+        - category: industry_yield
+          multiplier: 1.2
     - name: T-1e
       kind: inner_planet
       distance_au: 0.38
