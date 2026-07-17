@@ -122,6 +122,13 @@ async fn apply_shared_command(
 
     match result {
         Ok(events) => {
+            // Fan out to every WS-connected client watching the shared engine
+            // (a second browser tab, a future spectator client, ...), same as
+            // the WS command handler does — otherwise only the issuing tab's
+            // locally-injected copy of these events would ever be seen.
+            for e in &events {
+                let _ = state.events.send(e.clone());
+            }
             let wire_events: Vec<crate::wsmsg::ServerEvent> = events
                 .iter()
                 .map(crate::wsmsg::ServerEvent::from_core)
