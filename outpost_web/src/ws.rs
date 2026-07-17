@@ -85,9 +85,11 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
             if let ClientCommand::NewGame {
                 difficulty,
                 planet_seed,
+                system_seed,
             } = command
             {
-                handle_new_game(seq, difficulty, planet_seed, state, socket).await;
+                let system_seed = system_seed.unwrap_or(planet_seed);
+                handle_new_game(seq, difficulty, planet_seed, system_seed, state, socket).await;
                 return;
             }
 
@@ -437,12 +439,13 @@ fn build_snapshot(state: &AppState) -> WorldSnapshot {
 
 /// Execute the new-game initialisation sequence and respond with a full snapshot.
 ///
-/// Steps: load content pack → apply difficulty → set needs config → seed planet →
-/// found initial colony → emit `NewGameSnapshot`.
+/// Steps: load content pack → apply difficulty → set needs config → generate
+/// the star system → seed planet → found initial colony → emit `NewGameSnapshot`.
 async fn handle_new_game(
     seq: u64,
     difficulty: DifficultyPreset,
     planet_seed: u64,
+    system_seed: u64,
     state: &AppState,
     socket: &mut WebSocket,
 ) {
@@ -481,9 +484,21 @@ async fn handle_new_game(
         // Build and install a default survival NeedsConfig.
         engine.state.needs_config = Some(NeedsConfig::default_survival());
 
-        // Seed the planet map.
         let mut events: Vec<outpost_core::Event> = Vec::new();
 
+        // Procedurally generate the star system (issue #199) — the bootstrap
+        // default, replacing the content pack's authored systems.yaml
+        // scenarios (still available separately via `seed_system_from_content`
+        // for a future hand-authored-scenario picker). Independent seed from
+        // the planet map so the player can reroll one without the other.
+        let system_evs = engine
+            .apply(&Command::System(SystemCommand::GenerateSystem {
+                seed: system_seed,
+            }))
+            .map_err(|e| format!("GenerateSystem failed: {e}"))?;
+        events.extend(system_evs);
+
+        // Seed the planet map.
         let seed_evs = engine
             .apply(&Command::SeedPlanet {
                 seed: planet_seed,
@@ -491,10 +506,6 @@ async fn handle_new_game(
             })
             .map_err(|e| format!("SeedPlanet failed: {e}"))?;
         events.extend(seed_evs);
-
-        // Seed the star system's bodies from the content pack, so the
-        // founding wizard has real colonize targets (issue #220).
-        seed_system_from_content(&mut engine);
 
         // Found the initial colony.
         let colony_evs = engine
@@ -566,6 +577,15 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
 /// authored star system, if any. No-op when the pack ships no `systems.yaml`.
 ///
 /// Mirrors `outpost_tauri::commands::seed_system_from_content`.
+///
+/// Not called from the live `handle_new_game` bootstrap path as of issue
+/// #199 — procedural generation (`Command::System(SystemCommand::GenerateSystem)`)
+/// is the default there now. Kept (not deleted) because #199 explicitly
+/// demotes `content/base/systems.yaml`'s authored scenarios to "optional,
+/// selectable later" rather than removing them — this is the loader a
+/// future scenario-picker command would call. Exercised directly by
+/// `seed_system_from_content_populates_bodies_from_real_pack` below.
+#[allow(dead_code)]
 fn seed_system_from_content(engine: &mut GameEngine) {
     let Some(system) = engine
         .state
@@ -761,6 +781,56 @@ mod tests {
             !engine.state.system_state.node_map.bodies.is_empty(),
             "expected at least one system body after seeding"
         );
+    }
+
+    /// Real-engine proof that `handle_new_game`'s actual bootstrap sequence
+    /// — `GenerateSystem` → `SeedPlanet` → `FoundColony` — produces a system
+    /// with at least one founding-viable body (issue #199), across a small
+    /// seed sweep rather than just one lucky seed.
+    #[test]
+    fn generate_system_bootstrap_sequence_produces_a_founding_viable_body() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        if !base_dir.is_dir() {
+            return;
+        }
+
+        for seed in 0..8u64 {
+            let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+            let mut engine = GameEngine::new();
+            engine.state.registry = Some(registry);
+
+            engine
+                .apply(&Command::System(SystemCommand::GenerateSystem { seed }))
+                .expect("generate system");
+            engine
+                .apply(&Command::SeedPlanet { seed, radius: 4 })
+                .expect("seed planet");
+            engine
+                .apply(&Command::FoundColony {
+                    name: "Alpha Base".into(),
+                    starting_population: 200,
+                })
+                .expect("found colony");
+
+            assert!(
+                !engine.state.system_state.node_map.bodies.is_empty(),
+                "seed {seed}: expected at least one system body"
+            );
+            assert!(
+                engine
+                    .state
+                    .system_state
+                    .node_map
+                    .bodies
+                    .values()
+                    .any(outpost_core::system::Body::meets_founding_threshold),
+                "seed {seed}: expected at least one founding-viable body"
+            );
+        }
     }
 
     /// Real-engine proof that the starter (no-tech-prerequisite) building set

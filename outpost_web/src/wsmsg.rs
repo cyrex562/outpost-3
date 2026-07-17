@@ -212,12 +212,22 @@ pub enum ClientCommand {
         /// `true` to enable manual override; `false` to resume automation.
         enabled: bool,
     },
-    /// Initialise a new game: load content, apply difficulty, seed planet, found colony.
+    /// Initialise a new game: load content, apply difficulty, generate the
+    /// star system, seed planet, found colony.
     NewGame {
         /// Difficulty preset to apply.
         difficulty: DifficultyPreset,
         /// Deterministic seed used for planet map generation.
         planet_seed: u64,
+        /// Deterministic seed used for star-system generation (issue #199).
+        ///
+        /// Independent of `planet_seed` by design — the player can reroll
+        /// the system without rerolling the founding planet's hex map, or
+        /// vice versa. Optional for backward compatibility with older
+        /// clients; defaults to `planet_seed` when omitted, matching the
+        /// only behavior a caller with a single seed field could have meant.
+        #[serde(default)]
+        system_seed: Option<u64>,
     },
 }
 
@@ -1164,12 +1174,29 @@ mod tests {
                     ClientCommand::NewGame {
                         difficulty,
                         planet_seed,
+                        system_seed,
                     },
             } => {
                 assert_eq!(seq, 10);
                 assert_eq!(difficulty, DifficultyPreset::Normal);
                 assert_eq!(planet_seed, 42);
+                // Omitted in the payload — defaults to None, resolved to
+                // planet_seed by the caller (issue #199).
+                assert_eq!(system_seed, None);
             }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn new_game_command_with_explicit_system_seed_deserialises() {
+        let raw = r#"{"type":"command","seq":11,"command":{"kind":"new_game","difficulty":"Hard","planet_seed":1,"system_seed":99}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                command: ClientCommand::NewGame { system_seed, .. },
+                ..
+            } => assert_eq!(system_seed, Some(99)),
             _ => panic!("unexpected variant"),
         }
     }
