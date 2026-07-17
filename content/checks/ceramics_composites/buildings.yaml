@@ -1,0 +1,18 @@
+# Buildings used in the ceramics-composites balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: silicate_quarry
+  name: Silicate Quarry
+  category: extraction
+
+- id: ceramics_kiln
+  name: Ceramics Kiln
+  category: processing
+
+- id: crystal_grower
+  name: Crystal Grower
+  category: processing
+
+- id: fabricator
+  name: Fabricator
+  category: processing

@@ -464,3 +464,87 @@
   phase: solid
   base_value: 200.0
   tradeable: true
+
+- id: silicates
+  name: Silicates
+  description: >
+    Sand/quartz/clay-family minerals, mined in bulk (issue #225). Shared
+    feedstock for `ceramics`, `glass`, and `crystals` below — kept as a
+    single raw commodity rather than three separate ores, since they're
+    fundamentally the same mineral family (matches the "don't overdo the
+    granularity" judgment call #216 already applied to its own raw
+    materials).
+  category: raw_material
+  phase: solid
+  base_value: 6.0
+  tradeable: true
+
+- id: ceramics
+  name: Ceramics
+  description: >
+    High-temperature, high-insulation material fired from `silicates`
+    (issue #225) — an alternative or complement to `refractory_metal`
+    (#207) for heat shielding, electronics substrates, and advanced
+    construction. Gated at the same tier as `refractory_foundry`.
+  category: manufactured
+  phase: solid
+  base_value: 35.0
+  tradeable: true
+
+- id: glass
+  name: Glass
+  description: >
+    Melted and annealed `silicates` (issue #225) — feeds habitat glazing
+    and windows, optics, and `fiber_optics` below.
+  category: manufactured
+  phase: solid
+  base_value: 20.0
+  tradeable: true
+
+- id: composites
+  name: Composites
+  description: >
+    Lightweight, high-strength material combining `ceramics` and
+    `plastics` (#210) — a ceramic/glass-matrix composite (issue #225).
+    Overlap resolved: kept as a distinct commodity from #216's
+    `carbon_composites` rather than merged, since the two have chemically
+    distinct precursor chains (silicates-based vs. carbon-based) and
+    serve as sibling alternatives for advanced-construction material
+    choice — the same use-case-differentiated category principle #216
+    already applied when it kept `semiconductor_ore` separate from
+    `carbon`. Both remain valid inputs to advanced-tier construction
+    costs; nothing about `carbon_composites` changes here.
+  category: manufactured
+  phase: solid
+  base_value: 130.0
+  tradeable: true
+
+- id: fiber_optics
+  name: Fiber Optics
+  description: >
+    Drawn optical fiber, processed from `glass` (issue #225). A plausible
+    future input for sensor/communications equipment (`sensor_array`,
+    #166) — no consumer wired up yet; checked for existing consumers
+    first and found none, same hedge #210 used for `fuel`.
+  category: manufactured
+  phase: solid
+  base_value: 60.0
+  tradeable: true
+
+- id: crystals
+  name: Crystals
+  description: >
+    Precision-grown optical/piezoelectric crystals, lightly processed
+    from `silicates` in a single step (issue #225, matching #214's
+    `fusion_fuel` "don't split a raw→refined chain when the extra step
+    doesn't add gameplay depth" hedge). Overlap resolved: kept distinct
+    from #216's `semiconductor_ore`/`semiconductors` chain rather than
+    made a precursor to it — these are instrumentation/gemstone-grade
+    crystals (a plausible `luxury_goods`, #209, input), not
+    semiconductor-grade silicon, so they don't touch #216's already-
+    shipped `semiconductor_fab` recipe. No consumer wired up yet, same
+    hedge as `fiber_optics` above.
+  category: raw_material
+  phase: solid
+  base_value: 90.0
+  tradeable: true

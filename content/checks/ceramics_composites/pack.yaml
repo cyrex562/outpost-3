@@ -1,0 +1,16 @@
+id: ceramics-composites-check
+name: Ceramics, Composites, Glass & Crystals Balance Check
+version: '0.1.0'
+description: >
+  Proves the sixth raw-material family added in issue #225
+  (silicates -> ceramics/glass/crystals, ceramics+plastics -> composites,
+  glass -> fiber_optics) closes end-to-end: one silicate_quarry feeds one
+  ceramics_kiln running fire_ceramics, a second ceramics_kiln instance
+  running smelt_glass, and one crystal_grower. One fabricator instance
+  runs fabricate_composites (consuming the kiln's ceramics plus imported
+  plastics — plastics is a pre-existing #210 commodity, not new to this
+  issue) and a second fabricator instance runs fabricate_fiber_optics.
+  Mirrors content/checks/carbon_semiconductor's self-contained style for
+  the new raw materials, with a generous plastics import for the one
+  pre-existing input, mirroring content/checks/component_tier's import
+  style.

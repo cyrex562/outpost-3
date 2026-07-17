@@ -55,6 +55,7 @@
       - gas_extractor
       - fissile_mine
       - semiconductor_mine
+      - silicate_quarry
     bonuses:
       - mining_efficiency_10_percent
 
@@ -141,6 +142,8 @@
       - refractory_foundry
       - manufactory
       - semiconductor_fab
+      - ceramics_kiln
+      - crystal_grower
     bonuses:
       - production_efficiency_25_percent
       - labor_requirement_minus_20_percent

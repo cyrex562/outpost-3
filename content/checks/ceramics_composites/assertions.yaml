@@ -1,0 +1,43 @@
+# Assertions for the ceramics-composites balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   silicates:     12.0 mined − (2.0 ceramics + 3.0 glass + 1.5 crystals) = +5.5/sol
+#   ceramics:       1.5 produced (3/2 sols) − 1.0 consumed (2/2 sols)      = +0.5/sol
+#   glass:          1.5 produced (3/2 sols) − 1.0 consumed (2/2 sols)      = +0.5/sol
+#   crystals:       0.5 produced (1/2 sols), no consumer yet               = +0.5/sol
+#   composites:     1.0 produced (2/2 sols)                                = +1.0/sol
+#   fiber_optics:   0.5 produced (1/2 sols)                                = +0.5/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: silicates
+  expect: closed
+  min_net: 2.0
+  label: silicates-not-in-deficit
+
+- commodity: ceramics
+  expect: closed
+  min_net: 0.25
+  label: ceramics-surplus
+
+- commodity: glass
+  expect: closed
+  min_net: 0.25
+  label: glass-surplus
+
+- commodity: crystals
+  expect: closed
+  min_net: 0.25
+  label: crystals-surplus
+
+- commodity: composites
+  expect: closed
+  min_net: 0.5
+  label: composites-surplus
+
+- commodity: fiber_optics
+  expect: closed
+  min_net: 0.25
+  label: fiber-optics-surplus

@@ -1,0 +1,35 @@
+# Commodities used in the ceramics-composites balance check.
+- id: silicates
+  name: Silicates
+  category: raw_material
+  base_value: 6.0
+
+- id: ceramics
+  name: Ceramics
+  category: manufactured
+  base_value: 35.0
+
+- id: glass
+  name: Glass
+  category: manufactured
+  base_value: 20.0
+
+- id: crystals
+  name: Crystals
+  category: raw_material
+  base_value: 90.0
+
+- id: composites
+  name: Composites
+  category: manufactured
+  base_value: 130.0
+
+- id: fiber_optics
+  name: Fiber Optics
+  category: manufactured
+  base_value: 60.0
+
+- id: plastics
+  name: Plastics
+  category: chemical
+  base_value: 20.0
