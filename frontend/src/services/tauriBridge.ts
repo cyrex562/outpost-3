@@ -20,6 +20,20 @@ async function invokeFn<T>(cmd: string, args?: Record<string, unknown>): Promise
 
 const invoke: InvokeFn = invokeFn
 
+/**
+ * Fetch a browser-mode REST endpoint against the shared `outpost_web`
+ * engine. Used as the non-Tauri fallback for the founding wizard's
+ * read-only data calls (issue #220) — see `outpost_web::query_routes`.
+ */
+async function fetchJson<T>(path: string): Promise<T> {
+  const res = await fetch(path)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status} ${path}: ${body}`)
+  }
+  return res.json() as Promise<T>
+}
+
 // ── Payload types (mirror commands.rs) ────────────────────────────────────────
 
 export interface ColonyWire {
@@ -147,6 +161,7 @@ export interface SystemBody {
 }
 
 export async function getSystemBodies(): Promise<SystemBody[]> {
+  if (!isTauri) return fetchJson<SystemBody[]>('/api/system-bodies')
   return invoke<SystemBody[]>('get_system_bodies')
 }
 
@@ -178,6 +193,7 @@ export interface ColonizeTarget {
 }
 
 export async function getColonizeTargets(): Promise<ColonizeTarget[]> {
+  if (!isTauri) return fetchJson<ColonizeTarget[]>('/api/colonize-targets')
   return invoke<ColonizeTarget[]>('get_colonize_targets')
 }
 
@@ -194,6 +210,7 @@ export interface BuildingOption {
 }
 
 export async function listBuildings(): Promise<BuildingOption[]> {
+  if (!isTauri) return fetchJson<BuildingOption[]>('/api/buildings')
   return invoke<BuildingOption[]>('list_buildings')
 }
 
@@ -279,6 +296,7 @@ export async function setActiveRecipe(colonyId: string, buildingType: string, re
 }
 
 export async function getPlanetMap(): Promise<PlanetMap> {
+  if (!isTauri) return fetchJson<PlanetMap>('/api/planet-map')
   return invoke<PlanetMap>('get_planet_map')
 }
 
@@ -290,6 +308,7 @@ export interface SupplyPackage {
 }
 
 export async function listSupplyPackages(): Promise<SupplyPackage[]> {
+  if (!isTauri) return fetchJson<SupplyPackage[]>('/api/supply-packages')
   return invoke<SupplyPackage[]>('list_supply_packages')
 }
 

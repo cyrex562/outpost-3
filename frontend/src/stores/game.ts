@@ -11,7 +11,7 @@ import { ref, computed, watch } from 'vue'
 import type { Command } from '@/types/commands'
 import type { GameEvent } from '@/types/gameEvents'
 import type { ColonyScreenData } from '@/types/screen'
-import { createSession, applyCommand, deleteSession } from '@/api/client'
+import { createSession, applySharedCommand, deleteSession } from '@/api/client'
 import { isTauri, apply as tauriApply, query as tauriQuery } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
 
@@ -116,8 +116,15 @@ export const useGameStore = defineStore('game', () => {
           await refreshColonyScreen(selectedColonyId.value)
         }
       } else {
-        if (sessionId.value === null) await openSession()
-        events = await applyCommand(sessionId.value!, cmd)
+        // Browser mode dispatches against the shared engine (the same one
+        // the WebSocket `new_game` flow bootstraps content/planet/colony
+        // onto), not the unbootstrapped per-session engine (issue #220).
+        // The WS channel only pushes events for commands it itself issued,
+        // so feed these into the world reducer directly, same as Tauri mode.
+        events = await applySharedCommand(cmd)
+        for (const ev of events) {
+          worldStore.handleServerMessage({ type: 'event', event: ev as unknown as import('@/types/events').ServerEvent })
+        }
       }
       lastEvents.value = events
       toastMessage.value = summariseEvents(events)

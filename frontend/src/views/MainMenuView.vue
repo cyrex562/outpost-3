@@ -89,7 +89,10 @@ async function startNewGame(): Promise<void> {
   error.value = null
   try {
     if (!isTauri) {
-      error.value = 'New game requires desktop mode.'
+      // Browser mode bootstraps through the WebSocket `new_game` flow
+      // against the shared engine instead of the Tauri `bootstrap` IPC
+      // command — see NewGameView.vue.
+      router.push('/new-game')
       return
     }
     // For "Custom" and "custom:*" selections, pass the buffered scalars payload.
@@ -153,7 +156,7 @@ async function exitApp(): Promise<void> {
     <p class="menu-subtitle">Turn-based grand strategy — colony survival at star-system scale</p>
 
     <div v-if="mode === 'root'" class="menu-buttons">
-      <button class="btn primary" data-testid="btn-new-game" @click="mode = 'new'">New Game</button>
+      <button class="btn primary" data-testid="btn-new-game" @click="isTauri ? (mode = 'new') : router.push('/new-game')">New Game</button>
       <button class="btn" data-testid="btn-load-game" @click="openLoad">Load Game</button>
       <button class="btn" data-testid="btn-settings" @click="mode = 'settings'">Settings</button>
       <button class="btn danger" data-testid="btn-exit" @click="exitApp">Exit</button>
