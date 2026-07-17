@@ -1,0 +1,31 @@
+# Assertions for the carbon-semiconductor balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   carbon:             3.0 harvested − 2.0 consumed (4/2 sols)  = +1.0/sol
+#   semiconductor_ore:  5.0 mined − 2.0 consumed (4/2 sols)      = +3.0/sol
+#   carbon_composites:  1.0 produced (2/2 sols)                  = +1.0/sol
+#   semiconductors:     1.0 produced (2/2 sols)                  = +1.0/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: carbon
+  expect: closed
+  min_net: 0.5
+  label: carbon-not-in-deficit
+
+- commodity: semiconductor_ore
+  expect: closed
+  min_net: 1.0
+  label: semiconductor-ore-not-in-deficit
+
+- commodity: carbon_composites
+  expect: closed
+  min_net: 0.5
+  label: carbon-composites-surplus
+
+- commodity: semiconductors
+  expect: closed
+  min_net: 0.5
+  label: semiconductors-surplus

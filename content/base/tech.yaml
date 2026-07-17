@@ -54,6 +54,7 @@
       - hydrocarbon_well
       - gas_extractor
       - fissile_mine
+      - semiconductor_mine
     bonuses:
       - mining_efficiency_10_percent
 
@@ -139,6 +140,7 @@
       - refractory_mine
       - refractory_foundry
       - manufactory
+      - semiconductor_fab
     bonuses:
       - production_efficiency_25_percent
       - labor_requirement_minus_20_percent

@@ -6,6 +6,7 @@
 #   precious_metal:      1.0 imported − 0.5 elec                  = +0.5/sol
 #   refractory_metal:    1.5 imported − 1.0 alloys                = +0.5/sol
 #   plastics:             2.0 imported − 1.0 elec                  = +1.0/sol  (issue #210)
+#   semiconductors:        2.0 imported − 0.5 elec                  = +1.5/sol  (issue #216)
 #   mechanical_components: 2.0 produced (1/1 sol)                 = +2.0/sol
 #   electronic_components: 0.5 produced (1/2 sols)                = +0.5/sol
 #   alloys:                1.0 produced (2/2 sols)                = +1.0/sol
@@ -38,6 +39,11 @@
   expect: closed
   min_net: 0.5
   label: plastics-not-in-deficit
+
+- commodity: semiconductors
+  expect: closed
+  min_net: 1.0
+  label: semiconductors-not-in-deficit
 
 - commodity: mechanical_components
   expect: closed

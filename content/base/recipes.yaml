@@ -136,6 +136,15 @@
     - id: fissile_ore
       quantity: 5.0
 
+- id: mine_semiconductor_ore
+  name: Mine Semiconductor Ore
+  building: semiconductor_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: semiconductor_ore
+      quantity: 5.0
+
 # ── Tier 2 ───────────────────────────────────────────────────────────────────
 
 - id: house_colonists_apartment
@@ -341,6 +350,22 @@
     - id: refractory_metal
       quantity: 2.0
 
+# "synthesize_carbon_composites" deliberately sorts after
+# "refine_refractory_ore" alphabetically ('r' < 's'), so adding it
+# doesn't change the refractory_foundry's deterministic default recipe
+# for existing colonies that never called SetActiveRecipe (issue #166's
+# recipe-selection invariant, issue #216).
+- id: synthesize_carbon_composites
+  name: Synthesize Carbon Composites
+  building: refractory_foundry
+  cycle_sols: 2
+  inputs:
+    - id: carbon
+      quantity: 4.0
+  outputs:
+    - id: carbon_composites
+      quantity: 2.0
+
 - id: assemble_power_cells
   name: Assemble Power Cells
   building: fabricator
@@ -371,6 +396,17 @@
     - id: mechanical_components
       quantity: 2.0
 
+- id: refine_semiconductors
+  name: Refine Semiconductors
+  building: semiconductor_fab
+  cycle_sols: 2
+  inputs:
+    - id: semiconductor_ore
+      quantity: 4.0
+  outputs:
+    - id: semiconductors
+      quantity: 2.0
+
 - id: fabricate_electronic_components
   name: Fabricate Electronic Components
   building: fabricator
@@ -382,6 +418,8 @@
       quantity: 1.0
     - id: plastics
       quantity: 2.0
+    - id: semiconductors
+      quantity: 1.0
   outputs:
     - id: electronic_components
       quantity: 1.0
@@ -455,6 +493,8 @@
       quantity: 15.0
     - id: trace_minerals
       quantity: 2.0
+    - id: carbon
+      quantity: 3.0
 
 - id: conduct_advanced_research
   name: Conduct Advanced Research

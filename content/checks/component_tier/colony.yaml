@@ -23,3 +23,5 @@ imports:
     rate: 1.5
   - commodity_id: plastics
     rate: 2.0
+  - commodity_id: semiconductors
+    rate: 2.0

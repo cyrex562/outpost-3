@@ -24,6 +24,8 @@
       quantity: 1.0
     - id: plastics
       quantity: 2.0
+    - id: semiconductors
+      quantity: 1.0
   outputs:
     - id: electronic_components
       quantity: 1.0
