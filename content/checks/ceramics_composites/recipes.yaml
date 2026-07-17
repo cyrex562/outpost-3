@@ -1,0 +1,67 @@
+# Recipes used in the ceramics-composites balance check — rates mirror
+# content/base/recipes.yaml exactly.
+- id: mine_silicates
+  name: Mine Silicates
+  building: silicate_quarry
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: silicates
+      quantity: 12.0
+
+- id: fire_ceramics
+  name: Fire Ceramics
+  building: ceramics_kiln
+  cycle_sols: 2
+  inputs:
+    - id: silicates
+      quantity: 4.0
+  outputs:
+    - id: ceramics
+      quantity: 3.0
+
+- id: smelt_glass
+  name: Smelt Glass
+  building: ceramics_kiln
+  cycle_sols: 2
+  inputs:
+    - id: silicates
+      quantity: 6.0
+  outputs:
+    - id: glass
+      quantity: 3.0
+
+- id: grow_crystals
+  name: Grow Crystals
+  building: crystal_grower
+  cycle_sols: 2
+  inputs:
+    - id: silicates
+      quantity: 3.0
+  outputs:
+    - id: crystals
+      quantity: 1.0
+
+- id: fabricate_composites
+  name: Fabricate Composites
+  building: fabricator
+  cycle_sols: 2
+  inputs:
+    - id: ceramics
+      quantity: 2.0
+    - id: plastics
+      quantity: 2.0
+  outputs:
+    - id: composites
+      quantity: 2.0
+
+- id: fabricate_fiber_optics
+  name: Fabricate Fiber Optics
+  building: fabricator
+  cycle_sols: 2
+  inputs:
+    - id: glass
+      quantity: 2.0
+  outputs:
+    - id: fiber_optics
+      quantity: 1.0

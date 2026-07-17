@@ -1,0 +1,26 @@
+# Colony configuration for the ceramics-composites balance check.
+#
+# One silicate_quarry feeds two ceramics_kiln instances (one running
+# fire_ceramics, one running smelt_glass — issue #166's recipe-selection
+# mechanic lets a single building type run different recipes on different
+# instances) and one crystal_grower. Two fabricator instances run
+# fabricate_composites and fabricate_fiber_optics respectively. Plastics
+# (a pre-existing #210 commodity) is imported rather than mined on-site,
+# mirroring content/checks/component_tier's style for pre-existing inputs.
+buildings:
+  - building_id: silicate_quarry
+    recipe_id: mine_silicates
+  - building_id: ceramics_kiln
+    recipe_id: fire_ceramics
+  - building_id: ceramics_kiln
+    recipe_id: smelt_glass
+  - building_id: crystal_grower
+    recipe_id: grow_crystals
+  - building_id: fabricator
+    recipe_id: fabricate_composites
+  - building_id: fabricator
+    recipe_id: fabricate_fiber_optics
+
+imports:
+  - commodity_id: plastics
+    rate: 2.0

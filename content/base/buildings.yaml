@@ -241,6 +241,22 @@
     - id: structural_metal
       quantity: 20.0
 
+- id: silicate_quarry
+  name: Silicate Quarry
+  description: >
+    Open-pit extraction of sand/quartz/clay-family mineral deposits —
+    shared feedstock for the ceramics/glass/crystals chain (issue #225).
+  category: extraction
+  power_delta: 6.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: structural_metal
+      quantity: 15.0
+
 # ── Tier 2 (advanced_materials / hydroponics / improved_solar) ─────────────
 
 - id: apartment_block
@@ -477,6 +493,46 @@
       quantity: 45.0
     - id: components
       quantity: 20.0
+
+- id: ceramics_kiln
+  name: Ceramics Kiln
+  description: >
+    High-temperature kiln firing silicates into ceramics, or melting them
+    into glass (issue #225). Runs one recipe at a time; switch it from the
+    colony view (issue #166 recipe selection). Gated at the same tier as
+    refractory_foundry, the material it complements.
+  category: processing
+  power_delta: 16.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 45.0
+    - id: components
+      quantity: 15.0
+
+- id: crystal_grower
+  name: Crystal Grower
+  description: >
+    Precision furnace growing optical/piezoelectric crystals from
+    silicates in a single step (issue #225) — instrumentation/gemstone
+    grade, not semiconductor-grade silicon (kept distinct from
+    `semiconductor_fab`; see `crystals`' commodity description).
+  category: processing
+  power_delta: 12.0
+  worker_slots: 1
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 4
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 35.0
+    - id: components
+      quantity: 15.0
 
 - id: fabricator
   name: Fabricator

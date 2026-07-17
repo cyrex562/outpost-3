@@ -1650,6 +1650,170 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the silicates -> ceramics/glass/crystals chain
+    /// (issue #225) actually works against the real content pack: one
+    /// silicate_quarry feeds a ceramics_kiln (switchable between
+    /// fire_ceramics and smelt_glass, issue #166 recipe selection) and a
+    /// crystal_grower.
+    #[test]
+    fn silicates_chain_produces_ceramics_glass_crystals_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Silicates Chain Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("silicate_quarry", 1));
+        // Power source — silicate_quarry alone demands 6kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("silicates") > 0.0,
+            "silicate_quarry should produce silicates"
+        );
+
+        engine.state.colonies[idx].pool.deposit("silicates", 200.0);
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("ceramics_kiln", 2));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("crystal_grower", 3));
+        // Cumulative demand now exceeds a single mk1 array; add a mk2.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk2", 1));
+
+        // ceramics_kiln defaults to fire_ceramics (sorts before smelt_glass).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("ceramics") > 0.0,
+            "ceramics_kiln should produce ceramics via its default fire_ceramics recipe"
+        );
+        assert!(
+            engine.state.colonies[idx].pool.amount("crystals") > 0.0,
+            "crystal_grower should produce crystals"
+        );
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "ceramics_kiln".into(),
+                recipe_id: "smelt_glass".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("glass") > 0.0,
+            "ceramics_kiln should produce glass after switching to smelt_glass"
+        );
+    }
+
+    /// Real-engine proof that the fabricator's `fabricate_composites` and
+    /// `fabricate_fiber_optics` recipes (issue #225) actually work against
+    /// the real content pack.
+    #[test]
+    fn fabricator_composites_and_fiber_optics_produce_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Composites Fiber Optics Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("fabricator", 2));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk2", 1));
+
+        engine.state.colonies[idx].pool.deposit("ceramics", 100.0);
+        engine.state.colonies[idx].pool.deposit("plastics", 100.0);
+        engine.state.colonies[idx].pool.deposit("glass", 100.0);
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "fabricator".into(),
+                recipe_id: "fabricate_composites".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("composites") > 0.0,
+            "fabricator should produce composites after switching to fabricate_composites"
+        );
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "fabricator".into(),
+                recipe_id: "fabricate_fiber_optics".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("fiber_optics") > 0.0,
+            "fabricator should produce fiber_optics after switching to fabricate_fiber_optics"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {
