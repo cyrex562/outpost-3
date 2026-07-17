@@ -2,14 +2,14 @@
 //!
 //! `outpost_tauri/src/commands.rs` has bespoke Tauri commands
 //! (`get_colonize_targets`, `list_buildings`, `list_supply_packages`,
-//! `get_planet_map`) that read directly from `engine.state` rather than
-//! going through `outpost_core::Query` — none of those four have a core
-//! `Query` variant, and the WS query dispatch (`ws.rs`) only forwards a
-//! handful of the existing `Query` variants anyway. This module mirrors
-//! those same four read paths for `outpost_web`'s shared `AppState.engine`
-//! (the same engine `ws.rs`'s `NewGame` flow bootstraps), so browser-mode
-//! screens — the colony-founding wizard in particular — can reach them
-//! without a Tauri IPC bridge.
+//! `get_planet_map`, `get_system_bodies`) that read directly from
+//! `engine.state` rather than going through `outpost_core::Query` — none of
+//! those have a core `Query` variant, and the WS query dispatch (`ws.rs`)
+//! only forwards a handful of the existing `Query` variants anyway. This
+//! module mirrors those same read paths for `outpost_web`'s shared
+//! `AppState.engine` (the same engine `ws.rs`'s `NewGame` flow bootstraps),
+//! so browser-mode screens — the colony-founding wizard in particular — can
+//! reach them without a Tauri IPC bridge.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -319,6 +319,105 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
     .into_response()
 }
 
+/// A body on the system map, positioned for rendering.
+#[derive(Debug, Serialize)]
+pub struct SystemBodyWire {
+    /// Stable identifier of the body.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Body kind (`InnerPlanet`, `Moon`, `AsteroidBelt`, ...).
+    pub kind: String,
+    /// Orbital role (`Primary`, `Satellite`, ...).
+    pub role: String,
+    /// Orbital distance from the primary star, in AU.
+    pub distance_au: f32,
+    /// Whether this body is a valid colonization target.
+    pub colonizable: bool,
+    /// Atmospheric thickness/density band (issue #197).
+    pub atmosphere_density: String,
+    /// Atmospheric chemical hazard band (issue #197).
+    pub atmosphere_hazard: String,
+    /// Surface-temperature band.
+    pub temperature: String,
+    /// Surface gravity, in units of Earth gravity.
+    pub gravity_g: f32,
+    /// Radiation hazard band.
+    pub radiation: String,
+    /// Base habitability score, `0..=100`.
+    pub habitability: u8,
+    /// Base habitability multiplier applied to production.
+    pub habitability_modifier: f32,
+    /// Habitability score after tech-driven mitigations are applied (issue
+    /// #185). Equal to `habitability` when no mitigation applies.
+    pub habitability_effective: u8,
+    /// Habitability modifier after tech-driven mitigations are applied
+    /// (issue #185). Equal to `habitability_modifier` when no mitigation applies.
+    pub habitability_modifier_effective: f32,
+    /// Surface/composition archetype (issue #196) — flavor/authoring
+    /// guidance, not a habitability input.
+    pub subtype: String,
+    /// Whether the body is tidally locked to its parent.
+    pub tidally_locked: bool,
+    /// Axial tilt, in degrees.
+    pub axial_tilt_deg: f32,
+    /// Rotation period, in hours.
+    pub rotation_period_hours: f32,
+    /// Number of natural satellites.
+    pub moon_count: u32,
+    /// Display name of the body this one orbits, if any.
+    pub parent_body_name: Option<String>,
+}
+
+/// `GET /api/system-bodies` — every body in the system, with rendering hints.
+///
+/// Mirrors `outpost_tauri::commands::get_system_bodies` against the shared
+/// engine.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_system_bodies(State(state): State<AppState>) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    let node_bodies = &engine.state.system_state.node_map.bodies;
+    let bodies: Vec<SystemBodyWire> = node_bodies
+        .values()
+        .map(|b| SystemBodyWire {
+            id: b.id.0.to_string(),
+            name: b.name.clone(),
+            kind: format!("{:?}", b.kind),
+            role: format!("{:?}", b.role),
+            distance_au: b.distance_au,
+            colonizable: matches!(
+                b.kind,
+                BodyKind::InnerPlanet | BodyKind::Moon | BodyKind::AsteroidBelt
+            ),
+            atmosphere_density: format!("{:?}", b.atmosphere_density),
+            atmosphere_hazard: format!("{:?}", b.atmosphere_hazard),
+            temperature: format!("{:?}", b.temperature),
+            gravity_g: b.gravity_g,
+            radiation: format!("{:?}", b.radiation),
+            habitability: b.habitability(),
+            habitability_modifier: b.habitability_modifier(),
+            habitability_effective: b
+                .habitability_with_mitigations(&engine.state.habitability_mitigations),
+            habitability_modifier_effective: b
+                .habitability_modifier_with_mitigations(&engine.state.habitability_mitigations),
+            subtype: format!("{:?}", b.subtype),
+            tidally_locked: b.tidally_locked,
+            axial_tilt_deg: b.axial_tilt_deg,
+            rotation_period_hours: b.rotation_period_hours,
+            moon_count: b.moon_count,
+            parent_body_name: b
+                .parent_body
+                .as_ref()
+                .and_then(|pid| node_bodies.get(pid))
+                .map(|p| p.name.clone()),
+        })
+        .collect();
+    Json(bodies)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +471,25 @@ mod tests {
         let response = router
             .oneshot(
                 Request::get("/api/colonize-targets")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn system_bodies_empty_list_on_fresh_engine() {
+        let router = test_router();
+        let response = router
+            .oneshot(
+                Request::get("/api/system-bodies")
                     .body(Body::empty())
                     .unwrap(),
             )

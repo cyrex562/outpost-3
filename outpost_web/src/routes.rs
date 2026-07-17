@@ -32,6 +32,7 @@ pub fn build_router(state: AppState) -> Router {
             get(query_routes::list_supply_packages),
         )
         .route("/api/planet-map", get(query_routes::get_planet_map))
+        .route("/api/system-bodies", get(query_routes::get_system_bodies))
         .route("/ws", get(ws_handler))
         // Session management
         .route("/sessions", post(create_session))
