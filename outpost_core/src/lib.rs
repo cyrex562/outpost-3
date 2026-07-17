@@ -1727,6 +1727,7 @@ impl GameEngine {
                             maintenance_enabled,
                             colony.habitability_modifier,
                             &colony.active_recipes,
+                            &colony.category_modifiers,
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -2240,7 +2241,8 @@ impl GameEngine {
                 // Issue #183: gate on the parent body's habitability score
                 // before any mutation, unless the harsh-world capability is
                 // unlocked. `home_body_modifier` carries the computed
-                // productivity modifier forward so the auto-link below
+                // productivity modifier and the body's per-category
+                // modifiers (issue #184) forward so the auto-link below
                 // doesn't need to look the body up a second time.
                 let home_body_modifier = match body_id {
                     Some(bid) => {
@@ -2264,8 +2266,11 @@ impl GameEngine {
                                 threshold: system::HABITABILITY_FOUNDING_THRESHOLD,
                             });
                         }
-                        Some(body.habitability_modifier_with_mitigations(
-                            &self.state.habitability_mitigations,
+                        Some((
+                            body.habitability_modifier_with_mitigations(
+                                &self.state.habitability_mitigations,
+                            ),
+                            body.modifiers.clone(),
                         ))
                     }
                     None => None,
@@ -2389,12 +2394,15 @@ impl GameEngine {
                 // equivalent to a follow-up Command::AssignColonyHomeBody,
                 // which remains separately callable but is no longer
                 // required for this to take effect.
-                if let (Some(bid), Some(modifier)) = (body_id, home_body_modifier) {
+                if let (Some(bid), Some((modifier, category_modifiers))) =
+                    (body_id, home_body_modifier)
+                {
                     let idx = self
                         .find_colony_index(colony_id)
                         .expect("colony was just inserted");
                     self.state.colonies[idx].home_body_id = Some(bid.clone());
                     self.state.colonies[idx].habitability_modifier = modifier;
+                    self.state.colonies[idx].category_modifiers = category_modifiers;
                     events.push(Event::ColonyHomeBodySet {
                         colony_id,
                         body_id: bid.clone(),
@@ -2417,9 +2425,11 @@ impl GameEngine {
                     })?;
                 let modifier = body
                     .habitability_modifier_with_mitigations(&self.state.habitability_mitigations);
+                let category_modifiers = body.modifiers.clone();
                 let colony = &mut self.state.colonies[idx];
                 colony.home_body_id = Some(body_id.clone());
                 colony.habitability_modifier = modifier;
+                colony.category_modifiers = category_modifiers;
                 Ok(vec![Event::ColonyHomeBodySet {
                     colony_id: *colony_id,
                     body_id: body_id.clone(),
@@ -4197,6 +4207,53 @@ mod tests {
         assert_eq!(
             engine.state.colonies[idx].home_body_id.as_ref(),
             Some(&body_id)
+        );
+    }
+
+    #[test]
+    fn assign_colony_home_body_copies_category_modifiers() {
+        // Issue #184: AssignColonyHomeBody should also cache the body's
+        // authored per-category modifiers onto the colony, alongside the
+        // flat habitability_modifier.
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Forgeworld".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 0.3,
+            }))
+            .unwrap();
+        let body_id = match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        };
+        let authored_modifiers = vec![system::BodyModifier {
+            category: system::YieldCategory::IndustryYield,
+            multiplier: 1.5,
+        }];
+        engine
+            .apply(&Command::System(system::SystemCommand::SetBodyModifiers {
+                body_id: body_id.clone(),
+                modifiers: authored_modifiers.clone(),
+            }))
+            .unwrap();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Forge".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded");
+        };
+        let colony_id = *colony_id;
+        engine
+            .apply(&Command::AssignColonyHomeBody { colony_id, body_id })
+            .unwrap();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].category_modifiers,
+            authored_modifiers
         );
     }
 

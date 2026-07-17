@@ -62,6 +62,17 @@ pub struct Colony {
     /// (neutral) for colonies founded without a body reference.
     #[serde(default = "default_habitability_modifier")]
     pub habitability_modifier: f32,
+    /// Per-category production modifiers, cached from the home body
+    /// (issue #184).
+    ///
+    /// Populated alongside [`Self::habitability_modifier`] whenever
+    /// [`crate::Command::AssignColonyHomeBody`] (or the auto-link in
+    /// `FoundColonyAtSite`) runs. Stacks *multiplicatively* with
+    /// `habitability_modifier` rather than replacing it — see
+    /// [`crate::system::Body::modifiers`]. Empty for colonies founded
+    /// without a body reference (every category neutral at `1.0`).
+    #[serde(default)]
+    pub category_modifiers: Vec<crate::system::BodyModifier>,
     /// Each operational building's most recent production outcome, keyed by
     /// `building_type` (issue #182).
     ///
@@ -99,6 +110,7 @@ impl Colony {
             terrain_id: None,
             home_body_id: None,
             habitability_modifier: default_habitability_modifier(),
+            category_modifiers: Vec::new(),
             last_production: std::collections::HashMap::new(),
             active_recipes: std::collections::HashMap::new(),
         }

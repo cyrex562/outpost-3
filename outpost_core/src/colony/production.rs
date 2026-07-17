@@ -115,12 +115,38 @@ pub struct ProductionStepOutcome {
 struct PendingProduction<'a> {
     building_type: &'a str,
     recipe: Option<&'a RecipeDef>,
+    building_category: BuildingCategory,
     maintenance: &'a [Ingredient],
     /// Effective per-sol maintenance multiplier
     /// (`MaintenanceConsumption` scalar; `0.0` when disabled).
     maintenance_multiplier: f64,
     scale: f64,
     shortfalls: Vec<ProductionShortfall>,
+}
+
+/// Classify a recipe output into a [`crate::system::YieldCategory`] (issue
+/// #184), so a body's per-category [`crate::system::BodyModifier`]s apply
+/// to the right slice of production.
+///
+/// `BuildingCategory::Power`/`Research` map directly to `PowerOutput`/
+/// `ScienceYield` — those categories are unambiguous regardless of what
+/// they output. Everything else is split by the *output commodity's* own
+/// `category` string rather than the building's, since `Extraction`/
+/// `Processing` buildings span both food chains (hydroponic bays) and
+/// industrial chains (ore mines, refineries) under the same
+/// `BuildingCategory` — commodities tagged `consumable` count as food,
+/// everything else defaults to `IndustryYield`.
+fn yield_category_for(
+    building_category: &BuildingCategory,
+    commodity_category: Option<&str>,
+) -> crate::system::YieldCategory {
+    use crate::system::YieldCategory;
+    match building_category {
+        BuildingCategory::Power => YieldCategory::PowerOutput,
+        BuildingCategory::Research => YieldCategory::ScienceYield,
+        _ if commodity_category == Some("consumable") => YieldCategory::FoodYield,
+        _ => YieldCategory::IndustryYield,
+    }
 }
 
 // ─── Production resolution ────────────────────────────────────────────────────
@@ -158,6 +184,7 @@ pub fn process_production(
         true,
         1.0,
         &std::collections::HashMap::new(),
+        &[],
     )
 }
 
@@ -175,6 +202,12 @@ pub fn process_production(
 /// #163) — used to fold in the colony's habitability modifier. Inputs and
 /// maintenance draws are unaffected so worlds that are hard to live on still
 /// consume the same feedstock but yield less product.
+///
+/// `category_modifiers` (issue #184) applies an *additional*, per-output
+/// multiplicative factor on top of `productivity_multiplier`, resolved per
+/// [`crate::system::YieldCategory`] via [`yield_category_for`] — a body can
+/// author an elevated `power_output` modifier, say, without that also
+/// inflating its food or science yield.
 #[allow(
     clippy::too_many_arguments,
     clippy::implicit_hasher,
@@ -190,6 +223,7 @@ pub fn process_production_scaled(
     maintenance_enabled: bool,
     productivity_multiplier: f32,
     active_recipes: &std::collections::HashMap<String, String>,
+    category_modifiers: &[crate::system::BodyModifier],
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
@@ -309,6 +343,7 @@ pub fn process_production_scaled(
         pending.push(PendingProduction {
             building_type,
             recipe,
+            building_category: bdef.category.clone(),
             maintenance: if has_maintenance {
                 bdef.maintenance.as_slice()
             } else {
@@ -330,9 +365,17 @@ pub fn process_production_scaled(
                     pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
                 }
                 for ingredient in &recipe.outputs {
+                    let commodity_category = registry
+                        .commodity(&ingredient.id)
+                        .map(|c| c.category.as_str());
+                    let category = yield_category_for(&p.building_category, commodity_category);
+                    let category_mult = f64::from(crate::system::category_modifier(
+                        category_modifiers,
+                        category,
+                    ));
                     pool.deposit(
                         &ingredient.id,
-                        ingredient.quantity * p.scale * output_multiplier,
+                        ingredient.quantity * p.scale * output_multiplier * category_mult,
                     );
                 }
             }
@@ -906,6 +949,7 @@ mod tests {
             true,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         let smelter = outcome
@@ -950,6 +994,7 @@ mod tests {
             true,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         let mut pool_harsh = ColonyPool::new();
@@ -964,6 +1009,7 @@ mod tests {
             true,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         let get_scale = |o: &ProductionStepOutcome, ty: &str| -> f64 {
@@ -1005,6 +1051,7 @@ mod tests {
             false,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         let smelter = outcome
@@ -1097,6 +1144,7 @@ mod tests {
             true,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         let recycler = outcome
@@ -1139,6 +1187,7 @@ mod tests {
             true,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         for res in &outcome.building_results {
@@ -1174,6 +1223,7 @@ mod tests {
             true,
             1.25,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         let smelt = outcome
@@ -1200,6 +1250,76 @@ mod tests {
         );
     }
 
+    // ── Per-category body modifiers (issue #184) ──────────────────────────────
+
+    #[test]
+    fn category_modifier_stacks_multiplicatively_on_matching_category() {
+        // iron_plate is an IndustryYield output (smelter is Processing, and
+        // iron_plate isn't a `consumable` commodity) — an IndustryYield
+        // BodyModifier should multiply on top of productivity_multiplier.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        let category_modifiers = [crate::system::BodyModifier {
+            category: crate::system::YieldCategory::IndustryYield,
+            multiplier: 2.0,
+        }];
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.25,
+            &std::collections::HashMap::new(),
+            &category_modifiers,
+        );
+
+        // 1.0 base output * 1.25 productivity * 2.0 industry modifier = 2.5.
+        assert!(
+            (pool.amount("iron_plate") - 2.5).abs() < 1e-6,
+            "expected 2.5 iron_plate (1.25 productivity x 2.0 industry_yield), got {}",
+            pool.amount("iron_plate")
+        );
+    }
+
+    #[test]
+    fn category_modifier_does_not_apply_to_a_different_category() {
+        // A ScienceYield modifier must not affect the smelter's IndustryYield
+        // output — modifiers are scoped per category, not colony-wide.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        let category_modifiers = [crate::system::BodyModifier {
+            category: crate::system::YieldCategory::ScienceYield,
+            multiplier: 5.0,
+        }];
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &category_modifiers,
+        );
+
+        assert!(
+            (pool.amount("iron_plate") - 1.0).abs() < 1e-6,
+            "ScienceYield modifier should not affect IndustryYield output, got {}",
+            pool.amount("iron_plate")
+        );
+    }
+
     #[test]
     fn productivity_multiplier_below_one_reduces_outputs() {
         // A harsh world (0.75×) yields 25 % less product per turn.
@@ -1218,6 +1338,7 @@ mod tests {
             true,
             0.75,
             &std::collections::HashMap::new(),
+            &[],
         );
         assert!(
             (pool.amount("iron_plate") - 0.75).abs() < 1e-6,
@@ -1286,6 +1407,7 @@ mod tests {
             true,
             1.0,
             &std::collections::HashMap::new(),
+            &[],
         );
 
         assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
@@ -1300,7 +1422,18 @@ mod tests {
         let mut active = std::collections::HashMap::new();
         active.insert("refinery".to_string(), "refine_gadget".to_string());
 
-        process_production_scaled(&mut pool, &placed, 10.0, &reg, 1.0, 1.0, true, 1.0, &active);
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &active,
+            &[],
+        );
 
         assert_eq!(pool.amount("alloy"), 0.0);
         assert!((pool.amount("gadget") - 3.0).abs() < 1e-9);
@@ -1316,7 +1449,18 @@ mod tests {
         // back to the first authored recipe rather than silently no-op.
         active.insert("refinery".to_string(), "mine_ore".to_string());
 
-        process_production_scaled(&mut pool, &placed, 10.0, &reg, 1.0, 1.0, true, 1.0, &active);
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &active,
+            &[],
+        );
 
         assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
     }

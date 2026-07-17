@@ -262,6 +262,52 @@ fn default_moon_count() -> u32 {
     0
 }
 
+/// Per-category production yield a body's [`BodyModifier`]s can affect
+/// (issue #184).
+///
+/// Distinct from the flat [`Body::habitability_modifier`], which applies
+/// uniformly to every recipe output regardless of what it produces — a
+/// `YieldCategory` modifier targets one slice of production instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum YieldCategory {
+    /// Recipes producing a `consumable`-category commodity (food, water).
+    FoodYield,
+    /// The catch-all for extraction/processing recipes that aren't food —
+    /// ore, refined metals, components, end-items, and similar chains.
+    IndustryYield,
+    /// Recipes run by a `BuildingCategory::Research` building.
+    ScienceYield,
+    /// Recipes run by a `BuildingCategory::Power` building.
+    PowerOutput,
+}
+
+/// An authored per-category production modifier on a [`Body`] (issue #184).
+///
+/// Stacks *multiplicatively* with [`Body::habitability_modifier`] rather
+/// than replacing it — the habitability modifier remains the general "how
+/// survivable is this place" scalar applied to every output; a
+/// `BodyModifier` is an additional, category-specific factor layered on
+/// top (e.g. a gas giant might author an elevated `power_output` modifier
+/// for its abundant fusion fuel, independent of how habitable it is).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BodyModifier {
+    /// Which production category this modifier affects.
+    pub category: YieldCategory,
+    /// Multiplicative delta — `1.0` is neutral, `1.2` is +20%, `0.8` is −20%.
+    pub multiplier: f32,
+}
+
+/// Look up the multiplier for `category` in `modifiers`, defaulting to
+/// `1.0` (neutral) when no [`BodyModifier`] authors that category.
+#[must_use]
+pub fn category_modifier(modifiers: &[BodyModifier], category: YieldCategory) -> f32 {
+    modifiers
+        .iter()
+        .find(|m| m.category == category)
+        .map_or(1.0, |m| m.multiplier)
+}
+
 /// A celestial body in the system node map.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Body {
@@ -316,6 +362,12 @@ pub struct Body {
     /// or giant — issue #196's "planet itself is a moon of another body".
     #[serde(default)]
     pub parent_body: Option<BodyId>,
+    /// Per-category production modifiers (issue #184) — e.g. a gas giant
+    /// might author an elevated `power_output` modifier. Empty by default
+    /// (every category neutral at `1.0`); stacks multiplicatively with
+    /// [`Self::habitability_modifier`] rather than replacing it.
+    #[serde(default)]
+    pub modifiers: Vec<BodyModifier>,
 }
 
 impl Body {
@@ -339,6 +391,7 @@ impl Body {
             rotation_period_hours: default_rotation_period_hours(),
             moon_count: default_moon_count(),
             parent_body: None,
+            modifiers: Vec::new(),
         }
     }
 
@@ -435,6 +488,14 @@ impl Body {
         mitigations: &std::collections::HashSet<HabitabilityAttribute>,
     ) -> f32 {
         0.75 + f32::from(self.habitability_with_mitigations(mitigations)) * 0.005
+    }
+
+    /// Authored per-category production modifier for `category` (issue
+    /// #184), defaulting to `1.0` (neutral) when unauthored. See
+    /// [`category_modifier`].
+    #[must_use]
+    pub fn category_modifier(&self, category: YieldCategory) -> f32 {
+        category_modifier(&self.modifiers, category)
     }
 
     /// Whether this body's habitability clears the founding threshold
@@ -862,6 +923,18 @@ pub enum SystemCommand {
         /// The body `body_id` orbits.
         parent_body: BodyId,
     },
+    /// Overwrite a body's per-category production modifiers (issue #184).
+    ///
+    /// Separate from [`SystemCommand::SetBodyAttributes`] since most
+    /// authored bodies have no modifiers at all (empty `Vec` is the
+    /// neutral default) — folding this into the attributes command would
+    /// force every existing caller to thread through an always-empty field.
+    SetBodyModifiers {
+        /// Target body.
+        body_id: BodyId,
+        /// Replacement modifier list.
+        modifiers: Vec<BodyModifier>,
+    },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
         /// Origin body.
@@ -983,6 +1056,13 @@ pub enum SystemEvent {
         body_id: BodyId,
         /// The body `body_id` orbits.
         parent_body: BodyId,
+    },
+    /// A body's per-category production modifiers were overwritten (issue #184).
+    BodyModifiersSet {
+        /// Target body.
+        body_id: BodyId,
+        /// New modifier list.
+        modifiers: Vec<BodyModifier>,
     },
     /// A shipping route was added between two bodies.
     ShippingRouteAdded {
@@ -1230,6 +1310,19 @@ pub fn apply_system_command(
             Ok(vec![SystemEvent::BodyParentSet {
                 body_id: body_id.clone(),
                 parent_body: parent_body.clone(),
+            }])
+        }
+
+        SystemCommand::SetBodyModifiers { body_id, modifiers } => {
+            let body = state
+                .node_map
+                .bodies
+                .get_mut(body_id)
+                .ok_or_else(|| SystemError::BodyNotFound(body_id.clone()))?;
+            body.modifiers.clone_from(modifiers);
+            Ok(vec![SystemEvent::BodyModifiersSet {
+                body_id: body_id.clone(),
+                modifiers: modifiers.clone(),
             }])
         }
 
@@ -1874,6 +1967,56 @@ mod tests {
             &SystemCommand::SetBodyParent {
                 body_id: inner_id,
                 parent_body: bad_parent,
+            },
+        );
+        assert!(matches!(result, Err(SystemError::BodyNotFound(_))));
+    }
+
+    #[test]
+    fn set_body_modifiers_overwrites_and_reports_event() {
+        let (mut state, inner_id, _) = make_state_with_two_bodies();
+        let modifiers = vec![
+            BodyModifier {
+                category: YieldCategory::ScienceYield,
+                multiplier: 1.3,
+            },
+            BodyModifier {
+                category: YieldCategory::FoodYield,
+                multiplier: 0.8,
+            },
+        ];
+        let events = apply_system_command(
+            &mut state,
+            &SystemCommand::SetBodyModifiers {
+                body_id: inner_id.clone(),
+                modifiers: modifiers.clone(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(events[0], SystemEvent::BodyModifiersSet { .. }));
+        assert_eq!(state.node_map.bodies[&inner_id].modifiers, modifiers);
+        assert!(
+            (state.node_map.bodies[&inner_id].category_modifier(YieldCategory::ScienceYield) - 1.3)
+                .abs()
+                < 1e-6
+        );
+        // Unauthored category still defaults to neutral.
+        assert!(
+            (state.node_map.bodies[&inner_id].category_modifier(YieldCategory::PowerOutput) - 1.0)
+                .abs()
+                < 1e-6
+        );
+    }
+
+    #[test]
+    fn set_body_modifiers_rejects_nonexistent_body() {
+        let mut state = SystemState::new();
+        let bad_id = BodyId::new();
+        let result = apply_system_command(
+            &mut state,
+            &SystemCommand::SetBodyModifiers {
+                body_id: bad_id,
+                modifiers: vec![],
             },
         );
         assert!(matches!(result, Err(SystemError::BodyNotFound(_))));
