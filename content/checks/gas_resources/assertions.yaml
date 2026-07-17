@@ -1,0 +1,25 @@
+# Assertions for the gas-resources balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   fusion_fuel:  4.0 extracted − 3.0 consumed by fusion reactor = +1.0/sol
+#   noble_gases:  6.0 extracted, no consumer                     = +6.0/sol
+#   power:       60.0 produced, no consumer in this bundle       = +60.0/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: fusion_fuel
+  expect: closed
+  min_net: 0.5
+  label: fusion-fuel-not-in-deficit
+
+- commodity: noble_gases
+  expect: closed
+  min_net: 1.0
+  label: noble-gases-surplus
+
+- commodity: power
+  expect: closed
+  min_net: 10.0
+  label: fusion-power-still-produced

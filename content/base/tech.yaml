@@ -52,6 +52,7 @@
       - structural_mine
       - conductive_mine
       - hydrocarbon_well
+      - gas_extractor
     bonuses:
       - mining_efficiency_10_percent
 

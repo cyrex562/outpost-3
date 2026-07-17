@@ -1,0 +1,10 @@
+id: gas-resources-check
+name: Gas Resources Balance Check
+version: '0.1.0'
+description: >
+  Proves the gas resource chain added in issue #214 (noble_gases,
+  fusion_fuel) closes end-to-end: two gas_extractor instances (one per
+  recipe) feed a fusion_reactor_prototype that now consumes fusion_fuel
+  instead of running on zero inputs. No imports — everything produced
+  on-site, mirroring content/checks/metal_categories's self-contained
+  style since these are this issue's new raw materials.

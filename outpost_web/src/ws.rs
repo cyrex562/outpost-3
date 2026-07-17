@@ -1062,6 +1062,130 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the gas extractor's two recipes (#214)
+    /// actually work against the real content pack: confirm the default
+    /// recipe produces fusion_fuel (not noble_gases), then switch via
+    /// SetActiveRecipe and confirm noble_gases comes out instead.
+    #[test]
+    fn gas_extractor_recipe_selection_produces_each_gas_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Gas Extractor Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("gas_extractor", 1));
+        // Power source — gas_extractor alone demands 6kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        // Default (no active_recipes entry) should be extract_fusion_fuel
+        // (sorts first alphabetically among the extractor's two recipes).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("fusion_fuel") > 0.0,
+            "gas_extractor should default to extract_fusion_fuel with no active_recipes entry"
+        );
+        assert_eq!(engine.state.colonies[idx].pool.amount("noble_gases"), 0.0);
+
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "gas_extractor".into(),
+                recipe_id: "extract_noble_gases".into(),
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("noble_gases") > 0.0,
+            "gas_extractor should produce noble_gases after switching to extract_noble_gases"
+        );
+    }
+
+    /// Real-engine proof that `fusion_reactor_prototype` (#166) no longer
+    /// runs on zero inputs (#214): without fusion_fuel in the pool it
+    /// produces no power, and once fusion_fuel is seeded it does.
+    #[test]
+    fn fusion_reactor_requires_fusion_fuel_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Fusion Reactor Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("fusion_reactor_prototype", 2));
+
+        // No fusion_fuel seeded — the reactor should produce zero power.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].pool.amount("power"),
+            0.0,
+            "fusion_reactor_prototype should no longer produce power for free"
+        );
+
+        engine.state.colonies[idx]
+            .pool
+            .deposit("fusion_fuel", 100.0);
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("power") > 0.0,
+            "fusion_reactor_prototype should produce power once fusion_fuel is available"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

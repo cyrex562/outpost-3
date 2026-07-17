@@ -345,3 +345,34 @@
   phase: solid
   base_value: 15.0
   tradeable: true
+
+- id: noble_gases
+  name: Noble Gases
+  description: >
+    Helium/neon/argon/xenon family, extracted from atmosphere or
+    subsurface deposits — one category commodity rather than a gas per
+    element (issue #214). Shielding gas for electronics/component
+    manufacturing, ion-propulsion/thruster flavor, cryogenics. No
+    engine-mechanic consumer yet — producible/tradeable now, same hedge
+    used for #210's `fuel`.
+  category: raw_material
+  phase: gas
+  base_value: 18.0
+  tradeable: true
+  weight: 0.1
+
+- id: fusion_fuel
+  name: Fusion Fuel
+  description: >
+    Deuterium/tritium/helium-3 family — kept as a single lightly-processed
+    commodity rather than splitting a raw→refined chain, since the
+    isotope-separation detail doesn't add meaningful gameplay depth at
+    this tier (issue #214, matching the "don't overdo the granularity"
+    judgment call already used for #216's raw materials). The
+    `fusion_reactor_prototype`'s `generate_power_fusion` recipe now
+    consumes this instead of running on zero inputs.
+  category: raw_material
+  phase: gas
+  base_value: 45.0
+  tradeable: true
+  weight: 0.1
