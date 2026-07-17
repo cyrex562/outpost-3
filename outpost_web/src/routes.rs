@@ -12,7 +12,8 @@ use outpost_core::{Command, EngineError};
 
 use crate::query_routes;
 use crate::state::AppState;
-use crate::ws::ws_handler;
+use crate::ws::{client_command_to_core, ws_handler};
+use crate::wsmsg::ClientCommand;
 
 /// Build the full application router.
 pub fn build_router(state: AppState) -> Router {
@@ -88,20 +89,32 @@ async fn current_sol(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-/// `POST /api/command` — apply a [`Command`] to the shared browser-mode engine.
+/// `POST /api/command` — apply a [`ClientCommand`] to the shared browser-mode
+/// engine.
 ///
 /// This targets `AppState.engine` (the same engine the WebSocket `NewGame`
 /// flow bootstraps content/planet/colony onto), not a per-session engine —
-/// see `query_routes` for the rationale. Returns the list of [`Event`]s
-/// produced by the command.
+/// see `query_routes` for the rationale. Accepts the same `{"kind": ...}`
+/// tagged shape as the WS `command` message (and the frontend's `Command`
+/// type) rather than the core [`Command`] enum's externally-tagged shape,
+/// so it's a drop-in REST alternative to sending over the socket. Returns
+/// the events produced by the command in the same [`crate::wsmsg::ServerEvent`]
+/// wire shape the WebSocket `event` message uses — not the core [`Event`]
+/// enum's externally-tagged shape — so the frontend's shared `GameEvent`
+/// handling code (keyed on `.kind`) works identically over REST and WS.
 ///
 /// # Panics
 ///
 /// Panics if the shared engine mutex is poisoned.
 async fn apply_shared_command(
     State(state): State<AppState>,
-    Json(cmd): Json<Command>,
+    Json(client_cmd): Json<ClientCommand>,
 ) -> impl IntoResponse {
+    let cmd = match client_command_to_core(client_cmd, &state) {
+        Ok(cmd) => cmd,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    };
+
     let result = {
         let mut engine = state.engine.lock().expect("engine lock");
         engine.apply(&cmd)
@@ -109,7 +122,11 @@ async fn apply_shared_command(
 
     match result {
         Ok(events) => {
-            let json = serde_json::to_value(&events).unwrap_or(Value::Array(vec![]));
+            let wire_events: Vec<crate::wsmsg::ServerEvent> = events
+                .iter()
+                .map(crate::wsmsg::ServerEvent::from_core)
+                .collect();
+            let json = serde_json::to_value(&wire_events).unwrap_or(Value::Array(vec![]));
             (StatusCode::OK, Json(json)).into_response()
         }
         Err(e) => {

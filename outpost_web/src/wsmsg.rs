@@ -88,6 +88,44 @@ pub enum ClientCommand {
         /// Labour units to assign.
         labour: u64,
     },
+    /// Select which recipe a building type runs in a colony (issue #166).
+    SetActiveRecipe {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Building type to set the active recipe for.
+        building_type: String,
+        /// Recipe id to activate.
+        recipe_id: String,
+    },
+    /// Found a new colony at a surveyed planet-map site (issue #220 — the
+    /// founding wizard's primary command in browser mode).
+    FoundColonyAtSite {
+        /// Display name for the new colony.
+        name: String,
+        /// Starting colonist head-count.
+        starting_population: u64,
+        /// Surveyed site UUID where the colony is being placed.
+        site_id: String,
+        /// Optional economic focus description.
+        #[serde(default)]
+        focus: Option<String>,
+        /// Optional `SupplyPackage` id used to seed starting commodities.
+        #[serde(default)]
+        supplies_id: Option<String>,
+        /// Explicit per-commodity starter-supply amounts (issue #167).
+        #[serde(default)]
+        supply_overrides: Option<Vec<(String, f64)>>,
+        /// Star-system body this site belongs to, if known (issue #183).
+        #[serde(default)]
+        body_id: Option<String>,
+    },
+    /// Link a colony to its home system body (issue #163).
+    AssignColonyHomeBody {
+        /// Colony to update.
+        colony_id: String,
+        /// Star-system body UUID.
+        body_id: String,
+    },
     /// Set the active difficulty preset.
     SetDifficulty {
         /// Difficulty grade: "sandbox", "easy", "normal", "hard", or "brutal".
@@ -841,6 +879,77 @@ mod tests {
                 seq,
                 command: ClientCommand::CancelResearch,
             } => assert_eq!(seq, 5),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_found_colony_at_site_deserialises() {
+        let raw = r#"{"type":"command","seq":7,"command":{"kind":"found_colony_at_site","name":"Alpha","starting_population":100,"site_id":"00000000-0000-0000-0000-000000000003"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::FoundColonyAtSite {
+                        name,
+                        starting_population,
+                        site_id,
+                        focus,
+                        supplies_id,
+                        supply_overrides,
+                        body_id,
+                    },
+            } => {
+                assert_eq!(seq, 7);
+                assert_eq!(name, "Alpha");
+                assert_eq!(starting_population, 100);
+                assert_eq!(site_id, "00000000-0000-0000-0000-000000000003");
+                assert_eq!(focus, None);
+                assert_eq!(supplies_id, None);
+                assert_eq!(supply_overrides, None);
+                assert_eq!(body_id, None);
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_assign_colony_home_body_deserialises() {
+        let raw = r#"{"type":"command","seq":8,"command":{"kind":"assign_colony_home_body","colony_id":"00000000-0000-0000-0000-000000000001","body_id":"00000000-0000-0000-0000-000000000002"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::AssignColonyHomeBody { colony_id, body_id },
+            } => {
+                assert_eq!(seq, 8);
+                assert_eq!(colony_id, "00000000-0000-0000-0000-000000000001");
+                assert_eq!(body_id, "00000000-0000-0000-0000-000000000002");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_set_active_recipe_deserialises() {
+        let raw = r#"{"type":"command","seq":9,"command":{"kind":"set_active_recipe","colony_id":"00000000-0000-0000-0000-000000000001","building_type":"refinery","recipe_id":"refine_conductive_ore"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::SetActiveRecipe {
+                        colony_id,
+                        building_type,
+                        recipe_id,
+                    },
+            } => {
+                assert_eq!(seq, 9);
+                assert_eq!(colony_id, "00000000-0000-0000-0000-000000000001");
+                assert_eq!(building_type, "refinery");
+                assert_eq!(recipe_id, "refine_conductive_ore");
+            }
             _ => panic!("unexpected variant"),
         }
     }
