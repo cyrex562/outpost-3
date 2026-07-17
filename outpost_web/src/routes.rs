@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use outpost_core::{Command, EngineError};
 
+use crate::query_routes;
 use crate::state::AppState;
 use crate::ws::ws_handler;
 
@@ -20,6 +21,17 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/colonies", get(list_colonies))
         .route("/api/sol", get(current_sol))
+        .route("/api/command", post(apply_shared_command))
+        .route(
+            "/api/colonize-targets",
+            get(query_routes::get_colonize_targets),
+        )
+        .route("/api/buildings", get(query_routes::list_buildings))
+        .route(
+            "/api/supply-packages",
+            get(query_routes::list_supply_packages),
+        )
+        .route("/api/planet-map", get(query_routes::get_planet_map))
         .route("/ws", get(ws_handler))
         // Session management
         .route("/sessions", post(create_session))
@@ -72,6 +84,37 @@ async fn current_sol(State(state): State<AppState>) -> impl IntoResponse {
             Json(json!({ "error": e.to_string() })),
         )
             .into_response(),
+    }
+}
+
+/// `POST /api/command` — apply a [`Command`] to the shared browser-mode engine.
+///
+/// This targets `AppState.engine` (the same engine the WebSocket `NewGame`
+/// flow bootstraps content/planet/colony onto), not a per-session engine —
+/// see `query_routes` for the rationale. Returns the list of [`Event`]s
+/// produced by the command.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+async fn apply_shared_command(
+    State(state): State<AppState>,
+    Json(cmd): Json<Command>,
+) -> impl IntoResponse {
+    let result = {
+        let mut engine = state.engine.lock().expect("engine lock");
+        engine.apply(&cmd)
+    };
+
+    match result {
+        Ok(events) => {
+            let json = serde_json::to_value(&events).unwrap_or(Value::Array(vec![]));
+            (StatusCode::OK, Json(json)).into_response()
+        }
+        Err(e) => {
+            let status = engine_error_status(&e);
+            (status, Json(json!({ "error": e.to_string() }))).into_response()
+        }
     }
 }
 
