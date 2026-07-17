@@ -618,6 +618,30 @@ pub enum Command {
         /// New interrupt sensitivity config for this colony.
         config: interrupt::InterruptConfig,
     },
+
+    // ── Debug/testing (issue #232) ─────────────────────────────────────────
+    /// Grant an arbitrary quantity of a commodity directly into a colony's
+    /// pool, bypassing production/deposits/recipes entirely.
+    ///
+    /// A testing-mode escape hatch, not a normal gameplay command — the
+    /// intended workflow (per issue #232) is a playtester using this to
+    /// simulate "what if this colony already had enough of X" while probing
+    /// whether the current resource-distribution algorithm gives a founding
+    /// site a genuine path to a tech/victory goal, so the algorithm can be
+    /// tuned from what the playthrough actually needed. Hosts should gate
+    /// this behind an explicit testing/sandbox mode rather than exposing it
+    /// in normal play. No content-pack or deposit validation is performed —
+    /// `commodity_id` need not correspond to a real [`content::CommodityDef`]
+    /// or an existing deposit.
+    DebugGrantColonyResources {
+        /// Target colony.
+        colony_id: ColonyId,
+        /// Content-pack commodity id to grant.
+        commodity_id: String,
+        /// Quantity to add to the colony's pool (capped by pool capacity,
+        /// same as any other deposit).
+        amount: f64,
+    },
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -1257,6 +1281,18 @@ pub enum Event {
     ExpeditionLost {
         /// Expedition that was lost.
         expedition_id: expedition::FieldExpeditionId,
+    },
+
+    /// A [`Command::DebugGrantColonyResources`] testing-mode grant landed in
+    /// a colony's pool.
+    DebugResourcesGranted {
+        /// Colony that received the grant.
+        colony_id: ColonyId,
+        /// Commodity granted.
+        commodity_id: String,
+        /// Quantity actually added (may be less than requested if pool
+        /// capacity capped it — see [`colony::pool::ColonyPool::deposit`]).
+        amount: f64,
     },
 }
 
@@ -2661,6 +2697,22 @@ impl GameEngine {
                     .interrupt_configs
                     .insert(*colony_id, config.clone());
                 Ok(vec![])
+            }
+
+            Command::DebugGrantColonyResources {
+                colony_id,
+                commodity_id,
+                amount,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let granted = self.state.colonies[idx]
+                    .pool
+                    .deposit(commodity_id, amount.max(0.0));
+                Ok(vec![Event::DebugResourcesGranted {
+                    colony_id: *colony_id,
+                    commodity_id: commodity_id.clone(),
+                    amount: granted,
+                }])
             }
 
             Command::OpenEmigrationGate {
@@ -5809,6 +5861,100 @@ mod tests {
         assert!(!cfg
             .sources
             .contains(&InterruptSourceKind::PredictiveWarning));
+    }
+
+    // ── Debug/testing commands (issue #232) ──────────────────────────────────
+
+    #[test]
+    fn debug_grant_colony_resources_lands_in_pool_and_emits_event() {
+        let mut engine = GameEngine::with_seed(0);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Debug Colony".into(),
+                starting_population: 10,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let before = engine.state.colonies[0].pool.amount("structural_ore");
+
+        let events = engine
+            .apply(&Command::DebugGrantColonyResources {
+                colony_id,
+                commodity_id: "structural_ore".into(),
+                amount: 250.0,
+            })
+            .unwrap();
+
+        let after = engine.state.colonies[0].pool.amount("structural_ore");
+        assert!(
+            after >= before + 249.9,
+            "expected pool to gain ~250 structural_ore, before={before} after={after}"
+        );
+
+        match &events[0] {
+            Event::DebugResourcesGranted {
+                colony_id: evt_colony,
+                commodity_id,
+                amount,
+            } => {
+                assert_eq!(*evt_colony, colony_id);
+                assert_eq!(commodity_id, "structural_ore");
+                assert!(*amount > 0.0);
+            }
+            other => panic!("expected DebugResourcesGranted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn debug_grant_colony_resources_rejects_unknown_colony() {
+        let mut engine = GameEngine::with_seed(0);
+        let bogus = uuid::Uuid::new_v4();
+        let result = engine.apply(&Command::DebugGrantColonyResources {
+            colony_id: bogus,
+            commodity_id: "structural_ore".into(),
+            amount: 100.0,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn debug_grant_colony_resources_clamps_negative_amount_to_zero() {
+        let mut engine = GameEngine::with_seed(0);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Debug Colony".into(),
+                starting_population: 10,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let before = engine.state.colonies[0].pool.amount("structural_ore");
+        let events = engine
+            .apply(&Command::DebugGrantColonyResources {
+                colony_id,
+                commodity_id: "structural_ore".into(),
+                amount: -500.0,
+            })
+            .unwrap();
+        let after = engine.state.colonies[0].pool.amount("structural_ore");
+
+        assert!(
+            (after - before).abs() < 1e-9,
+            "negative amount must not drain the pool: before={before} after={after}"
+        );
+        match &events[0] {
+            Event::DebugResourcesGranted { amount, .. } => {
+                assert!((*amount).abs() < 1e-9, "granted amount should clamp to 0");
+            }
+            other => panic!("expected DebugResourcesGranted, got {other:?}"),
+        }
     }
 
     /// A colony with an empty mask never causes an interrupt halt.

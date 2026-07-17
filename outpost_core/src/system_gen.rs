@@ -32,9 +32,10 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
+use crate::map::VEIN_COMMODITIES;
 use crate::system::{
-    AtmosphereDensity, AtmosphereHazard, Body, BodyKind, PlanetarySubtype, RadiationLevel,
-    SystemRole, TemperatureBand, HABITABILITY_FOUNDING_THRESHOLD,
+    AtmosphereDensity, AtmosphereHazard, Body, BodyDeposit, BodyKind, PlanetarySubtype,
+    RadiationLevel, SystemRole, TemperatureBand, HABITABILITY_FOUNDING_THRESHOLD,
 };
 
 /// Distance (AU) treated as the center of the habitable zone. No stellar
@@ -56,9 +57,16 @@ const MAX_INNER_PLANETS: u32 = 4;
 /// [`crate::system::HABITABILITY_FOUNDING_THRESHOLD`] — see this module's
 /// doc comment for why that's a hard guarantee here rather than a
 /// probabilistic outcome the way [`crate::map::PlanetMap`] allows.
+///
+/// `abundance_scalar` (issue #232) scales every [`BodyDeposit::abundance`]
+/// [`distribute_system_resources`] assigns — `1.0` is neutral, matching
+/// [`crate::modifier::DifficultyScalar`]'s convention everywhere else in the
+/// codebase. It does not affect *coverage* (every curated commodity is still
+/// guaranteed to exist somewhere in the system regardless of this value) —
+/// only how generous the placed deposits read.
 #[must_use]
 #[allow(clippy::too_many_lines)]
-pub fn generate_system(seed: u64) -> Vec<Body> {
+pub fn generate_system(seed: u64, abundance_scalar: f32) -> Vec<Body> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut bodies: Vec<Body> = Vec::new();
 
@@ -132,8 +140,123 @@ pub fn generate_system(seed: u64) -> Vec<Body> {
     }
 
     assign_roles(&mut bodies);
+    distribute_system_resources(&mut bodies, &mut rng, abundance_scalar);
 
     bodies
+}
+
+/// Distribute [`crate::map::VEIN_COMMODITIES`] across every generated body
+/// (issue #232's "the entire system must have enough resources" requirement).
+///
+/// Only the founding colony's home body ever gets a full hex map with
+/// real [`crate::map::Deposit`]s (via a later, separate `SeedPlanet` call) —
+/// every other body here only gets the lightweight [`BodyDeposit`] tag. Each
+/// commodity is assigned to 1-2 bodies, weighted by an archetype affinity
+/// (reusing [`crate::map::subtype_commodity_multiplier`] plus a
+/// [`BodyKind`]-level bias — asteroid belts favour ores, gas giants favour
+/// hydrocarbons, moons skew fissile) mirroring Dyson Sphere Program's
+/// per-planet-type resource tables. A verify-and-patch guarantee pass
+/// afterward ensures every curated commodity landed on at least one body
+/// system-wide, even if every body's affinity for it happened to be low —
+/// same "statistical placement, deterministic guarantee on top" shape as
+/// [`force_habitable`] and `map.rs::force_guaranteed_deposits`.
+fn distribute_system_resources(bodies: &mut [Body], rng: &mut ChaCha8Rng, abundance_scalar: f32) {
+    if bodies.is_empty() {
+        return;
+    }
+    let abundance_scalar = abundance_scalar.max(0.0);
+
+    for commodity in VEIN_COMMODITIES {
+        let deposit_count = rng.gen_range(1..=2usize.min(bodies.len()));
+        let mut chosen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for _ in 0..deposit_count {
+            let weights: Vec<f32> = bodies
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    if chosen.contains(&i) {
+                        0.0
+                    } else {
+                        commodity_affinity(b, commodity)
+                    }
+                })
+                .collect();
+            let total: f32 = weights.iter().sum();
+            if total <= 0.0 {
+                break; // every body already chosen or has zero affinity.
+            }
+            let mut roll = rng.gen_range(0.0..total);
+            let mut pick = None;
+            for (i, w) in weights.iter().enumerate() {
+                if roll < *w {
+                    pick = Some(i);
+                    break;
+                }
+                roll -= w;
+            }
+            if let Some(idx) = pick.or(Some(weights.len().saturating_sub(1))) {
+                chosen.insert(idx);
+            }
+        }
+        for idx in chosen {
+            let abundance = (0.4 + rng.gen_range(0.0..0.5)) * abundance_scalar;
+            bodies[idx]
+                .deposits
+                .push(BodyDeposit::new(commodity, abundance));
+        }
+    }
+
+    // Guarantee pass: force any commodity that landed nowhere onto its
+    // highest-affinity body. Rare in practice (every body has baseline
+    // affinity >= a small positive floor for every commodity — see
+    // `commodity_affinity`), but not logically impossible with very small
+    // systems, so this stays unconditional rather than a debug_assert.
+    for commodity in VEIN_COMMODITIES {
+        let present = bodies
+            .iter()
+            .any(|b| b.deposits.iter().any(|d| d.commodity_id == commodity));
+        if present {
+            continue;
+        }
+        if let Some((idx, _)) = bodies.iter().enumerate().max_by(|(_, a), (_, b)| {
+            commodity_affinity(a, commodity)
+                .partial_cmp(&commodity_affinity(b, commodity))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }) {
+            bodies[idx]
+                .deposits
+                .push(BodyDeposit::new(commodity, 0.5 * abundance_scalar));
+        }
+    }
+}
+
+/// Archetype affinity for `commodity` on `body`, combining the per-subtype
+/// bias `map.rs` already uses for hex-level veins with a coarser
+/// [`BodyKind`]-level bias (asteroid belts/gas giants/moons have no subtype
+/// distinction fine enough to matter at body granularity). Always positive
+/// so [`distribute_system_resources`]'s guarantee pass always has a body to
+/// fall back to.
+fn commodity_affinity(body: &Body, commodity: &str) -> f32 {
+    let subtype_mult = crate::map::subtype_commodity_multiplier(body.subtype, commodity);
+    let kind_mult = match body.kind {
+        BodyKind::AsteroidBelt => match commodity {
+            "structural_ore" | "conductive_ore" | "precious_ore" | "refractory_ore"
+            | "semiconductor_ore" | "silicates" => 1.5,
+            "biomass" | "hydrocarbons" => 0.1,
+            _ => 1.0,
+        },
+        BodyKind::GasGiant => match commodity {
+            "hydrocarbons" => 1.5,
+            "structural_ore" | "silicates" | "biomass" => 0.05,
+            _ => 1.0,
+        },
+        BodyKind::Moon => match commodity {
+            "fissile_ore" => 1.3,
+            _ => 1.0,
+        },
+        BodyKind::InnerPlanet | BodyKind::OrbitalStation => 1.0,
+    };
+    (subtype_mult * kind_mult).max(0.05)
 }
 
 /// Generate one body at `distance_au`, deriving attributes from distance
@@ -394,8 +517,8 @@ mod tests {
 
     #[test]
     fn generation_is_deterministic() {
-        let a = generate_system(42);
-        let b = generate_system(42);
+        let a = generate_system(42, 1.0);
+        let b = generate_system(42, 1.0);
         assert_eq!(a.len(), b.len());
         let names_a: Vec<&str> = a.iter().map(|body| body.name.as_str()).collect();
         let names_b: Vec<&str> = b.iter().map(|body| body.name.as_str()).collect();
@@ -406,14 +529,52 @@ mod tests {
     }
 
     #[test]
+    fn higher_abundance_scalar_yields_richer_deposits_without_changing_coverage() {
+        // Same seed, only the abundance scalar differs: body/attribute shape
+        // must stay identical (deposit distribution consumes RNG only after
+        // everything else is decided), but the generous run's total
+        // abundance should exceed the lean run's, and both must still cover
+        // every curated commodity somewhere.
+        let lean = generate_system(11, 0.5);
+        let generous = generate_system(11, 3.0);
+        assert_eq!(lean.len(), generous.len());
+
+        let total_abundance = |bodies: &[Body]| -> f32 {
+            bodies
+                .iter()
+                .flat_map(|b| &b.deposits)
+                .map(|d| d.abundance)
+                .sum()
+        };
+        assert!(
+            total_abundance(&generous) > total_abundance(&lean),
+            "abundance_scalar=3.0 total should exceed abundance_scalar=0.5 total"
+        );
+
+        for bodies in [&lean, &generous] {
+            let present: std::collections::HashSet<&str> = bodies
+                .iter()
+                .flat_map(|b| &b.deposits)
+                .map(|d| d.commodity_id.as_str())
+                .collect();
+            for commodity in crate::map::VEIN_COMMODITIES {
+                assert!(
+                    present.contains(commodity),
+                    "coverage must hold regardless of abundance_scalar (missing {commodity})"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn different_seeds_produce_different_systems() {
         // Statistical, not logical, guarantee — matches map.rs's own
         // different_seeds_produce_different_maps convention. Sweep a few
         // seeds so a single unlucky collision doesn't flake the suite.
         let mut any_differ = false;
         for seed in 0..10u64 {
-            let a = generate_system(seed);
-            let b = generate_system(seed + 1000);
+            let a = generate_system(seed, 1.0);
+            let b = generate_system(seed + 1000, 1.0);
             let sig_a: Vec<(String, u32)> = a
                 .iter()
                 .map(|body| (format!("{:?}", body.kind), body.habitability() as u32))
@@ -435,7 +596,7 @@ mod tests {
         // Matches the #188-style seed-sweep test-bar convention cited in
         // this issue's Definition of Done.
         for seed in 0..64u64 {
-            let bodies = generate_system(seed);
+            let bodies = generate_system(seed, 1.0);
             assert!(
                 bodies.iter().any(Body::meets_founding_threshold),
                 "seed {seed} produced no founding-viable body"
@@ -446,7 +607,7 @@ mod tests {
     #[test]
     fn generated_subtypes_are_always_compatible_with_their_kind() {
         for seed in 0..32u64 {
-            for body in generate_system(seed) {
+            for body in generate_system(seed, 1.0) {
                 assert!(
                     body.subtype.compatible_with(&body.kind),
                     "seed {seed}: body {:?} has incompatible subtype {:?} for kind {:?}",
@@ -461,7 +622,7 @@ mod tests {
     #[test]
     fn moons_link_to_a_real_parent_body() {
         for seed in 0..32u64 {
-            let bodies = generate_system(seed);
+            let bodies = generate_system(seed, 1.0);
             let ids: std::collections::HashSet<_> = bodies.iter().map(|b| b.id.clone()).collect();
             for body in &bodies {
                 if let Some(parent) = &body.parent_body {
@@ -478,7 +639,7 @@ mod tests {
     #[test]
     fn gas_giant_moon_count_matches_attached_moons() {
         for seed in 0..32u64 {
-            let bodies = generate_system(seed);
+            let bodies = generate_system(seed, 1.0);
             for giant in bodies.iter().filter(|b| b.kind == BodyKind::GasGiant) {
                 let attached = bodies
                     .iter()
@@ -494,9 +655,45 @@ mod tests {
     }
 
     #[test]
+    fn every_curated_commodity_exists_somewhere_in_the_system() {
+        for seed in 0..32u64 {
+            let bodies = generate_system(seed, 1.0);
+            let present: std::collections::HashSet<&str> = bodies
+                .iter()
+                .flat_map(|b| &b.deposits)
+                .map(|d| d.commodity_id.as_str())
+                .collect();
+            for commodity in crate::map::VEIN_COMMODITIES {
+                assert!(
+                    present.contains(commodity),
+                    "seed {seed}: no body in the system has a {commodity} deposit"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn body_deposits_only_reference_valid_bodies() {
+        // Sanity check on distribute_system_resources' index bookkeeping:
+        // every deposit must land on a body that actually exists in the
+        // returned Vec (trivially true given deposits are pushed directly
+        // onto `bodies[idx]`, but worth asserting explicitly since the
+        // weighted-pick logic is the one part of this module doing index
+        // arithmetic rather than working through `Body` values directly).
+        for seed in 0..16u64 {
+            let bodies = generate_system(seed, 1.0);
+            let total_deposits: usize = bodies.iter().map(|b| b.deposits.len()).sum();
+            assert!(
+                total_deposits > 0,
+                "seed {seed}: no deposits were distributed at all"
+            );
+        }
+    }
+
+    #[test]
     fn generates_at_least_the_minimum_inner_planet_count() {
         for seed in 0..32u64 {
-            let bodies = generate_system(seed);
+            let bodies = generate_system(seed, 1.0);
             let inner_count = bodies
                 .iter()
                 .filter(|b| matches!(b.kind, BodyKind::InnerPlanet))

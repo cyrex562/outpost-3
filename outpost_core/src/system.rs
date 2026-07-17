@@ -181,6 +181,9 @@ fn default_gravity_g() -> f32 {
 fn default_radiation() -> RadiationLevel {
     RadiationLevel::Low
 }
+fn default_abundance_scalar() -> f32 {
+    1.0
+}
 
 /// Surface/composition archetype for a body, orthogonal to [`BodyKind`]
 /// (issue #196).
@@ -308,6 +311,38 @@ pub fn category_modifier(modifiers: &[BodyModifier], category: YieldCategory) ->
         .map_or(1.0, |m| m.multiplier)
 }
 
+/// A system-wide, hex-independent resource endowment tag on a [`Body`]
+/// (issue #232).
+///
+/// Only the founding colony's home body ever gets a full [`crate::map::PlanetMap`]
+/// with hex-level [`crate::map::Deposit`]s — every other system body never has
+/// a hex map generated at all in the live game. `BodyDeposit` is the lightweight
+/// stand-in that lets "does this body have any `structural_ore`" be answered for
+/// bodies without hex-level detail, so a future outpost/expedition system
+/// (#233/#235) has something to check against. It intentionally carries no
+/// location finer than "on this body" and no depletion/quantity — richness
+/// is comparative flavor only, mirroring how hex `Deposit::richness` doesn't
+/// currently gate production either (see issue #232's PR description for why
+/// deposit-gating itself is explicitly out of scope here).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BodyDeposit {
+    /// Content-pack commodity id (e.g. `"structural_ore"`).
+    pub commodity_id: String,
+    /// Relative abundance in `(0.0, 1.0]` — comparative flavor, not a budget.
+    pub abundance: f32,
+}
+
+impl BodyDeposit {
+    /// Create a new body-level deposit tag.
+    #[must_use]
+    pub fn new(commodity_id: impl Into<String>, abundance: f32) -> Self {
+        Self {
+            commodity_id: commodity_id.into(),
+            abundance: abundance.clamp(0.001, 1.0),
+        }
+    }
+}
+
 /// A celestial body in the system node map.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Body {
@@ -368,6 +403,11 @@ pub struct Body {
     /// [`Self::habitability_modifier`] rather than replacing it.
     #[serde(default)]
     pub modifiers: Vec<BodyModifier>,
+    /// System-wide resource endowment tags (issue #232) — see [`BodyDeposit`].
+    /// Empty by default; populated by `system_gen::distribute_system_resources`
+    /// for procedurally generated systems.
+    #[serde(default)]
+    pub deposits: Vec<BodyDeposit>,
 }
 
 impl Body {
@@ -392,6 +432,7 @@ impl Body {
             moon_count: default_moon_count(),
             parent_body: None,
             modifiers: Vec::new(),
+            deposits: Vec::new(),
         }
     }
 
@@ -945,6 +986,15 @@ pub enum SystemCommand {
     GenerateSystem {
         /// Deterministic seed — same seed always produces the same system.
         seed: u64,
+        /// Deposit-generosity multiplier (issue #232), resolved by the
+        /// caller from the active difficulty preset's
+        /// [`crate::modifier::ModifiableQuantity::DepositAbundance`] scalar
+        /// before constructing this command — `apply_system_command`
+        /// operates on [`SystemState`] alone and has no reach into the
+        /// difficulty scalar living on the outer `GameState`. `1.0` is
+        /// neutral (the default when omitted, e.g. by older callers/saves).
+        #[serde(default = "default_abundance_scalar")]
+        abundance_scalar: f32,
     },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
@@ -1345,9 +1395,12 @@ pub fn apply_system_command(
             }])
         }
 
-        SystemCommand::GenerateSystem { seed } => {
+        SystemCommand::GenerateSystem {
+            seed,
+            abundance_scalar,
+        } => {
             state.node_map.bodies.clear();
-            let generated = crate::system_gen::generate_system(*seed);
+            let generated = crate::system_gen::generate_system(*seed, *abundance_scalar);
             let body_ids: Vec<BodyId> = generated
                 .into_iter()
                 .map(|body| state.node_map.add_body(body))
@@ -2057,8 +2110,14 @@ mod tests {
     #[test]
     fn generate_system_populates_node_map_and_reports_body_ids() {
         let mut state = SystemState::new();
-        let events =
-            apply_system_command(&mut state, &SystemCommand::GenerateSystem { seed: 7 }).unwrap();
+        let events = apply_system_command(
+            &mut state,
+            &SystemCommand::GenerateSystem {
+                seed: 7,
+                abundance_scalar: 1.0,
+            },
+        )
+        .unwrap();
         let SystemEvent::SystemGenerated { seed, body_ids } = &events[0] else {
             panic!("expected SystemGenerated");
         };
@@ -2074,7 +2133,14 @@ mod tests {
     fn generate_system_replaces_any_existing_bodies() {
         let (mut state, inner_id, outer_id) = make_state_with_two_bodies();
         assert_eq!(state.node_map.bodies.len(), 2);
-        apply_system_command(&mut state, &SystemCommand::GenerateSystem { seed: 3 }).unwrap();
+        apply_system_command(
+            &mut state,
+            &SystemCommand::GenerateSystem {
+                seed: 3,
+                abundance_scalar: 1.0,
+            },
+        )
+        .unwrap();
         // The two hand-added bodies must be gone — generation
         // wholesale-replaces the node map, mirroring Command::SeedPlanet's
         // "overwrite any previously seeded map" semantics.

@@ -50,6 +50,15 @@ pub enum ModifiableQuantity {
     /// colony pool each sol. Applied in
     /// [`crate::colony::process_production_scaled`].
     MaintenanceConsumption,
+    /// Resource-deposit generosity multiplier (issue #232).
+    ///
+    /// Scales [`crate::system::BodyDeposit::abundance`] at system-generation
+    /// time — higher values make a generated system's raw-material presence
+    /// more generous. Applied once, in
+    /// [`crate::system_gen::generate_system`], not per-turn like the other
+    /// variants here (deposit generosity is a generation-time property, not
+    /// something recomputed every sol).
+    DepositAbundance,
 }
 
 // ─── ModifierDescriptor ───────────────────────────────────────────────────────

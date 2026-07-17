@@ -193,6 +193,19 @@ The distinct jobs the system scope owns that no lower scope does:
 - **Inter-body logistics** — shipping goods between bodies, where **shipping/hauler capacity itself becomes a managed resource**.
 - **Megaprojects** — pooled from the entire system. This is where victory lives (the interstellar expedition; plus wormhole gate, terraforming engine, system-scale power, etc.).
 
+### 8.3A Founding-site resource guarantee (issue #232)
+
+Procedural system generation (§8.3, issue #199) guarantees a habitable founding body but says nothing about whether that body — or the system around it — actually has the raw materials to survive and progress. Issue #232 closes that gap with two guarantees, both **coverage guarantees, not depletion/economy guarantees** (deposits carry no finite budget; extraction doesn't currently drain them):
+
+- **Founding site**: `PlanetMap` generation (`map.rs`) force-places at least one real hex `Deposit` of every commodity in the curated `VEIN_COMMODITIES` list if normal vein placement didn't produce one, mirroring Factorio's "starting-area" override pattern (a guarantee pass layered on top of, not replacing, ordinary probabilistic placement).
+- **System-wide**: every generated `Body` gets a lightweight `BodyDeposit` tag (`system_gen.rs::distribute_system_resources`) — DSP-style archetype-biased placement (asteroid belts favor ores, gas giants favor hydrocarbons, moons skew fissile) with the same verify-and-patch guarantee on top, so every curated commodity exists *somewhere* in the system even before a colony can reach it.
+
+**`VEIN_COMMODITIES`** (`map.rs`) is the single curated raw-material list both guarantees share — deliberately small (9 entries: `structural_ore`, `conductive_ore`, `precious_ore`, `refractory_ore`, `semiconductor_ore`, `fissile_ore`, `silicates`, `hydrocarbons`, `biomass`), mirroring `content/checks/bootstrap_colony`'s curated-starter-loadout philosophy rather than requiring every raw material in the content pack on one world. New raw-material commodity families should be evaluated against this list — added if a colony's tech-progression path genuinely needs them guaranteed-reachable, left out if they're meant to be a genuine system-wide scarcity/exploration incentive instead.
+
+Deposit *generosity* (not coverage) scales with difficulty via `ModifiableQuantity::DepositAbundance`.
+
+**Explicitly deferred** (tracked as a follow-up issue): deposits don't yet gate mining/production at all — every extraction recipe currently runs unconditionally regardless of local deposits. The guarantees above are forward-looking world-state, not yet a live gameplay constraint. Real sizing of "how much abundance is actually enough" needs that gating to exist first, then playtesting data (a proposed workflow: a tester uses `Command::DebugGrantColonyResources` to simulate having enough of a resource, and the resulting playthrough is analyzed to back out real requirements) — not a one-shot calculation.
+
 ---
 
 ## 9. Expeditions & Exploration

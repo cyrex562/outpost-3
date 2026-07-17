@@ -12,6 +12,7 @@ use tokio::sync::broadcast::error::RecvError;
 use outpost_core::content::loader::{PackLoader, RawFile};
 use outpost_core::content::registry::ContentRegistry;
 use outpost_core::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
+use outpost_core::modifier::ModifiableQuantity;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::system::SystemCommand;
 use outpost_core::{Command, GameEngine, Query};
@@ -491,9 +492,14 @@ async fn handle_new_game(
         // scenarios (still available separately via `seed_system_from_content`
         // for a future hand-authored-scenario picker). Independent seed from
         // the planet map so the player can reroll one without the other.
+        let abundance_scalar = engine
+            .state
+            .difficulty_scalar
+            .scalar_for(&ModifiableQuantity::DepositAbundance);
         let system_evs = engine
             .apply(&Command::System(SystemCommand::GenerateSystem {
                 seed: system_seed,
+                abundance_scalar,
             }))
             .map_err(|e| format!("GenerateSystem failed: {e}"))?;
         events.extend(system_evs);
@@ -804,7 +810,10 @@ mod tests {
             engine.state.registry = Some(registry);
 
             engine
-                .apply(&Command::System(SystemCommand::GenerateSystem { seed }))
+                .apply(&Command::System(SystemCommand::GenerateSystem {
+                    seed,
+                    abundance_scalar: 1.0,
+                }))
                 .expect("generate system");
             engine
                 .apply(&Command::SeedPlanet { seed, radius: 4 })
