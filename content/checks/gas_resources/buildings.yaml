@@ -1,0 +1,10 @@
+# Buildings used in the gas-resources balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: gas_extractor
+  name: Gas Extractor
+  category: extraction
+
+- id: fusion_reactor_prototype
+  name: Fusion Reactor Prototype
+  category: power

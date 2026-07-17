@@ -1,0 +1,14 @@
+# Colony configuration for the gas-resources balance check.
+#
+# Two gas_extractor instances (one per recipe) feeding one
+# fusion_reactor_prototype instance. No imports — everything produced
+# on-site.
+buildings:
+  - building_id: gas_extractor
+    recipe_id: extract_fusion_fuel
+  - building_id: gas_extractor
+    recipe_id: extract_noble_gases
+  - building_id: fusion_reactor_prototype
+    recipe_id: generate_power_fusion
+
+imports: []

@@ -1,0 +1,15 @@
+# Commodities used in the gas-resources balance check.
+- id: noble_gases
+  name: Noble Gases
+  category: raw_material
+  base_value: 18.0
+
+- id: fusion_fuel
+  name: Fusion Fuel
+  category: raw_material
+  base_value: 45.0
+
+- id: power
+  name: Power
+  category: energy
+  base_value: 0.0

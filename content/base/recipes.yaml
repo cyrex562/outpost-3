@@ -107,6 +107,26 @@
     - id: hydrocarbons
       quantity: 9.0
 
+# Gas extractor: two recipes, one building — the recipe-selection mechanic
+# (issue #166, issue #214).
+- id: extract_fusion_fuel
+  name: Extract Fusion Fuel
+  building: gas_extractor
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: fusion_fuel
+      quantity: 4.0
+
+- id: extract_noble_gases
+  name: Extract Noble Gases
+  building: gas_extractor
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: noble_gases
+      quantity: 6.0
+
 # ── Tier 2 ───────────────────────────────────────────────────────────────────
 
 - id: house_colonists_apartment
@@ -373,7 +393,9 @@
   name: Generate Power (Fusion)
   building: fusion_reactor_prototype
   cycle_sols: 1
-  inputs: []
+  inputs:
+    - id: fusion_fuel
+      quantity: 3.0
   outputs:
     - id: power
       quantity: 60.0

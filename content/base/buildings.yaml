@@ -188,6 +188,26 @@
     - id: structural_metal
       quantity: 18.0
 
+- id: gas_extractor
+  name: Gas Extractor
+  description: >
+    Draws noble gases or fusion fuel isotopes from atmosphere/subsurface
+    deposits. Runs one recipe at a time; switch it from the colony view
+    (issue #166 recipe selection; issue #214). Gated at resource_extraction
+    (tier 1) so a fusion_fuel supply chain is buildable well before
+    fusion_basics (tier 3, requires advanced_materials — itself gated
+    behind resource_extraction) unlocks fusion_reactor_prototype.
+  category: extraction
+  power_delta: 6.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: structural_metal
+      quantity: 18.0
+
 # ── Tier 2 (advanced_materials / hydroponics / improved_solar) ─────────────
 
 - id: apartment_block
