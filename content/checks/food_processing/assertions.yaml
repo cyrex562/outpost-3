@@ -1,0 +1,25 @@
+# Assertions for the food-processing balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   biomass:         12.0 imported − (5.0 protein + 4.0 produce) = +3.0/sol
+#   protein_rations: 3.0 produced (3/1 sol)                       = +3.0/sol
+#   produce_rations: 3.0 produced (3/1 sol)                       = +3.0/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: biomass
+  expect: closed
+  min_net: 1.0
+  label: biomass-not-in-deficit
+
+- commodity: protein_rations
+  expect: closed
+  min_net: 1.0
+  label: protein-rations-surplus
+
+- commodity: produce_rations
+  expect: closed
+  min_net: 1.0
+  label: produce-rations-surplus

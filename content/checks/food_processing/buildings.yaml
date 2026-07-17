@@ -1,0 +1,6 @@
+# Buildings used in the food-processing balance check — mirrors
+# content/base/buildings.yaml's category field (informational only, the
+# calculator doesn't read it).
+- id: food_processing_plant
+  name: Food Processing Plant
+  category: extraction

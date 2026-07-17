@@ -140,7 +140,7 @@ Detail on how population moves. **Governing principle: migration must have frict
 - **Within a colony:** pooled stockpile, abstract logistics.
 - **Between colonies/worlds:** explicit shipping over the strategic map.
 - **Tiers:** survival basics (cheap, soloable) vs advanced/growth chains (compete for slots + labor).
-- **Food:** several distinct foodstuffs rather than many crops. Exact set **[TBD, via harness experimentation]**.
+- **Food:** several distinct foodstuffs rather than many crops. Resolved via harness experimentation (issue #211): the starter `hydroponic_bay` yields `food_ration` (the sole needs-tracked survival staple, weight unchanged) plus a `biomass` byproduct, which feeds two tech-gated (`hydroponics`) distinct foodstuffs — `protein_rations` and `produce_rations` — as separate tradeable end-items. A diet-variety stability bonus was considered and explicitly deferred pending playtesting signal; see `content/base/commodities.yaml`'s `biomass` entry.
 
 **The commodity graph is discovered, not designed on paper.** The real early deliverable is not the final list of goods — it's the machinery to author and stress-test commodity graphs quickly (see §13).
 

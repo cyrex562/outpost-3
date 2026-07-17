@@ -1,0 +1,11 @@
+id: food-processing-check
+name: Food Processing Balance Check
+version: '0.1.0'
+description: >
+  Proves the two distinct-foodstuff chains added in issue #211
+  (protein_rations, produce_rations) each close, given a generous
+  external supply of biomass as an import (this bundle tests the food
+  processing plant's recipes in isolation, not the upstream
+  hydroponic_bay byproduct chain — that's covered by
+  content/checks/bootstrap_colony, which proves biomass production at
+  the same population-100 bar #166 established).

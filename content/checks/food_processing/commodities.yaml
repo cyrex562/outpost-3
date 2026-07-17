@@ -1,0 +1,15 @@
+# Commodities used in the food-processing balance check.
+- id: biomass
+  name: Biomass
+  category: raw_material
+  base_value: 4.0
+
+- id: protein_rations
+  name: Protein Rations
+  category: consumable
+  base_value: 14.0
+
+- id: produce_rations
+  name: Produce Rations
+  category: consumable
+  base_value: 12.0

@@ -92,9 +92,11 @@
     - basic_construction
   unlocks:
     # hydroponic_bay ships in the starter set (issue #166) — hydroponics
-    # gates the higher-throughput water_treatment_plant instead.
+    # gates the higher-throughput water_treatment_plant and the
+    # distinct-foodstuffs food_processing_plant instead (issue #211).
     buildings:
       - water_treatment_plant
+      - food_processing_plant
     bonuses:
       - food_production_15_percent
 

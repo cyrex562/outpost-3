@@ -14,11 +14,56 @@
 - id: food_ration
   name: Food Ration
   description: >
-    Compact, shelf-stable ration block.  Produced by hydroponic bays
-    and distributed to the colony population each sol.
+    Compact, shelf-stable ration block — the colony's tracked survival
+    need (`outpost_core/src/needs.rs`). Produced by hydroponic bays
+    alongside a biomass byproduct and distributed to the colony population
+    each sol (issue #211: biomass byproduct added; needs-system tracking
+    unchanged — see `biomass`'s description for why).
   category: consumable
   phase: solid
   base_value: 8.0
+  tradeable: true
+
+- id: biomass
+  name: Biomass
+  description: >
+    Raw harvested plant matter — a byproduct of `hydroponic_bay`'s
+    `grow_rations` recipe alongside its primary `food_ration` output
+    (mirrors the `structural_mine`/`waste_rock` byproduct pattern). Feeds
+    tech-gated distinct-foodstuff recipes (`protein_rations`,
+    `produce_rations`) as separate tradeable end-items in their own
+    right — not merged back into `food_ration`, so the starter-set
+    survival bar #166 established is untouched by this issue (issue #211,
+    resolving `docs/DESIGN.md`'s "several distinct foodstuffs" TBD). A
+    diet-variety stability bonus was considered and explicitly deferred —
+    no `outpost_core/src/needs.rs` changes here — pending real
+    playtesting signal on the right weight, matching #209's precedent for
+    consumer_goods/luxury_goods.
+  category: raw_material
+  phase: solid
+  base_value: 4.0
+  tradeable: true
+
+- id: protein_rations
+  name: Protein Rations
+  description: >
+    Cultured/fermented protein foodstuff, distinct from the staple
+    `food_ration` — a tradeable end-item, not a needs-system input this
+    iteration (issue #211).
+  category: consumable
+  phase: solid
+  base_value: 14.0
+  tradeable: true
+
+- id: produce_rations
+  name: Produce Rations
+  description: >
+    Fresh-pressed fruit/vegetable foodstuff, distinct from the staple
+    `food_ration` — a tradeable end-item, not a needs-system input this
+    iteration (issue #211).
+  category: consumable
+  phase: solid
+  base_value: 12.0
   tradeable: true
 
 - id: structural_ore
