@@ -47,10 +47,22 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: 'npm run build && npm run preview -- --port 4173',
-    url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      // outpost_web backend — required for specs that drive live game state
+      // (e.g. the found-colony flow). Run from the repo root so its default
+      // `content_dir: "content"` resolves to the real content pack.
+      command: 'cargo run --bin outpost_web',
+      url: 'http://localhost:3000/health',
+      cwd: '..',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command: 'npm run build && npm run preview -- --port 4173',
+      url: 'http://localhost:4173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 })

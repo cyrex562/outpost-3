@@ -45,6 +45,18 @@ export async function applyCommand(sessionId: string, cmd: Command): Promise<Gam
   })
 }
 
+/**
+ * Apply a command to the shared browser-mode engine (issue #220) — the same
+ * engine the WebSocket `new_game` flow bootstraps content/planet/colony
+ * onto. Returns the events produced.
+ */
+export async function applySharedCommand(cmd: Command): Promise<GameEvent[]> {
+  return request<GameEvent[]>('/api/command', {
+    method: 'POST',
+    body: JSON.stringify(cmd),
+  })
+}
+
 /** Get the full game state snapshot for a session. */
 export async function getSessionState(sessionId: string): Promise<unknown> {
   return request<unknown>(`/sessions/${sessionId}/state`)

@@ -89,7 +89,10 @@ async function startNewGame(): Promise<void> {
   error.value = null
   try {
     if (!isTauri) {
-      error.value = 'New game requires desktop mode.'
+      // Browser mode bootstraps through the WebSocket `new_game` flow
+      // against the shared engine instead of the Tauri `bootstrap` IPC
+      // command — see NewGameView.vue.
+      router.push('/new-game')
       return
     }
     // For "Custom" and "custom:*" selections, pass the buffered scalars payload.

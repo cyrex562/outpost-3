@@ -13,7 +13,8 @@ use outpost_core::content::loader::{PackLoader, RawFile};
 use outpost_core::content::registry::ContentRegistry;
 use outpost_core::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use outpost_core::needs::NeedsConfig;
-use outpost_core::{Command, Query};
+use outpost_core::system::SystemCommand;
+use outpost_core::{Command, GameEngine, Query};
 
 use crate::state::AppState;
 use crate::wsmsg::{
@@ -144,7 +145,10 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
 
 /// Convert a [`ClientCommand`] into a core [`Command`].
 #[allow(clippy::too_many_lines)]
-fn client_command_to_core(cmd: ClientCommand, _state: &AppState) -> Result<Command, String> {
+pub(crate) fn client_command_to_core(
+    cmd: ClientCommand,
+    _state: &AppState,
+) -> Result<Command, String> {
     use outpost_core::colony::ColonyId;
     use outpost_core::difficulty::DifficultyPreset;
     use outpost_core::expedition::FieldExpeditionId;
@@ -205,6 +209,56 @@ fn client_command_to_core(cmd: ClientCommand, _state: &AppState) -> Result<Comma
                 slot,
                 labour,
             })
+        }
+        ClientCommand::SetActiveRecipe {
+            colony_id,
+            building_type,
+            recipe_id,
+        } => {
+            let id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            Ok(Command::SetActiveRecipe {
+                colony_id: id,
+                building_type,
+                recipe_id,
+            })
+        }
+        ClientCommand::FoundColonyAtSite {
+            name,
+            starting_population,
+            site_id,
+            focus,
+            supplies_id,
+            supply_overrides,
+            body_id,
+        } => {
+            let site_id = uuid::Uuid::from_str(&site_id)
+                .map(outpost_core::trade::SiteId)
+                .map_err(|_| format!("invalid site_id: {site_id}"))?;
+            let body_id = body_id
+                .map(|b| {
+                    uuid::Uuid::from_str(&b)
+                        .map(outpost_core::system::BodyId)
+                        .map_err(|_| format!("invalid body_id: {b}"))
+                })
+                .transpose()?;
+            Ok(Command::FoundColonyAtSite {
+                name,
+                starting_population,
+                site_id,
+                focus,
+                supplies_id,
+                supply_overrides,
+                body_id,
+            })
+        }
+        ClientCommand::AssignColonyHomeBody { colony_id, body_id } => {
+            let colony_id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            let body_id = uuid::Uuid::from_str(&body_id)
+                .map(outpost_core::system::BodyId)
+                .map_err(|_| format!("invalid body_id: {body_id}"))?;
+            Ok(Command::AssignColonyHomeBody { colony_id, body_id })
         }
         ClientCommand::SetDifficulty { grade } => {
             let preset = match grade.to_lowercase().as_str() {
@@ -394,8 +448,10 @@ async fn handle_new_game(
 ) {
     let content_dir = state.config.content_dir.clone();
 
-    // 1. Load core content pack from disk.
-    let registry = match load_content_pack_from_dir(&content_dir.join("core")) {
+    // 1. Load the base content pack from disk — the full game pack (buildings,
+    // recipes, supply packages, star systems), not the legacy `core` pack
+    // (commodities/recipes only, no buildings/systems/supplies).
+    let registry = match load_content_pack_from_dir(&content_dir.join("base")) {
         Ok(r) => r,
         Err(e) => {
             let _ = send_error(socket, &format!("content load failed: {e}")).await;
@@ -435,6 +491,10 @@ async fn handle_new_game(
             })
             .map_err(|e| format!("SeedPlanet failed: {e}"))?;
         events.extend(seed_evs);
+
+        // Seed the star system's bodies from the content pack, so the
+        // founding wizard has real colonize targets (issue #220).
+        seed_system_from_content(&mut engine);
 
         // Found the initial colony.
         let colony_evs = engine
@@ -480,6 +540,8 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
         "buildings.yaml",
         "recipes.yaml",
         "default_directives.yaml",
+        "supplies.yaml",
+        "systems.yaml",
     ];
     let mut raw_contents: Vec<(String, String)> = Vec::new();
 
@@ -498,6 +560,86 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
         .collect();
 
     PackLoader::load(&raw_files).map_err(|e| format!("content pack error: {e}"))
+}
+
+/// Populate `engine.state.system_state` from the content pack's first
+/// authored star system, if any. No-op when the pack ships no `systems.yaml`.
+///
+/// Mirrors `outpost_tauri::commands::seed_system_from_content`.
+fn seed_system_from_content(engine: &mut GameEngine) {
+    let Some(system) = engine
+        .state
+        .registry
+        .as_ref()
+        .and_then(|r| r.star_systems().next().cloned())
+    else {
+        return;
+    };
+
+    // Pass 1: add every body and its authored attributes/role. `parent_body`
+    // is deferred to pass 2 (below) since it may name a body that hasn't
+    // been added yet — content validation only guarantees the name resolves
+    // *somewhere* in this system, not that it comes earlier.
+    let mut pending_parents: Vec<(outpost_core::system::BodyId, String)> = Vec::new();
+    for body in &system.bodies {
+        let _ = engine.apply(&Command::System(SystemCommand::AddBody {
+            name: body.name.clone(),
+            kind: body.kind.clone(),
+            distance_au: body.distance_au,
+        }));
+        // `AddBody` doesn't carry the resulting body id back; look it up by name.
+        let body_id = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .iter()
+            .find(|(_, b)| b.name == body.name)
+            .map(|(id, _)| id.clone());
+        let Some(id) = body_id else { continue };
+        let _ = engine.apply(&Command::System(SystemCommand::SetBodyAttributes {
+            body_id: id.clone(),
+            atmosphere_density: body.atmosphere_density,
+            atmosphere_hazard: body.atmosphere_hazard,
+            temperature: body.temperature,
+            gravity_g: body.gravity_g,
+            radiation: body.radiation,
+            subtype: body.subtype,
+            tidally_locked: body.tidally_locked,
+            axial_tilt_deg: body.axial_tilt_deg,
+            rotation_period_hours: body.rotation_period_hours,
+            moon_count: body.moon_count,
+        }));
+        if !matches!(body.role, outpost_core::system::SystemRole::Unassigned) {
+            let _ = engine.apply(&Command::System(SystemCommand::AssignRole {
+                body_id: id.clone(),
+                role: body.role.clone(),
+            }));
+        }
+        if let Some(parent_name) = &body.parent_body {
+            pending_parents.push((id, parent_name.clone()));
+        }
+    }
+
+    // Pass 2: resolve authored parent-body names now that every body in the
+    // system has a live BodyId.
+    for (body_id, parent_name) in pending_parents {
+        let parent_id = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .iter()
+            .find(|(_, b)| b.name == parent_name)
+            .map(|(id, _)| id.clone());
+        let Some(parent_body) = parent_id else {
+            continue;
+        };
+        let _ = engine.apply(&Command::System(SystemCommand::SetBodyParent {
+            body_id,
+            parent_body,
+        }));
+    }
 }
 
 /// Load a difficulty grade table from a YAML file.
@@ -563,6 +705,55 @@ mod tests {
             result.is_ok(),
             "core pack failed to load: {:?}",
             result.err()
+        );
+    }
+
+    /// `load_content_pack_from_dir` also picks up `supplies.yaml` and
+    /// `systems.yaml` from the real `content/base` pack (issue #220 — the
+    /// browser-mode `new_game` bootstrap needs both for the founding wizard).
+    #[test]
+    fn load_base_content_pack_includes_supplies_and_systems() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        if !base_dir.is_dir() {
+            return;
+        }
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+        assert!(
+            registry.supply_packages().count() > 0,
+            "expected at least one supply package from supplies.yaml"
+        );
+        assert!(
+            registry.star_systems().count() > 0,
+            "expected at least one star system from systems.yaml"
+        );
+    }
+
+    /// `seed_system_from_content` populates `system_state.node_map.bodies`
+    /// from the real `content/base` pack's `systems.yaml`, so the founding
+    /// wizard's colonize-targets list isn't empty after `NewGame` (issue #220).
+    #[test]
+    fn seed_system_from_content_populates_bodies_from_real_pack() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        if !base_dir.is_dir() {
+            return;
+        }
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        seed_system_from_content(&mut engine);
+
+        assert!(
+            !engine.state.system_state.node_map.bodies.is_empty(),
+            "expected at least one system body after seeding"
         );
     }
 

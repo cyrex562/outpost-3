@@ -8,6 +8,7 @@
 //!
 //! - `state`   — shared `AppState` (engine + broadcast channel)
 //! - `routes`  — HTTP REST endpoints + static frontend serving
+//! - `query_routes` — read-only wizard-support REST endpoints (issue #220)
 //! - `ws`      — WebSocket game-loop handler
 //! - `wsmsg`   — typed WebSocket message contract (server→client, client→server)
 //! - `config`  — runtime configuration
@@ -15,6 +16,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod query_routes;
 pub mod routes;
 pub mod sessions;
 pub mod state;

@@ -10,8 +10,10 @@ use uuid::Uuid;
 
 use outpost_core::{Command, EngineError};
 
+use crate::query_routes;
 use crate::state::AppState;
-use crate::ws::ws_handler;
+use crate::ws::{client_command_to_core, ws_handler};
+use crate::wsmsg::ClientCommand;
 
 /// Build the full application router.
 pub fn build_router(state: AppState) -> Router {
@@ -20,6 +22,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/colonies", get(list_colonies))
         .route("/api/sol", get(current_sol))
+        .route("/api/command", post(apply_shared_command))
+        .route(
+            "/api/colonize-targets",
+            get(query_routes::get_colonize_targets),
+        )
+        .route("/api/buildings", get(query_routes::list_buildings))
+        .route(
+            "/api/supply-packages",
+            get(query_routes::list_supply_packages),
+        )
+        .route("/api/planet-map", get(query_routes::get_planet_map))
+        .route("/api/system-bodies", get(query_routes::get_system_bodies))
         .route("/ws", get(ws_handler))
         // Session management
         .route("/sessions", post(create_session))
@@ -72,6 +86,60 @@ async fn current_sol(State(state): State<AppState>) -> impl IntoResponse {
             Json(json!({ "error": e.to_string() })),
         )
             .into_response(),
+    }
+}
+
+/// `POST /api/command` — apply a [`ClientCommand`] to the shared browser-mode
+/// engine.
+///
+/// This targets `AppState.engine` (the same engine the WebSocket `NewGame`
+/// flow bootstraps content/planet/colony onto), not a per-session engine —
+/// see `query_routes` for the rationale. Accepts the same `{"kind": ...}`
+/// tagged shape as the WS `command` message (and the frontend's `Command`
+/// type) rather than the core [`Command`] enum's externally-tagged shape,
+/// so it's a drop-in REST alternative to sending over the socket. Returns
+/// the events produced by the command in the same [`crate::wsmsg::ServerEvent`]
+/// wire shape the WebSocket `event` message uses — not the core [`Event`]
+/// enum's externally-tagged shape — so the frontend's shared `GameEvent`
+/// handling code (keyed on `.kind`) works identically over REST and WS.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+async fn apply_shared_command(
+    State(state): State<AppState>,
+    Json(client_cmd): Json<ClientCommand>,
+) -> impl IntoResponse {
+    let cmd = match client_command_to_core(client_cmd, &state) {
+        Ok(cmd) => cmd,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    };
+
+    let result = {
+        let mut engine = state.engine.lock().expect("engine lock");
+        engine.apply(&cmd)
+    };
+
+    match result {
+        Ok(events) => {
+            // Fan out to every WS-connected client watching the shared engine
+            // (a second browser tab, a future spectator client, ...), same as
+            // the WS command handler does — otherwise only the issuing tab's
+            // locally-injected copy of these events would ever be seen.
+            for e in &events {
+                let _ = state.events.send(e.clone());
+            }
+            let wire_events: Vec<crate::wsmsg::ServerEvent> = events
+                .iter()
+                .map(crate::wsmsg::ServerEvent::from_core)
+                .collect();
+            let json = serde_json::to_value(&wire_events).unwrap_or(Value::Array(vec![]));
+            (StatusCode::OK, Json(json)).into_response()
+        }
+        Err(e) => {
+            let status = engine_error_status(&e);
+            (status, Json(json!({ "error": e.to_string() }))).into_response()
+        }
     }
 }
 
