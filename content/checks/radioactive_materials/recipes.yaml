@@ -1,0 +1,34 @@
+# Recipes used in the radioactive-materials balance check — rates mirror
+# content/base/recipes.yaml exactly.
+- id: mine_fissile_ore
+  name: Mine Fissile Ore
+  building: fissile_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: fissile_ore
+      quantity: 5.0
+
+- id: refine_nuclear_fuel
+  name: Refine Nuclear Fuel
+  building: nuclear_refinery
+  cycle_sols: 1
+  inputs:
+    - id: fissile_ore
+      quantity: 4.0
+  outputs:
+    - id: nuclear_fuel
+      quantity: 3.0
+
+- id: generate_power_fission
+  name: Generate Power (Fission)
+  building: fission_reactor
+  cycle_sols: 1
+  inputs:
+    - id: nuclear_fuel
+      quantity: 2.0
+  outputs:
+    - id: power
+      quantity: 40.0
+    - id: radioactive_waste
+      quantity: 1.0

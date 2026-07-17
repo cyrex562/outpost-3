@@ -376,3 +376,44 @@
   base_value: 45.0
   tradeable: true
   weight: 0.1
+
+- id: fissile_ore
+  name: Fissile Ore
+  description: >
+    Uranium/thorium-family ore, mined from subsurface deposits — the raw
+    feedstock for nuclear fuel enrichment (issue #215).
+  category: metallic_ore
+  phase: solid
+  base_value: 50.0
+  tradeable: true
+
+- id: nuclear_fuel
+  name: Nuclear Fuel
+  description: >
+    Enriched/refined fissile material — powers a fission_reactor (issue
+    #215). Fills the tier-2 power gap between solar/wind (tier 1) and
+    fusion (tier 3, #166) that was in the original #166 brainstorm but
+    never shipped.
+  category: metal
+  phase: solid
+  base_value: 120.0
+  tradeable: true
+
+- id: radioactive_waste
+  name: Radioactive Waste
+  description: >
+    Spent fuel byproduct of running a fission_reactor (issue #215) — a
+    byproduct of reactor OPERATION, not of refining nuclear_fuel (the
+    refining step itself is modeled as clean; waste comes from burning
+    the fuel). Resolved design (Q&A before implementing): pure
+    tradeable/storable byproduct like `waste_rock` (#166), with no
+    hazard-system consumer yet — extending `outpost_core/src/hazard.rs`'s
+    `RadiationLeak` hazard kind to react to accumulated waste is a real
+    engine mechanic, deferred pending playtesting signal, matching the
+    established pattern for #209/#211's similar deferrals. `hazard.rs`
+    is intentionally untouched by this issue.
+  category: raw_material
+  phase: solid
+  base_value: 2.0
+  tradeable: true
+  weight: 1.5

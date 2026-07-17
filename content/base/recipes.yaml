@@ -127,6 +127,15 @@
     - id: noble_gases
       quantity: 6.0
 
+- id: mine_fissile_ore
+  name: Mine Fissile Ore
+  building: fissile_mine
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: fissile_ore
+      quantity: 5.0
+
 # ── Tier 2 ───────────────────────────────────────────────────────────────────
 
 - id: house_colonists_apartment
@@ -239,6 +248,33 @@
   outputs:
     - id: chemicals
       quantity: 2.0
+
+- id: refine_nuclear_fuel
+  name: Refine Nuclear Fuel
+  building: nuclear_refinery
+  cycle_sols: 1
+  inputs:
+    - id: fissile_ore
+      quantity: 4.0
+  outputs:
+    - id: nuclear_fuel
+      quantity: 3.0
+
+# radioactive_waste is a byproduct of running the reactor, not of
+# refining nuclear_fuel — resolved design decision, issue #215 (see
+# radioactive_waste's commodity description for the reasoning).
+- id: generate_power_fission
+  name: Generate Power (Fission)
+  building: fission_reactor
+  cycle_sols: 1
+  inputs:
+    - id: nuclear_fuel
+      quantity: 2.0
+  outputs:
+    - id: power
+      quantity: 40.0
+    - id: radioactive_waste
+      quantity: 1.0
 
 - id: treat_water
   name: Treat Water

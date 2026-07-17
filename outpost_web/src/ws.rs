@@ -1186,6 +1186,134 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that the fission_reactor (#215) both produces
+    /// power from nuclear_fuel and emits radioactive_waste as a byproduct
+    /// of running — the resolved design decision that waste comes from
+    /// reactor operation, not from refining, against the real content pack.
+    #[test]
+    fn fission_reactor_produces_power_and_radioactive_waste_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Fission Reactor Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("fission_reactor", 2));
+
+        // No nuclear_fuel seeded — the reactor should produce nothing.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert_eq!(engine.state.colonies[idx].pool.amount("power"), 0.0);
+        assert_eq!(
+            engine.state.colonies[idx].pool.amount("radioactive_waste"),
+            0.0
+        );
+
+        engine.state.colonies[idx]
+            .pool
+            .deposit("nuclear_fuel", 100.0);
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("power") > 0.0,
+            "fission_reactor should produce power once nuclear_fuel is available"
+        );
+        assert!(
+            engine.state.colonies[idx].pool.amount("radioactive_waste") > 0.0,
+            "fission_reactor should emit radioactive_waste as a byproduct of running"
+        );
+    }
+
+    /// Real-engine proof that the fissile_mine -> nuclear_refinery chain
+    /// (#215) actually works against the real content pack.
+    #[test]
+    fn nuclear_fuel_chain_produces_nuclear_fuel_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Nuclear Fuel Chain Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("fissile_mine", 1));
+        // Power source — fissile_mine alone demands 7kW.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("fissile_ore") > 0.0,
+            "fissile_mine should produce fissile_ore"
+        );
+
+        engine.state.colonies[idx]
+            .pool
+            .deposit("fissile_ore", 100.0);
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("nuclear_refinery", 2));
+        // nuclear_refinery alone demands 14kW; swap to a bigger array.
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk2", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("nuclear_fuel") > 0.0,
+            "nuclear_refinery should produce nuclear_fuel from fissile_ore"
+        );
+    }
+
     /// `load_difficulty_table` parses the real `content/difficulty.yaml`.
     #[test]
     fn load_real_difficulty_table_succeeds() {

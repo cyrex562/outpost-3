@@ -1,0 +1,31 @@
+# Assertions for the radioactive-materials balance check.
+#
+# Expected net rates (production - consumption), all per-sol:
+#   fissile_ore:      5.0 mined − 4.0 refined            = +1.0/sol
+#   nuclear_fuel:     3.0 refined − 2.0 consumed by reactor = +1.0/sol
+#   power:            40.0 produced, no consumer in this bundle = +40.0/sol
+#   radioactive_waste: 1.0 produced (reactor byproduct), no consumer = +1.0/sol
+#
+# No overall-verdict assertion: every net is comfortably positive by design
+# (BalanceVerdict::Trivial, not Closed) — see content/checks/bootstrap_colony/
+# for why that's expected and not a bug.
+
+- commodity: fissile_ore
+  expect: closed
+  min_net: 0.5
+  label: fissile-ore-not-in-deficit
+
+- commodity: nuclear_fuel
+  expect: closed
+  min_net: 0.5
+  label: nuclear-fuel-not-in-deficit
+
+- commodity: power
+  expect: closed
+  min_net: 10.0
+  label: fission-power-produced
+
+- commodity: radioactive_waste
+  expect: closed
+  min_net: 0.5
+  label: radioactive-waste-byproduct-accumulates

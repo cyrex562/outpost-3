@@ -208,6 +208,22 @@
     - id: structural_metal
       quantity: 18.0
 
+- id: fissile_mine
+  name: Fissile Mine
+  description: >
+    Shielded extraction of uranium/thorium-family deposits — feedstock
+    for nuclear fuel enrichment (issue #215).
+  category: extraction
+  power_delta: 7.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+
 # ── Tier 2 (advanced_materials / hydroponics / improved_solar) ─────────────
 
 - id: apartment_block
@@ -345,6 +361,44 @@
       quantity: 35.0
     - id: components
       quantity: 10.0
+
+- id: nuclear_refinery
+  name: Nuclear Refinery
+  description: >
+    Enriches fissile ore into reactor-grade nuclear fuel — slow, careful
+    processing (issue #215).
+  category: processing
+  power_delta: 14.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: advanced_materials
+  construction_cost:
+    - id: structural_metal
+      quantity: 40.0
+    - id: components
+      quantity: 15.0
+
+- id: fission_reactor
+  name: Fission Reactor
+  description: >
+    Mid-tier nuclear power plant — fills the gap between solar/wind
+    (tier 1) and fusion_reactor_prototype (tier 3, #166). Consumes
+    nuclear_fuel and produces a radioactive_waste byproduct as it runs
+    (issue #215).
+  category: power
+  power_delta: -40.0
+  worker_slots: 1
+  labor_required: 2
+  slot_cost: 2
+  construction_turns: 5
+  tech_prerequisite: improved_solar
+  construction_cost:
+    - id: structural_metal
+      quantity: 45.0
+    - id: components
+      quantity: 15.0
 
 # ── Tier 3 (automation / fusion_basics / planetary_life_support) ───────────
 
