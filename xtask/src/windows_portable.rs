@@ -61,7 +61,12 @@ pub fn build_windows_portable() -> Res<()> {
     setup_windows()?;
 
     println!("== Building frontend ==");
-    run("npm", &["--prefix", "frontend", "ci"])?;
+    // `npm install` rather than `npm ci`: this is a local dev/portable-build
+    // helper, not a CI pipeline — `ci`'s strict lockfile-sync requirement
+    // (any drift between package.json and package-lock.json, including
+    // benign per-platform optional-dependency differences) turns into a
+    // hard failure here where `install` would just reconcile and continue.
+    run("npm", &["--prefix", "frontend", "install"])?;
     run("npm", &["--prefix", "frontend", "run", "build"])?;
 
     println!("== Cross-compiling {BIN_NAME} for {TARGET} (cargo-xwin) ==");
