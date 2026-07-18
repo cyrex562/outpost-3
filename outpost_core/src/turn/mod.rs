@@ -214,6 +214,11 @@ pub struct GameState {
     /// Habitability attributes mitigated by completed tech, applied globally
     /// (retroactively) to every colony with a linked home body.
     pub habitability_mitigations: HashSet<crate::system::HabitabilityAttribute>,
+
+    // ── Outposts (issue #233) ─────────────────────────────────────────────
+    /// Lightweight, colony-anchored off-world presences — see
+    /// [`crate::outpost::Outpost`].
+    pub outposts: Vec<crate::outpost::Outpost>,
 }
 
 impl GameState {
@@ -261,6 +266,7 @@ impl GameState {
             infra_routes: HashMap::new(),
             expeditions: Vec::new(),
             habitability_mitigations: HashSet::new(),
+            outposts: Vec::new(),
         }
     }
 

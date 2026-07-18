@@ -38,6 +38,7 @@ pub mod migration;
 pub mod modifier;
 pub mod needs;
 pub mod orbital;
+pub mod outpost;
 pub mod population;
 pub mod predicate;
 pub mod research;
@@ -641,6 +642,93 @@ pub enum Command {
         /// Quantity to add to the colony's pool (capped by pool capacity,
         /// same as any other deposit).
         amount: f64,
+    },
+
+    // ── Outposts (issue #233) ───────────────────────────────────────────────
+    /// Establish a new [`outpost::Outpost`] anchored to `body_id`, owned by
+    /// `colony_id`.
+    ///
+    /// Outposts extend a colony's reach rather than existing independently —
+    /// establishment itself is never tech- or range-gated (per design
+    /// discussion); what can actually be *built* at an outpost is gated by
+    /// the same tech-prerequisite machinery used for colony buildings, plus
+    /// a max-range-from-parent-colony constraint deferred to issue #241.
+    EstablishOutpost {
+        /// Human-readable name.
+        name: String,
+        /// The colony establishing (and owning) this outpost.
+        colony_id: ColonyId,
+        /// The system body to anchor the outpost to.
+        body_id: system::BodyId,
+    },
+    /// Tear down an outpost, removing it from play.
+    ///
+    /// No refund of invested resources — matches [`Command::CancelConstruction`]'s
+    /// "in-progress project" refund model existing only for queued (not
+    /// completed) work; a completed outpost's buildings/stockpile are simply
+    /// discarded. Promotion to a full colony (issue #242) is the alternative
+    /// to decommissioning when the outpost's investment should be kept.
+    DecommissionOutpost {
+        /// Outpost to remove.
+        outpost_id: outpost::OutpostId,
+    },
+    /// Queue a construction project at an outpost, reusing the same
+    /// [`colony::ConstructionProject`]/[`colony::ConstructionQueue`]
+    /// machinery colonies use.
+    ///
+    /// Unlike colony construction, no `labor` commodity is withdrawn per
+    /// turn — outposts have no population to generate a labor supply from;
+    /// `labor_per_turn` is retained for API symmetry with
+    /// [`Command::QueueConstruction`] and future balancing but is not
+    /// currently consumed.
+    QueueOutpostConstruction {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Content-pack building type id.
+        building_type: String,
+        /// Build-slot cost.
+        slot_cost: u32,
+        /// Reserved for future use — see doc comment above.
+        labor_per_turn: u32,
+        /// Material cost, `(commodity_id, quantity)` pairs.
+        construction_cost: Vec<(String, f64)>,
+        /// Number of sols to complete.
+        construction_turns: u32,
+    },
+    /// Select which authored recipe an outpost's building type runs, for
+    /// building types with more than one recipe (mirrors
+    /// [`Command::SetActiveRecipe`]).
+    SetOutpostActiveRecipe {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Building type to select a recipe for.
+        building_type: String,
+        /// Recipe id to activate.
+        recipe_id: String,
+    },
+    /// Withdraw resources/research from an outpost's pool and contribute
+    /// them to a system megaproject.
+    ///
+    /// [`system::SystemCommand::ContributeToMegaproject`] already accepts
+    /// raw `resources`/`research` with no colony/source reference — this
+    /// command is a thin withdraw-then-forward wrapper so an outpost's
+    /// production can fund a megaproject without a full colony backing it
+    /// (the megaproject-support use case from issue #233).
+    ContributeOutpostToMegaproject {
+        /// Source outpost.
+        outpost_id: outpost::OutpostId,
+        /// Target megaproject.
+        project_id: system::MegaprojectId,
+        /// Resources to withdraw and contribute, `(commodity_id, quantity)`
+        /// pairs. Withdrawal is capped at what the outpost's pool actually
+        /// holds — under-supply contributes whatever is available, it does
+        /// not error.
+        resources: Vec<(String, f64)>,
+        /// Research to contribute — currently always `0.0` in practice since
+        /// outposts don't produce `research` without a research-capable
+        /// building authored for one, but accepted for symmetry with
+        /// `ContributeToMegaproject`.
+        research: f32,
     },
 }
 
@@ -1294,6 +1382,71 @@ pub enum Event {
         /// capacity capped it — see [`colony::pool::ColonyPool::deposit`]).
         amount: f64,
     },
+
+    // ── Outposts (issue #233) ───────────────────────────────────────────────
+    /// A new outpost was established.
+    OutpostEstablished {
+        /// The new outpost's id.
+        outpost_id: outpost::OutpostId,
+        /// The colony that established it.
+        colony_id: ColonyId,
+        /// The body it's anchored to.
+        body_id: system::BodyId,
+    },
+    /// An outpost was decommissioned and removed from play.
+    OutpostDecommissioned {
+        /// The removed outpost's id.
+        outpost_id: outpost::OutpostId,
+    },
+    /// An outpost queued a construction project.
+    OutpostConstructionQueued {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Building type queued.
+        building_type: String,
+        /// Queued project's id.
+        project_id: colony::ProjectId,
+    },
+    /// An outpost's queued construction project completed.
+    OutpostBuildingConstructed {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Building type completed.
+        building_type: String,
+    },
+    /// An outpost's per-building production shortfall (mirrors
+    /// [`Event::ProductionShortfall`]).
+    OutpostProductionShortfall {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Building type that fell short.
+        building_type: String,
+        /// Scale factor actually achieved (`1.0` = full output), in `[0.0, 1.0]`.
+        scale: f64,
+        /// Why production fell short.
+        reason: colony::ShortfallReason,
+    },
+    /// An outpost's active recipe selection changed.
+    OutpostActiveRecipeSet {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Building type the selection applies to.
+        building_type: String,
+        /// Newly active recipe id.
+        recipe_id: String,
+    },
+    /// An outpost contributed resources/research to a megaproject.
+    OutpostContributedToMegaproject {
+        /// Source outpost.
+        outpost_id: outpost::OutpostId,
+        /// Target megaproject.
+        project_id: system::MegaprojectId,
+        /// Resources actually withdrawn and contributed (may be less than
+        /// requested if the outpost's pool didn't hold enough).
+        resources: Vec<(String, f64)>,
+        /// Research contributed.
+        research: f32,
+    },
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -1308,6 +1461,9 @@ pub enum EngineError {
     /// The referenced colony does not exist.
     #[error("colony not found: {0}")]
     ColonyNotFound(ColonyId),
+    /// The referenced outpost does not exist.
+    #[error("outpost not found: {0}")]
+    OutpostNotFound(outpost::OutpostId),
     /// A command argument was out of range or otherwise invalid.
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
@@ -1668,6 +1824,23 @@ impl GameEngine {
                     }
                 }
 
+                // ── Step 1b: Outpost construction (issue #233) ──────────────
+                // No `labor` withdrawal — outposts have no population to fund
+                // one from; see `outpost::Outpost`'s module doc comment.
+                for out in &mut self.state.outposts {
+                    if let Some(completed) = out.build_queue.tick_active() {
+                        let building_type = completed.building_type.clone();
+                        out.buildings.push(colony::PlacedBuilding::new(
+                            &building_type,
+                            completed.slot_cost,
+                        ));
+                        events.push(Event::OutpostBuildingConstructed {
+                            outpost_id: out.id,
+                            building_type,
+                        });
+                    }
+                }
+
                 // ── Step 2: Needs resolution ────────────────────────────────
                 // Consume bulk commodities, update stability and population.
                 if let Some(config) = self.state.needs_config.clone() {
@@ -1778,6 +1951,50 @@ impl GameEngine {
                             }
                         }
                         colony.last_production = prod_outcome
+                            .building_results
+                            .into_iter()
+                            .map(|r| (r.building_type.clone(), r))
+                            .collect();
+                    }
+
+                    // ── Step 3b: Outpost production (issue #233) ────────────
+                    // Fixed skeleton-crew labor (no population to derive it
+                    // from) and a neutral 1.0 habitability modifier — outposts
+                    // aren't founded on habitability grounds, just anchored to
+                    // a body for its deposits/role. Upkeep shortfalls (power,
+                    // maintenance) reduce output via the same scale-factor
+                    // logic colonies get, for free, since this reuses
+                    // `process_production_scaled` unchanged.
+                    for out in &mut self.state.outposts {
+                        let placed: Vec<(String, u32)> = out
+                            .buildings
+                            .iter()
+                            .map(|b| (b.building_type.clone(), b.slot_cost))
+                            .collect();
+                        out.pool.reset_deltas();
+                        let prod_outcome = colony::process_production_scaled(
+                            &mut out.pool,
+                            &placed,
+                            outpost::OUTPOST_BASE_LABOR,
+                            registry,
+                            power_scalar,
+                            maintenance_scalar,
+                            maintenance_enabled,
+                            1.0,
+                            &out.active_recipes,
+                            &out.category_modifiers,
+                        );
+                        for result in &prod_outcome.building_results {
+                            for shortfall in &result.shortfalls {
+                                events.push(Event::OutpostProductionShortfall {
+                                    outpost_id: out.id,
+                                    building_type: result.building_type.clone(),
+                                    scale: result.scale,
+                                    reason: shortfall.reason.clone(),
+                                });
+                            }
+                        }
+                        out.last_production = prod_outcome
                             .building_results
                             .into_iter()
                             .map(|r| (r.building_type.clone(), r))
@@ -2713,6 +2930,145 @@ impl GameEngine {
                     commodity_id: commodity_id.clone(),
                     amount: granted,
                 }])
+            }
+
+            Command::EstablishOutpost {
+                name,
+                colony_id,
+                body_id,
+            } => {
+                self.find_colony_index(*colony_id)?;
+                let body = self
+                    .state
+                    .system_state
+                    .node_map
+                    .bodies
+                    .get(body_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!("body not found: {body_id}"))
+                    })?;
+                let mut new_outpost =
+                    outpost::Outpost::new(name.clone(), *colony_id, body_id.clone());
+                new_outpost.category_modifiers.clone_from(&body.modifiers);
+                let outpost_id = new_outpost.id;
+                self.state.outposts.push(new_outpost);
+                Ok(vec![Event::OutpostEstablished {
+                    outpost_id,
+                    colony_id: *colony_id,
+                    body_id: body_id.clone(),
+                }])
+            }
+
+            Command::DecommissionOutpost { outpost_id } => {
+                let idx = self.find_outpost_index(*outpost_id)?;
+                self.state.outposts.remove(idx);
+                Ok(vec![Event::OutpostDecommissioned {
+                    outpost_id: *outpost_id,
+                }])
+            }
+
+            Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type,
+                slot_cost,
+                labor_per_turn,
+                construction_cost,
+                construction_turns,
+            } => {
+                if building_type.trim().is_empty() {
+                    return Err(EngineError::InvalidArgument(
+                        "building_type must not be empty".into(),
+                    ));
+                }
+                let idx = self.find_outpost_index(*outpost_id)?;
+                let available = self.state.outposts[idx].slots_available();
+                if *slot_cost > available {
+                    return Err(EngineError::SlotCapacityExceeded {
+                        needed: *slot_cost,
+                        available,
+                    });
+                }
+                let project = colony::ConstructionProject::new(
+                    building_type.clone(),
+                    *slot_cost,
+                    *labor_per_turn,
+                    construction_cost.clone(),
+                    *construction_turns,
+                );
+                let project_id = project.id;
+                self.state.outposts[idx].build_queue.enqueue(project);
+                Ok(vec![Event::OutpostConstructionQueued {
+                    outpost_id: *outpost_id,
+                    building_type: building_type.clone(),
+                    project_id,
+                }])
+            }
+
+            Command::SetOutpostActiveRecipe {
+                outpost_id,
+                building_type,
+                recipe_id,
+            } => {
+                let idx = self.find_outpost_index(*outpost_id)?;
+                let registry = self.state.registry.as_ref().ok_or_else(|| {
+                    EngineError::InvalidArgument(
+                        "no content registry loaded — cannot validate recipe selection".into(),
+                    )
+                })?;
+                let recipe = registry
+                    .recipes()
+                    .find(|r| &r.id == recipe_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!("unknown recipe: {recipe_id}"))
+                    })?;
+                if &recipe.building != building_type {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "recipe '{recipe_id}' belongs to building '{}', not '{building_type}'",
+                        recipe.building
+                    )));
+                }
+                self.state.outposts[idx]
+                    .active_recipes
+                    .insert(building_type.clone(), recipe_id.clone());
+                Ok(vec![Event::OutpostActiveRecipeSet {
+                    outpost_id: *outpost_id,
+                    building_type: building_type.clone(),
+                    recipe_id: recipe_id.clone(),
+                }])
+            }
+
+            Command::ContributeOutpostToMegaproject {
+                outpost_id,
+                project_id,
+                resources,
+                research,
+            } => {
+                let idx = self.find_outpost_index(*outpost_id)?;
+                let withdrawn: Vec<(String, f64)> = resources
+                    .iter()
+                    .map(|(commodity_id, amount)| {
+                        let actual = self.state.outposts[idx]
+                            .pool
+                            .withdraw(commodity_id, *amount);
+                        (commodity_id.clone(), actual)
+                    })
+                    .collect();
+                let sys_cmd = system::SystemCommand::ContributeToMegaproject {
+                    project_id: project_id.clone(),
+                    resources: withdrawn.clone(),
+                    research: *research,
+                };
+                let sys_events =
+                    system::apply_system_command(&mut self.state.system_state, &sys_cmd)
+                        .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+                let mut events: Vec<Event> = vec![Event::OutpostContributedToMegaproject {
+                    outpost_id: *outpost_id,
+                    project_id: project_id.clone(),
+                    resources: withdrawn,
+                    research: *research,
+                }];
+                events.extend(sys_events.into_iter().map(Event::System));
+                Ok(events)
             }
 
             Command::OpenEmigrationGate {
@@ -4028,6 +4384,15 @@ impl GameEngine {
             .iter()
             .position(|c| c.id == id)
             .ok_or(EngineError::ColonyNotFound(id))
+    }
+
+    /// Find the index of an outpost by ID, or return [`EngineError::OutpostNotFound`].
+    fn find_outpost_index(&self, id: outpost::OutpostId) -> Result<usize, EngineError> {
+        self.state
+            .outposts
+            .iter()
+            .position(|o| o.id == id)
+            .ok_or(EngineError::OutpostNotFound(id))
     }
 
     /// Instantiate default directives from the loaded content registry and
@@ -5955,6 +6320,505 @@ mod tests {
             }
             other => panic!("expected DebugResourcesGranted, got {other:?}"),
         }
+    }
+
+    // ── Outposts (issue #233) ─────────────────────────────────────────────────
+
+    /// Establish a colony + a body for outpost tests to anchor to. Returns
+    /// `(engine, colony_id, body_id)`.
+    fn setup_colony_and_body(engine: &mut GameEngine) -> (ColonyId, system::BodyId) {
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Parent Colony".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Mining Belt".into(),
+                kind: system::BodyKind::AsteroidBelt,
+                distance_au: 2.0,
+            }))
+            .unwrap();
+        let body_id = match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+        (colony_id, body_id)
+    }
+
+    fn registry_with_mining_outpost_building() -> crate::content::ContentRegistry {
+        use crate::content::{
+            BuildingCategory, BuildingDef, ContentRegistry, Ingredient, RecipeDef,
+        };
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "mining_outpost".into(),
+            name: "Mining Outpost".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "mine_structural_ore_outpost".into(),
+            name: "Mine Structural Ore".into(),
+            building: "mining_outpost".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "structural_ore".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        reg
+    }
+
+    #[test]
+    fn establish_outpost_links_parent_colony_and_body() {
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Mining Camp Alpha".into(),
+                colony_id,
+                body_id: body_id.clone(),
+            })
+            .unwrap();
+        let outpost_id = match &events[0] {
+            Event::OutpostEstablished {
+                outpost_id,
+                colony_id: evt_colony,
+                body_id: evt_body,
+            } => {
+                assert_eq!(*evt_colony, colony_id);
+                assert_eq!(*evt_body, body_id);
+                *outpost_id
+            }
+            other => panic!("expected OutpostEstablished, got {other:?}"),
+        };
+
+        let outpost = engine
+            .state
+            .outposts
+            .iter()
+            .find(|o| o.id == outpost_id)
+            .expect("outpost must be stored");
+        assert_eq!(outpost.parent_colony_id, colony_id);
+        assert_eq!(outpost.body_id, body_id);
+        assert_eq!(outpost.name, "Mining Camp Alpha");
+    }
+
+    #[test]
+    fn establish_outpost_fails_for_unknown_colony() {
+        let mut engine = GameEngine::new();
+        let (_, body_id) = setup_colony_and_body(&mut engine);
+        let bogus = uuid::Uuid::new_v4();
+        let result = engine.apply(&Command::EstablishOutpost {
+            name: "Ghost Camp".into(),
+            colony_id: bogus,
+            body_id,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn establish_outpost_fails_for_unknown_body() {
+        let mut engine = GameEngine::new();
+        let (colony_id, _) = setup_colony_and_body(&mut engine);
+        let bogus_body = system::BodyId::new();
+        let result = engine.apply(&Command::EstablishOutpost {
+            name: "Ghost Camp".into(),
+            colony_id,
+            body_id: bogus_body,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decommission_outpost_removes_it() {
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Temp Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+
+        assert_eq!(engine.state.outposts.len(), 1);
+        engine
+            .apply(&Command::DecommissionOutpost { outpost_id })
+            .unwrap();
+        assert!(engine.state.outposts.is_empty());
+    }
+
+    #[test]
+    fn decommission_outpost_fails_for_unknown_outpost() {
+        let mut engine = GameEngine::new();
+        let bogus = uuid::Uuid::new_v4();
+        let result = engine.apply(&Command::DecommissionOutpost { outpost_id: bogus });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn queue_outpost_construction_respects_slot_capacity() {
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+
+        // OUTPOST_BASE_SLOT_CAPACITY is 2 — a slot_cost of 3 must be rejected.
+        let result = engine.apply(&Command::QueueOutpostConstruction {
+            outpost_id,
+            building_type: "mining_outpost".into(),
+            slot_cost: 3,
+            labor_per_turn: 1,
+            construction_cost: vec![],
+            construction_turns: 1,
+        });
+        assert!(matches!(
+            result,
+            Err(EngineError::SlotCapacityExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn outpost_construction_completes_via_advance_colony_sol() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_mining_outpost_building());
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+
+        engine
+            .apply(&Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type: "mining_outpost".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(events.iter().any(
+            |e| matches!(e, Event::OutpostBuildingConstructed { outpost_id: o, building_type } if *o == outpost_id && building_type == "mining_outpost")
+        ));
+        let outpost = &engine.state.outposts[0];
+        assert_eq!(outpost.buildings.len(), 1);
+        assert_eq!(outpost.buildings[0].building_type, "mining_outpost");
+    }
+
+    #[test]
+    fn outpost_mining_building_produces_raw_material_into_pool() {
+        // End-to-end: establish an outpost, build a mining building, advance
+        // a sol, and confirm the raw material actually lands in the
+        // outpost's pool — the core "single-resource mining/refining" use
+        // case issue #233's Definition of Done calls out explicitly.
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_mining_outpost_building());
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Ore Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+
+        engine
+            .apply(&Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type: "mining_outpost".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+        // Sol 1: construction completes, building placed — no production yet
+        // this same sol (matches colony behavior: production runs against
+        // buildings present at the *start* of the step).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        // Sol 2: the now-operational building produces ore.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let outpost = &engine.state.outposts[0];
+        assert!(
+            outpost.pool.amount("structural_ore") > 0.0,
+            "expected structural_ore in outpost pool, got {}",
+            outpost.pool.amount("structural_ore")
+        );
+    }
+
+    #[test]
+    fn outpost_production_shortfall_reduces_output_without_power() {
+        use crate::content::{
+            BuildingCategory, BuildingDef, ContentRegistry, Ingredient, RecipeDef,
+        };
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "power_hungry_outpost".into(),
+            name: "Power-hungry Outpost".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "mine_needs_power".into(),
+            name: "Mine (needs power)".into(),
+            building: "power_hungry_outpost".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "structural_ore".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 50.0, // no power source at this outpost — brownout.
+        });
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(reg);
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Dark Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+        engine
+            .apply(&Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type: "power_hungry_outpost".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap(); // construction completes
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap(); // production runs, no power
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::OutpostProductionShortfall { outpost_id: o, .. } if *o == outpost_id
+            )),
+            "expected an OutpostProductionShortfall event when no power is available"
+        );
+        let outpost = &engine.state.outposts[0];
+        assert!(
+            outpost.pool.amount("structural_ore") < 10.0,
+            "output should be scaled down by the power shortfall, got {}",
+            outpost.pool.amount("structural_ore")
+        );
+    }
+
+    #[test]
+    fn set_outpost_active_recipe_validates_building_match() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_mining_outpost_building());
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+
+        // Correct building match succeeds.
+        engine
+            .apply(&Command::SetOutpostActiveRecipe {
+                outpost_id,
+                building_type: "mining_outpost".into(),
+                recipe_id: "mine_structural_ore_outpost".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            engine.state.outposts[0]
+                .active_recipes
+                .get("mining_outpost")
+                .map(String::as_str),
+            Some("mine_structural_ore_outpost")
+        );
+
+        // Mismatched building is rejected.
+        let result = engine.apply(&Command::SetOutpostActiveRecipe {
+            outpost_id,
+            building_type: "smelter".into(),
+            recipe_id: "mine_structural_ore_outpost".into(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn contribute_outpost_to_megaproject_withdraws_and_forwards() {
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Support Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+
+        // Stock the outpost pool with more steel than the megaproject needs.
+        engine.state.outposts[0].pool.deposit("steel", 800.0);
+
+        let events = engine
+            .apply(&Command::System(
+                system::SystemCommand::RegisterMegaproject {
+                    name: "Interstellar Expedition".into(),
+                    kind: system::MegaprojectKind::InterstellarExpedition,
+                    milestones: vec![system::MilestoneSpec {
+                        label: "Hull Construction".into(),
+                        resource_cost: vec![("steel".into(), 500.0)],
+                        research_cost: 0.0,
+                    }],
+                },
+            ))
+            .unwrap();
+        let project_id = match &events[0] {
+            Event::System(system::SystemEvent::MegaprojectRegistered { project_id, .. }) => {
+                project_id.clone()
+            }
+            other => panic!("expected MegaprojectRegistered, got {other:?}"),
+        };
+
+        let events = engine
+            .apply(&Command::ContributeOutpostToMegaproject {
+                outpost_id,
+                project_id: project_id.clone(),
+                resources: vec![("steel".into(), 500.0)],
+                research: 0.0,
+            })
+            .unwrap();
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::OutpostContributedToMegaproject { outpost_id: o, .. } if *o == outpost_id
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::System(system::SystemEvent::MilestoneCompleted { .. })
+        )));
+        // Withdrawn from the outpost pool.
+        assert!((engine.state.outposts[0].pool.amount("steel") - 300.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contribute_outpost_to_megaproject_caps_withdrawal_at_pool_amount() {
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Poor Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+        // Only 50 steel available, but request contributing 500.
+        engine.state.outposts[0].pool.deposit("steel", 50.0);
+
+        let events = engine
+            .apply(&Command::System(
+                system::SystemCommand::RegisterMegaproject {
+                    name: "Interstellar Expedition".into(),
+                    kind: system::MegaprojectKind::InterstellarExpedition,
+                    milestones: vec![system::MilestoneSpec {
+                        label: "Hull Construction".into(),
+                        resource_cost: vec![("steel".into(), 500.0)],
+                        research_cost: 0.0,
+                    }],
+                },
+            ))
+            .unwrap();
+        let project_id = match &events[0] {
+            Event::System(system::SystemEvent::MegaprojectRegistered { project_id, .. }) => {
+                project_id.clone()
+            }
+            other => panic!("expected MegaprojectRegistered, got {other:?}"),
+        };
+
+        engine
+            .apply(&Command::ContributeOutpostToMegaproject {
+                outpost_id,
+                project_id,
+                resources: vec![("steel".into(), 500.0)],
+                research: 0.0,
+            })
+            .unwrap();
+
+        // Pool can't go negative — only what was actually held gets withdrawn.
+        assert!((engine.state.outposts[0].pool.amount("steel")).abs() < 1e-6);
     }
 
     /// A colony with an empty mask never causes an interrupt halt.

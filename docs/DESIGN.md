@@ -206,6 +206,25 @@ Deposit *generosity* (not coverage) scales with difficulty via `ModifiableQuanti
 
 **Explicitly deferred** (tracked as a follow-up issue): deposits don't yet gate mining/production at all — every extraction recipe currently runs unconditionally regardless of local deposits. The guarantees above are forward-looking world-state, not yet a live gameplay constraint. Real sizing of "how much abundance is actually enough" needs that gating to exist first, then playtesting data (a proposed workflow: a tester uses `Command::DebugGrantColonyResources` to simulate having enough of a resource, and the resulting playthrough is analyzed to back out real requirements) — not a one-shot calculation.
 
+### 8.3B Outposts (issue #233)
+
+An **outpost** is a lightweight, single-purpose off-world presence that extends a colony's reach — the mechanism by which a colony reaches resources or performs work "located elsewhere" in the system (§232's motivating need), rather than relocating or founding a second full colony everywhere a needed material happens to be. Always owned by a parent colony (`parent_colony_id`) and anchored to a specific system body (`body_id`); it does not exist independently.
+
+**Architecture decision** (resolved after auditing `orbital::OrbitalStation` and the megaproject mechanic, per this issue's own "avoid a fourth parallel thing that produces stuff on a body" caution):
+
+- `orbital::OrbitalStation` was ruled out as a base to generalize — it's purely structural bookkeeping (slot cost, a turn-countdown construction project) with no production/upkeep loop of its own, and is scoped system-wide rather than to a body.
+- A bare `PlacedBuilding` wrapper was ruled out — `PlacedBuilding` has no resource pool or construction-queue context of its own; it's meaningless detached from a container that owns a `ColonyPool`.
+- The chosen shape: a genuinely new `outpost::Outpost` struct, stored in its own `GameState.outposts: Vec<Outpost>` — **not** a reuse of `Colony`/`state.colonies`, since `Colony` and `PopulationPool` are 1:1-indexed everywhere in the codebase (`FoundColony` always creates both together) and an entity with no population would break that invariant.
+- Despite being a new struct, `Outpost` shares the *same internals* a `Colony` already uses rather than duplicating the production pipeline: `ColonyPool`, `PlacedBuilding`, `ConstructionQueue`/`ConstructionProject`, and `colony::process_production_scaled` are all reused unchanged, because none of them are actually coupled to `Colony`/population — `process_production_scaled` takes a raw `labor: f32` and a pool, not a `Colony` reference. An outpost supplies a fixed skeleton-crew `labor` constant (`outpost::OUTPOST_BASE_LABOR`) in place of a `PopulationPool`-derived value, and a neutral `1.0` habitability modifier (outposts aren't founded on habitability grounds).
+
+**Upkeep shortfalls reduce output, they don't destroy the outpost** — this falls out for free from reusing `process_production_scaled` unchanged: a power/maintenance shortfall already scales a building's output down via the same mechanism a colony building uses, with no new failure-state machinery needed.
+
+**Establishment is never gated** (tech, range, or otherwise) — any colony can `EstablishOutpost` on any known body at any time. What can actually be *built* at an established outpost is gated by tech/bonuses/max-range-from-parent-colony — deliberately split into a follow-up (#241) since it's a distinct, content-authoring-heavy concern that doesn't need to block the base mechanism.
+
+**Megaproject support** reuses `system::SystemCommand::ContributeToMegaproject` as-is — that command already accepts raw `resources`/`research` with no colony/source reference, so `Command::ContributeOutpostToMegaproject` is a thin withdraw-from-outpost-pool-then-forward wrapper, not a new contribution pathway.
+
+**Deliberately out of scope for #233** (tracked as sub-issues of #233): tech/bonus-gated building availability and the max-range constraint (#241); promotion of an established outpost into a full colony/city (#242); frontend UI (#243).
+
 ---
 
 ## 9. Expeditions & Exploration

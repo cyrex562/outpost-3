@@ -48,7 +48,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 3: full `GameState` blob added (`state_json` column); `sandbox_mode` stored in blob.
 /// Schema version 4: `expeditions` field added to `FullStateBlob`.
 /// Schema version 5: `habitability_mitigations` field added to `FullStateBlob` (issue #185).
-pub const SCHEMA_VERSION: u32 = 5;
+/// Schema version 6: `outposts` field added to `FullStateBlob` (issue #233).
+pub const SCHEMA_VERSION: u32 = 6;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,10 @@ struct FullStateBlob {
     // ── #185 Tech-driven habitability mitigation ────────────────────────────
     #[serde(default)]
     habitability_mitigations: HashSet<crate::system::HabitabilityAttribute>,
+
+    // ── #233 Outposts ─────────────────────────────────────────────────────────
+    #[serde(default)]
+    outposts: Vec<crate::outpost::Outpost>,
 }
 
 fn default_true() -> bool {
@@ -206,6 +211,7 @@ impl FullStateBlob {
             last_menace_definition: state.last_menace_definition.clone(),
             maintenance_enabled: state.maintenance_enabled,
             habitability_mitigations: state.habitability_mitigations.clone(),
+            outposts: state.outposts.clone(),
         }
     }
 
@@ -250,6 +256,7 @@ impl FullStateBlob {
             last_menace_definition: self.last_menace_definition,
             maintenance_enabled: self.maintenance_enabled,
             habitability_mitigations: self.habitability_mitigations,
+            outposts: self.outposts,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
