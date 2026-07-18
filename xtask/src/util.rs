@@ -15,10 +15,28 @@ pub fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Resolve a program name for spawning via [`std::process::Command`].
+///
+/// On Windows, npm-ecosystem tools (`npm`, `npx`, `yarn`, `pnpm`) are
+/// installed as `.cmd` shims (batch files), not `.exe`s. `CreateProcess`
+/// (what `Command::spawn` calls into) only auto-resolves `.exe`/`.com` —
+/// the `.cmd`/`.bat` extensions in `PATHEXT` are a `cmd.exe`-level
+/// convention, not something `Command::new("npm")` gets for free — so an
+/// unqualified `"npm"` fails to spawn with "program not found" on Windows
+/// even though `npm` is on `PATH`. Real executables (`cargo`, `rustup`,
+/// `zip`) are unaffected and pass through unchanged.
+fn resolve_program(program: &str) -> String {
+    if cfg!(windows) && matches!(program, "npm" | "npx" | "yarn" | "pnpm") {
+        format!("{program}.cmd")
+    } else {
+        program.to_string()
+    }
+}
+
 /// Run a command from the repo root, streaming its output live, and return
 /// an error carrying the command line if it exits non-zero or fails to spawn.
 pub fn run(program: &str, args: &[&str]) -> Res<()> {
-    let status = Command::new(program)
+    let status = Command::new(resolve_program(program))
         .args(args)
         .current_dir(repo_root())
         .status()
@@ -36,7 +54,7 @@ pub fn run(program: &str, args: &[&str]) -> Res<()> {
 /// error — used for preflight checks where a non-zero exit just means
 /// "not installed", not a real failure worth aborting on.
 pub fn run_ok(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
+    Command::new(resolve_program(program))
         .args(args)
         .current_dir(repo_root())
         .status()
@@ -47,7 +65,7 @@ pub fn run_ok(program: &str, args: &[&str]) -> bool {
 /// Capture a command's stdout as UTF-8 (lossily), from the repo root.
 /// Returns `None` if the command fails to spawn or exits non-zero.
 pub fn capture(program: &str, args: &[&str]) -> Option<String> {
-    Command::new(program)
+    Command::new(resolve_program(program))
         .args(args)
         .current_dir(repo_root())
         .output()
