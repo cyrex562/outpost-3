@@ -39,6 +39,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/outpost-targets/:colony_id",
             get(query_routes::get_outpost_targets),
         )
+        .route("/api/tech-tree", get(query_routes::get_tech_tree))
         .route("/ws", get(ws_handler))
         // Session management
         .route("/sessions", post(create_session))

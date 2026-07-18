@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getTechTree, type TechNode } from '@/services/tauriBridge'
+import { getTechTree, type TechNode, type TechEffect } from '@/services/tauriBridge'
 import { useGameStore } from '@/stores/game'
 
 const router = useRouter()
@@ -10,6 +10,8 @@ const gameStore = useGameStore()
 const nodes = ref<TechNode[]>([])
 const selected = ref<TechNode | null>(null)
 const error = ref<string | null>(null)
+const categoryFilter = ref<string>('')
+const tierFilter = ref<string>('')
 
 async function refresh(): Promise<void> {
   try {
@@ -23,6 +25,37 @@ async function refresh(): Promise<void> {
 }
 
 onMounted(refresh)
+
+// ── Category / tier browsing (issue #250 — the tree grew from 12 to 81 nodes) ──
+
+const categories = computed<string[]>(() => {
+  const set = new Set(nodes.value.map((n) => n.category).filter(Boolean))
+  return Array.from(set).sort()
+})
+
+const tierOptions = computed<number[]>(() => {
+  const set = new Set(nodes.value.map((n) => n.tier))
+  return Array.from(set).sort((a, b) => a - b)
+})
+
+const filteredNodes = computed<TechNode[]>(() =>
+  nodes.value.filter((n) => {
+    if (categoryFilter.value && n.category !== categoryFilter.value) return false
+    if (tierFilter.value && String(n.tier) !== tierFilter.value) return false
+    return true
+  }),
+)
+
+/** The player's queued-but-not-yet-active research, in actual FIFO drain order. */
+const queuedNodes = computed<TechNode[]>(() =>
+  nodes.value
+    .filter((n) => n.state === 'queued')
+    .sort((a, b) => (a.queue_position ?? 0) - (b.queue_position ?? 0)),
+)
+
+const activeNode = computed<TechNode | undefined>(() =>
+  nodes.value.find((n) => n.state === 'in_progress'),
+)
 
 // ── Layered layout: tier = 1 + max(tier(prereqs)) ─────────────────────────
 
@@ -45,7 +78,7 @@ const tiers = computed<TechNode[][]>(() => {
   }
 
   const buckets: TechNode[][] = []
-  for (const n of nodes.value) {
+  for (const n of filteredNodes.value) {
     const t = resolve(n.id)
     while (buckets.length <= t) buckets.push([])
     buckets[t].push(n)
@@ -130,6 +163,39 @@ async function research(node: TechNode): Promise<void> {
   await gameStore.sendCommand({ kind: 'research_tech', tech_id: node.id })
   await refresh()
 }
+
+async function enqueue(node: TechNode): Promise<void> {
+  await gameStore.sendCommand({ kind: 'enqueue_research', tech_id: node.id })
+  await refresh()
+}
+
+async function cancelResearch(): Promise<void> {
+  await gameStore.sendCommand({ kind: 'cancel_research' })
+  await refresh()
+}
+
+function effectLabel(effect: TechEffect): string {
+  switch (effect.type) {
+    case 'unlock_building':
+      return `Unlocks building: ${effect.building_id}`
+    case 'unlock_commodity':
+      return `Unlocks commodity: ${effect.commodity_id}`
+    case 'unlock_capability':
+      return `Unlocks capability: ${effect.capability_id}`
+    case 'bonus':
+      return `+${(effect.value * 100).toFixed(0)}% ${effect.category.replace(/_/g, ' ')}`
+    case 'mitigate_attribute':
+      return `Mitigates ${effect.attribute.replace(/_/g, ' ')} penalty`
+    case 'survey_modifier_bonus':
+      return `+${(effect.full_reveal_bonus * 100).toFixed(0)}% full-reveal / +${(effect.partial_reveal_bonus * 100).toFixed(0)}% partial-reveal survey odds`
+    case 'reduce_transit_time':
+      return `-${(effect.fraction * 100).toFixed(0)}% expedition transit time`
+    case 'extend_outpost_range':
+      return `+${effect.bonus_au.toFixed(1)} AU outpost range`
+    default:
+      return JSON.stringify(effect)
+  }
+}
 </script>
 
 <template>
@@ -139,11 +205,42 @@ async function research(node: TechNode): Promise<void> {
       <div class="legend">
         <span class="legend-item state-researched">researched</span>
         <span class="legend-item state-in_progress">in progress</span>
+        <span class="legend-item state-queued">queued</span>
         <span class="legend-item state-available">available</span>
         <span class="legend-item state-locked">locked</span>
       </div>
       <button class="btn" @click="router.push('/system')">Back to System</button>
     </header>
+
+    <div class="filters" data-testid="tech-filters">
+      <label>
+        Category
+        <select v-model="categoryFilter" data-testid="tech-filter-category">
+          <option value="">All</option>
+          <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
+        </select>
+      </label>
+      <label>
+        Tier
+        <select v-model="tierFilter" data-testid="tech-filter-tier">
+          <option value="">All</option>
+          <option v-for="t in tierOptions" :key="t" :value="String(t)">{{ t }}</option>
+        </select>
+      </label>
+    </div>
+
+    <div v-if="activeNode || queuedNodes.length" class="queue-panel" data-testid="research-queue">
+      <div v-if="activeNode" class="queue-active">
+        Researching: <strong>{{ activeNode.name }}</strong>
+        ({{ (activeNode.progress * 100).toFixed(0) }}%)
+        <button class="btn" :disabled="gameStore.busy" @click="cancelResearch">
+          {{ queuedNodes.length ? `Cancel (clears ${queuedNodes.length} queued too)` : 'Cancel' }}
+        </button>
+      </div>
+      <ol v-if="queuedNodes.length" class="queue-list">
+        <li v-for="n in queuedNodes" :key="n.id">{{ n.name }}</li>
+      </ol>
+    </div>
 
     <div class="graph-wrap">
       <svg
@@ -223,15 +320,30 @@ async function research(node: TechNode): Promise<void> {
           {{ selected.prerequisites.length ? selected.prerequisites.join(', ') : 'None' }}
         </dd>
       </dl>
-      <button
-        v-if="selected.state === 'available'"
-        class="btn primary"
-        :disabled="gameStore.busy"
-        @click="research(selected)"
-      >
-        Research
-      </button>
-      <div v-else-if="selected.state === 'locked'" class="hint">
+      <ul v-if="selected.effects.length" class="effects" data-testid="tech-effects">
+        <li v-for="(e, i) in selected.effects" :key="i">{{ effectLabel(e) }}</li>
+      </ul>
+      <div class="actions">
+        <button
+          v-if="selected.state === 'available' && !activeNode"
+          class="btn primary"
+          data-testid="tech-research-btn"
+          :disabled="gameStore.busy"
+          @click="research(selected)"
+        >
+          Research
+        </button>
+        <button
+          v-if="selected.state === 'available' && activeNode"
+          class="btn primary"
+          data-testid="tech-enqueue-btn"
+          :disabled="gameStore.busy"
+          @click="enqueue(selected)"
+        >
+          Queue after {{ activeNode.name }}
+        </button>
+      </div>
+      <div v-if="selected.state === 'locked'" class="hint">
         Complete prerequisites to unlock.
       </div>
     </aside>
@@ -253,8 +365,48 @@ async function research(node: TechNode): Promise<void> {
 }
 .legend-item.state-researched { color: #6a8; border-color: #365; }
 .legend-item.state-in_progress { color: #8cf; border-color: #468; }
+.legend-item.state-queued { color: #c9a; border-color: #648; }
 .legend-item.state-available { color: #ac6; border-color: #574; }
 .legend-item.state-locked { color: #557; border-color: #334; }
+
+.filters { display: flex; gap: 1rem; align-items: center; font-size: 0.8rem; color: #aac; }
+.filters select {
+  background: #14141e;
+  border: 1px solid #334;
+  color: #aac;
+  border-radius: 3px;
+  padding: 0.2rem 0.4rem;
+  font-family: monospace;
+}
+
+.queue-panel {
+  background: #101018;
+  border: 1px solid #334;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.82rem;
+  color: #aab;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.queue-active { display: flex; align-items: center; gap: 0.6rem; }
+.queue-active strong { color: #8cf; }
+.queue-list { margin: 0; padding-left: 1.2rem; color: #c9a; }
+
+.actions { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+
+.effects {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: #ac9;
+}
+.effects li::before { content: '▸ '; color: #575; }
 
 .graph-wrap {
   overflow: auto;
@@ -274,6 +426,8 @@ async function research(node: TechNode): Promise<void> {
 .node.state-researched .node-title { fill: #6a8; }
 .node.state-in_progress rect { fill: #0a1524; stroke: #468; }
 .node.state-in_progress .node-title { fill: #8cf; }
+.node.state-queued rect { fill: #180a20; stroke: #648; }
+.node.state-queued .node-title { fill: #c9a; }
 .node.state-available rect { fill: #10140a; stroke: #574; }
 .node.state-available .node-title { fill: #ac6; }
 .node.state-locked rect { fill: #0d0d15; stroke: #223; opacity: 0.65; }
@@ -297,6 +451,7 @@ async function research(node: TechNode): Promise<void> {
 }
 .status.state-researched { color: #6a8; border: 1px solid #365; }
 .status.state-in_progress { color: #8cf; border: 1px solid #468; }
+.status.state-queued { color: #c9a; border: 1px solid #648; }
 .status.state-available { color: #ac6; border: 1px solid #574; }
 .status.state-locked { color: #557; border: 1px solid #334; }
 

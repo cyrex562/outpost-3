@@ -131,6 +131,11 @@ pub enum ClientCommand {
         /// Difficulty grade: "sandbox", "easy", "normal", "hard", or "brutal".
         grade: String,
     },
+    /// Set the current research project, replacing any active one.
+    ResearchTech {
+        /// Content-pack tech identifier.
+        tech_id: String,
+    },
     /// Append a tech to the research queue.
     EnqueueResearch {
         /// Content-pack tech identifier.
@@ -969,6 +974,22 @@ mod tests {
             } => {
                 assert_eq!(seq, 3);
                 assert_eq!(grade, "hard");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_research_tech_deserialises() {
+        let raw = r#"{"type":"command","seq":6,"command":{"kind":"research_tech","tech_id":"fusion_power"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::ResearchTech { tech_id },
+            } => {
+                assert_eq!(seq, 6);
+                assert_eq!(tech_id, "fusion_power");
             }
             _ => panic!("unexpected variant"),
         }

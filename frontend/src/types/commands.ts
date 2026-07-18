@@ -33,6 +33,8 @@ export type Command =
   | { kind: 'remove_directive'; directive_id: string }
   | { kind: 'set_manual_override'; colony_id: string; enabled: boolean }
   | { kind: 'research_tech'; tech_id: string }
+  | { kind: 'enqueue_research'; tech_id: string }
+  | { kind: 'cancel_research' }
   | {
       kind: 'found_colony_at_site'
       name: string

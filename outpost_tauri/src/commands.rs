@@ -102,6 +102,7 @@ pub enum ClientCommand {
     EnqueueResearch {
         tech_id: String,
     },
+    CancelResearch,
     FoundColonyAtSite {
         name: String,
         starting_population: u64,
@@ -984,6 +985,7 @@ pub fn apply_command(
         },
         ClientCommand::ResearchTech { tech_id } => Command::ResearchTech { tech_id },
         ClientCommand::EnqueueResearch { tech_id } => Command::EnqueueResearch { tech_id },
+        ClientCommand::CancelResearch => Command::CancelResearch,
         ClientCommand::FoundColonyAtSite {
             name,
             starting_population,
@@ -1254,7 +1256,7 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
     Ok(bodies)
 }
 
-/// Tech definition + player state (researched / in_progress / available / locked).
+/// Tech definition + player state (researched / `in_progress` / queued / available / locked).
 #[derive(Debug, Serialize)]
 pub struct TechNodeWire {
     pub id: String,
@@ -1264,8 +1266,12 @@ pub struct TechNodeWire {
     pub tier: u32,
     pub cost: f32,
     pub prerequisites: Vec<String>,
-    pub state: String, // researched | in_progress | available | locked
+    pub state: String, // researched | in_progress | queued | available | locked
     pub progress: f32,
+    pub effects: Vec<outpost_core::tech::TechEffect>,
+    /// Zero-based position in `TechState.research_queue` (the actual FIFO
+    /// drain order), only meaningful when `state == "queued"`.
+    pub queue_position: Option<usize>,
 }
 
 /// Return the full tech tree with per-node state.
@@ -1287,13 +1293,19 @@ pub fn get_tech_tree(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Tech
     for tech in tech_registry.all() {
         let is_done = tech_state.is_researched(&tech.id);
         let is_active = current == Some(tech.id.as_str());
-        let is_queued = tech_state.research_queue.iter().any(|t| t == &tech.id);
+        let queue_position = tech_state
+            .research_queue
+            .iter()
+            .position(|t| t == &tech.id);
+        let is_queued = queue_position.is_some();
         let prereqs_met = tech_state.prerequisites_met(tech);
 
         let state = if is_done {
             "researched"
-        } else if is_active || is_queued {
+        } else if is_active {
             "in_progress"
+        } else if is_queued {
+            "queued"
         } else if prereqs_met {
             "available"
         } else {
@@ -1314,6 +1326,8 @@ pub fn get_tech_tree(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Tech
             prerequisites: tech.prerequisites.clone(),
             state: state.to_owned(),
             progress,
+            effects: tech.effects.clone(),
+            queue_position,
         });
     }
     nodes.sort_by(|a, b| {

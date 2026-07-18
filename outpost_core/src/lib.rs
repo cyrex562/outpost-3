@@ -4379,6 +4379,14 @@ impl GameEngine {
                         "prerequisites not met for tech '{tech_id}'"
                     )));
                 }
+                // Drop any queued copy of this tech: promoting it straight to
+                // `current_project` here must not leave it in
+                // `research_queue` too, or a later drain would complete it
+                // (and reapply its effects) a second time (issue #250 review).
+                self.state
+                    .tech_state
+                    .research_queue
+                    .retain(|t| t != tech_id);
                 self.state.tech_state.set_current_project(tech_id.clone());
                 Ok(vec![Event::ResearchStarted {
                     tech_id: tech_id.clone(),
@@ -4389,9 +4397,32 @@ impl GameEngine {
                 let registry = self.state.tech_registry.as_ref().ok_or_else(|| {
                     EngineError::InvalidArgument("no tech registry loaded".into())
                 })?;
-                let _ = registry.get(tech_id).ok_or_else(|| {
+                let def = registry.get(tech_id).ok_or_else(|| {
                     EngineError::InvalidArgument(format!("unknown tech '{tech_id}'"))
                 })?;
+                // Same gate as `ResearchTech`: only a directly-available tech
+                // (prerequisites already researched) may be queued. Prevents
+                // a locked tech from being promoted straight to
+                // `current_project` on a later drain with its prerequisites
+                // never having been researched (issue #250 review).
+                if !self.state.tech_state.prerequisites_met(def) {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "prerequisites not met for tech '{tech_id}'"
+                    )));
+                }
+                if self.state.tech_state.is_researched(tech_id)
+                    || self.state.tech_state.current_project.as_deref() == Some(tech_id.as_str())
+                    || self
+                        .state
+                        .tech_state
+                        .research_queue
+                        .iter()
+                        .any(|t| t == tech_id)
+                {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "tech '{tech_id}' is already researched, active, or queued"
+                    )));
+                }
                 self.state.tech_state.enqueue(tech_id.clone());
                 Ok(vec![Event::ResearchQueued {
                     tech_id: tech_id.clone(),
@@ -9296,15 +9327,77 @@ mod tests {
     }
 
     #[test]
-    fn cancel_research_clears_queue_and_project() {
+    fn enqueue_research_rejects_unmet_prerequisites() {
+        let mut engine = make_tech_engine();
+        // beta requires alpha, which is not yet researched
+        let err = engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "beta".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+        assert!(engine.state.tech_state.research_queue.is_empty());
+    }
+
+    #[test]
+    fn enqueue_research_rejects_tech_already_active() {
         let mut engine = make_tech_engine();
         engine
             .apply(&Command::ResearchTech {
                 tech_id: "alpha".into(),
             })
             .unwrap();
+        let err = engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn enqueue_research_rejects_tech_already_queued() {
+        let mut engine = make_tech_engine();
         engine
             .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        let err = engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+        assert_eq!(engine.state.tech_state.research_queue.len(), 1);
+    }
+
+    #[test]
+    fn enqueue_research_rejects_tech_already_researched() {
+        let mut engine = make_tech_engine();
+        engine.state.tech_state.researched.insert("alpha".into());
+        let err = engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn cancel_research_clears_queue_and_project() {
+        let mut engine = make_tech_engine();
+        engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        // `ResearchTech` dedupes `alpha` out of the queue as it promotes it
+        // to `current_project` (see `research_tech_dedupes_queued_copy`), so
+        // by the time `CancelResearch` runs, the queue is already empty —
+        // this test just confirms cancel also clears an empty queue cleanly.
+        engine
+            .apply(&Command::ResearchTech {
                 tech_id: "alpha".into(),
             })
             .unwrap();
@@ -9312,6 +9405,32 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::ResearchCancelled)));
         assert!(engine.state.tech_state.current_project.is_none());
         assert!(engine.state.tech_state.research_queue.is_empty());
+    }
+
+    #[test]
+    fn research_tech_dedupes_queued_copy() {
+        let mut engine = make_tech_engine();
+        engine
+            .apply(&Command::EnqueueResearch {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        assert_eq!(engine.state.tech_state.research_queue.len(), 1);
+        engine
+            .apply(&Command::ResearchTech {
+                tech_id: "alpha".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            engine.state.tech_state.current_project.as_deref(),
+            Some("alpha")
+        );
+        assert!(
+            engine.state.tech_state.research_queue.is_empty(),
+            "promoting a queued tech directly via ResearchTech must remove \
+             it from the queue, or a later drain would complete (and \
+             reapply the effects of) the same tech a second time"
+        );
     }
 
     // ── M1: Planet map integration tests ─────────────────────────────────
