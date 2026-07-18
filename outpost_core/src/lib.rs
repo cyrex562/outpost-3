@@ -110,7 +110,10 @@ pub enum Command {
     /// Queue a construction project in the named colony.
     ///
     /// The `building_type` key references a record in the loaded content pack.
-    /// Rejects if the colony lacks sufficient build slots.
+    /// Rejects if the colony lacks sufficient build slots, or with
+    /// [`EngineError::TechLocked`] if the registry defines this building
+    /// with a `tech_prerequisite` that hasn't been researched yet (issue
+    /// #247). The tech gate is inert when no registry is loaded.
     QueueConstruction {
         /// Target colony.
         colony_id: ColonyId,
@@ -1708,7 +1711,8 @@ pub enum EngineError {
         max_range_au: f32,
     },
     /// The requested building requires a tech prerequisite that hasn't been
-    /// researched yet (issue #241, outpost construction only).
+    /// researched yet. Enforced on [`Command::QueueConstruction`] (issue
+    /// #247) and [`Command::QueueOutpostConstruction`] (issue #241).
     #[error("building '{building_id}' requires tech prerequisite '{tech_id}' to be researched")]
     TechLocked {
         /// The building that was requested.
@@ -2741,6 +2745,25 @@ impl GameEngine {
                     return Err(EngineError::InvalidArgument(
                         "building_type must not be empty".into(),
                     ));
+                }
+                // Tech gate (issue #247) — only enforced when the registry
+                // actually defines this building, mirroring the same
+                // None-prerequisite-is-open convention `tech::unlocked_buildings`
+                // already applies and the identical check #241 added for
+                // `QueueOutpostConstruction`. An unregistered `building_type`
+                // string (used by some older tests/harness runs with no
+                // registry loaded) is left to fail downstream unchanged.
+                if let Some(reg) = self.state.registry.as_ref() {
+                    if let Some(def) = reg.building(building_type) {
+                        if let Some(tech_id) = &def.tech_prerequisite {
+                            if !self.state.tech_state.researched.contains(tech_id) {
+                                return Err(EngineError::TechLocked {
+                                    building_id: building_type.clone(),
+                                    tech_id: tech_id.clone(),
+                                });
+                            }
+                        }
+                    }
                 }
                 let idx = self.find_colony_index(*colony_id)?;
                 let available = self.state.colonies[idx].slots_available();
@@ -5757,6 +5780,113 @@ mod tests {
             Event::ConstructionQueued { colony_id: cid, building_type: bt, .. }
             if *cid == colony_id && bt == "greenhouse"
         ));
+    }
+
+    #[test]
+    fn queue_construction_fails_when_tech_not_researched() {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Delta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "advanced_reactor".into(),
+            name: "Advanced Reactor".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: Some("fusion_engineering".into()),
+            maintenance: vec![],
+        });
+        engine.state.registry = Some(reg);
+
+        let result = engine.apply(&queue_cmd(colony_id, "advanced_reactor", 1));
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::TechLocked { ref tech_id, .. }) if tech_id == "fusion_engineering"
+            ),
+            "expected TechLocked, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn queue_construction_succeeds_once_tech_researched() {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Delta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "advanced_reactor".into(),
+            name: "Advanced Reactor".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: Some("fusion_engineering".into()),
+            maintenance: vec![],
+        });
+        engine.state.registry = Some(reg);
+        engine
+            .state
+            .tech_state
+            .researched
+            .insert("fusion_engineering".into());
+
+        let result = engine.apply(&queue_cmd(colony_id, "advanced_reactor", 1));
+        assert!(result.is_ok(), "expected success, got {result:?}");
+    }
+
+    #[test]
+    fn queue_construction_ignores_tech_gate_when_no_registry_loaded() {
+        // Grandfathering: with no content registry loaded (bare-engine
+        // tests, some harness runs), the gate must stay fully inert rather
+        // than rejecting every building_type outright.
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Delta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        assert!(engine.state.registry.is_none());
+
+        let result = engine.apply(&queue_cmd(colony_id, "anything_unregistered", 1));
+        assert!(result.is_ok(), "expected success, got {result:?}");
     }
 
     #[test]
