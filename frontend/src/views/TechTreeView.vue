@@ -46,9 +46,11 @@ const filteredNodes = computed<TechNode[]>(() =>
   }),
 )
 
-/** The player's queued-but-not-yet-active research, in queue order. */
+/** The player's queued-but-not-yet-active research, in actual FIFO drain order. */
 const queuedNodes = computed<TechNode[]>(() =>
-  nodes.value.filter((n) => n.state === 'queued'),
+  nodes.value
+    .filter((n) => n.state === 'queued')
+    .sort((a, b) => (a.queue_position ?? 0) - (b.queue_position ?? 0)),
 )
 
 const activeNode = computed<TechNode | undefined>(() =>
@@ -231,7 +233,9 @@ function effectLabel(effect: TechEffect): string {
       <div v-if="activeNode" class="queue-active">
         Researching: <strong>{{ activeNode.name }}</strong>
         ({{ (activeNode.progress * 100).toFixed(0) }}%)
-        <button class="btn" :disabled="gameStore.busy" @click="cancelResearch">Cancel</button>
+        <button class="btn" :disabled="gameStore.busy" @click="cancelResearch">
+          {{ queuedNodes.length ? `Cancel (clears ${queuedNodes.length} queued too)` : 'Cancel' }}
+        </button>
       </div>
       <ol v-if="queuedNodes.length" class="queue-list">
         <li v-for="n in queuedNodes" :key="n.id">{{ n.name }}</li>
@@ -321,7 +325,7 @@ function effectLabel(effect: TechEffect): string {
       </ul>
       <div class="actions">
         <button
-          v-if="selected.state === 'available'"
+          v-if="selected.state === 'available' && !activeNode"
           class="btn primary"
           data-testid="tech-research-btn"
           :disabled="gameStore.busy"
@@ -331,12 +335,12 @@ function effectLabel(effect: TechEffect): string {
         </button>
         <button
           v-if="selected.state === 'available' && activeNode"
-          class="btn"
+          class="btn primary"
           data-testid="tech-enqueue-btn"
           :disabled="gameStore.busy"
           @click="enqueue(selected)"
         >
-          Queue
+          Queue after {{ activeNode.name }}
         </button>
       </div>
       <div v-if="selected.state === 'locked'" class="hint">

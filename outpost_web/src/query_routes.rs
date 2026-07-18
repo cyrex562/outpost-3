@@ -596,6 +596,11 @@ pub struct TechNodeWire {
     pub progress: f32,
     /// Authored effects this tech grants on completion.
     pub effects: Vec<outpost_core::tech::TechEffect>,
+    /// Zero-based position in `TechState.research_queue` (the actual FIFO
+    /// drain order), only meaningful when `state == "queued"`. `None`
+    /// otherwise, so the UI doesn't have to guess a queued tech's real
+    /// position from an unrelated tier/category/name sort (issue #250 review).
+    pub queue_position: Option<usize>,
 }
 
 /// `GET /api/tech-tree` — the full tech tree with per-node player state.
@@ -624,7 +629,8 @@ pub async fn get_tech_tree(State(state): State<AppState>) -> impl IntoResponse {
         .map(|tech| {
             let is_done = tech_state.is_researched(&tech.id);
             let is_active = current == Some(tech.id.as_str());
-            let is_queued = tech_state.research_queue.iter().any(|t| t == &tech.id);
+            let queue_position = tech_state.research_queue.iter().position(|t| t == &tech.id);
+            let is_queued = queue_position.is_some();
             let prereqs_met = tech_state.prerequisites_met(tech);
 
             let state = if is_done {
@@ -654,6 +660,7 @@ pub async fn get_tech_tree(State(state): State<AppState>) -> impl IntoResponse {
                 state: state.to_owned(),
                 progress,
                 effects: tech.effects.clone(),
+                queue_position,
             }
         })
         .collect();

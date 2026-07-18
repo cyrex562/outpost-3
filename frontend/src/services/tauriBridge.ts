@@ -192,6 +192,8 @@ export interface TechNode {
   state: 'researched' | 'in_progress' | 'queued' | 'available' | 'locked'
   progress: number
   effects: TechEffect[]
+  /** Zero-based position in the actual FIFO research queue; only meaningful when `state === 'queued'`. */
+  queue_position: number | null
 }
 
 export async function getTechTree(): Promise<TechNode[]> {
