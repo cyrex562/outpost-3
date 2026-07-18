@@ -234,6 +234,44 @@ pub enum ClientCommand {
         #[serde(default)]
         system_seed: Option<u64>,
     },
+    /// Establish a new outpost anchored to a body (issue #233/#243).
+    EstablishOutpost {
+        /// Outpost display name.
+        name: String,
+        /// Colony establishing (and owning) the outpost.
+        colony_id: String,
+        /// System body UUID to anchor the outpost to.
+        body_id: String,
+    },
+    /// Decommission an outpost, removing it from play (issue #233/#243).
+    DecommissionOutpost {
+        /// Outpost UUID.
+        outpost_id: String,
+    },
+    /// Queue a construction project at an outpost (issue #233/#243).
+    QueueOutpostConstruction {
+        /// Target outpost UUID.
+        outpost_id: String,
+        /// Content-pack key of the building type.
+        building_type: String,
+        /// Build-slot cost.
+        slot_cost: u32,
+        /// Labour units consumed per construction turn.
+        labor_per_turn: u32,
+        /// Commodity costs (commodity id, quantity) pairs.
+        construction_cost: Vec<(String, f64)>,
+        /// Colony-sol turns required to complete.
+        construction_turns: u32,
+    },
+    /// Promote an established outpost into a full colony (issue #242/#243).
+    PromoteOutpostToColony {
+        /// Outpost UUID to promote.
+        outpost_id: String,
+        /// Name for the resulting colony.
+        name: String,
+        /// Starting population for the new colony.
+        starting_population: u64,
+    },
 }
 
 /// Queries the client can issue (read-only, no state mutation).
@@ -554,6 +592,38 @@ pub enum ServerEvent {
         /// `None` for a Lagrange-band, system-wide station.
         body_id: Option<String>,
     },
+    /// A new outpost was established (issue #233/#243).
+    OutpostEstablished {
+        /// New outpost's UUID.
+        outpost_id: String,
+        /// Colony that established it.
+        colony_id: String,
+        /// Body it's anchored to.
+        body_id: String,
+    },
+    /// An outpost was decommissioned (issue #233/#243).
+    OutpostDecommissioned {
+        /// Removed outpost's UUID.
+        outpost_id: String,
+    },
+    /// An outpost queued a construction project (issue #233/#243).
+    OutpostConstructionQueued {
+        /// Target outpost UUID.
+        outpost_id: String,
+        /// Building type queued.
+        building_type: String,
+        /// Project UUID.
+        project_id: String,
+    },
+    /// An outpost was promoted into a full colony (issue #242/#243).
+    OutpostPromoted {
+        /// Promoted outpost's former UUID.
+        outpost_id: String,
+        /// Newly created colony's UUID.
+        colony_id: String,
+        /// New colony's name.
+        name: String,
+    },
     /// A core event with no frontend representation; safely ignored.
     Ignored,
 }
@@ -760,6 +830,36 @@ impl ServerEvent {
                 orbit_type: format!("{orbit_type:?}"),
                 blueprint_id: blueprint_id.clone(),
                 body_id: body_id.as_ref().map(|b| b.0.to_string()),
+            },
+            Event::OutpostEstablished {
+                outpost_id,
+                colony_id,
+                body_id,
+            } => Self::OutpostEstablished {
+                outpost_id: outpost_id.to_string(),
+                colony_id: colony_id.to_string(),
+                body_id: body_id.0.to_string(),
+            },
+            Event::OutpostDecommissioned { outpost_id } => Self::OutpostDecommissioned {
+                outpost_id: outpost_id.to_string(),
+            },
+            Event::OutpostConstructionQueued {
+                outpost_id,
+                building_type,
+                project_id,
+            } => Self::OutpostConstructionQueued {
+                outpost_id: outpost_id.to_string(),
+                building_type: building_type.clone(),
+                project_id: project_id.to_string(),
+            },
+            Event::OutpostPromoted {
+                outpost_id,
+                colony_id,
+                name,
+            } => Self::OutpostPromoted {
+                outpost_id: outpost_id.to_string(),
+                colony_id: colony_id.to_string(),
+                name: name.clone(),
             },
             // All remaining core events have no frontend representation.
             _ => Self::Ignored,

@@ -52,10 +52,24 @@ export const useWorldStore = defineStore('world', () => {
         break
       case 'ack':
         break
-      case 'new_game_snapshot':
+      case 'new_game_snapshot': {
         // Full snapshot returned after NewGame init — treat the same as snapshot.
         world.value = hydrateFromSnapshot(msg.state)
+        // Authoritatively select the newly founded colony from this direct,
+        // request-scoped response rather than leaving it to a later "pick
+        // colonies[0] if unset" fallback (ColonyView/OutpostsView) — that
+        // fallback races against any other event this shared connection
+        // happens to receive first (e.g. a broadcasted event from another
+        // browser tab/session hitting the same shared engine), which can
+        // latch onto the wrong colony entirely.
+        const firstColonyId = Object.keys(world.value.colonies)[0]
+        if (firstColonyId) {
+          import('@/stores/game').then(({ useGameStore }) => {
+            useGameStore().selectedColonyId = firstColonyId
+          })
+        }
         break
+      }
       case 'query_result':
         if (msg.result.kind === 'colony_screen') {
           import('@/stores/game').then(({ useGameStore }) => {

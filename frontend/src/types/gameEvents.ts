@@ -50,6 +50,32 @@ export interface ProductionShortfallEvent {
   reason: string
 }
 
+export interface OutpostEstablishedEvent {
+  kind: 'outpost_established'
+  outpost_id: string
+  colony_id: string
+  body_id: string
+}
+
+export interface OutpostDecommissionedEvent {
+  kind: 'outpost_decommissioned'
+  outpost_id: string
+}
+
+export interface OutpostConstructionQueuedEvent {
+  kind: 'outpost_construction_queued'
+  outpost_id: string
+  building_type: string
+  project_id: string
+}
+
+export interface OutpostPromotedEvent {
+  kind: 'outpost_promoted'
+  outpost_id: string
+  colony_id: string
+  name: string
+}
+
 export interface OtherEvent {
   kind: string
   [key: string]: unknown
@@ -64,4 +90,8 @@ export type GameEvent =
   | ResearchProducedEvent
   | DirectiveFiredEvent
   | ProductionShortfallEvent
+  | OutpostEstablishedEvent
+  | OutpostDecommissionedEvent
+  | OutpostConstructionQueuedEvent
+  | OutpostPromotedEvent
   | OtherEvent

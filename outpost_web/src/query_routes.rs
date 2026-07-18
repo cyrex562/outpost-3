@@ -426,6 +426,153 @@ pub async fn get_system_bodies(State(state): State<AppState>) -> impl IntoRespon
     Json(bodies)
 }
 
+/// An established outpost, for the outposts management view (issue #243).
+#[derive(Debug, Serialize)]
+pub struct OutpostWire {
+    /// Outpost UUID.
+    pub id: String,
+    /// Human-readable name.
+    pub name: String,
+    /// Colony that owns this outpost.
+    pub parent_colony_id: String,
+    /// System body it's anchored to.
+    pub body_id: String,
+    /// Display name of the anchor body.
+    pub body_name: String,
+    /// Total build-slot capacity.
+    pub slot_capacity: u32,
+    /// Build slots currently in use.
+    pub slots_used: u32,
+    /// Completed building types.
+    pub buildings: Vec<String>,
+    /// Pooled commodity stockpile as `(commodity_id, amount)` pairs.
+    pub pool: Vec<(String, f64)>,
+}
+
+/// `GET /api/outposts` — every established outpost across all colonies.
+///
+/// Mirrors `outpost_tauri::commands::list_outposts` against the shared
+/// engine. The frontend filters by `parent_colony_id` client-side.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn list_outposts(State(state): State<AppState>) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    let list: Vec<OutpostWire> = engine
+        .state
+        .outposts
+        .iter()
+        .map(|o| {
+            let body_name = engine
+                .state
+                .system_state
+                .node_map
+                .bodies
+                .get(&o.body_id)
+                .map_or_else(|| "Unknown".to_string(), |b| b.name.clone());
+            OutpostWire {
+                id: o.id.to_string(),
+                name: o.name.clone(),
+                parent_colony_id: o.parent_colony_id.to_string(),
+                body_id: o.body_id.0.to_string(),
+                body_name,
+                slot_capacity: o.slot_capacity,
+                slots_used: o.slots_used(),
+                buildings: o
+                    .buildings
+                    .iter()
+                    .map(|b| b.building_type.clone())
+                    .collect(),
+                pool: o
+                    .pool
+                    .commodity_ids()
+                    .map(|cid| (cid.to_string(), o.pool.amount(cid)))
+                    .collect(),
+            }
+        })
+        .collect();
+    Json(list)
+}
+
+/// A body evaluated as a possible `EstablishOutpost` target for a given
+/// parent colony (issue #241/#243).
+#[derive(Debug, Serialize)]
+pub struct OutpostTargetWire {
+    /// Candidate body UUID.
+    pub body_id: String,
+    /// Display name.
+    pub body_name: String,
+    /// Body kind (`InnerPlanet`, `Moon`, `AsteroidBelt`, ...).
+    pub kind: String,
+    /// Orbital distance from the primary star, in AU.
+    pub distance_au: f32,
+    /// Distance from the parent colony's home body, in AU. `None` when the
+    /// parent colony has no `home_body_id` (range gating is inert for it).
+    pub distance_from_home_au: Option<f32>,
+    /// Whether `EstablishOutpost` would currently accept this body.
+    pub in_range: bool,
+}
+
+/// `GET /api/outpost-targets/:colony_id` — bodies a colony could establish
+/// an outpost on, annotated with range-gate status (issue #241).
+///
+/// Mirrors `outpost_tauri::commands::get_outpost_targets` against the
+/// shared engine.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_outpost_targets(
+    State(state): State<AppState>,
+    axum::extract::Path(colony_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    let Ok(cid) = outpost_core::colony::ColonyId::parse_str(&colony_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("invalid colony_id: {colony_id}") })),
+        )
+            .into_response();
+    };
+    let home_body = engine
+        .state
+        .colonies
+        .iter()
+        .find(|c| c.id == cid)
+        .and_then(|c| c.home_body_id.as_ref())
+        .and_then(|bid| engine.state.system_state.node_map.bodies.get(bid));
+    let max_range_au = home_body.map(|_| {
+        outpost_core::outpost::max_outpost_range_au(
+            engine.state.system_state.node_map.propulsion_level,
+            engine.state.outpost_range_bonus_au,
+        )
+    });
+    let list: Vec<OutpostTargetWire> = engine
+        .state
+        .system_state
+        .node_map
+        .bodies
+        .values()
+        .map(|b| {
+            let distance_from_home_au = home_body.map(|h| (h.distance_au - b.distance_au).abs());
+            let in_range = match (distance_from_home_au, max_range_au) {
+                (Some(d), Some(max)) => d <= max,
+                _ => true,
+            };
+            OutpostTargetWire {
+                body_id: b.id.0.to_string(),
+                body_name: b.name.clone(),
+                kind: format!("{:?}", b.kind),
+                distance_au: b.distance_au,
+                distance_from_home_au,
+                in_range,
+            }
+        })
+        .collect();
+    Json(list).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,6 +645,55 @@ mod tests {
         let response = router
             .oneshot(
                 Request::get("/api/system-bodies")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn outposts_empty_list_on_fresh_engine() {
+        let router = test_router();
+        let response = router
+            .oneshot(Request::get("/api/outposts").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn outpost_targets_rejects_invalid_colony_id() {
+        let router = test_router();
+        let response = router
+            .oneshot(
+                Request::get("/api/outpost-targets/not-a-uuid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn outpost_targets_empty_list_on_fresh_engine() {
+        let router = test_router();
+        let bogus = uuid::Uuid::new_v4();
+        let response = router
+            .oneshot(
+                Request::get(format!("/api/outpost-targets/{bogus}"))
                     .body(Body::empty())
                     .unwrap(),
             )

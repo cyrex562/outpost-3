@@ -190,6 +190,14 @@ function summariseEvents(events: GameEvent[]): string {
         return `Directive fired.`
       case 'production_shortfall':
         return `Shortfall: ${e.building_type} — ${e.reason}.`
+      case 'outpost_established':
+        return `Outpost established.`
+      case 'outpost_decommissioned':
+        return `Outpost decommissioned.`
+      case 'outpost_construction_queued':
+        return `Outpost queued ${(e as import('@/types/gameEvents').OutpostConstructionQueuedEvent).building_type}.`
+      case 'outpost_promoted':
+        return `Outpost promoted to colony "${(e as import('@/types/gameEvents').OutpostPromotedEvent).name}".`
       default:
         return e.kind.replace(/_/g, ' ')
     }
