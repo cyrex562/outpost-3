@@ -611,6 +611,12 @@ impl OrbitalRegistry {
 // ─── Construction queue ───────────────────────────────────────────────────────
 
 /// An in-progress orbital station construction project.
+///
+/// Blueprint-driven construction always completes at `station_type`'s
+/// default size ([`StationType::slot_cost`]) via
+/// [`OrbitalStation::new_default_size`] — custom sizing is only exposed via
+/// the direct `Command::BuildOrbitalStation` path, which builds immediately
+/// rather than going through this queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OrbitalConstructionProject {
     /// Content-pack blueprint id that was used to start this project.
@@ -629,12 +635,6 @@ pub struct OrbitalConstructionProject {
     /// [`OrbitalStation::body_id`] for the `None`-means-Lagrange convention.
     #[serde(default)]
     pub body_id: Option<BodyId>,
-    /// Slot size the finished station will occupy (issue #234). Blueprint-driven
-    /// construction always builds at `station_type`'s default size
-    /// ([`StationType::slot_cost`]) — custom sizing is only exposed via the
-    /// direct `Command::BuildOrbitalStation` path.
-    #[serde(default)]
-    pub slot_cost: Option<u32>,
 }
 
 impl OrbitalConstructionProject {
@@ -657,7 +657,6 @@ impl OrbitalConstructionProject {
             months_remaining: build_months,
             costs_paid: false,
             body_id,
-            slot_cost: None,
         }
     }
 

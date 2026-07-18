@@ -373,9 +373,12 @@ pub enum Command {
     },
     /// Build an orbital station in the given orbit band, linked to a colony.
     ///
+    /// Builds immediately (no construction-turn cost) — unlike
+    /// [`Command::BeginOrbitalConstruction`], this path is not queued.
     /// Fails with [`EngineError::OrbitalSlotExceeded`] if the orbit band is
-    /// full, or [`EngineError::InvalidArgument`] if `slot_cost` falls outside
-    /// `station_type`'s valid range (issue #234).
+    /// full, or with [`EngineError::OrbitalError`] wrapping
+    /// [`orbital::OrbitalError::InvalidSlotCost`] if `slot_cost` falls
+    /// outside `station_type`'s valid range (issue #234).
     BuildOrbitalStation {
         /// Colony that funds and operates the station.
         colony_id: ColonyId,
@@ -10260,6 +10263,88 @@ mod tests {
         );
         // Station must be in the registry.
         assert_eq!(engine.state.orbital_registry.stations.len(), 1);
+    }
+
+    /// `Command::BuildOrbitalStation` builds immediately (no queue) at a
+    /// caller-chosen size within the type's slot range (issue #234).
+    #[test]
+    fn build_orbital_station_command_builds_immediately_at_chosen_size() {
+        let mut engine = GameEngine::with_seed(94);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Builder".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        let (min, max) = orbital::StationType::Habitat.slot_range();
+        let events = engine
+            .apply(&Command::BuildOrbitalStation {
+                colony_id,
+                station_type: orbital::StationType::Habitat,
+                orbit_type: orbital::OrbitType::Low,
+                body_id: None,
+                slot_cost: Some(max),
+            })
+            .unwrap();
+
+        assert_eq!(engine.state.orbital_registry.stations.len(), 1);
+        assert_eq!(engine.state.orbital_registry.stations[0].slot_cost, max);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::OrbitalStationBuilt { slot_cost, .. } if *slot_cost == max
+        )));
+        assert!(max > min, "sanity: Habitat has a non-trivial slot range");
+    }
+
+    /// `Command::BuildOrbitalStation` rejects a `slot_cost` outside the
+    /// station type's valid range (issue #234).
+    #[test]
+    fn build_orbital_station_command_rejects_out_of_range_slot_cost() {
+        let mut engine = GameEngine::with_seed(95);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Builder".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let colony_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::ColonyFounded { colony_id, .. } = e {
+                    Some(*colony_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        let (_, max) = orbital::StationType::Habitat.slot_range();
+        let result = engine.apply(&Command::BuildOrbitalStation {
+            colony_id,
+            station_type: orbital::StationType::Habitat,
+            orbit_type: orbital::OrbitType::Low,
+            body_id: None,
+            slot_cost: Some(max + 1),
+        });
+
+        assert!(matches!(
+            result,
+            Err(EngineError::OrbitalError(
+                OrbitalError::InvalidSlotCost { .. }
+            ))
+        ));
+        assert!(engine.state.orbital_registry.stations.is_empty());
     }
 
     // ── M3: Transport capacity for migration batches ──────────────────────────
