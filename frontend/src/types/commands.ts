@@ -50,6 +50,23 @@ export type Command =
       body_id?: string | null
     }
   | { kind: 'assign_colony_home_body'; colony_id: string; body_id: string }
+  | { kind: 'establish_outpost'; name: string; colony_id: string; body_id: string }
+  | { kind: 'decommission_outpost'; outpost_id: string }
+  | {
+      kind: 'queue_outpost_construction'
+      outpost_id: string
+      building_type: string
+      slot_cost: number
+      labor_per_turn: number
+      construction_cost: [string, number][]
+      construction_turns: number
+    }
+  | {
+      kind: 'promote_outpost_to_colony'
+      outpost_id: string
+      name: string
+      starting_population: number
+    }
 
 /** Directive trigger condition shape. */
 export interface DirectiveCondition {

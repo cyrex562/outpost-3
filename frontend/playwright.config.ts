@@ -31,6 +31,14 @@ const sandboxChromium =
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Specs suffixed `-live` drive the same shared, single-instance
+  // `outpost_web` engine (see `query_routes.rs`'s module doc) — running two
+  // of them concurrently (e.g. `found-colony-live` and `outpost-live`) races
+  // both `new_game` calls against that one engine and corrupts each other's
+  // state. Capping to one worker serializes every spec file; the suite is
+  // small enough that this costs little wall-clock time and removes an
+  // entire class of shared-backend flakiness for any future live spec too.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',

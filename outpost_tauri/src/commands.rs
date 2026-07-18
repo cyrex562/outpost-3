@@ -146,6 +146,29 @@ pub enum ClientCommand {
         colony_id: String,
         body_id: String,
     },
+    /// Establish a new outpost anchored to a body (issue #233/#243).
+    EstablishOutpost {
+        name: String,
+        colony_id: String,
+        body_id: String,
+    },
+    /// Decommission an outpost, removing it from play (issue #233/#243).
+    DecommissionOutpost { outpost_id: String },
+    /// Queue a construction project at an outpost (issue #233/#243).
+    QueueOutpostConstruction {
+        outpost_id: String,
+        building_type: String,
+        slot_cost: u32,
+        labor_per_turn: u32,
+        construction_cost: Vec<(String, f64)>,
+        construction_turns: u32,
+    },
+    /// Promote an established outpost into a full colony (issue #242/#243).
+    PromoteOutpostToColony {
+        outpost_id: String,
+        name: String,
+        starting_population: u64,
+    },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -234,6 +257,26 @@ pub enum ServerEvent {
         colony_id: String,
         body_id: String,
         habitability_modifier: f32,
+    },
+    /// A new outpost was established (issue #233/#243).
+    OutpostEstablished {
+        outpost_id: String,
+        colony_id: String,
+        body_id: String,
+    },
+    /// An outpost was decommissioned (issue #233/#243).
+    OutpostDecommissioned { outpost_id: String },
+    /// An outpost queued a construction project (issue #233/#243).
+    OutpostConstructionQueued {
+        outpost_id: String,
+        building_type: String,
+        project_id: String,
+    },
+    /// An outpost was promoted into a full colony (issue #242/#243).
+    OutpostPromoted {
+        outpost_id: String,
+        colony_id: String,
+        name: String,
     },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
@@ -350,6 +393,36 @@ impl ServerEvent {
                 colony_id: colony_id.to_string(),
                 body_id: body_id.0.to_string(),
                 habitability_modifier: *habitability_modifier,
+            },
+            Event::OutpostEstablished {
+                outpost_id,
+                colony_id,
+                body_id,
+            } => Self::OutpostEstablished {
+                outpost_id: outpost_id.to_string(),
+                colony_id: colony_id.to_string(),
+                body_id: body_id.0.to_string(),
+            },
+            Event::OutpostDecommissioned { outpost_id } => Self::OutpostDecommissioned {
+                outpost_id: outpost_id.to_string(),
+            },
+            Event::OutpostConstructionQueued {
+                outpost_id,
+                building_type,
+                project_id,
+            } => Self::OutpostConstructionQueued {
+                outpost_id: outpost_id.to_string(),
+                building_type: building_type.clone(),
+                project_id: project_id.to_string(),
+            },
+            Event::OutpostPromoted {
+                outpost_id,
+                colony_id,
+                name,
+            } => Self::OutpostPromoted {
+                outpost_id: outpost_id.to_string(),
+                colony_id: colony_id.to_string(),
+                name: name.clone(),
             },
             other => Self::Unknown {
                 core_kind: format!("{other:?}")
@@ -966,6 +1039,50 @@ pub fn apply_command(
                 body_id: outpost_core::system::BodyId(bid),
             }
         }
+        ClientCommand::EstablishOutpost {
+            name,
+            colony_id,
+            body_id,
+        } => {
+            let cid = parse_colony(&colony_id)?;
+            let bid = Uuid::parse_str(&body_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad body_id: {body_id}")))?;
+            Command::EstablishOutpost {
+                name,
+                colony_id: cid,
+                body_id: outpost_core::system::BodyId(bid),
+            }
+        }
+        ClientCommand::DecommissionOutpost { outpost_id } => Command::DecommissionOutpost {
+            outpost_id: Uuid::parse_str(&outpost_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad outpost_id: {outpost_id}")))?,
+        },
+        ClientCommand::QueueOutpostConstruction {
+            outpost_id,
+            building_type,
+            slot_cost,
+            labor_per_turn,
+            construction_cost,
+            construction_turns,
+        } => Command::QueueOutpostConstruction {
+            outpost_id: Uuid::parse_str(&outpost_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad outpost_id: {outpost_id}")))?,
+            building_type,
+            slot_cost,
+            labor_per_turn,
+            construction_cost,
+            construction_turns,
+        },
+        ClientCommand::PromoteOutpostToColony {
+            outpost_id,
+            name,
+            starting_population,
+        } => Command::PromoteOutpostToColony {
+            outpost_id: Uuid::parse_str(&outpost_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad outpost_id: {outpost_id}")))?,
+            name,
+            starting_population,
+        },
     };
 
     let events = engine.apply(&core_cmd).map_err(CmdError::from)?;
@@ -1254,6 +1371,136 @@ pub fn get_colonize_targets(
             distance_au: b.distance_au,
             habitability: b.habitability(),
             can_found: b.meets_founding_threshold() || harsh_world_unlocked,
+        })
+        .collect();
+    Ok(list)
+}
+
+/// An established outpost, for the outposts management view (issue #243).
+#[derive(Debug, Serialize)]
+pub struct OutpostWire {
+    pub id: String,
+    pub name: String,
+    pub parent_colony_id: String,
+    pub body_id: String,
+    pub body_name: String,
+    pub slot_capacity: u32,
+    pub slots_used: u32,
+    pub buildings: Vec<String>,
+    /// Pooled commodity stockpile as `(commodity_id, amount)` pairs — every
+    /// commodity that has ever had a non-zero amount, mirroring
+    /// `Query::ColonyScreen`'s `stockpile` convention.
+    pub pool: Vec<(String, f64)>,
+}
+
+/// List every established outpost across all colonies (issue #233/#243).
+///
+/// The frontend filters by `parent_colony_id` client-side to scope the
+/// list to the currently selected colony — mirrors how `ListColonies`
+/// returns everything and callers narrow as needed.
+#[tauri::command]
+pub fn list_outposts(engine_state: State<'_, EngineState>) -> CmdResult<Vec<OutpostWire>> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    let list = engine
+        .state
+        .outposts
+        .iter()
+        .map(|o| {
+            let body_name = engine
+                .state
+                .system_state
+                .node_map
+                .bodies
+                .get(&o.body_id)
+                .map_or_else(|| "Unknown".to_string(), |b| b.name.clone());
+            OutpostWire {
+                id: o.id.to_string(),
+                name: o.name.clone(),
+                parent_colony_id: o.parent_colony_id.to_string(),
+                body_id: o.body_id.0.to_string(),
+                body_name,
+                slot_capacity: o.slot_capacity,
+                slots_used: o.slots_used(),
+                buildings: o.buildings.iter().map(|b| b.building_type.clone()).collect(),
+                pool: o
+                    .pool
+                    .commodity_ids()
+                    .map(|cid| (cid.to_string(), o.pool.amount(cid)))
+                    .collect(),
+            }
+        })
+        .collect();
+    Ok(list)
+}
+
+/// A body evaluated as a possible `EstablishOutpost` target for a given
+/// parent colony (issue #241/#243).
+#[derive(Debug, Serialize)]
+pub struct OutpostTargetWire {
+    pub body_id: String,
+    pub body_name: String,
+    pub kind: String,
+    pub distance_au: f32,
+    /// Distance from the parent colony's home body, in AU. `None` when the
+    /// parent colony has no `home_body_id` (range gating is inert for it —
+    /// see `outpost::max_outpost_range_au`'s doc comment) or when computing
+    /// it would require a body no longer in the system.
+    pub distance_from_home_au: Option<f32>,
+    /// Whether `EstablishOutpost` would currently accept this body — always
+    /// `true` when `distance_from_home_au` is `None` (the range gate is
+    /// inert for an unplaced colony).
+    pub in_range: bool,
+}
+
+/// List bodies a given colony could establish an outpost on, annotated with
+/// range-gate status (issue #241) so the placement flow can filter/explain
+/// out-of-range bodies instead of only discovering it on rejection.
+///
+/// # Errors
+///
+/// Returns [`CmdError::InvalidArg`] if `colony_id` isn't a valid UUID.
+#[tauri::command]
+pub fn get_outpost_targets(
+    colony_id: String,
+    engine_state: State<'_, EngineState>,
+) -> CmdResult<Vec<OutpostTargetWire>> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    let cid = parse_colony(&colony_id)?;
+    let home_body = engine
+        .state
+        .colonies
+        .iter()
+        .find(|c| c.id == cid)
+        .and_then(|c| c.home_body_id.as_ref())
+        .and_then(|bid| engine.state.system_state.node_map.bodies.get(bid));
+    let max_range_au = home_body.map(|_| {
+        outpost_core::outpost::max_outpost_range_au(
+            engine.state.system_state.node_map.propulsion_level,
+            engine.state.outpost_range_bonus_au,
+        )
+    });
+    let list = engine
+        .state
+        .system_state
+        .node_map
+        .bodies
+        .values()
+        .map(|b| {
+            let distance_from_home_au = home_body.map(|h| (h.distance_au - b.distance_au).abs());
+            let in_range = match (distance_from_home_au, max_range_au) {
+                (Some(d), Some(max)) => d <= max,
+                _ => true,
+            };
+            OutpostTargetWire {
+                body_id: b.id.0.to_string(),
+                body_name: b.name.clone(),
+                kind: format!("{:?}", b.kind),
+                distance_au: b.distance_au,
+                distance_from_home_au,
+                in_range,
+            }
         })
         .collect();
     Ok(list)

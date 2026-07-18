@@ -300,6 +300,44 @@ export async function setActiveRecipe(colonyId: string, buildingType: string, re
   })
 }
 
+// ── Outposts (issue #233/#243) ──────────────────────────────────────────────
+
+export interface Outpost {
+  id: string
+  name: string
+  parent_colony_id: string
+  body_id: string
+  body_name: string
+  slot_capacity: number
+  slots_used: number
+  buildings: string[]
+  /** `[commodity_id, amount]` pairs — every commodity that has ever had a non-zero amount. */
+  pool: [string, number][]
+}
+
+/** List every established outpost across all colonies. Frontend filters by `parent_colony_id`. */
+export async function listOutposts(): Promise<Outpost[]> {
+  if (!isTauri) return fetchJson<Outpost[]>('/api/outposts')
+  return invoke<Outpost[]>('list_outposts')
+}
+
+export interface OutpostTarget {
+  body_id: string
+  body_name: string
+  kind: string
+  distance_au: number
+  /** Distance from the parent colony's home body, in AU; `null` when the colony has no home body. */
+  distance_from_home_au: number | null
+  /** Whether `EstablishOutpost` would currently accept this body. */
+  in_range: boolean
+}
+
+/** Bodies a given colony could establish an outpost on, annotated with range-gate status (issue #241). */
+export async function getOutpostTargets(colonyId: string): Promise<OutpostTarget[]> {
+  if (!isTauri) return fetchJson<OutpostTarget[]>(`/api/outpost-targets/${colonyId}`)
+  return invoke<OutpostTarget[]>('get_outpost_targets', { colonyId })
+}
+
 export async function getPlanetMap(): Promise<PlanetMap> {
   if (!isTauri) return fetchJson<PlanetMap>('/api/planet-map')
   return invoke<PlanetMap>('get_planet_map')

@@ -411,6 +411,59 @@ pub(crate) fn client_command_to_core(
         ClientCommand::NewGame { .. } => {
             Err("NewGame must be handled before client_command_to_core".into())
         }
+        ClientCommand::EstablishOutpost {
+            name,
+            colony_id,
+            body_id,
+        } => {
+            let colony_id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            let body_id = uuid::Uuid::from_str(&body_id)
+                .map(outpost_core::system::BodyId)
+                .map_err(|_| format!("invalid body_id: {body_id}"))?;
+            Ok(Command::EstablishOutpost {
+                name,
+                colony_id,
+                body_id,
+            })
+        }
+        ClientCommand::DecommissionOutpost { outpost_id } => {
+            let outpost_id = uuid::Uuid::from_str(&outpost_id)
+                .map_err(|_| format!("invalid outpost_id: {outpost_id}"))?;
+            Ok(Command::DecommissionOutpost { outpost_id })
+        }
+        ClientCommand::QueueOutpostConstruction {
+            outpost_id,
+            building_type,
+            slot_cost,
+            labor_per_turn,
+            construction_cost,
+            construction_turns,
+        } => {
+            let outpost_id = uuid::Uuid::from_str(&outpost_id)
+                .map_err(|_| format!("invalid outpost_id: {outpost_id}"))?;
+            Ok(Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type,
+                slot_cost,
+                labor_per_turn,
+                construction_cost,
+                construction_turns,
+            })
+        }
+        ClientCommand::PromoteOutpostToColony {
+            outpost_id,
+            name,
+            starting_population,
+        } => {
+            let outpost_id = uuid::Uuid::from_str(&outpost_id)
+                .map_err(|_| format!("invalid outpost_id: {outpost_id}"))?;
+            Ok(Command::PromoteOutpostToColony {
+                outpost_id,
+                name,
+                starting_population,
+            })
+        }
     }
 }
 

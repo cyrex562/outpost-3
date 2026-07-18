@@ -39,6 +39,8 @@ pub fn run() {
             commands::list_custom_presets,
             commands::save_custom_preset,
             commands::delete_custom_preset,
+            commands::list_outposts,
+            commands::get_outpost_targets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Outpost 3");

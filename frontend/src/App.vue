@@ -125,6 +125,7 @@ async function exitApp(): Promise<void> {
         <RouterLink to="/system" class="nav-link">System</RouterLink>
         <RouterLink to="/colony" class="nav-link">Colony</RouterLink>
         <RouterLink to="/tech" class="nav-link">Tech</RouterLink>
+        <RouterLink to="/outposts" class="nav-link">Outposts</RouterLink>
       </nav>
       <span
         v-if="!isTauri"
