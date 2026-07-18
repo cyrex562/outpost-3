@@ -744,3 +744,497 @@
   effects:
     - type: unlock_capability
       capability_id: megaproject_construction
+
+# ─── Wave 2 (issue #249) ─────────────────────────────────────────────────────
+#
+# #236 shipped a "solid start" (~48 entries) and explicitly deferred further
+# scale to a follow-up. This wave deepens every existing tier-3/4/5 category
+# with real branch points (not just capstone padding) and adds a new tier 7
+# of ascension/secret-project-style capstones, converging pairs of tier-6
+# techs — often across two different categories — into forward-looking
+# `unlock_capability` gates, matching the megastructure_engineering/
+# terraforming_theory precedent from #236. Sized against SMAC's ~90-tech
+# reference point (docs/DESIGN.md §7A), not an arbitrary round number.
+
+# ─── Tier 3 additions ────────────────────────────────────────────────────────
+
+- id: water_reclamation
+  name: Water Reclamation
+  description: Closed-loop greywater and condensate recovery systems.
+  category: life_sciences
+  tier: 3
+  research_cost: 950.0
+  prerequisites:
+    - hydroponics
+  effects:
+    - type: bonus
+      category: food_production
+      value: 0.10
+
+- id: modular_construction
+  name: Modular Construction
+  description: Prefabricated structural modules that snap together on-site.
+  category: engineering
+  tier: 3
+  research_cost: 1000.0
+  prerequisites:
+    - structural_composites
+  effects:
+    - type: bonus
+      category: construction_speed
+      value: 0.10
+
+- id: signal_processing
+  name: Signal Processing
+  description: Noise-filtering and pattern-recognition pipelines for instrument data.
+  category: computing
+  tier: 3
+  research_cost: 1100.0
+  prerequisites:
+    - automation
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.10
+
+- id: alloy_treatment
+  name: Alloy Treatment
+  description: Heat-treatment and annealing processes that improve yield across refining lines.
+  category: materials_science
+  tier: 3
+  research_cost: 1050.0
+  prerequisites:
+    - refractory_metallurgy
+  effects:
+    - type: bonus
+      category: production_efficiency
+      value: 0.10
+
+- id: navigation_computing
+  name: Navigation Computing
+  description: Onboard trajectory-solving hardware — trims transit time further.
+  category: astronautics
+  tier: 3
+  research_cost: 1200.0
+  prerequisites:
+    - orbital_mechanics
+    - automation
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.08
+
+# ─── Tier 4 additions ────────────────────────────────────────────────────────
+
+- id: cryogenics
+  name: Cryogenics
+  description: Low-temperature stasis and preservation techniques for colonist health.
+  category: life_sciences
+  tier: 4
+  research_cost: 2100.0
+  prerequisites:
+    - advanced_medicine
+  effects:
+    - type: bonus
+      category: colonist_health
+      value: 0.10
+
+- id: machine_learning
+  name: Machine Learning
+  description: Statistical inference pipelines that triage and accelerate research queues.
+  category: computing
+  tier: 4
+  research_cost: 2600.0
+  prerequisites:
+    - quantum_computing
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.10
+
+- id: automated_logistics
+  name: Automated Logistics
+  description: Self-scheduling cargo convoys that eliminate manual routing overhead.
+  category: engineering
+  tier: 4
+  research_cost: 2400.0
+  prerequisites:
+    - logistics_network
+    - automation
+  effects:
+    - type: bonus
+      category: trade_throughput
+      value: 0.10
+
+- id: deep_drilling
+  name: Deep Drilling
+  description: High-torque drilling rigs that reach lower-yield deposits economically.
+  category: materials_science
+  tier: 4
+  research_cost: 2300.0
+  prerequisites:
+    - refractory_metallurgy
+    - resource_extraction
+  effects:
+    - type: bonus
+      category: production_efficiency
+      value: 0.10
+
+- id: xenobiology
+  name: Xenobiology
+  description: >
+    Cross-disciplinary study of anomalous biological samples recovered by
+    survey expeditions (#235) — converges genetics with field xenoarchaeology.
+  category: life_sciences
+  tier: 4
+  research_cost: 2700.0
+  prerequisites:
+    - genetic_engineering
+    - xenoarchaeology
+  effects:
+    - type: bonus
+      category: colonist_health
+      value: 0.10
+
+- id: gravitic_engineering
+  name: Gravitic Engineering
+  description: Localized gravity-field manipulation for drive and habitat applications.
+  category: astronautics
+  tier: 4
+  research_cost: 2650.0
+  prerequisites:
+    - propulsion_engineering
+    - particle_physics
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.10
+
+- id: precision_manufacturing
+  name: Precision Manufacturing
+  description: Sub-micron tolerance fabrication combining semiconductor and ceramics lines.
+  category: materials_science
+  tier: 4
+  research_cost: 2400.0
+  prerequisites:
+    - semiconductor_fabrication
+    - advanced_ceramics
+  effects:
+    - type: bonus
+      category: construction_speed
+      value: 0.10
+
+# ─── Tier 5 additions ────────────────────────────────────────────────────────
+
+- id: quantum_field_theory
+  name: Quantum Field Theory
+  description: Unified treatment of particle interactions underpinning every later physics branch.
+  category: physical_sciences
+  tier: 5
+  research_cost: 6300.0
+  prerequisites:
+    - particle_physics
+    - quantum_computing
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.15
+
+- id: swarm_intelligence
+  name: Swarm Intelligence
+  description: Decentralized multi-agent coordination for colony-wide task allocation.
+  category: computing
+  tier: 5
+  research_cost: 6800.0
+  prerequisites:
+    - artificial_intelligence
+    - distributed_networks
+  effects:
+    - type: bonus
+      category: labor_efficiency
+      value: 0.15
+
+- id: longevity_treatments
+  name: Longevity Treatments
+  description: Cellular-repair therapies extending colonist productive lifespan.
+  category: life_sciences
+  tier: 5
+  research_cost: 6500.0
+  prerequisites:
+    - advanced_medicine
+    - cryogenics
+  effects:
+    - type: bonus
+      category: colonist_health
+      value: 0.20
+
+- id: gravimetric_sensors
+  name: Gravimetric Sensors
+  description: Superconducting gravimeters that resolve subsurface and anomaly detail.
+  category: astronautics
+  tier: 5
+  research_cost: 6700.0
+  prerequisites:
+    - sensor_systems
+    - superconductors
+  effects:
+    - type: survey_modifier_bonus
+      full_reveal_bonus: 0.10
+      partial_reveal_bonus: 0.10
+
+- id: advanced_alloys
+  name: Advanced Alloys
+  description: Nanostructured metal matrices combining refractory strength with low mass.
+  category: materials_science
+  tier: 5
+  research_cost: 6600.0
+  prerequisites:
+    - nanomaterials
+    - refractory_metallurgy
+  effects:
+    - type: bonus
+      category: construction_speed
+      value: 0.15
+
+- id: orbital_shipyards
+  name: Orbital Shipyards
+  description: Zero-g fabrication yards that speed up every orbital construction project.
+  category: engineering
+  tier: 5
+  research_cost: 6900.0
+  prerequisites:
+    - orbital_engineering
+    - interplanetary_logistics
+  effects:
+    - type: bonus
+      category: orbital_construction_speed
+      value: 0.15
+
+- id: metamaterials
+  name: Metamaterials
+  description: Engineered structures with properties absent from any natural material.
+  category: materials_science
+  tier: 5
+  research_cost: 7100.0
+  prerequisites:
+    - nanomaterials
+    - superconductors
+  effects:
+    - type: bonus
+      category: production_efficiency
+      value: 0.15
+
+# ─── Tier 6 additions ────────────────────────────────────────────────────────
+
+- id: fusion_torch_drives
+  name: Fusion Torch Drives
+  description: High-thrust fusion propulsion for rapid deep-system transit.
+  category: astronautics
+  tier: 6
+  research_cost: 12500.0
+  prerequisites:
+    - advanced_propulsion
+    - gravitic_engineering
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.15
+
+- id: exotic_matter_physics
+  name: Exotic Matter Physics
+  description: >
+    Negative-energy-density field theory — the convergence of antimatter
+    containment and unified field research.
+  category: physical_sciences
+  tier: 6
+  research_cost: 13500.0
+  prerequisites:
+    - antimatter_containment
+    - quantum_field_theory
+  effects:
+    - type: unlock_capability
+      capability_id: exotic_matter_engineering
+
+- id: interstellar_probes
+  name: Interstellar Probes
+  description: >
+    Torch-drive-boosted long-range probes that extend a colony's practical
+    outpost reach as well as survey turnaround.
+  category: astronautics
+  tier: 6
+  research_cost: 13000.0
+  prerequisites:
+    - fusion_torch_drives
+    - deep_space_navigation
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.10
+    - type: extend_outpost_range
+      bonus_au: 8.0
+
+- id: orbital_ring_theory
+  name: Orbital Ring Theory
+  description: >
+    Whole-orbit structural engineering — the convergence of megastructure
+    theory and orbital shipyard practice.
+  category: engineering
+  tier: 6
+  research_cost: 14500.0
+  prerequisites:
+    - megastructure_engineering
+    - orbital_shipyards
+  effects:
+    - type: unlock_capability
+      capability_id: orbital_ring_construction
+
+- id: programmable_matter
+  name: Programmable Matter
+  description: >
+    Self-reconfiguring material substrates — the convergence of metamaterial
+    engineering and artificial intelligence.
+  category: materials_science
+  tier: 6
+  research_cost: 13800.0
+  prerequisites:
+    - metamaterials
+    - artificial_intelligence
+  effects:
+    - type: unlock_capability
+      capability_id: programmable_matter_fabrication
+
+- id: planetary_ecology_engineering
+  name: Planetary Ecology Engineering
+  description: >
+    Whole-biosphere design tools — the convergence of terraforming theory and
+    synthetic biology, feeding future planet-scale ecology mechanics.
+  category: life_sciences
+  tier: 6
+  research_cost: 14200.0
+  prerequisites:
+    - terraforming_theory
+    - synthetic_biology
+  effects:
+    - type: unlock_capability
+      capability_id: advanced_terraforming
+
+- id: singularity_theory
+  name: Singularity Theory
+  description: >
+    Recursive self-improving system design — the convergence of neural
+    interfaces and swarm intelligence.
+  category: computing
+  tier: 6
+  research_cost: 14800.0
+  prerequisites:
+    - neural_interfaces
+    - swarm_intelligence
+  effects:
+    - type: unlock_capability
+      capability_id: technological_singularity
+
+- id: hyperdense_alloys
+  name: Hyperdense Alloys
+  description: Compressed-lattice alloys combining advanced-alloy strength with metamaterial precision.
+  category: materials_science
+  tier: 6
+  research_cost: 12800.0
+  prerequisites:
+    - advanced_alloys
+    - metamaterials
+  effects:
+    - type: bonus
+      category: construction_speed
+      value: 0.20
+
+# ─── Tier 7: ascension capstones (secret-project-style) ─────────────────────
+
+- id: zero_point_energy
+  name: Zero-Point Energy
+  description: >
+    Vacuum-energy extraction made practical by exotic matter containment —
+    the tree's premier power-generation capstone.
+  category: physical_sciences
+  tier: 7
+  research_cost: 22000.0
+  prerequisites:
+    - exotic_matter_physics
+  effects:
+    - type: bonus
+      category: power_generation
+      value: 0.30
+
+- id: dyson_swarm_engineering
+  name: Dyson Swarm Engineering
+  description: >
+    System-encircling collector-satellite construction — the convergence of
+    orbital ring theory and zero-point power, feeding future dyson-swarm
+    megaproject content.
+  category: engineering
+  tier: 7
+  research_cost: 26000.0
+  prerequisites:
+    - orbital_ring_theory
+    - zero_point_energy
+  effects:
+    - type: unlock_capability
+      capability_id: dyson_swarm_construction
+
+- id: warp_theory
+  name: Warp Theory
+  description: >
+    Spacetime-metric manipulation for faster-than-conventional transit — the
+    convergence of interstellar probe engineering and zero-point power.
+  category: astronautics
+  tier: 7
+  research_cost: 27000.0
+  prerequisites:
+    - interstellar_probes
+    - zero_point_energy
+  effects:
+    - type: unlock_capability
+      capability_id: faster_than_light_transit
+
+- id: post_scarcity_economics
+  name: Post-Scarcity Economics
+  description: >
+    Production planning at the limits of a self-improving, matter-programmable
+    economy — the convergence of technological singularity and programmable
+    matter.
+  category: computing
+  tier: 7
+  research_cost: 25000.0
+  prerequisites:
+    - singularity_theory
+    - programmable_matter
+  effects:
+    - type: bonus
+      category: production_efficiency
+      value: 0.30
+
+- id: genesis_engineering
+  name: Genesis Engineering
+  description: >
+    Whole-world biosphere synthesis from programmable substrates — the
+    convergence of planetary ecology engineering and programmable matter.
+  category: life_sciences
+  tier: 7
+  research_cost: 26500.0
+  prerequisites:
+    - planetary_ecology_engineering
+    - programmable_matter
+  effects:
+    - type: unlock_capability
+      capability_id: world_genesis
+
+- id: transcendent_computing
+  name: Transcendent Computing
+  description: >
+    Zero-point-powered recursive computation — the convergence of
+    technological singularity and vacuum-energy extraction.
+  category: computing
+  tier: 7
+  research_cost: 24000.0
+  prerequisites:
+    - singularity_theory
+    - zero_point_energy
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.30
