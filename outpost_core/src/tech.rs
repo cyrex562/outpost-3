@@ -149,8 +149,22 @@ impl Default for TechDef {
 ///
 /// `buildings` and `resources` are converted into concrete [`TechEffect`]
 /// entries by [`load_tech_registry`]. `bonuses` (e.g.
-/// `"construction_speed_10_percent"`) and `events` are accepted so authored
-/// content parses cleanly, but they are not yet mapped to engine effects.
+/// `"construction_speed_10_percent"`) and `events` are accepted so older
+/// authored content still parses cleanly, but are **deliberately, permanently
+/// decorative** (issue #248's recorded decision) — they are never converted
+/// into [`TechEffect`] entries, so a tech relying only on `bonuses`/`events`
+/// sugar (no explicit `effects:` block) produces zero runtime effect. A
+/// slug like `"construction_speed_10_percent"` is ambiguous to parse back
+/// into a real `{category, value}` pair (the naming convention isn't a
+/// stable machine format, just human-readable flavor text), and every
+/// numeric bonus that actually needs a real effect already has one
+/// available via an explicit `effects: [{type: bonus, category, value}]`
+/// entry (see [`TechEffect::Bonus`], wired to production output in
+/// `colony/production.rs`, issue #248). Content authors should use
+/// `effects:` for anything that must have a real numeric effect, and treat
+/// `bonuses`/`events` purely as flavor-text hints; a follow-up content pass
+/// (tracked alongside #249) can migrate the handful of pre-#236 techs still
+/// relying only on the sugar fields to explicit `effects:` blocks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TechUnlocks {
     /// Building ids this tech makes constructable.
@@ -159,10 +173,13 @@ pub struct TechUnlocks {
     /// Commodity ids this tech makes produceable / tradeable.
     #[serde(default)]
     pub resources: Vec<String>,
-    /// Named bonus slugs. Reserved for future mapping.
+    /// Named bonus slugs — decorative flavor text only (issue #248); never
+    /// converted into a real [`TechEffect`]. Use an explicit `effects:`
+    /// entry for anything that must actually change a number.
     #[serde(default)]
     pub bonuses: Vec<String>,
-    /// Event ids surfaced by this tech. Reserved for future mapping.
+    /// Event ids surfaced by this tech — decorative flavor text only
+    /// (issue #248); never converted into a real [`TechEffect`].
     #[serde(default)]
     pub events: Vec<String>,
 }

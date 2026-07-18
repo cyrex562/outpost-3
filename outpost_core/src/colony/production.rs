@@ -158,6 +158,24 @@ fn yield_category_for(
     }
 }
 
+/// Map a [`crate::system::YieldCategory`] to the `TechEffect::Bonus`
+/// `category` string content authors use for the matching tech-tree concept
+/// (issue #248) — e.g. `content/base/tech.yaml`'s `power_generation` bonus
+/// techs boost `PowerOutput` recipes. This is the sole place that
+/// reconciles the tech tree's free-form bonus-category vocabulary
+/// (`power_generation`, `research_output`, `food_production`,
+/// `production_efficiency`) with the structural [`crate::system::YieldCategory`]
+/// enum production.rs already classifies every output by.
+fn tech_bonus_category_key(category: crate::system::YieldCategory) -> &'static str {
+    use crate::system::YieldCategory;
+    match category {
+        YieldCategory::PowerOutput => "power_generation",
+        YieldCategory::ScienceYield => "research_output",
+        YieldCategory::FoodYield => "food_production",
+        YieldCategory::IndustryYield => "production_efficiency",
+    }
+}
+
 // ─── Production resolution ────────────────────────────────────────────────────
 
 /// Run the production step for a single colony.
@@ -195,6 +213,8 @@ pub fn process_production(
         &std::collections::HashMap::new(),
         &[],
         None,
+        &crate::modifier::ModifierAccumulator::new(),
+        &crate::modifier::DifficultyScalar::new(),
     )
 }
 
@@ -218,6 +238,16 @@ pub fn process_production(
 /// [`crate::system::YieldCategory`] via [`yield_category_for`] — a body can
 /// author an elevated `power_output` modifier, say, without that also
 /// inflating its food or science yield.
+///
+/// `modifier_accumulator`/`difficulty_scalar` (issue #248) resolve a third,
+/// independent per-output multiplicative factor via
+/// [`crate::modifier::resolve`], keyed by [`tech_bonus_category_key`] —
+/// this is what gives `TechEffect::Bonus` techs (e.g. `power_generation`,
+/// `research_output`, `food_production`, `production_efficiency`) a real
+/// numeric effect, following the stacking formula from `docs/DESIGN.md
+/// §7A`: `effective = base × (1 + Σ tech_bonuses_in_category) ×
+/// difficulty_scalar`. Pass empty/default instances for the pre-#248
+/// no-tech-bonus-applies case (see [`process_production`]).
 ///
 /// `deposit_richness` (issue #239) maps commodity id → richness/abundance
 /// in `[0.0, 1.0]` for whatever deposits are available at the colony's
@@ -250,6 +280,8 @@ pub fn process_production_scaled(
     active_recipes: &std::collections::HashMap<String, String>,
     category_modifiers: &[crate::system::BodyModifier],
     deposit_richness: Option<&std::collections::HashMap<String, f32>>,
+    modifier_accumulator: &crate::modifier::ModifierAccumulator,
+    difficulty_scalar: &crate::modifier::DifficultyScalar,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
@@ -412,9 +444,21 @@ pub fn process_production_scaled(
                         category_modifiers,
                         category,
                     ));
+                    let tech_mult = f64::from(crate::modifier::resolve(
+                        1.0,
+                        &crate::modifier::ModifiableQuantity::ProductionRate(
+                            tech_bonus_category_key(category).to_string(),
+                        ),
+                        modifier_accumulator,
+                        difficulty_scalar,
+                    ));
                     pool.deposit(
                         &ingredient.id,
-                        ingredient.quantity * p.scale * output_multiplier * category_mult,
+                        ingredient.quantity
+                            * p.scale
+                            * output_multiplier
+                            * category_mult
+                            * tech_mult,
                     );
                 }
             }
@@ -1054,6 +1098,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let smelter = outcome
@@ -1100,6 +1146,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let mut pool_harsh = ColonyPool::new();
@@ -1116,6 +1164,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let get_scale = |o: &ProductionStepOutcome, ty: &str| -> f64 {
@@ -1159,6 +1209,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let smelter = outcome
@@ -1253,6 +1305,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let recycler = outcome
@@ -1297,6 +1351,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         for res in &outcome.building_results {
@@ -1334,6 +1390,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let smelt = outcome
@@ -1388,6 +1446,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &category_modifiers,
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         // 1.0 base output * 1.25 productivity * 2.0 industry modifier = 2.5.
@@ -1423,11 +1483,95 @@ mod tests {
             &std::collections::HashMap::new(),
             &category_modifiers,
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         assert!(
             (pool.amount("iron_plate") - 1.0).abs() < 1e-6,
             "ScienceYield modifier should not affect IndustryYield output, got {}",
+            pool.amount("iron_plate")
+        );
+    }
+
+    #[test]
+    fn tech_bonus_scales_matching_category_output() {
+        // iron_plate is IndustryYield (smelter is Processing, iron_plate
+        // isn't a `consumable` commodity) — a `production_efficiency`
+        // TechEffect::Bonus should multiply on top of the base output
+        // (issue #248), following the same category-keyed pattern
+        // `category_modifier_stacks_multiplicatively_on_matching_category`
+        // already proves for body modifiers.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        let mut accum = crate::modifier::ModifierAccumulator::new();
+        accum.add(crate::modifier::ModifierDescriptor::new(
+            crate::modifier::ModifiableQuantity::ProductionRate("production_efficiency".into()),
+            "structural_composites",
+            0.25,
+        ));
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &accum,
+            &crate::modifier::DifficultyScalar::new(),
+        );
+
+        // 1.0 base output * (1.0 + 0.25 tech bonus) = 1.25.
+        assert!(
+            (pool.amount("iron_plate") - 1.25).abs() < 1e-6,
+            "expected 1.25 iron_plate (+25% production_efficiency tech bonus), got {}",
+            pool.amount("iron_plate")
+        );
+    }
+
+    #[test]
+    fn tech_bonus_does_not_apply_to_a_different_category() {
+        // A `research_output` bonus must not affect the smelter's
+        // IndustryYield output — tech bonuses are scoped per category, same
+        // discipline as body category_modifiers.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        let mut accum = crate::modifier::ModifierAccumulator::new();
+        accum.add(crate::modifier::ModifierDescriptor::new(
+            crate::modifier::ModifiableQuantity::ProductionRate("research_output".into()),
+            "theoretical_physics",
+            0.50,
+        ));
+        process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &accum,
+            &crate::modifier::DifficultyScalar::new(),
+        );
+
+        assert!(
+            (pool.amount("iron_plate") - 1.0).abs() < 1e-6,
+            "research_output tech bonus should not affect IndustryYield output, got {}",
             pool.amount("iron_plate")
         );
     }
@@ -1452,6 +1596,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
         assert!(
             (pool.amount("iron_plate") - 0.75).abs() < 1e-6,
@@ -1522,6 +1668,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
@@ -1548,6 +1696,8 @@ mod tests {
             &active,
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         assert_eq!(pool.amount("alloy"), 0.0);
@@ -1576,6 +1726,8 @@ mod tests {
             &active,
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
@@ -1663,6 +1815,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let mine = &outcome.building_results[0];
@@ -1693,6 +1847,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             Some(&deposits),
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let mine = &outcome.building_results[0];
@@ -1728,6 +1884,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             Some(&deposits),
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let mine = &outcome.building_results[0];
@@ -1765,6 +1923,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             Some(&deposits),
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let mine = &outcome.building_results[0];
@@ -1795,6 +1955,8 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             Some(&deposits),
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
         );
 
         let well = &outcome.building_results[0];

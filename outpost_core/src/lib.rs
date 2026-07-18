@@ -2159,6 +2159,8 @@ impl GameEngine {
                             &colony.active_recipes,
                             &colony.category_modifiers,
                             deposits,
+                            &self.state.modifier_accumulator,
+                            &self.state.difficulty_scalar,
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -2218,6 +2220,8 @@ impl GameEngine {
                             &out.active_recipes,
                             &out.category_modifiers,
                             Some(deposits),
+                            &self.state.modifier_accumulator,
+                            &self.state.difficulty_scalar,
                         );
                         for result in &prod_outcome.building_results {
                             for shortfall in &result.shortfalls {
