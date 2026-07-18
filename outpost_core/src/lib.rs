@@ -3044,6 +3044,33 @@ impl GameEngine {
                 research,
             } => {
                 let idx = self.find_outpost_index(*outpost_id)?;
+                // Validate the megaproject can actually accept a contribution
+                // *before* touching the outpost's pool — `pool.withdraw` is
+                // irreversible (it doesn't just check, it removes), so
+                // withdrawing first and validating after would silently
+                // destroy resources on a failed contribution (stale
+                // `project_id`, already-completed project, etc.).
+                let project = self
+                    .state
+                    .system_state
+                    .megaprojects
+                    .get(project_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "megaproject not found: {project_id:?}"
+                        ))
+                    })?;
+                if project.completed {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "megaproject already complete: {project_id:?}"
+                    )));
+                }
+                if project.next_milestone_index().is_none() {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "megaproject has no active milestone: {project_id:?}"
+                    )));
+                }
+
                 let withdrawn: Vec<(String, f64)> = resources
                     .iter()
                     .map(|(commodity_id, amount)| {
@@ -6819,6 +6846,106 @@ mod tests {
 
         // Pool can't go negative — only what was actually held gets withdrawn.
         assert!((engine.state.outposts[0].pool.amount("steel")).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contribute_outpost_to_megaproject_does_not_withdraw_on_unknown_project() {
+        // Regression: withdrawing before validating the megaproject exists
+        // would silently destroy pool resources on a failed contribution
+        // (e.g. a stale project_id) since ColonyPool::withdraw is
+        // irreversible. The contribution must fail *before* touching the
+        // pool.
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+        engine.state.outposts[0].pool.deposit("steel", 100.0);
+
+        let bogus_project = system::MegaprojectId::new();
+        let result = engine.apply(&Command::ContributeOutpostToMegaproject {
+            outpost_id,
+            project_id: bogus_project,
+            resources: vec![("steel".into(), 50.0)],
+            research: 0.0,
+        });
+        assert!(result.is_err());
+        assert!(
+            (engine.state.outposts[0].pool.amount("steel") - 100.0).abs() < 1e-6,
+            "pool must be untouched when the contribution is rejected, got {}",
+            engine.state.outposts[0].pool.amount("steel")
+        );
+    }
+
+    #[test]
+    fn contribute_outpost_to_megaproject_does_not_withdraw_on_completed_project() {
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+        engine.state.outposts[0].pool.deposit("steel", 500.0);
+
+        let events = engine
+            .apply(&Command::System(
+                system::SystemCommand::RegisterMegaproject {
+                    name: "Interstellar Expedition".into(),
+                    kind: system::MegaprojectKind::InterstellarExpedition,
+                    milestones: vec![system::MilestoneSpec {
+                        label: "Hull Construction".into(),
+                        resource_cost: vec![("steel".into(), 500.0)],
+                        research_cost: 0.0,
+                    }],
+                },
+            ))
+            .unwrap();
+        let project_id = match &events[0] {
+            Event::System(system::SystemEvent::MegaprojectRegistered { project_id, .. }) => {
+                project_id.clone()
+            }
+            other => panic!("expected MegaprojectRegistered, got {other:?}"),
+        };
+        // Complete the (only) milestone.
+        engine
+            .apply(&Command::ContributeOutpostToMegaproject {
+                outpost_id,
+                project_id: project_id.clone(),
+                resources: vec![("steel".into(), 500.0)],
+                research: 0.0,
+            })
+            .unwrap();
+        engine.state.outposts[0].pool.deposit("steel", 100.0);
+
+        // Second contribution to the now-completed project must fail and
+        // must not touch the pool.
+        let result = engine.apply(&Command::ContributeOutpostToMegaproject {
+            outpost_id,
+            project_id,
+            resources: vec![("steel".into(), 50.0)],
+            research: 0.0,
+        });
+        assert!(result.is_err());
+        assert!(
+            (engine.state.outposts[0].pool.amount("steel") - 100.0).abs() < 1e-6,
+            "pool must be untouched when the project is already complete, got {}",
+            engine.state.outposts[0].pool.amount("steel")
+        );
     }
 
     /// A colony with an empty mask never causes an interrupt halt.
