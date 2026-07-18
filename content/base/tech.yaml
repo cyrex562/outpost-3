@@ -1,13 +1,32 @@
-# Placeholder Technology Tree for Outpost 3 (Alpha Phase)
+# Technology Tree for Outpost 3 (issue #236)
 #
-# This is a minimal tech tree for demonstration purposes.
-# Full tech tree will be expanded in Alpha/Beta with:
-# - Multiple research paths and branching choices
-# - More granular unlocks and bonuses
-# - Technology synergy effects
-# - Dynamic prerequisites based on game state
+# Expanded from the original 12-entry placeholder set (see git history) into
+# a genuine multi-branch DAG across six categories. Design discipline (see
+# docs/DESIGN.md §7A):
+#   - unlocks-first: most techs gate a building/commodity/capability/survey
+#     effect into availability; flat numeric `Bonus` effects are a deliberate
+#     minority.
+#   - additive-within-category bonus stacking, not multiplicative.
+#   - a web/DAG, not permanent mutually-exclusive branches — every tech is
+#     eventually reachable from the tier-1 starter set.
+#
+# Categories: engineering, physical_sciences, life_sciences, computing,
+# materials_science, astronautics. The last two are new in #236:
+# materials_science unifies the refining/fabrication chains that used to be
+# bundled two-deep under advanced_materials/automation; astronautics gives
+# the #235 survey-expedition system (propulsion, sensors) and the #234
+# orbital system real tech hooks.
+#
+# This is issue #236's "solid start" — not the full SMAC/Stellaris-scale
+# tree yet. Follow-up issues (filed alongside this PR) track further waves:
+# deeper per-category branches, endgame/ascension-tier content, and wiring
+# tech-gate *enforcement* at the command layer (currently, like the
+# pre-#236 tree, `TechEffect`/`unlocks` populate tracking state that isn't
+# yet read back by `Command::QueueConstruction` or the orbital/outpost/
+# expedition commands — a pre-existing gap this issue doesn't newly
+# introduce, just doesn't fix either; see the filed follow-up).
 
-# Tier 1: Basic Technologies (starting tech, low cost)
+# ─── Tier 1: starter techs (no prerequisites) ───────────────────────────────
 
 - id: basic_construction
   name: Basic Construction
@@ -15,12 +34,8 @@
   category: engineering
   tier: 1
   research_cost: 100.0
-  research_time_ticks: 50
   prerequisites: []
   unlocks:
-    # basic_habitat, solar_array_mk1, and other survival basics ship in the
-    # starter set (no tech_prerequisite at all) as of issue #166 — only
-    # warehouse is actually gated behind this tech.
     buildings:
       - warehouse
     bonuses:
@@ -32,7 +47,6 @@
   category: engineering
   tier: 1
   research_cost: 150.0
-  research_time_ticks: 75
   prerequisites: []
   unlocks:
     buildings:
@@ -45,7 +59,6 @@
   category: engineering
   tier: 1
   research_cost: 200.0
-  research_time_ticks: 100
   prerequisites: []
   unlocks:
     buildings:
@@ -59,51 +72,7 @@
     bonuses:
       - mining_efficiency_10_percent
 
-# Tier 2: Intermediate Technologies (require tier 1 prereqs)
-
-- id: advanced_materials
-  name: Advanced Materials Processing
-  description: Refining techniques for producing high-quality metals and alloys.
-  category: physical_sciences
-  tier: 2
-  research_cost: 500.0
-  research_time_ticks: 250
-  prerequisites:
-    - resource_extraction
-  unlocks:
-    # smelter ships in the starter set (issue #166) — advanced_materials
-    # gates the denser tier-2 housing and the multi-recipe refinery instead.
-    # precious_mine/precious_refinery added in #207.
-    buildings:
-      - apartment_block
-      - refinery
-      - precious_mine
-      - precious_refinery
-      - petrochemical_plant
-      - nuclear_refinery
-    resources:
-      - steel
-      - titanium
-    bonuses: []
-
-- id: hydroponics
-  name: Hydroponic Agriculture
-  description: Soil-free farming techniques optimized for enclosed environments.
-  category: life_sciences
-  tier: 2
-  research_cost: 400.0
-  research_time_ticks: 200
-  prerequisites:
-    - basic_construction
-  unlocks:
-    # hydroponic_bay ships in the starter set (issue #166) — hydroponics
-    # gates the higher-throughput water_treatment_plant and the
-    # distinct-foodstuffs food_processing_plant instead (issue #211).
-    buildings:
-      - water_treatment_plant
-      - food_processing_plant
-    bonuses:
-      - food_production_15_percent
+# ─── Tier 2 ──────────────────────────────────────────────────────────────────
 
 - id: improved_solar
   name: Improved Solar Arrays
@@ -111,7 +80,6 @@
   category: engineering
   tier: 2
   research_cost: 600.0
-  research_time_ticks: 300
   prerequisites:
     - basic_power
   unlocks:
@@ -121,53 +89,155 @@
     bonuses:
       - power_generation_20_percent
 
-# Tier 3: Advanced Technologies (require multiple tier 2 prereqs)
+- id: hydroponics
+  name: Hydroponic Agriculture
+  description: Soil-free farming techniques optimized for enclosed environments.
+  category: life_sciences
+  tier: 2
+  research_cost: 400.0
+  prerequisites:
+    - basic_construction
+  unlocks:
+    buildings:
+      - water_treatment_plant
+      - food_processing_plant
+    bonuses:
+      - food_production_15_percent
+
+- id: advanced_materials
+  name: Advanced Materials Processing
+  description: >
+    Foundational metallurgy underpinning every deeper refining branch
+    (materials_science). Trimmed in #236 to its own real unlock
+    (structural_metal availability) — the buildings it used to bundle
+    (apartment_block, refinery, precious_mine/refinery, petrochemical_plant,
+    nuclear_refinery) now have their own dedicated techs below, so the tree
+    branches here instead of gating six buildings behind one node.
+  category: physical_sciences
+  tier: 2
+  research_cost: 500.0
+  prerequisites:
+    - resource_extraction
+  unlocks:
+    resources:
+      - structural_metal
+    bonuses: []
+
+- id: logistics_network
+  name: Logistics Networks
+  description: Inter-colony scheduling and cargo-routing systems.
+  category: engineering
+  tier: 2
+  research_cost: 450.0
+  prerequisites:
+    - basic_construction
+    - resource_extraction
+  unlocks:
+    buildings:
+      - trade_depot
+
+- id: urban_habitation
+  name: Urban Habitation
+  description: Dense, multi-story colonist housing.
+  category: engineering
+  tier: 2
+  research_cost: 400.0
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    buildings:
+      - apartment_block
+
+- id: fuel_refining
+  name: Fuel Refining
+  description: Cracking and distillation processes for structural and chemical feedstocks.
+  category: materials_science
+  tier: 2
+  research_cost: 400.0
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    buildings:
+      - refinery
+
+- id: precious_metallurgy
+  name: Precious Metallurgy
+  description: Extraction and refining of low-abundance high-value ores.
+  category: materials_science
+  tier: 2
+  research_cost: 450.0
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    buildings:
+      - precious_mine
+      - precious_refinery
+
+- id: petrochemical_processing
+  name: Petrochemical Processing
+  description: Hydrocarbon cracking into plastics and chemical feedstocks.
+  category: materials_science
+  tier: 2
+  research_cost: 450.0
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    buildings:
+      - petrochemical_plant
+
+- id: orbital_mechanics
+  name: Orbital Mechanics
+  description: >
+    Trajectory-planning fundamentals for interplanetary transit — the entry
+    point of the astronautics branch feeding #235's survey expeditions.
+  category: astronautics
+  tier: 2
+  research_cost: 350.0
+  prerequisites:
+    - basic_power
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.10
+
+# ─── Tier 3 ──────────────────────────────────────────────────────────────────
 
 - id: automation
   name: Industrial Automation
-  description: Robotic systems and AI-controlled processes to reduce labor requirements.
+  description: >
+    Robotic systems and AI-controlled processes to reduce labor
+    requirements. Trimmed in #236: the ten buildings this used to bundle at
+    once now split across automation itself (fabricator, manufactory) and
+    five dedicated tier-3/4 techs below (refractory_metallurgy,
+    advanced_ceramics, semiconductor_fabrication, theoretical_physics,
+    sensor_systems), each a real branch point instead of a single node
+    unlocking a third of the building roster.
   category: computing
   tier: 3
   research_cost: 1000.0
-  research_time_ticks: 500
   prerequisites:
     - advanced_materials
   unlocks:
     buildings:
       - fabricator
-      - trade_depot
-      - sensor_array
-      - physics_lab
-      - refractory_mine
-      - refractory_foundry
       - manufactory
-      - semiconductor_fab
-      - ceramics_kiln
-      - crystal_grower
     bonuses:
       - production_efficiency_25_percent
       - labor_requirement_minus_20_percent
-  resource_costs:
-    - resource_id: electronics
-      amount: 50.0
 
 - id: fusion_basics
   name: Fusion Fundamentals
-  description: Theoretical foundation for fusion power generation.
+  description: >
+    Theoretical foundation for fusion power generation. Pure theory tech —
+    the actual reactor building is gated behind fusion_engineering, which
+    also needs automation's industrial base (a theory-then-engineering
+    split, matching the SMAC/Stellaris convention of separating fundamental
+    research from the applied tech that turns it into a building).
   category: physical_sciences
   tier: 3
-  research_cost: 2000.0
-  research_time_ticks: 800
+  research_cost: 1600.0
   prerequisites:
     - improved_solar
     - advanced_materials
-  unlocks:
-    buildings:
-      - fusion_reactor_prototype
-    bonuses: []
-  resource_costs:
-    - resource_id: research_data
-      amount: 100.0
 
 - id: genetic_engineering
   name: Genetic Engineering
@@ -175,7 +245,6 @@
   category: life_sciences
   tier: 3
   research_cost: 1500.0
-  research_time_ticks: 600
   prerequisites:
     - hydroponics
   unlocks:
@@ -184,9 +253,6 @@
       - colonist_health_bonus_15_percent
     events:
       - genetic_breakthrough
-  resource_costs:
-    - resource_id: research_data
-      amount: 75.0
 
 - id: planetary_life_support
   name: Planetary Life Support Engineering
@@ -197,7 +263,6 @@
   category: life_sciences
   tier: 3
   research_cost: 1800.0
-  research_time_ticks: 700
   prerequisites:
     - hydroponics
     - advanced_materials
@@ -208,9 +273,6 @@
     buildings:
       - habitat_dome
       - atmospheric_harvester
-  resource_costs:
-    - resource_id: research_data
-      amount: 90.0
 
 - id: radiation_shielding
   name: Radiation Shielding
@@ -222,17 +284,122 @@
   category: life_sciences
   tier: 3
   research_cost: 1200.0
-  research_time_ticks: 500
   prerequisites:
     - advanced_materials
   effects:
     - type: mitigate_attribute
       attribute: radiation
-  resource_costs:
-    - resource_id: research_data
-      amount: 60.0
 
-# Tier 4: Placeholder for Alpha Expansion
+- id: nuclear_fuel_cycle
+  name: Nuclear Fuel Cycle
+  description: Fissile-ore enrichment and reprocessing.
+  category: materials_science
+  tier: 3
+  research_cost: 1100.0
+  prerequisites:
+    - advanced_materials
+    - resource_extraction
+  unlocks:
+    buildings:
+      - nuclear_refinery
+
+- id: refractory_metallurgy
+  name: Refractory Metallurgy
+  description: High-temperature alloy processing for heat-tolerant components.
+  category: materials_science
+  tier: 3
+  research_cost: 1000.0
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    buildings:
+      - refractory_mine
+      - refractory_foundry
+
+- id: advanced_ceramics
+  name: Advanced Ceramics
+  description: Sintered ceramics and crystal-growth techniques for optics and structural glass.
+  category: materials_science
+  tier: 3
+  research_cost: 1000.0
+  prerequisites:
+    - advanced_materials
+  unlocks:
+    buildings:
+      - ceramics_kiln
+      - crystal_grower
+
+- id: structural_composites
+  name: Structural Composites
+  description: Layered fiber-reinforced panels that speed up general construction.
+  category: engineering
+  tier: 3
+  research_cost: 900.0
+  prerequisites:
+    - advanced_materials
+  effects:
+    - type: bonus
+      category: construction_speed
+      value: 0.15
+
+- id: theoretical_physics
+  name: Theoretical Physics
+  description: Foundational research methodology underpinning every applied-physics branch.
+  category: physical_sciences
+  tier: 3
+  research_cost: 1200.0
+  prerequisites:
+    - automation
+  unlocks:
+    buildings:
+      - physics_lab
+
+- id: sensor_systems
+  name: Sensor Systems
+  description: >
+    Long-baseline sensor arrays and signal-processing pipelines — improves
+    survey-expedition full/partial reveal odds (#235) in addition to
+    unlocking the sensor_array building.
+  category: astronautics
+  tier: 3
+  research_cost: 1300.0
+  prerequisites:
+    - automation
+  unlocks:
+    buildings:
+      - sensor_array
+  effects:
+    - type: survey_modifier_bonus
+      full_reveal_bonus: 0.05
+      partial_reveal_bonus: 0.05
+
+- id: propulsion_engineering
+  name: Propulsion Engineering
+  description: Higher-thrust, higher-efficiency drive systems for interplanetary transit.
+  category: astronautics
+  tier: 3
+  research_cost: 1400.0
+  prerequisites:
+    - orbital_mechanics
+    - advanced_materials
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.15
+
+- id: advanced_medicine
+  name: Advanced Medicine
+  description: Genomically-tailored treatment and preventative care protocols.
+  category: life_sciences
+  tier: 3
+  research_cost: 1300.0
+  prerequisites:
+    - genetic_engineering
+  effects:
+    - type: bonus
+      category: colonist_health
+      value: 0.15
+
+# ─── Tier 4 ──────────────────────────────────────────────────────────────────
 
 - id: quantum_computing
   name: Quantum Computing
@@ -240,15 +407,335 @@
   category: computing
   tier: 4
   research_cost: 5000.0
-  research_time_ticks: 1500
   prerequisites:
     - automation
   unlocks:
     bonuses:
       - research_speed_50_percent
       - all_efficiency_20_percent
-  resource_costs:
-    - resource_id: electronics
-      amount: 200.0
-    - resource_id: research_data
-      amount: 500.0
+
+- id: fusion_engineering
+  name: Fusion Reactor Engineering
+  description: Applied engineering that turns fusion theory into a working reactor.
+  category: physical_sciences
+  tier: 4
+  research_cost: 2600.0
+  prerequisites:
+    - fusion_basics
+    - automation
+  unlocks:
+    buildings:
+      - fusion_reactor_prototype
+
+- id: particle_physics
+  name: Particle Physics
+  description: High-energy particle interactions, the gateway to superconducting materials.
+  category: physical_sciences
+  tier: 4
+  research_cost: 2400.0
+  prerequisites:
+    - fusion_basics
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.10
+
+- id: cybernetics
+  name: Cybernetics
+  description: Human-machine interface systems that reduce labor overhead across the colony.
+  category: computing
+  tier: 4
+  research_cost: 2800.0
+  prerequisites:
+    - automation
+  effects:
+    - type: bonus
+      category: labor_efficiency
+      value: 0.10
+
+- id: distributed_networks
+  name: Distributed Networks
+  description: System-wide mesh networking linking every colony's logistics data.
+  category: computing
+  tier: 4
+  research_cost: 2700.0
+  prerequisites:
+    - automation
+    - logistics_network
+  effects:
+    - type: unlock_capability
+      capability_id: system_wide_logistics
+
+- id: semiconductor_fabrication
+  name: Semiconductor Fabrication
+  description: Photolithography and doping processes for integrated circuits.
+  category: materials_science
+  tier: 4
+  research_cost: 2500.0
+  prerequisites:
+    - automation
+    - refractory_metallurgy
+  unlocks:
+    buildings:
+      - semiconductor_fab
+    resources:
+      - semiconductors
+
+- id: composite_materials
+  name: Composite Materials
+  description: Carbon-fiber and ceramic-matrix composites for lightweight structural panels.
+  category: materials_science
+  tier: 4
+  research_cost: 2600.0
+  prerequisites:
+    - advanced_ceramics
+    - refractory_metallurgy
+  unlocks:
+    resources:
+      - carbon_composites
+  effects:
+    - type: bonus
+      category: construction_speed
+      value: 0.10
+
+- id: atmospheric_processing
+  name: Atmospheric Processing
+  description: >
+    Scrubbing and filtration systems that cancel a linked colony's
+    atmosphere-hazard penalty on its habitability score, regardless of the
+    home body's actual atmosphere hazard band. Retroactive, mirroring
+    radiation_shielding (issue #185's precedent).
+  category: life_sciences
+  tier: 4
+  research_cost: 2000.0
+  prerequisites:
+    - hydroponics
+    - planetary_life_support
+  effects:
+    - type: mitigate_attribute
+      attribute: atmosphere_hazard
+
+- id: climate_control
+  name: Climate Control
+  description: >
+    Active thermal regulation that cancels a linked colony's temperature
+    penalty on its habitability score, regardless of the home body's actual
+    temperature band. Retroactive, mirroring radiation_shielding.
+  category: life_sciences
+  tier: 4
+  research_cost: 2100.0
+  prerequisites:
+    - planetary_life_support
+  effects:
+    - type: mitigate_attribute
+      attribute: temperature
+
+- id: pressurized_habitats
+  name: Pressurized Habitats
+  description: >
+    Sealed, pressure-differential-tolerant habitat construction that cancels
+    a linked colony's atmosphere-density penalty on its habitability score,
+    regardless of the home body's actual atmosphere density. Retroactive,
+    mirroring radiation_shielding.
+  category: life_sciences
+  tier: 4
+  research_cost: 2200.0
+  prerequisites:
+    - planetary_life_support
+    - advanced_materials
+  effects:
+    - type: mitigate_attribute
+      attribute: atmosphere_density
+
+- id: deep_space_navigation
+  name: Deep-Space Navigation
+  description: Long-range trajectory computation and autonomous course correction.
+  category: astronautics
+  tier: 4
+  research_cost: 2900.0
+  prerequisites:
+    - propulsion_engineering
+    - sensor_systems
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.15
+    - type: survey_modifier_bonus
+      full_reveal_bonus: 0.10
+      partial_reveal_bonus: 0.05
+
+- id: xenoarchaeology
+  name: Xenoarchaeology
+  description: >
+    Interpretive methodology for anomalous sites and artifacts discovered
+    during expeditions — improves survey reveal odds further (#235).
+  category: astronautics
+  tier: 4
+  research_cost: 2800.0
+  prerequisites:
+    - sensor_systems
+    - genetic_engineering
+  effects:
+    - type: survey_modifier_bonus
+      full_reveal_bonus: 0.10
+      partial_reveal_bonus: 0.10
+
+- id: orbital_engineering
+  name: Orbital Engineering
+  description: Modular station construction techniques (#234).
+  category: astronautics
+  tier: 4
+  research_cost: 2700.0
+  prerequisites:
+    - sensor_systems
+    - automation
+  effects:
+    - type: bonus
+      category: orbital_construction_speed
+      value: 0.20
+
+- id: interplanetary_logistics
+  name: Interplanetary Logistics
+  description: Cargo-transfer scheduling across the whole system, not just within a colony.
+  category: engineering
+  tier: 4
+  research_cost: 2500.0
+  prerequisites:
+    - logistics_network
+    - propulsion_engineering
+  effects:
+    - type: bonus
+      category: trade_throughput
+      value: 0.20
+
+# ─── Tier 5 ──────────────────────────────────────────────────────────────────
+
+- id: superconductors
+  name: Superconductors
+  description: Zero-resistance conductive materials for high-density power transmission.
+  category: physical_sciences
+  tier: 5
+  research_cost: 6000.0
+  prerequisites:
+    - particle_physics
+    - refractory_metallurgy
+  effects:
+    - type: bonus
+      category: power_generation
+      value: 0.15
+
+- id: nanomaterials
+  name: Nanomaterials
+  description: Engineered nanostructures for high-precision fabrication.
+  category: materials_science
+  tier: 5
+  research_cost: 6500.0
+  prerequisites:
+    - composite_materials
+    - semiconductor_fabrication
+  effects:
+    - type: bonus
+      category: production_efficiency
+      value: 0.15
+
+- id: artificial_intelligence
+  name: Artificial Intelligence
+  description: Autonomous reasoning systems for research triage and prioritization.
+  category: computing
+  tier: 5
+  research_cost: 7000.0
+  prerequisites:
+    - quantum_computing
+    - cybernetics
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.20
+
+- id: advanced_propulsion
+  name: Advanced Propulsion
+  description: Staged fusion-torch drives for rapid deep-system transit.
+  category: astronautics
+  tier: 5
+  research_cost: 7200.0
+  prerequisites:
+    - deep_space_navigation
+  effects:
+    - type: reduce_transit_time
+      fraction: 0.20
+
+# ─── Tier 6: capstones (convergent prerequisites) ───────────────────────────
+
+- id: antimatter_containment
+  name: Antimatter Containment
+  description: Magnetic-bottle containment fields for exotic-matter power generation.
+  category: physical_sciences
+  tier: 6
+  research_cost: 12000.0
+  prerequisites:
+    - superconductors
+  effects:
+    - type: bonus
+      category: power_generation
+      value: 0.25
+
+- id: synthetic_biology
+  name: Synthetic Biology
+  description: Engineered microbial and enzymatic pathways for closed-loop food production.
+  category: life_sciences
+  tier: 6
+  research_cost: 11500.0
+  prerequisites:
+    - genetic_engineering
+    - nanomaterials
+  effects:
+    - type: bonus
+      category: food_production
+      value: 0.20
+
+- id: neural_interfaces
+  name: Neural Interfaces
+  description: Direct cognitive augmentation for research and control-system throughput.
+  category: computing
+  tier: 6
+  research_cost: 13000.0
+  prerequisites:
+    - artificial_intelligence
+    - cybernetics
+  effects:
+    - type: bonus
+      category: research_output
+      value: 0.15
+
+- id: terraforming_theory
+  name: Terraforming Theory
+  description: >
+    Whole-body atmospheric and thermal engineering — the capstone of the
+    life_sciences mitigation branch, converging all three atmosphere/
+    temperature techs plus radiation shielding into a single forward-looking
+    capability gate for future planet-scale terraforming mechanics.
+  category: life_sciences
+  tier: 6
+  research_cost: 14000.0
+  prerequisites:
+    - climate_control
+    - atmospheric_processing
+    - pressurized_habitats
+  effects:
+    - type: unlock_capability
+      capability_id: terraforming
+
+- id: megastructure_engineering
+  name: Megastructure Engineering
+  description: >
+    System-scale construction techniques feeding the interstellar-expedition
+    and future megaproject content — the capstone of the engineering/
+    astronautics/materials_science convergence.
+  category: engineering
+  tier: 6
+  research_cost: 15000.0
+  prerequisites:
+    - interplanetary_logistics
+    - nanomaterials
+  effects:
+    - type: unlock_capability
+      capability_id: megaproject_construction

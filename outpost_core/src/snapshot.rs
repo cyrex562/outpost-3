@@ -50,7 +50,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 5: `habitability_mitigations` field added to `FullStateBlob` (issue #185).
 /// Schema version 6: `outposts` field added to `FullStateBlob` (issue #233).
 /// Schema version 7: `expedition_registry` field added to `FullStateBlob` (issue #235).
-pub const SCHEMA_VERSION: u32 = 7;
+/// Schema version 8: `tech_survey_modifiers`/`propulsion_transit_scalar` fields added (issue #236).
+pub const SCHEMA_VERSION: u32 = 8;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,16 @@ struct FullStateBlob {
     // ── #235 Body-scouting survey expeditions ────────────────────────────────
     #[serde(default)]
     expedition_registry: ExpeditionRegistry,
+
+    // ── #236 Tech-driven expedition modifiers ────────────────────────────────
+    #[serde(default)]
+    tech_survey_modifiers: crate::expedition::SurveyModifiers,
+    #[serde(default = "default_transit_scalar")]
+    propulsion_transit_scalar: f32,
+}
+
+fn default_transit_scalar() -> f32 {
+    1.0
 }
 
 fn default_true() -> bool {
@@ -218,6 +229,8 @@ impl FullStateBlob {
             habitability_mitigations: state.habitability_mitigations.clone(),
             outposts: state.outposts.clone(),
             expedition_registry: state.expedition_registry.clone(),
+            tech_survey_modifiers: state.tech_survey_modifiers.clone(),
+            propulsion_transit_scalar: state.propulsion_transit_scalar,
         }
     }
 
@@ -264,6 +277,8 @@ impl FullStateBlob {
             habitability_mitigations: self.habitability_mitigations,
             outposts: self.outposts,
             expedition_registry: self.expedition_registry,
+            tech_survey_modifiers: self.tech_survey_modifiers,
+            propulsion_transit_scalar: self.propulsion_transit_scalar,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,

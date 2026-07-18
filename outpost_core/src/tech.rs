@@ -56,6 +56,26 @@ pub enum TechEffect {
         /// The habitability input this tech treats as its best band.
         attribute: crate::system::HabitabilityAttribute,
     },
+    /// Improves survey-expedition reveal odds system-wide (issue #236,
+    /// feeding #235's `expedition::resolve_survey`). Stacks additively
+    /// across every researched tech carrying this effect.
+    SurveyModifierBonus {
+        /// Additive bonus to full-reveal probability.
+        #[serde(default)]
+        full_reveal_bonus: f32,
+        /// Additive bonus to partial-reveal probability.
+        #[serde(default)]
+        partial_reveal_bonus: f32,
+    },
+    /// Reduces survey-expedition transit time system-wide (issue #236,
+    /// feeding #235). `fraction` is the proportional reduction (e.g. `0.15`
+    /// = 15% shorter transit); multiple researched techs stack
+    /// multiplicatively on the remaining scalar (`scalar *= 1.0 -
+    /// fraction`), floored so transit never reaches zero turns.
+    ReduceTransitTime {
+        /// Proportional reduction in transit turns, in `[0.0, 1.0)`.
+        fraction: f32,
+    },
 }
 
 /// Authored technology definition — stored in content pack files.
@@ -800,5 +820,107 @@ mod tests {
         let mut with_tech = HashSet::new();
         with_tech.insert("science_tier2".to_string());
         assert_eq!(unlocked_buildings(buildings.iter(), &with_tech).len(), 1);
+    }
+
+    // ── Real content/base/tech.yaml (issue #236) ──────────────────────────────
+
+    fn read_real_tech_yaml() -> Option<String> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let root = std::path::Path::new(&manifest).parent()?.to_path_buf();
+        let path = root.join("content").join("base").join("tech.yaml");
+        std::fs::read_to_string(path).ok()
+    }
+
+    /// Done-when: the real authored tree parses cleanly (no cycles, no
+    /// unknown-prerequisite refs) and is a genuine multi-category,
+    /// multi-tier DAG well beyond the pre-#236 12-entry placeholder set.
+    #[test]
+    fn real_tech_yaml_parses_and_forms_a_wide_multi_tier_dag() {
+        let Some(yaml) = read_real_tech_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let registry = load_tech_registry(&yaml).expect("content/base/tech.yaml must parse");
+
+        let all_ids: Vec<&TechId> = registry.techs.keys().collect();
+        assert!(
+            all_ids.len() >= 40,
+            "expected a solid-start expansion well beyond the 12-entry \
+             placeholder tree, got {} techs",
+            all_ids.len()
+        );
+
+        let categories: std::collections::HashSet<&str> = registry
+            .techs
+            .values()
+            .map(|d| d.category.as_str())
+            .collect();
+        for expected in [
+            "engineering",
+            "physical_sciences",
+            "life_sciences",
+            "computing",
+            "materials_science",
+            "astronautics",
+        ] {
+            assert!(
+                categories.contains(expected),
+                "expected category '{expected}' to be represented in the tree"
+            );
+        }
+
+        let max_tier = registry.techs.values().map(|d| d.tier).max().unwrap_or(0);
+        assert!(
+            max_tier >= 5,
+            "expected the tree to span at least 5 tiers, got max tier {max_tier}"
+        );
+
+        // Genuine DAG, not a single-file line: at least one tech must have
+        // 2+ direct prerequisites (a convergence point).
+        assert!(
+            registry.techs.values().any(|d| d.prerequisites.len() >= 2),
+            "expected at least one tech with multiple prerequisites (a DAG \
+             convergence point, not a linear chain)"
+        );
+
+        // At least one tech must have 2+ direct dependents (a fan-out point).
+        let mut dependents: HashMap<&str, u32> = HashMap::new();
+        for def in registry.techs.values() {
+            for prereq in &def.prerequisites {
+                *dependents.entry(prereq.as_str()).or_insert(0) += 1;
+            }
+        }
+        assert!(
+            dependents.values().any(|&count| count >= 2),
+            "expected at least one tech with multiple dependents (a DAG \
+             fan-out point, not a single-file line)"
+        );
+    }
+
+    /// Done-when (pacing check, issue #236's DoD): at the baseline
+    /// `research_lab`-only output rate (5 research/sol, no `physics_lab`),
+    /// clearing the entire authored tree takes far more than a token number
+    /// of strategic months — i.e. tree size is scarce relative to research
+    /// output, not trivially beelinable.
+    #[test]
+    fn real_tech_yaml_is_not_trivially_beelinable_at_baseline_research_rate() {
+        let Some(yaml) = read_real_tech_yaml() else {
+            return;
+        };
+        let registry = load_tech_registry(&yaml).expect("content/base/tech.yaml must parse");
+
+        let total_cost: f32 = registry.techs.values().map(|d| d.research_cost).sum();
+
+        // Baseline: one starter research_lab, 5 research/sol, 30 sols/month
+        // (DEFAULT_SOLS_PER_MONTH) = 150 research/month, no physics_lab or
+        // AI/quantum bonuses yet (those are themselves deep in the tree).
+        let baseline_research_per_month = 5.0 * 30.0;
+        let months_to_clear_tree = total_cost / baseline_research_per_month;
+
+        assert!(
+            months_to_clear_tree > 300.0,
+            "expected clearing the whole tree to take well over 300 \
+             strategic months at baseline output (scarcity, not a beeline); \
+             got {months_to_clear_tree:.1} months for {total_cost:.0} total cost"
+        );
     }
 }
