@@ -17,6 +17,7 @@
 use uuid::Uuid;
 
 use crate::colony::ColonyId;
+use crate::system::BodyId;
 
 // ─── Orbit types ─────────────────────────────────────────────────────────────
 
@@ -100,7 +101,9 @@ pub enum StationType {
 }
 
 impl StationType {
-    /// Slot cost consumed in the chosen orbit band when this station is built.
+    /// Default slot cost when the caller doesn't choose a size explicitly —
+    /// the pre-issue-#234 fixed value, kept as the midpoint/typical size
+    /// within [`Self::slot_range`].
     #[must_use]
     pub fn slot_cost(self) -> u32 {
         match self {
@@ -109,7 +112,22 @@ impl StationType {
         }
     }
 
-    /// Base number of colony-sol turns required to construct this station.
+    /// Valid `(min, max)` slot-size range for a station of this type
+    /// (issue #234) — a station scales within its type's range rather than
+    /// every station of a type costing a single fixed value. Ranges are
+    /// centred on the pre-#234 fixed costs (`Self::slot_cost`) so existing
+    /// content/saves built at the default size stay valid.
+    #[must_use]
+    pub fn slot_range(self) -> (u32, u32) {
+        match self {
+            StationType::Habitat => (1, 4),
+            StationType::Industrial => (2, 6),
+            StationType::Logistics => (1, 3),
+        }
+    }
+
+    /// Base number of colony-sol turns required to construct this station
+    /// at its default (`Self::slot_cost`) size.
     #[must_use]
     pub fn base_construction_turns(self) -> u32 {
         match self {
@@ -117,6 +135,19 @@ impl StationType {
             StationType::Industrial => 12,
             StationType::Logistics => 6,
         }
+    }
+
+    /// Construction turns for a station of this type built at `slot_cost`
+    /// (issue #234) — scales linearly from [`Self::base_construction_turns`]
+    /// at the default size, +2 turns per slot above it (larger stations take
+    /// longer). Never less than the base for a below-default size, so a
+    /// smaller-than-default station isn't paradoxically slower.
+    #[must_use]
+    pub fn construction_turns_for(self, slot_cost: u32) -> u32 {
+        let base = self.base_construction_turns();
+        let default = self.slot_cost();
+        let extra_slots = slot_cost.saturating_sub(default);
+        base + extra_slots * 2
     }
 }
 
@@ -234,21 +265,79 @@ pub struct OrbitalStation {
     /// Colony that built and operates this station (may be `None` for independent
     /// Lagrange stations in future content).
     pub colony_id: ColonyId,
-    /// Slots consumed in the orbit band.
+    /// Slots consumed in the orbit band (issue #234: a chosen size within
+    /// [`StationType::slot_range`], not a single fixed value per type).
     pub slot_cost: u32,
+    /// The system body this station orbits (issue #234).
+    ///
+    /// `None` is reserved for [`OrbitType::Lagrange`] stations, which stay a
+    /// system-wide asset rather than anchored to one body — matching the
+    /// pre-#234 behaviour for that band. [`OrbitType::Low`]/[`OrbitType::Geostationary`]
+    /// stations should always carry `Some(body_id)`, since slot capacity for
+    /// those bands is now tracked per body (see
+    /// [`OrbitalRegistry::slots_used`]).
+    #[serde(default)]
+    pub body_id: Option<BodyId>,
 }
 
 impl OrbitalStation {
-    /// Create a new station; `slot_cost` defaults to [`StationType::slot_cost`].
-    #[must_use]
-    pub fn new(station_type: StationType, orbit_type: OrbitType, colony_id: ColonyId) -> Self {
-        Self {
+    /// Create a new station at `slot_cost`, validated against
+    /// `station_type`'s [`StationType::slot_range`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OrbitalError::InvalidSlotCost`] if `slot_cost` falls outside
+    /// the type's valid range.
+    pub fn new(
+        station_type: StationType,
+        orbit_type: OrbitType,
+        colony_id: ColonyId,
+        body_id: Option<BodyId>,
+        slot_cost: u32,
+    ) -> Result<Self, OrbitalError> {
+        let (min, max) = station_type.slot_range();
+        if slot_cost < min || slot_cost > max {
+            return Err(OrbitalError::InvalidSlotCost {
+                station_type,
+                requested: slot_cost,
+                min,
+                max,
+            });
+        }
+        Ok(Self {
             id: Uuid::new_v4(),
-            slot_cost: station_type.slot_cost(),
+            slot_cost,
             station_type,
             orbit_type,
             colony_id,
-        }
+            body_id,
+        })
+    }
+
+    /// Create a new station at `station_type`'s default
+    /// ([`StationType::slot_cost`]) size — a convenience wrapper for callers
+    /// that don't need to choose a custom size.
+    ///
+    /// # Panics
+    ///
+    /// Never panics in practice — `station_type.slot_cost()` is always
+    /// within `station_type.slot_range()` by construction (see the ranges
+    /// defined in [`StationType::slot_range`]).
+    #[must_use]
+    pub fn new_default_size(
+        station_type: StationType,
+        orbit_type: OrbitType,
+        colony_id: ColonyId,
+        body_id: Option<BodyId>,
+    ) -> Self {
+        Self::new(
+            station_type,
+            orbit_type,
+            colony_id,
+            body_id,
+            station_type.slot_cost(),
+        )
+        .expect("default slot_cost is always within the type's range")
     }
 }
 
@@ -267,18 +356,38 @@ pub struct SatelliteConstellation {
     pub count: u32,
     /// Whether this overlay is toggled on in the UI (no sim effect — presentation only).
     pub overlay_visible: bool,
+    /// The system body this constellation covers (issue #234).
+    ///
+    /// `None` is reserved for [`OrbitType::Lagrange`] constellations
+    /// (system-wide vantage, matching pre-#234 behaviour).
+    /// [`OrbitType::Low`]/[`OrbitType::Geostationary`] constellations should
+    /// carry `Some(body_id)` — coverage is meaningful only relative to a
+    /// specific body for those bands.
+    ///
+    /// A **probe** (issue #234's design decision) is just a small
+    /// constellation (typically `count: 1`) with `body_id` set to a body
+    /// other than the founding colony's home body — no separate probe type;
+    /// it reuses this same field and the existing coverage math as-is.
+    #[serde(default)]
+    pub body_id: Option<BodyId>,
 }
 
 impl SatelliteConstellation {
     /// Create a new constellation with the overlay visible by default.
     #[must_use]
-    pub fn new(satellite_type: SatelliteType, orbit_type: OrbitType, count: u32) -> Self {
+    pub fn new(
+        satellite_type: SatelliteType,
+        orbit_type: OrbitType,
+        count: u32,
+        body_id: Option<BodyId>,
+    ) -> Self {
         Self {
             id: Uuid::new_v4(),
             satellite_type,
             orbit_type,
             count,
             overlay_visible: true,
+            body_id,
         }
     }
 
@@ -310,6 +419,19 @@ pub enum OrbitalError {
     /// The referenced constellation does not exist.
     #[error("satellite constellation not found: {0}")]
     ConstellationNotFound(Uuid),
+    /// A requested station size falls outside the station type's valid
+    /// slot-size range (issue #234).
+    #[error("invalid slot cost for {station_type:?}: {requested} not in [{min}, {max}]")]
+    InvalidSlotCost {
+        /// Station type the size was requested for.
+        station_type: StationType,
+        /// The requested (invalid) slot cost.
+        requested: u32,
+        /// Minimum valid slot cost for this type.
+        min: u32,
+        /// Maximum valid slot cost for this type.
+        max: u32,
+    },
 }
 
 /// System-wide registry of orbital stations and satellite constellations.
@@ -328,30 +450,41 @@ impl OrbitalRegistry {
         Self::default()
     }
 
-    /// Count slots in use in the given orbit band.
+    /// Count slots in use in the given orbit band, scoped to `body_id`
+    /// (issue #234).
+    ///
+    /// [`OrbitType::Low`]/[`OrbitType::Geostationary`] capacity is
+    /// per-body — pass the same `body_id` two different stations were built
+    /// at to see them compete for the same pool, and a different `body_id`
+    /// (or the other body's stations) won't count against it. Passing
+    /// `None` counts stations with no body (the [`OrbitType::Lagrange`]
+    /// convention), matching pre-#234 system-wide accounting for that band.
     #[must_use]
-    pub fn slots_used(&self, orbit: OrbitType) -> u32 {
+    pub fn slots_used(&self, orbit: OrbitType, body_id: Option<&BodyId>) -> u32 {
         self.stations
             .iter()
-            .filter(|s| s.orbit_type == orbit)
+            .filter(|s| s.orbit_type == orbit && s.body_id.as_ref() == body_id)
             .map(|s| s.slot_cost)
             .sum()
     }
 
-    /// Count slots remaining in the given orbit band.
+    /// Count slots remaining in the given orbit band, scoped to `body_id`.
     #[must_use]
-    pub fn slots_available(&self, orbit: OrbitType) -> u32 {
-        orbit.slot_capacity().saturating_sub(self.slots_used(orbit))
+    pub fn slots_available(&self, orbit: OrbitType, body_id: Option<&BodyId>) -> u32 {
+        orbit
+            .slot_capacity()
+            .saturating_sub(self.slots_used(orbit, body_id))
     }
 
-    /// Attempt to add a station; fails if the orbit band is full.
+    /// Attempt to add a station; fails if the orbit band is full at
+    /// `station.body_id`.
     ///
     /// # Errors
     ///
     /// Returns [`OrbitalError::SlotCapacityExceeded`] when there are not enough
-    /// free slots in `station.orbit_type`.
+    /// free slots in `station.orbit_type` for `station.body_id`.
     pub fn add_station(&mut self, station: OrbitalStation) -> Result<(), OrbitalError> {
-        let available = self.slots_available(station.orbit_type);
+        let available = self.slots_available(station.orbit_type, station.body_id.as_ref());
         if station.slot_cost > available {
             return Err(OrbitalError::SlotCapacityExceeded {
                 needed: station.slot_cost,
@@ -416,10 +549,15 @@ impl OrbitalRegistry {
     }
 
     /// Return the combined coverage for a given satellite type across all
-    /// constellations of that type currently deployed.
+    /// constellations of that type currently deployed, **regardless of which
+    /// body they cover**.
     ///
     /// Sums unit coverage across all constellations in all orbit bands,
-    /// then clamps to `[0, 1]`.
+    /// then clamps to `[0, 1]`. Pre-#234 behaviour, kept for callers that
+    /// genuinely want a system-wide rollup (e.g. Lagrange-only overlays);
+    /// prefer [`Self::combined_coverage_for_body`] for "is body X covered"
+    /// questions, since summing coverage across unrelated bodies produces a
+    /// meaningless number for that purpose.
     #[must_use]
     pub fn combined_coverage(&self, satellite: SatelliteType) -> CoverageFootprint {
         let mut local = 0.0f32;
@@ -438,11 +576,47 @@ impl OrbitalRegistry {
             system_coverage: system.min(1.0),
         }
     }
+
+    /// Return the combined coverage for a given satellite type, scoped to
+    /// constellations covering `body_id` specifically (issue #234).
+    ///
+    /// This is the body-aware counterpart to [`Self::combined_coverage`] —
+    /// "does body X have adequate comms/sensor/defense coverage" needs to
+    /// sum only the constellations actually anchored to X, not every
+    /// constellation in the system regardless of target.
+    #[must_use]
+    pub fn combined_coverage_for_body(
+        &self,
+        satellite: SatelliteType,
+        body_id: &BodyId,
+    ) -> CoverageFootprint {
+        let mut local = 0.0f32;
+        let mut system = 0.0f32;
+
+        for c in &self.constellations {
+            if c.satellite_type == satellite && c.body_id.as_ref() == Some(body_id) {
+                let fp = c.coverage();
+                local += fp.local_coverage;
+                system += fp.system_coverage;
+            }
+        }
+
+        CoverageFootprint {
+            local_coverage: local.min(1.0),
+            system_coverage: system.min(1.0),
+        }
+    }
 }
 
 // ─── Construction queue ───────────────────────────────────────────────────────
 
 /// An in-progress orbital station construction project.
+///
+/// Blueprint-driven construction always completes at `station_type`'s
+/// default size ([`StationType::slot_cost`]) via
+/// [`OrbitalStation::new_default_size`] — custom sizing is only exposed via
+/// the direct `Command::BuildOrbitalStation` path, which builds immediately
+/// rather than going through this queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OrbitalConstructionProject {
     /// Content-pack blueprint id that was used to start this project.
@@ -457,6 +631,10 @@ pub struct OrbitalConstructionProject {
     pub months_remaining: u32,
     /// Whether commodity costs have already been deducted from the colony pool.
     pub costs_paid: bool,
+    /// The system body the finished station will orbit (issue #234) — see
+    /// [`OrbitalStation::body_id`] for the `None`-means-Lagrange convention.
+    #[serde(default)]
+    pub body_id: Option<BodyId>,
 }
 
 impl OrbitalConstructionProject {
@@ -469,6 +647,7 @@ impl OrbitalConstructionProject {
         orbit_type: OrbitType,
         station_type: StationType,
         build_months: u32,
+        body_id: Option<BodyId>,
     ) -> Self {
         Self {
             blueprint_id,
@@ -477,6 +656,7 @@ impl OrbitalConstructionProject {
             station_type,
             months_remaining: build_months,
             costs_paid: false,
+            body_id,
         }
     }
 
@@ -515,21 +695,19 @@ mod tests {
 
         // Fill all Lagrange slots (capacity = 3; Logistics = 2 slots each).
         // First station (2 slots) fits.
-        reg.add_station(OrbitalStation::new(
-            StationType::Logistics,
-            OrbitType::Lagrange,
-            colony,
-        ))
+        reg.add_station(
+            OrbitalStation::new(StationType::Logistics, OrbitType::Lagrange, colony, None, 2)
+                .unwrap(),
+        )
         .expect("first station should fit");
-        assert_eq!(reg.slots_used(OrbitType::Lagrange), 2);
+        assert_eq!(reg.slots_used(OrbitType::Lagrange, None), 2);
 
         // Second station (2 slots) — only 1 slot left → must fail.
         let err = reg
-            .add_station(OrbitalStation::new(
-                StationType::Logistics,
-                OrbitType::Lagrange,
-                colony,
-            ))
+            .add_station(
+                OrbitalStation::new(StationType::Logistics, OrbitType::Lagrange, colony, None, 2)
+                    .unwrap(),
+            )
             .unwrap_err();
 
         assert!(
@@ -548,33 +726,37 @@ mod tests {
     fn low_orbit_accepts_more_stations_than_lagrange() {
         let mut reg = OrbitalRegistry::new();
         let colony = ColonyId::new_v4();
+        let body = BodyId::new();
 
         // Fill Lagrange fully with one Habitat (2 slots) — 1 slot left.
-        reg.add_station(OrbitalStation::new(
-            StationType::Habitat,
-            OrbitType::Lagrange,
-            colony,
-        ))
+        reg.add_station(
+            OrbitalStation::new(StationType::Habitat, OrbitType::Lagrange, colony, None, 2)
+                .unwrap(),
+        )
         .unwrap();
         // Now only 1 slot left; Habitat costs 2 → blocked.
         assert!(reg
-            .add_station(OrbitalStation::new(
-                StationType::Habitat,
-                OrbitType::Lagrange,
-                colony,
-            ))
+            .add_station(
+                OrbitalStation::new(StationType::Habitat, OrbitType::Lagrange, colony, None, 2)
+                    .unwrap(),
+            )
             .is_err());
 
-        // Low orbit can still accept many more.
+        // Low orbit (at a body) can still accept many more.
         for _ in 0..4 {
-            reg.add_station(OrbitalStation::new(
-                StationType::Habitat,
-                OrbitType::Low,
-                colony,
-            ))
+            reg.add_station(
+                OrbitalStation::new(
+                    StationType::Habitat,
+                    OrbitType::Low,
+                    colony,
+                    Some(body.clone()),
+                    2,
+                )
+                .unwrap(),
+            )
             .expect("low orbit should have plenty of slots");
         }
-        assert!(reg.slots_available(OrbitType::Low) > 0);
+        assert!(reg.slots_available(OrbitType::Low, Some(&body)) > 0);
     }
 
     #[test]
@@ -582,14 +764,101 @@ mod tests {
         let mut reg = OrbitalRegistry::new();
         let colony = ColonyId::new_v4();
 
-        let station = OrbitalStation::new(StationType::Logistics, OrbitType::Lagrange, colony);
+        let station =
+            OrbitalStation::new(StationType::Logistics, OrbitType::Lagrange, colony, None, 2)
+                .unwrap();
         let id = station.id;
         reg.add_station(station).unwrap();
-        assert_eq!(reg.slots_used(OrbitType::Lagrange), 2);
+        assert_eq!(reg.slots_used(OrbitType::Lagrange, None), 2);
 
         reg.remove_station(id).unwrap();
-        assert_eq!(reg.slots_used(OrbitType::Lagrange), 0);
-        assert_eq!(reg.slots_available(OrbitType::Lagrange), LAGRANGE_SLOTS);
+        assert_eq!(reg.slots_used(OrbitType::Lagrange, None), 0);
+        assert_eq!(
+            reg.slots_available(OrbitType::Lagrange, None),
+            LAGRANGE_SLOTS
+        );
+    }
+
+    // ── body scoping (issue #234) ─────────────────────────────────────────────
+
+    #[test]
+    fn low_orbit_capacity_is_tracked_independently_per_body() {
+        let mut reg = OrbitalRegistry::new();
+        let colony = ColonyId::new_v4();
+        let body_a = BodyId::new();
+        let body_b = BodyId::new();
+
+        // Fill most of body A's Low orbit.
+        for _ in 0..5 {
+            reg.add_station(
+                OrbitalStation::new(
+                    StationType::Habitat,
+                    OrbitType::Low,
+                    colony,
+                    Some(body_a.clone()),
+                    2,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(reg.slots_used(OrbitType::Low, Some(&body_a)), 10);
+        // Body B's Low orbit is untouched by body A's usage — a fresh full pool.
+        assert_eq!(reg.slots_used(OrbitType::Low, Some(&body_b)), 0);
+        assert_eq!(
+            reg.slots_available(OrbitType::Low, Some(&body_b)),
+            LOW_ORBIT_SLOTS
+        );
+    }
+
+    #[test]
+    fn constellation_coverage_is_evaluated_per_body() {
+        let mut reg = OrbitalRegistry::new();
+        let body_a = BodyId::new();
+        let body_b = BodyId::new();
+
+        // Only body A gets a comms constellation.
+        reg.deploy_constellation(SatelliteConstellation::new(
+            SatelliteType::Comms,
+            OrbitType::Geostationary,
+            1,
+            Some(body_a.clone()),
+        ));
+
+        let coverage_a = reg.combined_coverage_for_body(SatelliteType::Comms, &body_a);
+        let coverage_b = reg.combined_coverage_for_body(SatelliteType::Comms, &body_b);
+        assert!(
+            coverage_a.local_coverage > 0.0,
+            "body A should have comms coverage"
+        );
+        assert_eq!(
+            coverage_b.local_coverage, 0.0,
+            "body B has no constellation covering it and must show zero coverage"
+        );
+    }
+
+    #[test]
+    fn probe_is_just_a_small_constellation_at_a_non_home_body() {
+        // Issue #234 design decision: a probe is not a distinct entity, just
+        // a SatelliteConstellation (typically count: 1) targeting a body
+        // other than the founding colony's home body — reusing the exact
+        // same coverage machinery.
+        let mut reg = OrbitalRegistry::new();
+        let home_body = BodyId::new();
+        let scouted_body = BodyId::new();
+
+        let probe = SatelliteConstellation::new(
+            SatelliteType::Sensor,
+            OrbitType::Low,
+            1,
+            Some(scouted_body.clone()),
+        );
+        reg.deploy_constellation(probe);
+
+        let home_coverage = reg.combined_coverage_for_body(SatelliteType::Sensor, &home_body);
+        let scouted_coverage = reg.combined_coverage_for_body(SatelliteType::Sensor, &scouted_body);
+        assert_eq!(home_coverage.local_coverage, 0.0);
+        assert!(scouted_coverage.local_coverage > 0.0);
     }
 
     // ── coverage computation ─────────────────────────────────────────────────
@@ -643,11 +912,13 @@ mod tests {
             SatelliteType::Comms,
             OrbitType::Low,
             2,
+            Some(BodyId::new()),
         ));
         reg.deploy_constellation(SatelliteConstellation::new(
             SatelliteType::Comms,
             OrbitType::Lagrange,
             1,
+            None,
         ));
 
         let combined = reg.combined_coverage(SatelliteType::Comms);
@@ -667,7 +938,12 @@ mod tests {
     #[test]
     fn overlay_toggle_flips_visibility() {
         let mut reg = OrbitalRegistry::new();
-        let c = SatelliteConstellation::new(SatelliteType::Defense, OrbitType::Low, 3);
+        let c = SatelliteConstellation::new(
+            SatelliteType::Defense,
+            OrbitType::Low,
+            3,
+            Some(BodyId::new()),
+        );
         let id = c.id;
         reg.deploy_constellation(c);
 
@@ -715,6 +991,61 @@ mod tests {
         }
     }
 
+    // ── variable slot-count scaling (issue #234) ──────────────────────────────
+
+    #[test]
+    fn station_can_be_built_at_more_than_one_slot_size() {
+        let colony = ColonyId::new_v4();
+        let body = BodyId::new();
+        let (min, max) = StationType::Habitat.slot_range();
+        assert!(min < max, "range must actually span more than one size");
+
+        let small = OrbitalStation::new(
+            StationType::Habitat,
+            OrbitType::Low,
+            colony,
+            Some(body.clone()),
+            min,
+        )
+        .expect("min size must be valid");
+        let large = OrbitalStation::new(
+            StationType::Habitat,
+            OrbitType::Low,
+            colony,
+            Some(body),
+            max,
+        )
+        .expect("max size must be valid");
+
+        assert_eq!(small.slot_cost, min);
+        assert_eq!(large.slot_cost, max);
+        assert!(small.slot_cost < large.slot_cost);
+    }
+
+    #[test]
+    fn station_slot_cost_outside_range_is_rejected() {
+        let colony = ColonyId::new_v4();
+        let (_, max) = StationType::Habitat.slot_range();
+        let err = OrbitalStation::new(
+            StationType::Habitat,
+            OrbitType::Low,
+            colony,
+            Some(BodyId::new()),
+            max + 1,
+        )
+        .unwrap_err();
+        assert!(matches!(err, OrbitalError::InvalidSlotCost { .. }));
+    }
+
+    #[test]
+    fn larger_stations_take_longer_to_construct() {
+        let (min, max) = StationType::Habitat.slot_range();
+        assert!(
+            StationType::Habitat.construction_turns_for(max)
+                > StationType::Habitat.construction_turns_for(min)
+        );
+    }
+
     // ── serde round-trip ──────────────────────────────────────────────────────
 
     #[test]
@@ -734,16 +1065,22 @@ mod tests {
     fn orbital_registry_serde_round_trip() {
         let mut reg = OrbitalRegistry::new();
         let colony = ColonyId::new_v4();
-        reg.add_station(OrbitalStation::new(
-            StationType::Habitat,
-            OrbitType::Low,
-            colony,
-        ))
+        reg.add_station(
+            OrbitalStation::new(
+                StationType::Habitat,
+                OrbitType::Low,
+                colony,
+                Some(BodyId::new()),
+                2,
+            )
+            .unwrap(),
+        )
         .unwrap();
         reg.deploy_constellation(SatelliteConstellation::new(
             SatelliteType::Comms,
             OrbitType::Geostationary,
             4,
+            Some(BodyId::new()),
         ));
 
         let json = serde_json::to_string(&reg).unwrap();
@@ -763,6 +1100,7 @@ mod tests {
             OrbitType::Low,
             StationType::Habitat,
             3,
+            Some(BodyId::new()),
         );
         assert_eq!(project.months_remaining, 3);
         assert!(!project.tick()); // month 2 remaining
@@ -780,6 +1118,7 @@ mod tests {
             OrbitType::Geostationary,
             StationType::Logistics,
             1,
+            Some(BodyId::new()),
         );
         // Single month to build.
         assert!(project.tick());
