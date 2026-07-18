@@ -225,6 +225,17 @@ pub struct GameState {
     /// bodies — see [`crate::expedition::ExpeditionRegistry`]. Distinct from
     /// the older [`Self::expeditions`] (planet-hex field expeditions).
     pub expedition_registry: crate::expedition::ExpeditionRegistry,
+
+    // ── Tech-driven expedition modifiers (issue #236) ─────────────────────
+    /// System-wide survey-modifier bonus accumulated from every researched
+    /// tech carrying [`TechEffect::SurveyModifierBonus`]; combined with a
+    /// given expedition's own per-mission modifiers when resolving a survey.
+    pub tech_survey_modifiers: crate::expedition::SurveyModifiers,
+    /// Multiplicative scalar applied to a new survey expedition's transit
+    /// turns, driven down from `1.0` by every researched tech carrying
+    /// [`TechEffect::ReduceTransitTime`] (floored so transit never reaches
+    /// zero turns).
+    pub propulsion_transit_scalar: f32,
 }
 
 impl GameState {
@@ -274,6 +285,8 @@ impl GameState {
             habitability_mitigations: HashSet::new(),
             outposts: Vec::new(),
             expedition_registry: crate::expedition::ExpeditionRegistry::default(),
+            tech_survey_modifiers: crate::expedition::SurveyModifiers::default(),
+            propulsion_transit_scalar: 1.0,
         }
     }
 
@@ -464,6 +477,18 @@ impl TurnProcessor {
                 }
                 TechEffect::MitigateAttribute { attribute } => {
                     mitigation_added |= state.habitability_mitigations.insert(*attribute);
+                }
+                TechEffect::SurveyModifierBonus {
+                    full_reveal_bonus,
+                    partial_reveal_bonus,
+                } => {
+                    state.tech_survey_modifiers.full_reveal_bonus += full_reveal_bonus;
+                    state.tech_survey_modifiers.partial_reveal_bonus += partial_reveal_bonus;
+                }
+                TechEffect::ReduceTransitTime { fraction } => {
+                    let retained = (1.0 - fraction.clamp(0.0, 0.95)).max(0.05);
+                    state.propulsion_transit_scalar =
+                        (state.propulsion_transit_scalar * retained).max(0.05);
                 }
             }
         }

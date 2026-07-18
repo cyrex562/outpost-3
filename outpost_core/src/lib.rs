@@ -2461,10 +2461,33 @@ impl GameEngine {
                                             id.0,
                                             current_sol ^ 0xC000_0000,
                                         );
+                                        // Combine this mission's own
+                                        // mid-mission-choice modifiers with
+                                        // the system-wide tech-driven bonus
+                                        // (issue #236's sensor_systems/
+                                        // deep_space_navigation/
+                                        // xenoarchaeology techs).
+                                        let combined_modifiers = expedition::SurveyModifiers {
+                                            full_reveal_bonus: state.modifiers.full_reveal_bonus
+                                                + self
+                                                    .state
+                                                    .tech_survey_modifiers
+                                                    .full_reveal_bonus,
+                                            full_reveal_penalty: state
+                                                .modifiers
+                                                .full_reveal_penalty,
+                                            partial_reveal_bonus: state
+                                                .modifiers
+                                                .partial_reveal_bonus
+                                                + self
+                                                    .state
+                                                    .tech_survey_modifiers
+                                                    .partial_reveal_bonus,
+                                        };
                                         let outcome = expedition::resolve_survey(
                                             state.expedition_type,
                                             state.target_body.clone(),
-                                            &state.modifiers,
+                                            &combined_modifiers,
                                             roll,
                                             site_name,
                                             deposits,
@@ -3919,11 +3942,25 @@ impl GameEngine {
                     )));
                 }
 
-                let state = expedition::ExpeditionState::new(
+                let mut state = expedition::ExpeditionState::new(
                     *expedition_type,
                     target_body.clone(),
                     *colony_id,
                 );
+                // Apply tech-driven propulsion scaling (issue #236) to the
+                // transit leg only — survey duration is a function of
+                // mission thoroughness, not travel speed.
+                #[allow(
+                    clippy::cast_precision_loss,
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss
+                )]
+                {
+                    let scaled = (state.transit_turns_remaining as f32
+                        * self.state.propulsion_transit_scalar)
+                        .max(1.0);
+                    state.transit_turns_remaining = scaled.round() as u32;
+                }
                 let eid = state.id.clone();
                 self.state.expedition_registry.launch(state);
                 Ok(vec![Event::SurveyExpeditionLaunched {
@@ -11237,6 +11274,77 @@ mod tests {
         });
 
         assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn launch_survey_expedition_applies_tech_propulsion_scalar() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let body_id = add_body(&mut engine, "Fast Prospect");
+
+        // Simulate several stacked ReduceTransitTime techs already
+        // researched (issue #236): a strong scalar makes the reduction
+        // deterministically visible against SURVEY_TRANSIT_TURNS = 2.
+        engine.state.propulsion_transit_scalar = 0.4;
+
+        engine
+            .apply(&Command::LaunchSurveyExpedition {
+                colony_id: cid,
+                target_body: body_id,
+                expedition_type: expedition::ExpeditionType::FastFlybyProbe,
+            })
+            .unwrap();
+
+        let (_, state) = engine.state.expedition_registry.iter().next().unwrap();
+        // 2 * 0.4 = 0.8, floored at 1.0 minimum, rounds to 1.
+        assert_eq!(
+            state.transit_turns_remaining,
+            1,
+            "propulsion scalar must reduce transit turns below the unscaled \
+             baseline of {}",
+            expedition::SURVEY_TRANSIT_TURNS
+        );
+    }
+
+    #[test]
+    fn survey_completion_applies_tech_survey_modifier_bonus() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let body_id = add_body(&mut engine, "Sensor Target");
+
+        // A guaranteed-full-reveal bonus (issue #236): base FastFlybyProbe
+        // full-reveal probability is only 0.10, but a +0.95 tech bonus
+        // pushes it to a near-certain full reveal regardless of roll.
+        engine.state.tech_survey_modifiers.full_reveal_bonus = 0.95;
+
+        engine
+            .apply(&Command::LaunchSurveyExpedition {
+                colony_id: cid,
+                target_body: body_id.clone(),
+                expedition_type: expedition::ExpeditionType::FastFlybyProbe,
+            })
+            .unwrap();
+
+        let mut completed_outcome = None;
+        for _ in 0..(expedition::SURVEY_TRANSIT_TURNS
+            + expedition::ExpeditionType::FastFlybyProbe.base_duration_turns())
+        {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            for e in &evs {
+                if let Event::SurveyCompleted { outcome, .. } = e {
+                    completed_outcome = Some(outcome.clone());
+                }
+            }
+        }
+
+        assert!(
+            matches!(
+                completed_outcome,
+                Some(expedition::SurveyOutcome::FullReveal { .. })
+            ),
+            "tech survey-modifier bonus must push a low-odds probe to a full \
+             reveal: got {completed_outcome:?}"
+        );
     }
 
     #[test]
