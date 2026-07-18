@@ -15,6 +15,7 @@ use outpost_core::difficulty::{default_grade_table, DifficultyGradeTable, Diffic
 use outpost_core::modifier::ModifiableQuantity;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::system::SystemCommand;
+use outpost_core::tech::load_tech_registry;
 use outpost_core::{Command, GameEngine, Query};
 
 use crate::state::AppState;
@@ -274,6 +275,7 @@ pub(crate) fn client_command_to_core(
             };
             Ok(Command::SetDifficulty { preset })
         }
+        ClientCommand::ResearchTech { tech_id } => Ok(Command::ResearchTech { tech_id }),
         ClientCommand::EnqueueResearch { tech_id } => Ok(Command::EnqueueResearch { tech_id }),
         ClientCommand::CancelResearch => Ok(Command::CancelResearch),
         ClientCommand::OpenEmigrationGate {
@@ -539,6 +541,16 @@ async fn handle_new_game(
 
         // Set content registry.
         engine.state.registry = Some(registry);
+
+        // Load the tech DAG (issue #250) — mirrors
+        // `outpost_tauri::commands::load_embedded_tech`, reading from disk
+        // instead of the embedded pack. Non-fatal when missing/unparsable so
+        // a base pack without a tech tree still boots.
+        if let Ok(tech_yaml) = std::fs::read_to_string(content_dir.join("base/tech.yaml")) {
+            if let Ok(tech_registry) = load_tech_registry(&tech_yaml) {
+                engine.state.tech_registry = Some(tech_registry);
+            }
+        }
 
         // Apply difficulty preset and scalar.
         engine.state.difficulty_preset = difficulty;
@@ -828,6 +840,29 @@ mod tests {
         assert!(
             registry.anomalies().count() > 0,
             "expected at least one anomaly from anomalies.yaml (issue #235)"
+        );
+    }
+
+    /// `handle_new_game`'s tech-loading step (issue #250) reads
+    /// `content/base/tech.yaml` from disk the same way it's authored, so the
+    /// browser-mode tech tree isn't permanently empty like it was before
+    /// this fix — confirms the file path and `load_tech_registry` parsing
+    /// both work against the real pack, not just a fixture.
+    #[test]
+    fn base_tech_yaml_loads_into_a_non_empty_registry() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let tech_path = root.join("content").join("base").join("tech.yaml");
+        if !tech_path.is_file() {
+            return;
+        }
+        let yaml = std::fs::read_to_string(&tech_path).expect("read tech.yaml");
+        let registry = load_tech_registry(&yaml).expect("tech.yaml must parse");
+        assert!(
+            registry.all().count() > 0,
+            "expected at least one tech definition"
         );
     }
 

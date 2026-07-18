@@ -170,6 +170,17 @@ export async function getSystemBodies(): Promise<SystemBody[]> {
   return invoke<SystemBody[]>('get_system_bodies')
 }
 
+/** Mirrors `outpost_core::tech::TechEffect` (`#[serde(tag = "type", rename_all = "snake_case")]`). */
+export type TechEffect =
+  | { type: 'unlock_building'; building_id: string }
+  | { type: 'unlock_commodity'; commodity_id: string }
+  | { type: 'unlock_capability'; capability_id: string }
+  | { type: 'bonus'; category: string; value: number }
+  | { type: 'mitigate_attribute'; attribute: string }
+  | { type: 'survey_modifier_bonus'; full_reveal_bonus: number; partial_reveal_bonus: number }
+  | { type: 'reduce_transit_time'; fraction: number }
+  | { type: 'extend_outpost_range'; bonus_au: number }
+
 export interface TechNode {
   id: string
   name: string
@@ -178,11 +189,13 @@ export interface TechNode {
   tier: number
   cost: number
   prerequisites: string[]
-  state: 'researched' | 'in_progress' | 'available' | 'locked'
+  state: 'researched' | 'in_progress' | 'queued' | 'available' | 'locked'
   progress: number
+  effects: TechEffect[]
 }
 
 export async function getTechTree(): Promise<TechNode[]> {
+  if (!isTauri) return fetchJson<TechNode[]>('/api/tech-tree')
   return invoke<TechNode[]>('get_tech_tree')
 }
 

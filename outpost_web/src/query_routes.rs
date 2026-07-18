@@ -573,6 +573,99 @@ pub async fn get_outpost_targets(
     Json(list).into_response()
 }
 
+/// Tech definition + player state (researched / `in_progress` / queued / available / locked).
+#[derive(Debug, Serialize)]
+pub struct TechNodeWire {
+    /// Content-pack tech identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Content-authored category slug.
+    pub category: String,
+    /// Flavor description.
+    pub description: String,
+    /// DAG depth tier.
+    pub tier: u32,
+    /// Research-point cost.
+    pub cost: f32,
+    /// Prerequisite tech ids.
+    pub prerequisites: Vec<String>,
+    /// `researched | in_progress | queued | available | locked`.
+    pub state: String,
+    /// Fraction of `cost` completed, only meaningful when `state == "in_progress"`.
+    pub progress: f32,
+    /// Authored effects this tech grants on completion.
+    pub effects: Vec<outpost_core::tech::TechEffect>,
+}
+
+/// `GET /api/tech-tree` — the full tech tree with per-node player state.
+///
+/// Mirrors `outpost_tauri::commands::get_tech_tree` against the shared
+/// engine.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_tech_tree(State(state): State<AppState>) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    let Some(tech_registry) = engine.state.tech_registry.as_ref() else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no tech registry loaded" })),
+        )
+            .into_response();
+    };
+
+    let tech_state = &engine.state.tech_state;
+    let current = tech_state.current_project.as_deref();
+
+    let mut nodes: Vec<TechNodeWire> = tech_registry
+        .all()
+        .map(|tech| {
+            let is_done = tech_state.is_researched(&tech.id);
+            let is_active = current == Some(tech.id.as_str());
+            let is_queued = tech_state.research_queue.iter().any(|t| t == &tech.id);
+            let prereqs_met = tech_state.prerequisites_met(tech);
+
+            let state = if is_done {
+                "researched"
+            } else if is_active {
+                "in_progress"
+            } else if is_queued {
+                "queued"
+            } else if prereqs_met {
+                "available"
+            } else {
+                "locked"
+            };
+            let progress = if is_active {
+                tech_state.progress / tech.research_cost.max(0.001)
+            } else {
+                0.0
+            };
+            TechNodeWire {
+                id: tech.id.clone(),
+                name: tech.display_name.clone(),
+                category: tech.category.clone(),
+                description: tech.description.clone(),
+                tier: tech.tier,
+                cost: tech.research_cost,
+                prerequisites: tech.prerequisites.clone(),
+                state: state.to_owned(),
+                progress,
+                effects: tech.effects.clone(),
+            }
+        })
+        .collect();
+    nodes.sort_by(|a, b| {
+        a.tier
+            .cmp(&b.tier)
+            .then_with(|| a.category.cmp(&b.category))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Json(nodes).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,6 +708,16 @@ mod tests {
         let router = test_router();
         let response = router
             .oneshot(Request::get("/api/planet-map").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn tech_tree_404_before_content_loaded() {
+        let router = test_router();
+        let response = router
+            .oneshot(Request::get("/api/tech-tree").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
