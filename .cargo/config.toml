@@ -1,0 +1,11 @@
+# Repo-wide cargo config.
+#
+# The `xtask` alias runs the in-repo build/orchestration tool. Run from the
+# repo root:
+#
+#   cargo xtask build-windows-portable
+#   cargo xtask help
+#
+# Source: xtask/src/main.rs
+[alias]
+xtask = "run --quiet --manifest-path xtask/Cargo.toml --"
