@@ -525,6 +525,42 @@ pub enum Command {
         /// Stable identifier of the expedition to recall.
         expedition_id: expedition::FieldExpeditionId,
     },
+
+    // ── Body-scouting survey expeditions (issue #235) ───────────────────────
+    /// Launch a probe or manned survey expedition at a system body.
+    ///
+    /// Unlike [`Command::LaunchFieldExpedition`] (which targets a planet-map
+    /// hex), this targets any [`system::BodyId`] and uses the richer
+    /// [`expedition::ExpeditionType`] tiers (probe through manned) with
+    /// probabilistic full/partial/failed survey outcomes. See
+    /// [`expedition::resolve_survey`].
+    ///
+    /// Fails with [`EngineError::ColonyNotFound`] if `colony_id` is unknown,
+    /// or [`EngineError::InvalidArgument`] if `target_body` is not a known
+    /// system body.
+    LaunchSurveyExpedition {
+        /// Colony that launches and funds the expedition.
+        colony_id: ColonyId,
+        /// Target body to survey.
+        target_body: system::BodyId,
+        /// Mission profile (probe through manned).
+        expedition_type: expedition::ExpeditionType,
+    },
+
+    /// Resolve a pending mid-mission decision (typically an anomaly
+    /// encounter) on a survey expedition currently in
+    /// [`expedition::ExpeditionPhase::AwaitingDecision`].
+    ///
+    /// Fails with [`EngineError::InvalidArgument`] if the expedition is
+    /// unknown, not awaiting a decision, or `choice_id` does not match one
+    /// of the pending event's choices.
+    ResolveMissionDecision {
+        /// Expedition with the pending decision.
+        expedition_id: expedition::ExpeditionId,
+        /// Id of the chosen [`expedition::MissionChoice`].
+        choice_id: String,
+    },
+
     /// Evaluate all tracked victory conditions against current game metrics.
     ///
     /// Emits [`Event::VictoryAchieved`] for newly satisfied conditions.
@@ -1412,6 +1448,67 @@ pub enum Event {
         expedition_id: expedition::FieldExpeditionId,
     },
 
+    // ── Body-scouting survey expeditions (issue #235) ───────────────────────
+    /// A survey expedition (probe or manned) was launched at a system body.
+    SurveyExpeditionLaunched {
+        /// Identifier of the new expedition.
+        expedition_id: expedition::ExpeditionId,
+        /// Colony that launched and is funding the expedition.
+        colony_id: ColonyId,
+        /// Target body being surveyed.
+        target_body: system::BodyId,
+        /// Mission profile.
+        expedition_type: expedition::ExpeditionType,
+    },
+
+    /// A survey expedition finished its transit leg and began surveying.
+    SurveyExpeditionArrived {
+        /// Expedition that arrived on-station.
+        expedition_id: expedition::ExpeditionId,
+        /// Body being surveyed.
+        target_body: system::BodyId,
+    },
+
+    /// A mid-mission event (typically an anomaly encounter) was injected into
+    /// an active survey expedition, halting it in
+    /// [`expedition::ExpeditionPhase::AwaitingDecision`] until resolved via
+    /// [`Command::ResolveMissionDecision`].
+    MidMissionEventTriggered {
+        /// Expedition the event was injected into.
+        expedition_id: expedition::ExpeditionId,
+        /// The event itself (title, description, tier, choices).
+        event: expedition::MidMissionEvent,
+    },
+
+    /// A player decision on a pending mid-mission event was resolved.
+    MissionDecisionResolved {
+        /// Expedition the decision applied to.
+        expedition_id: expedition::ExpeditionId,
+        /// Id of the choice that was selected.
+        choice_id: String,
+    },
+
+    /// An anomaly investigation granted its reward (research/resources/tech).
+    AnomalyOutcomeResolved {
+        /// Expedition that investigated the anomaly.
+        expedition_id: expedition::ExpeditionId,
+        /// The resolved outcome and its rewards.
+        outcome: expedition::AnomalyOutcome,
+    },
+
+    /// A survey expedition completed (successfully or not) and its outcome
+    /// was recorded.
+    SurveyCompleted {
+        /// Expedition that completed.
+        expedition_id: expedition::ExpeditionId,
+        /// Colony that funded the expedition.
+        colony_id: ColonyId,
+        /// Body that was surveyed.
+        target_body: system::BodyId,
+        /// The resolved survey outcome.
+        outcome: expedition::SurveyOutcome,
+    },
+
     /// A [`Command::DebugGrantColonyResources`] testing-mode grant landed in
     /// a colony's pool.
     DebugResourcesGranted {
@@ -2224,6 +2321,203 @@ impl GameEngine {
                         }
                     }
                     events.extend(expedition_events);
+                }
+
+                // ── Step 4f: Survey expedition advancement (issue #235) ───
+                // Advance each active body-scouting survey expedition by one
+                // sol: transit countdown, on-site anomaly checks, and the
+                // final `resolve_survey` outcome.
+                {
+                    let current_sol = self.state.sol;
+                    let ids: Vec<expedition::ExpeditionId> = self
+                        .state
+                        .expedition_registry
+                        .iter()
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    let mut survey_events: Vec<Event> = Vec::new();
+
+                    for id in ids {
+                        let Some(state) = self.state.expedition_registry.get_mut(&id) else {
+                            continue;
+                        };
+
+                        match state.phase {
+                            expedition::ExpeditionPhase::InTransit => {
+                                state.transit_turns_remaining =
+                                    state.transit_turns_remaining.saturating_sub(1);
+                                if state.transit_turns_remaining == 0 {
+                                    state.phase = expedition::ExpeditionPhase::Surveying;
+                                    survey_events.push(Event::SurveyExpeditionArrived {
+                                        expedition_id: id.clone(),
+                                        target_body: state.target_body.clone(),
+                                    });
+                                }
+                            }
+                            expedition::ExpeditionPhase::Surveying => {
+                                // Anomaly check first — a triggered anomaly
+                                // halts the survey countdown until the player
+                                // resolves it via `ResolveMissionDecision`.
+                                let mut anomaly_fired = false;
+                                if let Some(registry) = self.state.registry.as_ref() {
+                                    let mut anomalies: Vec<&expedition::AnomalyDef> =
+                                        registry.anomalies().collect();
+                                    anomalies.sort_by(|a, b| a.id.cmp(&b.id));
+
+                                    for anomaly in anomalies {
+                                        if state.triggered_anomalies.contains(&anomaly.id) {
+                                            continue;
+                                        }
+                                        let salt = expedition::string_salt(&anomaly.id);
+                                        let trigger_roll = expedition::deterministic_roll(
+                                            id.0,
+                                            current_sol ^ 0xA000_0000 ^ salt,
+                                        );
+                                        if !expedition::check_anomaly_trigger(
+                                            anomaly,
+                                            state.expedition_type,
+                                            trigger_roll,
+                                        ) {
+                                            continue;
+                                        }
+                                        let outcome_roll = expedition::deterministic_roll(
+                                            id.0,
+                                            current_sol ^ 0xB000_0000 ^ salt,
+                                        );
+                                        let Some(chosen) = expedition::resolve_anomaly_outcome(
+                                            anomaly,
+                                            outcome_roll,
+                                        ) else {
+                                            continue;
+                                        };
+
+                                        state.triggered_anomalies.push(anomaly.id.clone());
+                                        let event = expedition::MidMissionEvent {
+                                            id: uuid::Uuid::new_v4(),
+                                            title: anomaly.name.clone(),
+                                            description: anomaly.description.clone(),
+                                            tier: Tier::Blocking,
+                                            choices: vec![
+                                                expedition::MissionChoice {
+                                                    id: "investigate".to_string(),
+                                                    label: "Investigate".to_string(),
+                                                    effect: expedition::ChoiceEffect::GrantAnomalyOutcome(
+                                                        chosen.clone(),
+                                                    ),
+                                                },
+                                                expedition::MissionChoice {
+                                                    id: "ignore".to_string(),
+                                                    label: "Ignore and continue".to_string(),
+                                                    effect: expedition::ChoiceEffect::Narrative,
+                                                },
+                                            ],
+                                        };
+                                        state.pending_event = Some(event.clone());
+                                        state.phase = expedition::ExpeditionPhase::AwaitingDecision;
+                                        survey_events.push(Event::MidMissionEventTriggered {
+                                            expedition_id: id.clone(),
+                                            event,
+                                        });
+                                        anomaly_fired = true;
+                                        break;
+                                    }
+                                }
+
+                                if !anomaly_fired {
+                                    state.survey_turns_remaining =
+                                        state.survey_turns_remaining.saturating_sub(1);
+                                    if state.survey_turns_remaining == 0 {
+                                        let body = self
+                                            .state
+                                            .system_state
+                                            .node_map
+                                            .bodies
+                                            .get(&state.target_body);
+                                        let (site_name, deposits) = body.map_or_else(
+                                            || {
+                                                (
+                                                    "Unnamed Site".to_string(),
+                                                    std::collections::HashMap::new(),
+                                                )
+                                            },
+                                            |b| {
+                                                let deposits: std::collections::HashMap<
+                                                    String,
+                                                    f64,
+                                                > = b
+                                                    .deposits
+                                                    .iter()
+                                                    .map(|d| {
+                                                        (
+                                                            d.commodity_id.clone(),
+                                                            f64::from(d.abundance) * 1000.0,
+                                                        )
+                                                    })
+                                                    .collect();
+                                                (format!("{} Site", b.name), deposits)
+                                            },
+                                        );
+                                        let roll = expedition::deterministic_roll(
+                                            id.0,
+                                            current_sol ^ 0xC000_0000,
+                                        );
+                                        let outcome = expedition::resolve_survey(
+                                            state.expedition_type,
+                                            state.target_body.clone(),
+                                            &state.modifiers,
+                                            roll,
+                                            site_name,
+                                            deposits,
+                                        );
+                                        state.outcome = Some(outcome.clone());
+                                        state.phase = expedition::ExpeditionPhase::Completed;
+                                        let origin_colony = state.origin_colony;
+                                        let target_body = state.target_body.clone();
+
+                                        match &outcome {
+                                            expedition::SurveyOutcome::FullReveal {
+                                                site_name,
+                                                ..
+                                            } => {
+                                                if let Some(b) = self
+                                                    .state
+                                                    .system_state
+                                                    .node_map
+                                                    .bodies
+                                                    .get_mut(&target_body)
+                                                {
+                                                    b.surveyed = true;
+                                                    b.candidate_site_name = Some(site_name.clone());
+                                                }
+                                            }
+                                            expedition::SurveyOutcome::PartialReveal { .. } => {
+                                                if let Some(b) = self
+                                                    .state
+                                                    .system_state
+                                                    .node_map
+                                                    .bodies
+                                                    .get_mut(&target_body)
+                                                {
+                                                    b.surveyed = true;
+                                                }
+                                            }
+                                            expedition::SurveyOutcome::Failed { .. } => {}
+                                        }
+
+                                        survey_events.push(Event::SurveyCompleted {
+                                            expedition_id: id.clone(),
+                                            colony_id: origin_colony,
+                                            target_body,
+                                            outcome,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    events.extend(survey_events);
                 }
 
                 // ── Step 5: Directive evaluation ──────────────────────────
@@ -3606,6 +3900,131 @@ impl GameEngine {
                 Ok(vec![])
             }
 
+            Command::LaunchSurveyExpedition {
+                colony_id,
+                target_body,
+                expedition_type,
+            } => {
+                self.find_colony_index(*colony_id)?;
+                if !self
+                    .state
+                    .system_state
+                    .node_map
+                    .bodies
+                    .contains_key(target_body)
+                {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "unknown system body: {:?}",
+                        target_body.0
+                    )));
+                }
+
+                let state = expedition::ExpeditionState::new(
+                    *expedition_type,
+                    target_body.clone(),
+                    *colony_id,
+                );
+                let eid = state.id.clone();
+                self.state.expedition_registry.launch(state);
+                Ok(vec![Event::SurveyExpeditionLaunched {
+                    expedition_id: eid,
+                    colony_id: *colony_id,
+                    target_body: target_body.clone(),
+                    expedition_type: *expedition_type,
+                }])
+            }
+
+            Command::ResolveMissionDecision {
+                expedition_id,
+                choice_id,
+            } => {
+                // Peek at the pending choice before `resolve_decision` consumes
+                // it, so a `GrantAnomalyOutcome` reward can be applied to
+                // `GameState` afterwards — `ExpeditionRegistry` itself has no
+                // access to the research pool, colony pools, or tech registry.
+                let reward = self
+                    .state
+                    .expedition_registry
+                    .get(expedition_id)
+                    .and_then(|s| s.pending_event.as_ref())
+                    .and_then(|ev| ev.choices.iter().find(|c| c.id == *choice_id))
+                    .and_then(|c| match &c.effect {
+                        expedition::ChoiceEffect::GrantAnomalyOutcome(outcome) => {
+                            Some(outcome.clone())
+                        }
+                        _ => None,
+                    });
+
+                self.state
+                    .expedition_registry
+                    .resolve_decision(expedition_id, choice_id)
+                    .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+
+                let mut events = vec![Event::MissionDecisionResolved {
+                    expedition_id: expedition_id.clone(),
+                    choice_id: choice_id.clone(),
+                }];
+
+                if let Some(outcome) = reward {
+                    if outcome.research_bonus > 0.0 {
+                        self.state.research_pool.deposit(outcome.research_bonus);
+                    }
+                    if !outcome.resource_reward.is_empty() {
+                        let origin_colony = self
+                            .state
+                            .expedition_registry
+                            .get(expedition_id)
+                            .map(|s| s.origin_colony);
+                        if let Some(colony_id) = origin_colony {
+                            if let Ok(idx) = self.find_colony_index(colony_id) {
+                                for (commodity_id, qty) in &outcome.resource_reward {
+                                    self.state.colonies[idx].pool.deposit(commodity_id, *qty);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(tech_id) = &outcome.unlocks_tech {
+                        if !self.state.tech_state.is_researched(tech_id) {
+                            let effects = self
+                                .state
+                                .tech_registry
+                                .as_ref()
+                                .and_then(|r| r.get(tech_id))
+                                .map(|def| def.effects.clone());
+                            if let Some(effects) = effects {
+                                self.state.tech_state.researched.insert(tech_id.clone());
+                                turn::TurnProcessor::apply_tech_effects(&mut self.state, &effects);
+                                events.push(Event::TechUnlocked {
+                                    tech_id: tech_id.clone(),
+                                });
+                            }
+                        }
+                    }
+                    events.push(Event::AnomalyOutcomeResolved {
+                        expedition_id: expedition_id.clone(),
+                        outcome,
+                    });
+                }
+
+                // An AbortMission choice resolves straight to a terminal
+                // `Aborted` phase with a `Failed` outcome already recorded —
+                // surface that as a normal survey completion too.
+                if let Some(state) = self.state.expedition_registry.get(expedition_id) {
+                    if state.phase == expedition::ExpeditionPhase::Aborted {
+                        if let Some(outcome) = state.outcome.clone() {
+                            events.push(Event::SurveyCompleted {
+                                expedition_id: expedition_id.clone(),
+                                colony_id: state.origin_colony,
+                                target_body: state.target_body.clone(),
+                                outcome,
+                            });
+                        }
+                    }
+                }
+
+                Ok(events)
+            }
+
             Command::EvaluateVictory => {
                 let snap = self.build_victory_snapshot();
                 let mut events = Vec::new();
@@ -4273,6 +4692,7 @@ impl GameEngine {
     /// Returns `ConstructionComplete` (`Notable`) for each finished building,
     /// and `PredictiveWarning` (`Urgent`) for each colony whose stability is
     /// trending toward crisis within [`PREDICTIVE_WARNING_ETA`] turns.
+    #[allow(clippy::too_many_lines)]
     fn collect_turn_interrupts(&self, events: &[Event]) -> Vec<Interrupt> {
         let mut interrupts: Vec<Interrupt> = Vec::new();
 
@@ -4333,6 +4753,20 @@ impl GameEngine {
                     InterruptSource::EventFired(event_id.clone()),
                     None,
                     format!("Hazard event fired: {event_id}"),
+                ));
+            }
+        }
+
+        // Mid-mission events (typically anomaly encounters on a survey
+        // expedition) → reuse EventFired at the event's own authored tier
+        // (issue #235's "reuse the interrupt + predicate system").
+        for ev in events {
+            if let Event::MidMissionEventTriggered { event, .. } = ev {
+                interrupts.push(Interrupt::new(
+                    event.tier,
+                    InterruptSource::EventFired(format!("mid_mission:{}", event.id)),
+                    None,
+                    format!("{}: {}", event.title, event.description),
                 ));
             }
         }
@@ -10771,6 +11205,211 @@ mod tests {
         assert_eq!(
             engine.state.expeditions[0].status,
             expedition::ExpeditionStatus::Returning
+        );
+    }
+
+    // ── Body-scouting survey expeditions (issue #235) ─────────────────────────
+
+    fn add_body(engine: &mut GameEngine, name: &str) -> system::BodyId {
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: name.to_string(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.2,
+            }))
+            .unwrap();
+        match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        }
+    }
+
+    #[test]
+    fn launch_survey_expedition_rejects_unknown_body() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let bogus_body = system::BodyId::new();
+
+        let result = engine.apply(&Command::LaunchSurveyExpedition {
+            colony_id: cid,
+            target_body: bogus_body,
+            expedition_type: expedition::ExpeditionType::FastFlybyProbe,
+        });
+
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn survey_expedition_full_lifecycle_launch_transit_survey_completes() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let body_id = add_body(&mut engine, "Prospect");
+
+        let events = engine
+            .apply(&Command::LaunchSurveyExpedition {
+                colony_id: cid,
+                target_body: body_id.clone(),
+                expedition_type: expedition::ExpeditionType::FastFlybyProbe,
+            })
+            .unwrap();
+        let eid = events
+            .iter()
+            .find_map(|e| {
+                if let Event::SurveyExpeditionLaunched { expedition_id, .. } = e {
+                    Some(expedition_id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("SurveyExpeditionLaunched must be emitted");
+
+        assert_eq!(
+            engine.state.expedition_registry.get(&eid).unwrap().phase,
+            expedition::ExpeditionPhase::InTransit
+        );
+
+        // FastFlybyProbe: 2 transit turns + 2 survey turns, no anomalies
+        // loaded (no registry set), so it always reaches Completed by sol 4.
+        let mut arrived = false;
+        let mut completed_outcome = None;
+        for _ in 0..expedition::SURVEY_TRANSIT_TURNS
+            + expedition::ExpeditionType::FastFlybyProbe.base_duration_turns()
+        {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            if evs
+                .iter()
+                .any(|e| matches!(e, Event::SurveyExpeditionArrived { .. }))
+            {
+                arrived = true;
+            }
+            for e in &evs {
+                if let Event::SurveyCompleted {
+                    expedition_id,
+                    outcome,
+                    ..
+                } = e
+                {
+                    if *expedition_id == eid {
+                        completed_outcome = Some(outcome.clone());
+                    }
+                }
+            }
+        }
+
+        assert!(arrived, "SurveyExpeditionArrived must fire after transit");
+        let outcome = completed_outcome.expect("SurveyCompleted must fire by end of mission");
+        assert_eq!(
+            engine.state.expedition_registry.get(&eid).unwrap().phase,
+            expedition::ExpeditionPhase::Completed
+        );
+
+        // Whatever the roll produced, the outcome's body_id matches the target.
+        let outcome_body = match &outcome {
+            expedition::SurveyOutcome::FullReveal { body_id, .. }
+            | expedition::SurveyOutcome::PartialReveal { body_id, .. }
+            | expedition::SurveyOutcome::Failed { body_id, .. } => body_id.clone(),
+        };
+        assert_eq!(outcome_body, body_id);
+    }
+
+    #[test]
+    fn survey_expedition_anomaly_triggers_and_investigation_pays_research_and_resources() {
+        let mut engine = make_expedition_engine();
+        let cid = first_colony_id(&engine);
+        let body_id = add_body(&mut engine, "Anomaly World");
+
+        // An anomaly guaranteed to trigger on the first eligible sol
+        // (trigger_probability = 1.0), with a single deterministic outcome.
+        let mut resource_reward = std::collections::HashMap::new();
+        resource_reward.insert("structural_ore".to_string(), 25.0);
+        let anomaly = expedition::AnomalyDef {
+            id: "test_anomaly".to_string(),
+            name: "Test Anomaly".to_string(),
+            trigger_probability: 1.0,
+            eligible_expedition_types: vec![expedition::ExpeditionType::FastFlybyProbe],
+            description: "A guaranteed test anomaly.".to_string(),
+            outcomes: vec![expedition::AnomalyOutcome {
+                id: "only_outcome".to_string(),
+                weight: 1.0,
+                description: "The only possible outcome.".to_string(),
+                research_bonus: 42.0,
+                resource_reward,
+                unlocks_tech: None,
+            }],
+        };
+        let mut registry = content::ContentRegistry::default();
+        registry.insert_anomaly(anomaly);
+        engine.state.registry = Some(registry);
+
+        engine
+            .apply(&Command::LaunchSurveyExpedition {
+                colony_id: cid,
+                target_body: body_id,
+                expedition_type: expedition::ExpeditionType::FastFlybyProbe,
+            })
+            .unwrap();
+
+        // Advance through the transit leg; the anomaly can only fire once
+        // Surveying begins.
+        let mut mid_mission_event = None;
+        for _ in 0..(expedition::SURVEY_TRANSIT_TURNS + 1) {
+            let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+            for e in &evs {
+                if let Event::MidMissionEventTriggered { event, .. } = e {
+                    mid_mission_event = Some(event.clone());
+                }
+            }
+            if mid_mission_event.is_some() {
+                break;
+            }
+        }
+        let event = mid_mission_event.expect("guaranteed anomaly must trigger while surveying");
+
+        let eid = engine
+            .state
+            .expedition_registry
+            .iter()
+            .next()
+            .map(|(id, _)| id.clone())
+            .unwrap();
+        assert_eq!(
+            engine.state.expedition_registry.get(&eid).unwrap().phase,
+            expedition::ExpeditionPhase::AwaitingDecision
+        );
+
+        let research_before = engine.state.research_pool.total();
+        let colony_idx = engine.find_colony_index(cid).unwrap();
+        let ore_before = engine.state.colonies[colony_idx]
+            .pool
+            .amount("structural_ore");
+
+        let investigate_choice = event
+            .choices
+            .iter()
+            .find(|c| c.id == "investigate")
+            .expect("investigate choice must be present");
+        let resolve_events = engine
+            .apply(&Command::ResolveMissionDecision {
+                expedition_id: eid.clone(),
+                choice_id: investigate_choice.id.clone(),
+            })
+            .unwrap();
+
+        assert!(
+            resolve_events
+                .iter()
+                .any(|e| matches!(e, Event::AnomalyOutcomeResolved { .. })),
+            "AnomalyOutcomeResolved must be emitted on investigation"
+        );
+        assert!((engine.state.research_pool.total() - research_before - 42.0).abs() < 1e-6);
+        let ore_after = engine.state.colonies[colony_idx]
+            .pool
+            .amount("structural_ore");
+        assert!((ore_after - ore_before - 25.0).abs() < 1e-6);
+        assert_eq!(
+            engine.state.expedition_registry.get(&eid).unwrap().phase,
+            expedition::ExpeditionPhase::Surveying,
+            "expedition should resume surveying after the decision resolves"
         );
     }
 

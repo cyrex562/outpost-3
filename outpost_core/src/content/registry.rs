@@ -6,6 +6,7 @@ use super::types::{
     BuildingDef, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint, PackManifest,
     RecipeDef, StarSystemDef, SupplyPackage,
 };
+use crate::expedition::AnomalyDef;
 
 /// In-memory registry produced by loading one or more content packs.
 ///
@@ -29,6 +30,8 @@ pub struct ContentRegistry {
     pub(super) supply_packages: HashMap<String, SupplyPackage>,
     /// Authored star-system scenarios used to seed `SystemState.node_map`.
     pub(super) star_systems: HashMap<String, StarSystemDef>,
+    /// Anomaly definitions discoverable during survey expeditions (issue #235).
+    pub(super) anomalies: HashMap<String, AnomalyDef>,
 }
 
 impl ContentRegistry {
@@ -42,6 +45,7 @@ impl ContentRegistry {
         self.default_directives.extend(other.default_directives);
         self.supply_packages.extend(other.supply_packages);
         self.star_systems.extend(other.star_systems);
+        self.anomalies.extend(other.anomalies);
     }
 
     /// The manifest of the most-recently loaded pack.
@@ -129,6 +133,22 @@ impl ContentRegistry {
     /// All star-system scenarios as an iterator.
     pub fn star_systems(&self) -> impl Iterator<Item = &StarSystemDef> {
         self.star_systems.values()
+    }
+
+    /// Look up an anomaly by id.
+    #[must_use]
+    pub fn anomaly(&self, id: &str) -> Option<&AnomalyDef> {
+        self.anomalies.get(id)
+    }
+
+    /// All anomaly definitions as an iterator.
+    pub fn anomalies(&self) -> impl Iterator<Item = &AnomalyDef> {
+        self.anomalies.values()
+    }
+
+    /// Insert or replace an anomaly definition (used in tests and harness tooling).
+    pub fn insert_anomaly(&mut self, def: AnomalyDef) {
+        self.anomalies.insert(def.id.clone(), def);
     }
 }
 

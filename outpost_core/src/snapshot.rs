@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::colony::{Colony, ColonyId};
 use crate::difficulty::{DifficultyGradeTable, DifficultyPreset};
 use crate::directive::DirectiveStore;
-use crate::expedition::Expedition;
+use crate::expedition::{Expedition, ExpeditionRegistry};
 use crate::interrupt::{InterruptConfig, StabilityTracker};
 use crate::map::PlanetMap;
 use crate::menace::MenaceState;
@@ -49,7 +49,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 4: `expeditions` field added to `FullStateBlob`.
 /// Schema version 5: `habitability_mitigations` field added to `FullStateBlob` (issue #185).
 /// Schema version 6: `outposts` field added to `FullStateBlob` (issue #233).
-pub const SCHEMA_VERSION: u32 = 6;
+/// Schema version 7: `expedition_registry` field added to `FullStateBlob` (issue #235).
+pub const SCHEMA_VERSION: u32 = 7;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -163,6 +164,10 @@ struct FullStateBlob {
     // ── #233 Outposts ─────────────────────────────────────────────────────────
     #[serde(default)]
     outposts: Vec<crate::outpost::Outpost>,
+
+    // ── #235 Body-scouting survey expeditions ────────────────────────────────
+    #[serde(default)]
+    expedition_registry: ExpeditionRegistry,
 }
 
 fn default_true() -> bool {
@@ -212,6 +217,7 @@ impl FullStateBlob {
             maintenance_enabled: state.maintenance_enabled,
             habitability_mitigations: state.habitability_mitigations.clone(),
             outposts: state.outposts.clone(),
+            expedition_registry: state.expedition_registry.clone(),
         }
     }
 
@@ -257,6 +263,7 @@ impl FullStateBlob {
             maintenance_enabled: self.maintenance_enabled,
             habitability_mitigations: self.habitability_mitigations,
             outposts: self.outposts,
+            expedition_registry: self.expedition_registry,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,

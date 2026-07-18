@@ -1,0 +1,148 @@
+# Anomalies discoverable during survey expeditions (issue #235).
+#
+# Each entry is checked against every active `Surveying`-phase expedition
+# once per sol (see `Command::AdvanceColonySol`'s Step 4f). `trigger_probability`
+# is per-eligible-sol, not cumulative across the whole mission — longer
+# missions (manned expeditions) get more rolls, not a higher single roll.
+#
+# `outcomes` are weighted-random; investigating the anomaly always resolves
+# to exactly one of them. Ignoring the anomaly grants nothing and the survey
+# resumes on the next sol.
+
+- id: ancient_ruins
+  name: Ancient Ruins
+  trigger_probability: 0.08
+  eligible_expedition_types: [Lander, MannedExpedition]
+  description: >
+    Ground-penetrating sensors pick up unmistakably artificial geometry
+    buried beneath the regolith — regular angles, uniform spacing, nothing
+    natural erosion would produce.
+  outcomes:
+    - id: data_cores
+      weight: 2.0
+      description: Intact data cores recovered and decoded.
+      research_bonus: 60.0
+      resource_reward: {}
+      unlocks_tech: null
+    - id: xenotech_cache
+      weight: 1.0
+      description: A cache of alien fabrication tools, still functional.
+      research_bonus: 30.0
+      resource_reward:
+        electronic_components: 40.0
+      unlocks_tech: null
+    - id: collapsed_vault
+      weight: 1.0
+      description: The vault collapsed during excavation; only rubble remains.
+      research_bonus: 5.0
+      resource_reward: {}
+      unlocks_tech: null
+
+- id: crystalline_formation
+  name: Crystalline Formation
+  trigger_probability: 0.12
+  eligible_expedition_types: [OrbitalSurvey, Lander, MannedExpedition]
+  description: >
+    A field of naturally-grown crystal lattices, unusually large and
+    structurally regular — worth a closer look before the survey moves on.
+  outcomes:
+    - id: sample_extracted
+      weight: 2.0
+      description: A viable sample extracted for materials research.
+      research_bonus: 20.0
+      resource_reward:
+        precious_metal: 15.0
+      unlocks_tech: null
+    - id: formation_unstable
+      weight: 1.0
+      description: The formation shears under the drill; the site is a loss.
+      research_bonus: 0.0
+      resource_reward: {}
+      unlocks_tech: null
+
+- id: derelict_probe
+  name: Derelict Probe
+  trigger_probability: 0.10
+  eligible_expedition_types: [FastFlybyProbe, OrbitalSurvey]
+  description: >
+    A tumbling, long-dead automated probe of unfamiliar design, drifting in
+    a decaying orbit. Its origin and age are unclear from a distance.
+  outcomes:
+    - id: telemetry_recovered
+      weight: 2.0
+      description: Partial telemetry logs recovered before the probe tumbles out of range.
+      research_bonus: 25.0
+      resource_reward: {}
+      unlocks_tech: null
+    - id: navigation_archive
+      weight: 1.0
+      description: A surprisingly intact navigation archive of the wider system.
+      research_bonus: 15.0
+      resource_reward: {}
+      unlocks_tech: advanced_materials
+
+- id: subsurface_ocean_vent
+  name: Subsurface Ocean Vent
+  trigger_probability: 0.10
+  eligible_expedition_types: [Lander, MannedExpedition]
+  description: >
+    Thermal imaging reveals a warm plume venting through the ice crust — a
+    strong sign of a liquid subsurface ocean and, possibly, biosignatures.
+  outcomes:
+    - id: biosignature_confirmed
+      weight: 1.0
+      description: Trace organic compounds confirmed in the vent plume.
+      research_bonus: 45.0
+      resource_reward:
+        biomass: 20.0
+      unlocks_tech: hydroponics
+    - id: mineral_rich_plume
+      weight: 2.0
+      description: The plume carries a heavy load of dissolved minerals.
+      research_bonus: 10.0
+      resource_reward:
+        conductive_ore: 30.0
+      unlocks_tech: null
+
+- id: micrometeorite_swarm
+  name: Micrometeorite Swarm
+  trigger_probability: 0.15
+  eligible_expedition_types: [FastFlybyProbe, OrbitalSurvey, Lander, MannedExpedition]
+  description: >
+    A dense, uncatalogued debris field crosses the survey path with no
+    warning. Investigating the swarm's composition risks the equipment.
+  outcomes:
+    - id: composition_logged
+      weight: 2.0
+      description: Swarm composition logged without incident.
+      research_bonus: 12.0
+      resource_reward: {}
+      unlocks_tech: null
+    - id: sensor_damage
+      weight: 1.0
+      description: A near-miss chips the sensor array; data quality suffers.
+      research_bonus: 0.0
+      resource_reward: {}
+      unlocks_tech: null
+
+- id: fossilized_impact_core
+  name: Fossilized Impact Core
+  trigger_probability: 0.09
+  eligible_expedition_types: [Lander, MannedExpedition]
+  description: >
+    Drilling through an ancient impact crater's central peak turns up a
+    stratified core sample — a geological record stretching back eons.
+  outcomes:
+    - id: rare_isotopes
+      weight: 1.0
+      description: The core is laced with rare isotopes of research interest.
+      research_bonus: 35.0
+      resource_reward:
+        fissile_ore: 20.0
+      unlocks_tech: null
+    - id: geological_record
+      weight: 2.0
+      description: A clean stratigraphic record, useful for dating the wider system.
+      research_bonus: 18.0
+      resource_reward: {}
+      unlocks_tech: null

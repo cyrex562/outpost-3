@@ -219,6 +219,12 @@ pub struct GameState {
     /// Lightweight, colony-anchored off-world presences — see
     /// [`crate::outpost::Outpost`].
     pub outposts: Vec<crate::outpost::Outpost>,
+
+    // ── Body-scouting survey expeditions (issue #235) ─────────────────────
+    /// Live state for probe/manned survey expeditions targeting system
+    /// bodies — see [`crate::expedition::ExpeditionRegistry`]. Distinct from
+    /// the older [`Self::expeditions`] (planet-hex field expeditions).
+    pub expedition_registry: crate::expedition::ExpeditionRegistry,
 }
 
 impl GameState {
@@ -267,6 +273,7 @@ impl GameState {
             expeditions: Vec::new(),
             habitability_mitigations: HashSet::new(),
             outposts: Vec::new(),
+            expedition_registry: crate::expedition::ExpeditionRegistry::default(),
         }
     }
 
