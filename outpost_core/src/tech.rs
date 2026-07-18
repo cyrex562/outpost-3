@@ -858,6 +858,10 @@ mod tests {
     /// Done-when: the real authored tree parses cleanly (no cycles, no
     /// unknown-prerequisite refs) and is a genuine multi-category,
     /// multi-tier DAG well beyond the pre-#236 12-entry placeholder set.
+    ///
+    /// Thresholds raised in #249 (wave 2, ~48 → ~81 entries, tier 6 → 7) to
+    /// reflect the larger tree's actual shape rather than staying pinned to
+    /// #236's original "solid start" numbers.
     #[test]
     fn real_tech_yaml_parses_and_forms_a_wide_multi_tier_dag() {
         let Some(yaml) = read_real_tech_yaml() else {
@@ -867,9 +871,9 @@ mod tests {
 
         let all_ids: Vec<&TechId> = registry.techs.keys().collect();
         assert!(
-            all_ids.len() >= 40,
-            "expected a solid-start expansion well beyond the 12-entry \
-             placeholder tree, got {} techs",
+            all_ids.len() >= 75,
+            "expected a wave-2 expansion well beyond #236's ~48-entry solid \
+             start, got {} techs",
             all_ids.len()
         );
 
@@ -894,29 +898,37 @@ mod tests {
 
         let max_tier = registry.techs.values().map(|d| d.tier).max().unwrap_or(0);
         assert!(
-            max_tier >= 5,
-            "expected the tree to span at least 5 tiers, got max tier {max_tier}"
+            max_tier >= 7,
+            "expected the tree to span at least 7 tiers (wave 2's ascension \
+             capstones), got max tier {max_tier}"
         );
 
-        // Genuine DAG, not a single-file line: at least one tech must have
-        // 2+ direct prerequisites (a convergence point).
+        // Genuine DAG, not a single-file line: several techs must have 2+
+        // direct prerequisites (convergence points) — wave 2 deliberately
+        // added many cross-category convergences, not just one token point.
+        let convergence_count = registry
+            .techs
+            .values()
+            .filter(|d| d.prerequisites.len() >= 2)
+            .count();
         assert!(
-            registry.techs.values().any(|d| d.prerequisites.len() >= 2),
-            "expected at least one tech with multiple prerequisites (a DAG \
-             convergence point, not a linear chain)"
+            convergence_count >= 10,
+            "expected at least 10 DAG convergence points (techs with 2+ \
+             prerequisites), got {convergence_count}"
         );
 
-        // At least one tech must have 2+ direct dependents (a fan-out point).
+        // Several techs must have 2+ direct dependents (fan-out points).
         let mut dependents: HashMap<&str, u32> = HashMap::new();
         for def in registry.techs.values() {
             for prereq in &def.prerequisites {
                 *dependents.entry(prereq.as_str()).or_insert(0) += 1;
             }
         }
+        let fan_out_count = dependents.values().filter(|&&count| count >= 2).count();
         assert!(
-            dependents.values().any(|&count| count >= 2),
-            "expected at least one tech with multiple dependents (a DAG \
-             fan-out point, not a single-file line)"
+            fan_out_count >= 5,
+            "expected at least 5 DAG fan-out points (techs with 2+ direct \
+             dependents), got {fan_out_count}"
         );
     }
 
