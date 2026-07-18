@@ -73,6 +73,15 @@ pub enum ShortfallReason {
         /// The maintenance commodity id that was the tightest constraint.
         commodity_id: String,
     },
+    /// A deposit-gated extraction recipe ran below full output because no
+    /// matching deposit (or only a low-richness one) was found at the
+    /// colony's site/body (issue #239). `effective_scale` on the enclosing
+    /// [`ProductionShortfall`] distinguishes a total absence (`0.0`) from a
+    /// merely scarce deposit (`0.0 < scale < 1.0`).
+    DepositShort {
+        /// The deposit-gated commodity id that was the tightest constraint.
+        commodity_id: String,
+    },
 }
 
 /// Outcome of one building's production attempt this turn.
@@ -185,6 +194,7 @@ pub fn process_production(
         1.0,
         &std::collections::HashMap::new(),
         &[],
+        None,
     )
 }
 
@@ -208,6 +218,21 @@ pub fn process_production(
 /// [`crate::system::YieldCategory`] via [`yield_category_for`] — a body can
 /// author an elevated `power_output` modifier, say, without that also
 /// inflating its food or science yield.
+///
+/// `deposit_richness` (issue #239) maps commodity id → richness/abundance
+/// in `[0.0, 1.0]` for whatever deposits are available at the colony's
+/// site/body. Only recipes with at least one output in
+/// [`crate::map::VEIN_COMMODITIES`] (the curated raw-material list #232
+/// guarantees placement for) are deposit-gated; every other recipe is
+/// unaffected.
+///
+/// Pass `None` when the colony has **no spatial placement to check against
+/// at all** (e.g. founded via the bare `Command::FoundColony` test/fixture
+/// path with no hex or body link) — gating is inert, matching
+/// [`process_production`]. Pass `Some(map)` — even an *empty* map — whenever
+/// the colony genuinely has a site/body: a real location with zero deposits
+/// on record is a meaningfully different case from "no placement data
+/// exists," and must still gate (missing map entries mean `0.0` richness).
 #[allow(
     clippy::too_many_arguments,
     clippy::implicit_hasher,
@@ -224,6 +249,7 @@ pub fn process_production_scaled(
     productivity_multiplier: f32,
     active_recipes: &std::collections::HashMap<String, String>,
     category_modifiers: &[crate::system::BodyModifier],
+    deposit_richness: Option<&std::collections::HashMap<String, f32>>,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
@@ -304,10 +330,15 @@ pub fn process_production_scaled(
         };
         let effective_labor_ratio = if applies_labor { labor_ratio } else { 1.0 };
 
+        // Deposit gating (issue #239) — only applies to deposit-gated
+        // recipes; inert (ratio 1.0) for everything else.
+        let (deposit_ratio, deposit_tight) = compute_deposit_ratio(recipe, deposit_richness);
+
         // Overall scale factor.
         let scale = input_ratio
             .min(power_ratio)
             .min(effective_labor_ratio)
+            .min(deposit_ratio)
             .max(0.0);
 
         // Record shortfalls. Maintenance-only tight constraints report as
@@ -331,6 +362,14 @@ pub fn process_production_scaled(
             shortfalls.push(ProductionShortfall {
                 reason: ShortfallReason::PowerBrownout,
                 effective_scale: power_ratio,
+            });
+        }
+        if deposit_ratio < 1.0 - 1e-9 {
+            shortfalls.push(ProductionShortfall {
+                reason: ShortfallReason::DepositShort {
+                    commodity_id: deposit_tight.unwrap_or_default(),
+                },
+                effective_scale: deposit_ratio,
             });
         }
         if effective_labor_ratio < 1.0 - 1e-9 {
@@ -435,6 +474,70 @@ fn compute_power_grid_scaled(
     }
 
     PowerGrid { capacity, demand }
+}
+
+/// Compute the deposit-availability scale factor for a recipe (issue #239).
+///
+/// Only recipes with at least one output in [`crate::map::VEIN_COMMODITIES`]
+/// are deposit-gated; everything else (including recipes with no deposit-
+/// tracked output at all, e.g. a water well) returns `(1.0, None)`
+/// unconditionally.
+///
+/// `deposit_richness` is `None` when the colony has **no spatial placement
+/// to check against at all** (e.g. founded via the bare `Command::FoundColony`
+/// test/fixture path) — gating is inert in that case. It is `Some(map)`
+/// (possibly an *empty* map — a real hex/body with zero deposits on record
+/// is a meaningfully different case from "no placement data exists at
+/// all") whenever the colony genuinely has a site or body to check;
+/// missing entries in that map mean "no matching deposit here" (`0.0`
+/// richness), not "gating doesn't apply."
+///
+/// When gating applies, the *worst* richness among the recipe's
+/// deposit-gated outputs sets the ratio: total absence (`0.0` richness,
+/// i.e. no matching deposit at all) drops the ratio to `0.0`; presence of
+/// any deposit guarantees a `0.5` floor, scaling linearly up to `1.0` at
+/// richness `1.0` — so a guaranteed-placed but low-richness deposit
+/// (#232's coverage guarantee) still produces something, while richness
+/// genuinely matters rather than being a pure presence/absence toggle.
+fn compute_deposit_ratio(
+    recipe: Option<&RecipeDef>,
+    deposit_richness: Option<&std::collections::HashMap<String, f32>>,
+) -> (f64, Option<String>) {
+    let Some(recipe) = recipe else {
+        return (1.0, None);
+    };
+    let vein_outputs: Vec<&str> = recipe
+        .outputs
+        .iter()
+        .map(|o| o.id.as_str())
+        .filter(|id| crate::map::VEIN_COMMODITIES.contains(id))
+        .collect();
+    let Some(deposit_richness) = deposit_richness else {
+        return (1.0, None);
+    };
+    if vein_outputs.is_empty() {
+        return (1.0, None);
+    }
+
+    let mut worst_commodity = vein_outputs[0];
+    let mut worst_richness = f32::MAX;
+    for id in &vein_outputs {
+        let richness = deposit_richness.get(*id).copied().unwrap_or(0.0);
+        if richness < worst_richness {
+            worst_richness = richness;
+            worst_commodity = id;
+        }
+    }
+
+    if worst_richness <= 0.0 {
+        return (0.0, Some(worst_commodity.to_string()));
+    }
+    let ratio = f64::from(0.5 + worst_richness.clamp(0.0, 1.0) * 0.5);
+    if ratio < 1.0 - 1e-9 {
+        (ratio, Some(worst_commodity.to_string()))
+    } else {
+        (ratio, None)
+    }
 }
 
 /// Compute the effective input ratio for a building, combining recipe inputs
@@ -950,6 +1053,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         let smelter = outcome
@@ -995,6 +1099,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         let mut pool_harsh = ColonyPool::new();
@@ -1010,6 +1115,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         let get_scale = |o: &ProductionStepOutcome, ty: &str| -> f64 {
@@ -1052,6 +1158,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         let smelter = outcome
@@ -1145,6 +1252,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         let recycler = outcome
@@ -1188,6 +1296,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         for res in &outcome.building_results {
@@ -1224,6 +1333,7 @@ mod tests {
             1.25,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         let smelt = outcome
@@ -1277,6 +1387,7 @@ mod tests {
             1.25,
             &std::collections::HashMap::new(),
             &category_modifiers,
+            None,
         );
 
         // 1.0 base output * 1.25 productivity * 2.0 industry modifier = 2.5.
@@ -1311,6 +1422,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &category_modifiers,
+            None,
         );
 
         assert!(
@@ -1339,6 +1451,7 @@ mod tests {
             0.75,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
         assert!(
             (pool.amount("iron_plate") - 0.75).abs() < 1e-6,
@@ -1408,6 +1521,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
@@ -1433,6 +1547,7 @@ mod tests {
             1.0,
             &active,
             &[],
+            None,
         );
 
         assert_eq!(pool.amount("alloy"), 0.0);
@@ -1460,8 +1575,231 @@ mod tests {
             1.0,
             &active,
             &[],
+            None,
         );
 
         assert!((pool.amount("alloy") - 5.0).abs() < 1e-9);
+    }
+
+    // ── Deposit gating (issue #239) ────────────────────────────────────────────
+
+    fn make_registry_with_vein_mine() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "structural_mine".into(),
+            name: "Structural Mine".into(),
+            description: String::new(),
+            category: BuildingCategory::Extraction,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "mine_structural_ore".into(),
+            name: "Mine Structural Ore".into(),
+            building: "structural_mine".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "structural_ore".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        // Non-deposit-gated recipe (not in VEIN_COMMODITIES) — a control to
+        // prove gating is scoped to deposit-tracked commodities only.
+        reg.insert_building(BuildingDef {
+            id: "water_well".into(),
+            name: "Water Well".into(),
+            description: String::new(),
+            category: BuildingCategory::Extraction,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "pump_water".into(),
+            name: "Pump Water".into(),
+            building: "water_well".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "water".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        reg
+    }
+
+    #[test]
+    fn deposit_gating_is_inert_with_empty_richness_map() {
+        // Empty map = colony has no spatial placement to check against
+        // (e.g. founded via the bare Command::FoundColony path) — gating
+        // must not apply at all, matching pre-#239 behaviour.
+        let reg = make_registry_with_vein_mine();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["structural_mine"]);
+
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+        );
+
+        let mine = &outcome.building_results[0];
+        assert!((mine.scale - 1.0).abs() < 1e-9);
+        assert!(mine.shortfalls.is_empty());
+        assert!((pool.amount("structural_ore") - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn deposit_gating_zeroes_output_with_no_matching_deposit() {
+        // Non-empty richness map (colony IS spatially placed) but no entry
+        // for structural_ore — no matching deposit at all.
+        let reg = make_registry_with_vein_mine();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["structural_mine"]);
+        let mut deposits = std::collections::HashMap::new();
+        deposits.insert("conductive_ore".to_string(), 0.8_f32); // unrelated commodity
+
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            Some(&deposits),
+        );
+
+        let mine = &outcome.building_results[0];
+        assert!(
+            mine.scale.abs() < 1e-9,
+            "expected scale 0.0, got {}",
+            mine.scale
+        );
+        assert!(mine.shortfalls.iter().any(|s| matches!(
+            &s.reason,
+            ShortfallReason::DepositShort { commodity_id } if commodity_id == "structural_ore"
+        )));
+        assert!(pool.amount("structural_ore").abs() < 1e-9);
+    }
+
+    #[test]
+    fn deposit_gating_scales_output_by_richness_when_present() {
+        let reg = make_registry_with_vein_mine();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["structural_mine"]);
+        let mut deposits = std::collections::HashMap::new();
+        deposits.insert("structural_ore".to_string(), 0.4_f32);
+
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            Some(&deposits),
+        );
+
+        let mine = &outcome.building_results[0];
+        // ratio = 0.5 + 0.4 * 0.5 = 0.7 (small epsilon: richness is stored
+        // as f32 and widened to f64, so this isn't bit-exact).
+        assert!(
+            (mine.scale - 0.7).abs() < 1e-6,
+            "expected scale ~0.7, got {}",
+            mine.scale
+        );
+        assert!(mine.shortfalls.iter().any(|s| matches!(
+            &s.reason,
+            ShortfallReason::DepositShort { commodity_id } if commodity_id == "structural_ore"
+        )));
+        assert!((pool.amount("structural_ore") - 7.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn deposit_gating_allows_full_output_at_full_richness() {
+        let reg = make_registry_with_vein_mine();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["structural_mine"]);
+        let mut deposits = std::collections::HashMap::new();
+        deposits.insert("structural_ore".to_string(), 1.0_f32);
+
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            Some(&deposits),
+        );
+
+        let mine = &outcome.building_results[0];
+        assert!((mine.scale - 1.0).abs() < 1e-9);
+        assert!(mine.shortfalls.is_empty());
+    }
+
+    #[test]
+    fn deposit_gating_does_not_apply_to_non_vein_commodities() {
+        // A colony IS spatially placed (non-empty map) but the water_well's
+        // output ("water") isn't in VEIN_COMMODITIES, so it must run at full
+        // scale regardless of what's (or isn't) in the deposits map.
+        let reg = make_registry_with_vein_mine();
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["water_well"]);
+        let mut deposits = std::collections::HashMap::new();
+        deposits.insert("structural_ore".to_string(), 0.9_f32); // unrelated to water
+
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            Some(&deposits),
+        );
+
+        let well = &outcome.building_results[0];
+        assert!((well.scale - 1.0).abs() < 1e-9);
+        assert!(well.shortfalls.is_empty());
+        assert!((pool.amount("water") - 10.0).abs() < 1e-9);
     }
 }

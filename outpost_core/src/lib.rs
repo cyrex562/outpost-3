@@ -2054,6 +2054,24 @@ impl GameEngine {
                         .difficulty_scalar
                         .scalar_for(&modifier::ModifiableQuantity::MaintenanceConsumption);
                     let maintenance_enabled = self.state.maintenance_enabled;
+                    // Precompute deposit richness per colony (issue #239)
+                    // before the mutable loop below — `colony_deposit_richness`
+                    // takes `&self` and can't run once `self.state.colonies`
+                    // is borrowed mutably.
+                    let colony_deposits: std::collections::HashMap<
+                        ColonyId,
+                        Option<std::collections::HashMap<String, f32>>,
+                    > = self
+                        .state
+                        .colonies
+                        .iter()
+                        .map(|c| {
+                            (
+                                c.id,
+                                self.colony_deposit_richness(c.id, c.home_body_id.as_ref()),
+                            )
+                        })
+                        .collect();
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -2067,6 +2085,7 @@ impl GameEngine {
                             .map(|b| (b.building_type.clone(), b.slot_cost))
                             .collect();
                         colony.pool.reset_deltas();
+                        let deposits = colony_deposits.get(&colony.id).and_then(Option::as_ref);
                         let prod_outcome = colony::process_production_scaled(
                             &mut colony.pool,
                             &placed,
@@ -2078,6 +2097,7 @@ impl GameEngine {
                             colony.habitability_modifier,
                             &colony.active_recipes,
                             &colony.category_modifiers,
+                            deposits,
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -2104,7 +2124,18 @@ impl GameEngine {
                     // a body for its deposits/role. Upkeep shortfalls (power,
                     // maintenance) reduce output via the same scale-factor
                     // logic colonies get, for free, since this reuses
-                    // `process_production_scaled` unchanged.
+                    // `process_production_scaled` unchanged. Deposit gating
+                    // (issue #239) uses the outpost's `body_id` directly —
+                    // outposts have no hex placement, only a body link.
+                    let outpost_deposits: std::collections::HashMap<
+                        outpost::OutpostId,
+                        std::collections::HashMap<String, f32>,
+                    > = self
+                        .state
+                        .outposts
+                        .iter()
+                        .map(|o| (o.id, self.body_deposit_richness(&o.body_id)))
+                        .collect();
                     for out in &mut self.state.outposts {
                         let placed: Vec<(String, u32)> = out
                             .buildings
@@ -2112,6 +2143,8 @@ impl GameEngine {
                             .map(|b| (b.building_type.clone(), b.slot_cost))
                             .collect();
                         out.pool.reset_deltas();
+                        let empty_deposits = std::collections::HashMap::new();
+                        let deposits = outpost_deposits.get(&out.id).unwrap_or(&empty_deposits);
                         let prod_outcome = colony::process_production_scaled(
                             &mut out.pool,
                             &placed,
@@ -2123,6 +2156,7 @@ impl GameEngine {
                             1.0,
                             &out.active_recipes,
                             &out.category_modifiers,
+                            Some(deposits),
                         );
                         for result in &prod_outcome.building_results {
                             for shortfall in &result.shortfalls {
@@ -4543,6 +4577,9 @@ impl GameEngine {
                                     colony::ShortfallReason::MaintenanceShort { commodity_id } => {
                                         ("maintenance_short", Some(commodity_id.clone()))
                                     }
+                                    colony::ShortfallReason::DepositShort { commodity_id } => {
+                                        ("deposit_short", Some(commodity_id.clone()))
+                                    }
                                 };
                                 ui::ShortfallRow {
                                     kind: kind.to_string(),
@@ -4935,6 +4972,67 @@ impl GameEngine {
             total_traded_volume: total_traded,
             player_traded_volume: player_traded,
         }
+    }
+
+    /// Deposit richness available at a system body, for deposit-gated
+    /// extraction recipes (issue #239) — the max
+    /// [`system::BodyDeposit::abundance`] per commodity id. Empty if the
+    /// body is unknown or has no deposits.
+    fn body_deposit_richness(
+        &self,
+        body_id: &system::BodyId,
+    ) -> std::collections::HashMap<String, f32> {
+        let mut out = std::collections::HashMap::new();
+        if let Some(body) = self.state.system_state.node_map.bodies.get(body_id) {
+            for d in &body.deposits {
+                let entry = out.entry(d.commodity_id.clone()).or_insert(0.0_f32);
+                *entry = entry.max(d.abundance);
+            }
+        }
+        out
+    }
+
+    /// Deposit richness available to a colony, for deposit-gated extraction
+    /// recipes (issue #239) — the max of any matching hex
+    /// [`map::Deposit::richness`] (for a colony founded via
+    /// `Command::FoundColonyAtSite`, keyed off its planet-map hex) and any
+    /// matching [`system::BodyDeposit::abundance`] (for a colony linked to a
+    /// system body via `home_body_id`).
+    ///
+    /// Returns `None` — gating inert — only for a colony with **no spatial
+    /// placement at all**: not on the planet map (never `FoundColonyAtSite`d,
+    /// or no planet map seeded) *and* no `home_body_id` (e.g. one created via
+    /// the bare `Command::FoundColony` test/fixture path). A colony that
+    /// genuinely has a site or body — even one whose hex/body happens to
+    /// carry zero recorded deposits — returns `Some(map)` (possibly empty),
+    /// since "placed somewhere with nothing there" must still gate, unlike
+    /// "no placement data exists to check against."
+    fn colony_deposit_richness(
+        &self,
+        colony_id: ColonyId,
+        home_body_id: Option<&system::BodyId>,
+    ) -> Option<std::collections::HashMap<String, f32>> {
+        let mut out = std::collections::HashMap::new();
+        let mut placed = false;
+        if let Some(pm) = &self.state.planet_map {
+            if let Some(node) = pm.colonies.iter().find(|n| n.colony_id == colony_id) {
+                placed = true;
+                if let Some(cell) = pm.cells.get(&node.coord) {
+                    for d in &cell.deposits {
+                        let entry = out.entry(d.commodity_id.clone()).or_insert(0.0_f32);
+                        *entry = entry.max(d.richness);
+                    }
+                }
+            }
+        }
+        if let Some(body_id) = home_body_id {
+            placed = true;
+            for (k, v) in self.body_deposit_richness(body_id) {
+                let entry = out.entry(k).or_insert(0.0_f32);
+                *entry = entry.max(v);
+            }
+        }
+        placed.then_some(out)
     }
 
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].
@@ -6909,6 +7007,14 @@ mod tests {
             Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
             other => panic!("expected BodyAdded, got {other:?}"),
         };
+        // Give the body a structural_ore deposit (issue #239) so outpost
+        // mining tests built on this shared fixture keep working under
+        // deposit gating — an asteroid belt plausibly has ore, and no test
+        // here asserts on the body's exact deposit list.
+        if let Some(body) = engine.state.system_state.node_map.bodies.get_mut(&body_id) {
+            body.deposits
+                .push(system::BodyDeposit::new("structural_ore", 1.0));
+        }
         (colony_id, body_id)
     }
 
@@ -8713,6 +8819,202 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::ColonyPlacedOnMap { q, r, .. } if *q == best_coord.q && *r == best_coord.r)));
+    }
+
+    /// Done-when (issue #239): a colony founded at the specific hex where
+    /// #232's coverage guarantee force-placed a `structural_ore` deposit
+    /// can actually mine it under #239's new deposit gating — proving the
+    /// coverage guarantee and the gate coexist rather than starving every
+    /// founding colony.
+    #[test]
+    fn founding_site_with_guaranteed_deposit_sustains_gated_extraction() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 4242,
+                radius: 6,
+            })
+            .unwrap();
+
+        // Find a habitable hex that actually has a structural_ore deposit
+        // (guaranteed to exist *somewhere* on the map by #232, though not
+        // necessarily at the single best landing site).
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let (site_id, coord) = pm
+            .sites
+            .iter()
+            .find_map(|(&id, &coord)| {
+                let cell = pm.cells.get(&coord)?;
+                if cell.is_habitable()
+                    && cell
+                        .deposits
+                        .iter()
+                        .any(|d| d.commodity_id == "structural_ore")
+                {
+                    Some((id, coord))
+                } else {
+                    None
+                }
+            })
+            .expect(
+                "a habitable hex with a structural_ore deposit must exist \
+                 (issue #232's coverage guarantee)",
+            );
+        let _ = coord;
+
+        let mut registry = content::ContentRegistry::default();
+        registry.insert_building(content::types::BuildingDef {
+            id: "structural_mine".into(),
+            name: "Structural Mine".into(),
+            description: String::new(),
+            category: content::types::BuildingCategory::Extraction,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        registry.insert_recipe(content::types::RecipeDef {
+            id: "mine_structural_ore".into(),
+            name: "Mine Structural Ore".into(),
+            building: "structural_mine".into(),
+            inputs: vec![],
+            outputs: vec![content::types::Ingredient {
+                id: "structural_ore".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        engine.state.registry = Some(registry);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Ore Landing".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: None,
+            })
+            .unwrap();
+
+        let idx = 0;
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("structural_mine", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        assert!(
+            engine.state.colonies[idx].pool.amount("structural_ore") > 0.0,
+            "colony founded on its own guaranteed structural_ore deposit \
+             must be able to mine it under deposit gating"
+        );
+    }
+
+    /// Done-when (issue #239): a colony founded at a habitable hex with NO
+    /// structural_ore deposit gets zero output from a structural_mine —
+    /// deposit gating actually blocks extraction when nothing is there,
+    /// not just a decorative flag.
+    #[test]
+    fn founding_site_without_matching_deposit_blocks_gated_extraction() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 4242,
+                radius: 6,
+            })
+            .unwrap();
+
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let (site_id, _) = pm
+            .sites
+            .iter()
+            .find_map(|(&id, &coord)| {
+                let cell = pm.cells.get(&coord)?;
+                if cell.is_habitable()
+                    && !cell
+                        .deposits
+                        .iter()
+                        .any(|d| d.commodity_id == "structural_ore")
+                {
+                    Some((id, coord))
+                } else {
+                    None
+                }
+            })
+            .expect("a habitable hex without a structural_ore deposit must exist");
+
+        let mut registry = content::ContentRegistry::default();
+        registry.insert_building(content::types::BuildingDef {
+            id: "structural_mine".into(),
+            name: "Structural Mine".into(),
+            description: String::new(),
+            category: content::types::BuildingCategory::Extraction,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        registry.insert_recipe(content::types::RecipeDef {
+            id: "mine_structural_ore".into(),
+            name: "Mine Structural Ore".into(),
+            building: "structural_mine".into(),
+            inputs: vec![],
+            outputs: vec![content::types::Ingredient {
+                id: "structural_ore".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+        });
+        engine.state.registry = Some(registry);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Barren Landing".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: None,
+            })
+            .unwrap();
+
+        let idx = 0;
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("structural_mine", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        assert!(
+            engine.state.colonies[idx]
+                .pool
+                .amount("structural_ore")
+                .abs()
+                < 1e-9,
+            "colony with no matching deposit must get zero structural_ore \
+             from a structural_mine under deposit gating"
+        );
+        assert_eq!(
+            engine.state.colonies[idx]
+                .last_production
+                .get("structural_mine")
+                .unwrap()
+                .scale,
+            0.0
+        );
     }
 
     /// Shared setup for the habitability-gate tests (issue #183): seed a

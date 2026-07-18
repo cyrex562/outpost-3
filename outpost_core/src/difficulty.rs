@@ -724,6 +724,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
         let hard = process_production_scaled(
             &mut pool_hard,
@@ -736,6 +737,7 @@ mod tests {
             1.0,
             &std::collections::HashMap::new(),
             &[],
+            None,
         );
 
         assert!(
