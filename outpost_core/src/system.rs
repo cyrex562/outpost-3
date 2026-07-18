@@ -408,6 +408,17 @@ pub struct Body {
     /// for procedurally generated systems.
     #[serde(default)]
     pub deposits: Vec<BodyDeposit>,
+    /// Whether a survey expedition has completed at this body with at least
+    /// a partial reveal (issue #235) — see
+    /// `expedition::Command::LaunchSurveyExpedition`. Flavor/UI state only;
+    /// does not gate anything mechanically (deposits are always true world
+    /// state, matching #232's coverage-not-gating precedent).
+    #[serde(default)]
+    pub surveyed: bool,
+    /// Named candidate colony/outpost site discovered by a full-reveal
+    /// survey (issue #235), if any.
+    #[serde(default)]
+    pub candidate_site_name: Option<String>,
 }
 
 impl Body {
@@ -433,6 +444,8 @@ impl Body {
             parent_body: None,
             modifiers: Vec::new(),
             deposits: Vec::new(),
+            surveyed: false,
+            candidate_site_name: None,
         }
     }
 

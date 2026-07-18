@@ -13,6 +13,7 @@ use super::{
         SupplyPackage,
     },
 };
+use crate::expedition::AnomalyDef;
 
 /// Named raw file: a `(filename, yaml_text)` pair.
 pub type RawFile<'a> = (&'a str, &'a str);
@@ -53,6 +54,7 @@ impl PackLoader {
             collect_list::<DefaultDirectiveDef>(files, &["default_directives.yaml"])?;
         let supply_packages = collect_table::<SupplyPackage>(files, &["supplies.yaml"])?;
         let star_systems = collect_table::<StarSystemDef>(files, &["systems.yaml"])?;
+        let anomalies = collect_table::<AnomalyDef>(files, &["anomalies.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
         let commodity_ids: std::collections::HashSet<&str> =
@@ -121,6 +123,7 @@ impl PackLoader {
             default_directives,
             supply_packages,
             star_systems,
+            anomalies,
         })
     }
 }
@@ -208,6 +211,12 @@ impl HasId for SupplyPackage {
 }
 
 impl HasId for StarSystemDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl HasId for AnomalyDef {
     fn id(&self) -> &str {
         &self.id
     }

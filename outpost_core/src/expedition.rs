@@ -359,6 +359,63 @@ pub fn check_anomaly_trigger(
         && roll < anomaly.trigger_probability
 }
 
+/// Pick which [`AnomalyOutcome`] investigating `anomaly` resolves to, given a
+/// `[0,1)` roll, weighted by each outcome's `weight` (normalised internally).
+///
+/// Returns `None` only if `anomaly.outcomes` is empty (a content-authoring
+/// error the loader should reject before this is ever called).
+#[must_use]
+pub fn resolve_anomaly_outcome(anomaly: &AnomalyDef, roll: f32) -> Option<&AnomalyOutcome> {
+    let total_weight: f32 = anomaly.outcomes.iter().map(|o| o.weight.max(0.0)).sum();
+    if total_weight <= 0.0 {
+        return anomaly.outcomes.first();
+    }
+    let target = roll.clamp(0.0, 0.999_999) * total_weight;
+    let mut cumulative = 0.0;
+    for outcome in &anomaly.outcomes {
+        cumulative += outcome.weight.max(0.0);
+        if target < cumulative {
+            return Some(outcome);
+        }
+    }
+    anomaly.outcomes.last()
+}
+
+// ─── Deterministic rolls ──────────────────────────────────────────────────────
+
+/// Derive a deterministic pseudo-random roll in `[0, 1)` from an expedition
+/// id and a salt (e.g. the current sol, or a purpose-specific constant).
+///
+/// Keeps survey/anomaly resolution reproducible from saved state without
+/// threading an external RNG stream through the engine — matching the
+/// existing field-expedition system's deterministic-arithmetic approach
+/// (see `Command::AdvanceColonySol`'s Step 4e discovery roll).
+#[must_use]
+pub fn deterministic_roll(id: Uuid, salt: u64) -> f32 {
+    #[allow(clippy::cast_possible_truncation)]
+    let mixed = (id.as_u128() as u64) ^ salt;
+    let hashed = mixed
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(0x1234_5678);
+    // Top 24 bits, well-distributed, scaled into [0, 1).
+    #[allow(clippy::cast_precision_loss)]
+    let value = (hashed >> 40) as f32 / 16_777_216.0_f32;
+    value.clamp(0.0, 0.999_999)
+}
+
+/// FNV-1a hash of a string into a `u64`, used to derive a per-anomaly salt
+/// for [`deterministic_roll`] so different anomalies checked on the same
+/// sol don't share a roll.
+#[must_use]
+pub fn string_salt(s: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in s.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    hash
+}
+
 // ─── Mid-Mission Event / Decision ────────────────────────────────────────────
 
 /// A mid-mission event injected into an active expedition.
@@ -400,6 +457,14 @@ pub enum ChoiceEffect {
     AbortMission,
     /// No mechanical effect; purely narrative.
     Narrative,
+    /// Grant the rewards of an already-resolved anomaly investigation
+    /// outcome (issue #235). The outcome is pre-rolled when the mid-mission
+    /// event is created (see [`resolve_anomaly_outcome`]); choosing this
+    /// option applies its `research_bonus`/`resource_reward`/`unlocks_tech`
+    /// to live game state. The engine layer (not [`ExpeditionRegistry`])
+    /// applies the reward, since that requires access to `GameState`'s
+    /// research pool, colony pools, and tech registry.
+    GrantAnomalyOutcome(AnomalyOutcome),
 }
 
 // ─── Expedition State ─────────────────────────────────────────────────────────
@@ -437,19 +502,31 @@ pub enum ExpeditionPhase {
     Aborted,
 }
 
+/// Fixed transit-leg duration (turns) shared by every survey expedition,
+/// regardless of mission profile (issue #235).
+pub const SURVEY_TRANSIT_TURNS: u32 = 2;
+
 /// Full live state of one expedition mission.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpeditionState {
     /// Stable identifier.
     pub id: ExpeditionId,
+    /// Colony that launched and funds this expedition (issue #235) — the
+    /// destination for any resource rewards and the context for tracking
+    /// which colony's expedition this is.
+    pub origin_colony: ColonyId,
     /// Mission profile.
     pub expedition_type: ExpeditionType,
     /// Target celestial body.
     pub target_body: BodyId,
     /// Current lifecycle phase.
     pub phase: ExpeditionPhase,
-    /// Turns remaining until transit / survey completes.
-    pub turns_remaining: u32,
+    /// Turns remaining in the transit leg (counts down first).
+    pub transit_turns_remaining: u32,
+    /// Turns remaining in the on-site survey leg (counts down once transit
+    /// completes; a triggered anomaly pauses this countdown while
+    /// `phase == AwaitingDecision`).
+    pub survey_turns_remaining: u32,
     /// Accumulated modifier adjustments from mid-mission choices.
     pub modifiers: SurveyModifiers,
     /// Pending mid-mission event awaiting player resolution (if any).
@@ -463,15 +540,19 @@ pub struct ExpeditionState {
 impl ExpeditionState {
     /// Create a new expedition in the [`ExpeditionPhase::InTransit`] phase.
     #[must_use]
-    pub fn new(expedition_type: ExpeditionType, target_body: BodyId) -> Self {
-        let transit = 2u32; // fixed transit leg
-        let survey = expedition_type.base_duration_turns();
+    pub fn new(
+        expedition_type: ExpeditionType,
+        target_body: BodyId,
+        origin_colony: ColonyId,
+    ) -> Self {
         Self {
             id: ExpeditionId::new(),
+            origin_colony,
             expedition_type,
             target_body,
             phase: ExpeditionPhase::InTransit,
-            turns_remaining: transit + survey,
+            transit_turns_remaining: SURVEY_TRANSIT_TURNS,
+            survey_turns_remaining: expedition_type.base_duration_turns(),
             modifiers: SurveyModifiers::default(),
             pending_event: None,
             outcome: None,
@@ -559,7 +640,7 @@ impl ExpeditionRegistry {
                 });
                 return Ok(());
             }
-            ChoiceEffect::Narrative => {}
+            ChoiceEffect::Narrative | ChoiceEffect::GrantAnomalyOutcome(_) => {}
         }
 
         // Resume surveying after decision.
@@ -613,6 +694,10 @@ mod tests {
 
     fn sample_body() -> BodyId {
         BodyId::new()
+    }
+
+    fn sample_colony_id() -> ColonyId {
+        Uuid::new_v4()
     }
 
     // ── Survey outcome probabilities ──────────────────────────────────────────
@@ -781,7 +866,7 @@ mod tests {
     fn decision_boost_applies_modifier() {
         let body = sample_body();
         let mut registry = ExpeditionRegistry::default();
-        let mut state = ExpeditionState::new(ExpeditionType::Lander, body);
+        let mut state = ExpeditionState::new(ExpeditionType::Lander, body, sample_colony_id());
         state.phase = ExpeditionPhase::AwaitingDecision;
         state.pending_event = Some(make_event_with_boost());
         let id = registry.launch(state);
@@ -797,7 +882,7 @@ mod tests {
     fn decision_abort_sets_failed_outcome() {
         let body = sample_body();
         let mut registry = ExpeditionRegistry::default();
-        let mut state = ExpeditionState::new(ExpeditionType::Lander, body);
+        let mut state = ExpeditionState::new(ExpeditionType::Lander, body, sample_colony_id());
         state.phase = ExpeditionPhase::AwaitingDecision;
         state.pending_event = Some(make_event_with_boost());
         let id = registry.launch(state);
@@ -816,7 +901,7 @@ mod tests {
     fn decision_unknown_choice_returns_error() {
         let body = sample_body();
         let mut registry = ExpeditionRegistry::default();
-        let mut state = ExpeditionState::new(ExpeditionType::Lander, body);
+        let mut state = ExpeditionState::new(ExpeditionType::Lander, body, sample_colony_id());
         state.phase = ExpeditionPhase::AwaitingDecision;
         state.pending_event = Some(make_event_with_boost());
         let id = registry.launch(state);
@@ -829,7 +914,7 @@ mod tests {
     fn decision_on_non_awaiting_expedition_returns_error() {
         let body = sample_body();
         let mut registry = ExpeditionRegistry::default();
-        let state = ExpeditionState::new(ExpeditionType::Lander, body);
+        let state = ExpeditionState::new(ExpeditionType::Lander, body, sample_colony_id());
         let id = registry.launch(state); // phase = InTransit
 
         let err = registry.resolve_decision(&id, "recalibrate");
@@ -860,7 +945,11 @@ mod tests {
     fn expedition_registry_serde_round_trip() {
         let body = sample_body();
         let mut registry = ExpeditionRegistry::default();
-        registry.launch(ExpeditionState::new(ExpeditionType::OrbitalSurvey, body));
+        registry.launch(ExpeditionState::new(
+            ExpeditionType::OrbitalSurvey,
+            body,
+            sample_colony_id(),
+        ));
         let json = serde_json::to_string(&registry).unwrap();
         let back: ExpeditionRegistry = serde_json::from_str(&json).unwrap();
         assert_eq!(back.expeditions.len(), 1);

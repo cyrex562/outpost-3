@@ -568,6 +568,7 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
         "default_directives.yaml",
         "supplies.yaml",
         "systems.yaml",
+        "anomalies.yaml",
     ];
     let mut raw_contents: Vec<(String, String)> = Vec::new();
 
@@ -770,6 +771,10 @@ mod tests {
         assert!(
             registry.star_systems().count() > 0,
             "expected at least one star system from systems.yaml"
+        );
+        assert!(
+            registry.anomalies().count() > 0,
+            "expected at least one anomaly from anomalies.yaml (issue #235)"
         );
     }
 
