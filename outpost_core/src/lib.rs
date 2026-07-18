@@ -740,6 +740,30 @@ pub enum Command {
         /// Outpost to remove.
         outpost_id: outpost::OutpostId,
     },
+    /// Convert an established outpost into a full, independent
+    /// [`colony::Colony`] (issue #242).
+    ///
+    /// Promotion is unconditional — any outpost can be promoted at any time,
+    /// matching #233's "establishment is never gated" precedent for the base
+    /// mechanism (no minimum stockpile/building/tech is required). The new
+    /// colony carries over the outpost's pool, buildings, construction
+    /// queue, slot capacity, category modifiers, active recipes, and last
+    /// production outcome unchanged; `body_id` becomes the new colony's
+    /// `home_body_id`. The outpost is removed and its `parent_colony_id`
+    /// link is dropped — the resulting colony is fully independent, with no
+    /// retained relationship to the outpost's former parent (there is no
+    /// "parent colony" concept for a `Colony` to carry it in). A fresh
+    /// [`crate::population::PopulationPool`] is spun up from
+    /// `starting_population`, since an outpost has no population of its own
+    /// to carry over.
+    PromoteOutpostToColony {
+        /// Outpost to promote.
+        outpost_id: outpost::OutpostId,
+        /// Name for the resulting colony.
+        name: String,
+        /// Starting population for the new colony.
+        starting_population: u64,
+    },
     /// Queue a construction project at an outpost, reusing the same
     /// [`colony::ConstructionProject`]/[`colony::ConstructionQueue`]
     /// machinery colonies use.
@@ -1537,6 +1561,15 @@ pub enum Event {
     OutpostDecommissioned {
         /// The removed outpost's id.
         outpost_id: outpost::OutpostId,
+    },
+    /// An outpost was promoted into a full, independent colony (issue #242).
+    OutpostPromoted {
+        /// The promoted outpost's former id (now removed from play).
+        outpost_id: outpost::OutpostId,
+        /// The newly created colony's id.
+        colony_id: ColonyId,
+        /// The new colony's name.
+        name: String,
     },
     /// An outpost queued a construction project.
     OutpostConstructionQueued {
@@ -3405,6 +3438,56 @@ impl GameEngine {
                 self.state.outposts.remove(idx);
                 Ok(vec![Event::OutpostDecommissioned {
                     outpost_id: *outpost_id,
+                }])
+            }
+
+            Command::PromoteOutpostToColony {
+                outpost_id,
+                name,
+                starting_population,
+            } => {
+                let idx = self.find_outpost_index(*outpost_id)?;
+                let old_outpost = self.state.outposts.remove(idx);
+
+                // Prefer the body's current habitability/category modifiers
+                // (freshest data) over the outpost's establishment-time
+                // cache; fall back to the cache if the body has since been
+                // removed from the system.
+                let (habitability_modifier, category_modifiers) = self
+                    .state
+                    .system_state
+                    .node_map
+                    .bodies
+                    .get(&old_outpost.body_id)
+                    .map(|body| {
+                        (
+                            body.habitability_modifier_with_mitigations(
+                                &self.state.habitability_mitigations,
+                            ),
+                            body.modifiers.clone(),
+                        )
+                    })
+                    .unwrap_or((1.0, old_outpost.category_modifiers.clone()));
+
+                let mut colony = colony::Colony::new(name.clone());
+                colony.pool = old_outpost.pool;
+                colony.buildings = old_outpost.buildings;
+                colony.build_queue = old_outpost.build_queue;
+                colony.slot_capacity = old_outpost.slot_capacity.max(colony::BASE_SLOT_CAPACITY);
+                colony.home_body_id = Some(old_outpost.body_id);
+                colony.habitability_modifier = habitability_modifier;
+                colony.category_modifiers = category_modifiers;
+                colony.active_recipes = old_outpost.active_recipes;
+                colony.last_production = old_outpost.last_production;
+
+                let colony_id = colony.id;
+                self.state.add_colony(colony, *starting_population);
+                self.insert_default_directives(colony_id);
+
+                Ok(vec![Event::OutpostPromoted {
+                    outpost_id: *outpost_id,
+                    colony_id,
+                    name: name.clone(),
                 }])
             }
 
@@ -7452,6 +7535,137 @@ mod tests {
         let bogus = uuid::Uuid::new_v4();
         let result = engine.apply(&Command::DecommissionOutpost { outpost_id: bogus });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn promote_outpost_to_colony_creates_independent_colony_with_carried_over_state() {
+        let mut engine = GameEngine::new();
+        let (parent_colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Frontier Camp".into(),
+                colony_id: parent_colony_id,
+                body_id: body_id.clone(),
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!("expected OutpostEstablished")
+        };
+        let outpost_id = *outpost_id;
+
+        // Give the outpost some carried-over state to verify against.
+        engine.state.outposts[0]
+            .pool
+            .deposit("structural_ore", 250.0);
+        engine.state.outposts[0].slot_capacity = 7;
+        let placed = colony::PlacedBuilding {
+            id: uuid::Uuid::new_v4(),
+            building_type: "mining_outpost".into(),
+            slot_cost: 1,
+        };
+        engine.state.outposts[0].buildings.push(placed);
+
+        let colonies_before = engine.state.colonies.len();
+        let populations_before = engine.state.populations.len();
+
+        let events = engine
+            .apply(&Command::PromoteOutpostToColony {
+                outpost_id,
+                name: "New Haven".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::OutpostPromoted {
+            outpost_id: evt_outpost,
+            colony_id: new_colony_id,
+            name: evt_name,
+        } = &events[0]
+        else {
+            panic!("expected OutpostPromoted, got {:?}", events[0]);
+        };
+        assert_eq!(*evt_outpost, outpost_id);
+        assert_eq!(evt_name, "New Haven");
+        let new_colony_id = *new_colony_id;
+
+        // Outpost is gone, colony was added.
+        assert!(engine.state.outposts.is_empty());
+        assert_eq!(engine.state.colonies.len(), colonies_before + 1);
+        assert_eq!(engine.state.populations.len(), populations_before + 1);
+
+        let idx = engine.find_colony_index(new_colony_id).unwrap();
+        let colony = &engine.state.colonies[idx];
+        assert_eq!(colony.name, "New Haven");
+        assert_eq!(colony.home_body_id, Some(body_id));
+        assert!((colony.pool.amount("structural_ore") - 250.0).abs() < 1e-6);
+        assert_eq!(colony.buildings.len(), 1);
+        assert_eq!(colony.slot_capacity, 7);
+
+        // colonies/populations stay index-aligned.
+        assert!((engine.state.populations[idx].count - 50.0).abs() < 1e-6);
+
+        // The original parent colony is untouched and independent of the
+        // promoted colony — no retained relationship either way.
+        assert_ne!(new_colony_id, parent_colony_id);
+        assert!(engine
+            .state
+            .colonies
+            .iter()
+            .any(|c| c.id == parent_colony_id));
+    }
+
+    #[test]
+    fn promote_outpost_to_colony_carries_over_low_slot_capacity_up_to_colony_base() {
+        // An outpost's slot capacity (2) is below BASE_SLOT_CAPACITY (5); the
+        // promoted colony must not be stuck below the normal colony floor.
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Tiny Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!("expected OutpostEstablished")
+        };
+        let outpost_id = *outpost_id;
+        assert_eq!(
+            engine.state.outposts[0].slot_capacity,
+            outpost::OUTPOST_BASE_SLOT_CAPACITY
+        );
+
+        let events = engine
+            .apply(&Command::PromoteOutpostToColony {
+                outpost_id,
+                name: "Grown Up".into(),
+                starting_population: 10,
+            })
+            .unwrap();
+        let Event::OutpostPromoted { colony_id, .. } = &events[0] else {
+            panic!("expected OutpostPromoted")
+        };
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].slot_capacity,
+            colony::BASE_SLOT_CAPACITY,
+            "promoted colony must not be stuck below the normal colony slot-capacity floor"
+        );
+    }
+
+    #[test]
+    fn promote_outpost_to_colony_fails_for_unknown_outpost() {
+        let mut engine = GameEngine::new();
+        let bogus = uuid::Uuid::new_v4();
+        let result = engine.apply(&Command::PromoteOutpostToColony {
+            outpost_id: bogus,
+            name: "Ghost".into(),
+            starting_population: 10,
+        });
+        assert!(
+            matches!(result, Err(EngineError::OutpostNotFound(_))),
+            "expected OutpostNotFound, got {result:?}"
+        );
     }
 
     #[test]
