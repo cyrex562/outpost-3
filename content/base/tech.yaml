@@ -375,7 +375,10 @@
 
 - id: propulsion_engineering
   name: Propulsion Engineering
-  description: Higher-thrust, higher-efficiency drive systems for interplanetary transit.
+  description: >
+    Higher-thrust, higher-efficiency drive systems for interplanetary
+    transit — also extends how far a parent colony can reach when
+    establishing an outpost (issue #241).
   category: astronautics
   tier: 3
   research_cost: 1400.0
@@ -385,6 +388,8 @@
   effects:
     - type: reduce_transit_time
       fraction: 0.15
+    - type: extend_outpost_range
+      bonus_au: 5.0
 
 - id: advanced_medicine
   name: Advanced Medicine

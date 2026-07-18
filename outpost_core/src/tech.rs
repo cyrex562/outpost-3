@@ -76,6 +76,13 @@ pub enum TechEffect {
         /// Proportional reduction in transit turns, in `[0.0, 1.0)`.
         fraction: f32,
     },
+    /// Extends the max range an outpost may be established from its parent
+    /// colony's home body (issue #241). Stacks additively across every
+    /// researched tech carrying this effect.
+    ExtendOutpostRange {
+        /// Additive bonus in AU.
+        bonus_au: f32,
+    },
 }
 
 /// Authored technology definition — stored in content pack files.

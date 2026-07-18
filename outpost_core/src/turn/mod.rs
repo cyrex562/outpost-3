@@ -236,6 +236,15 @@ pub struct GameState {
     /// [`TechEffect::ReduceTransitTime`] (floored so transit never reaches
     /// zero turns).
     pub propulsion_transit_scalar: f32,
+
+    // ── Outpost tech/range gating (issue #241) ─────────────────────────────
+    /// Additive AU bonus to an outpost's max allowed range from its parent
+    /// colony's home body, accumulated from every researched tech carrying
+    /// [`TechEffect::ExtendOutpostRange`]. Combined with
+    /// [`crate::outpost::BASE_OUTPOST_RANGE_AU`] scaled by
+    /// `system_state.node_map.propulsion_level` (see
+    /// [`crate::outpost::max_outpost_range_au`]).
+    pub outpost_range_bonus_au: f32,
 }
 
 impl GameState {
@@ -287,6 +296,7 @@ impl GameState {
             expedition_registry: crate::expedition::ExpeditionRegistry::default(),
             tech_survey_modifiers: crate::expedition::SurveyModifiers::default(),
             propulsion_transit_scalar: 1.0,
+            outpost_range_bonus_au: 0.0,
         }
     }
 
@@ -489,6 +499,9 @@ impl TurnProcessor {
                     let retained = (1.0 - fraction.clamp(0.0, 0.95)).max(0.05);
                     state.propulsion_transit_scalar =
                         (state.propulsion_transit_scalar * retained).max(0.05);
+                }
+                TechEffect::ExtendOutpostRange { bonus_au } => {
+                    state.outpost_range_bonus_au += bonus_au.max(0.0);
                 }
             }
         }
@@ -827,6 +840,34 @@ mod tests {
         assert!(
             (sum - 0.20).abs() < 1e-4,
             "expected 0.20 bonus in accumulator, got {sum}"
+        );
+    }
+
+    #[test]
+    fn extend_outpost_range_tech_effect_accumulates_additively() {
+        let mut state = make_state();
+        let tech_id = "long_range_logistics".to_string();
+        let defs = vec![TechDef {
+            id: tech_id.clone(),
+            display_name: "Long-Range Logistics".to_string(),
+            prerequisites: vec![],
+            research_cost: 5.0,
+            effects: vec![TechEffect::ExtendOutpostRange { bonus_au: 4.0 }],
+            ..TechDef::default()
+        }];
+        state.tech_state.set_current_project(tech_id);
+        state.tech_registry = Some(TechRegistry::build(defs).unwrap());
+        state.research_pool.deposit(10.0);
+
+        assert!((state.outpost_range_bonus_au - 0.0).abs() < 1e-6);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        assert!(
+            (state.outpost_range_bonus_au - 4.0).abs() < 1e-4,
+            "expected outpost_range_bonus_au to accumulate to 4.0, got {}",
+            state.outpost_range_bonus_au
         );
     }
 
