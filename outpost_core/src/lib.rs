@@ -714,11 +714,13 @@ pub enum Command {
     /// Establish a new [`outpost::Outpost`] anchored to `body_id`, owned by
     /// `colony_id`.
     ///
-    /// Outposts extend a colony's reach rather than existing independently —
-    /// establishment itself is never tech- or range-gated (per design
-    /// discussion); what can actually be *built* at an outpost is gated by
-    /// the same tech-prerequisite machinery used for colony buildings, plus
-    /// a max-range-from-parent-colony constraint deferred to issue #241.
+    /// Outposts extend a colony's reach rather than existing independently.
+    /// Rejected with [`EngineError::OutpostOutOfRange`] if `body_id` is
+    /// farther than [`outpost::max_outpost_range_au`] from the parent
+    /// colony's `home_body_id` (issue #241) — inert for a colony with no
+    /// `home_body_id` (never spatially placed). What can actually be *built*
+    /// at an established outpost is gated separately, by tech prerequisite,
+    /// at [`Command::QueueOutpostConstruction`].
     EstablishOutpost {
         /// Human-readable name.
         name: String,
@@ -1658,6 +1660,28 @@ pub enum EngineError {
         score: u8,
         /// The minimum score required without the capability override.
         threshold: u8,
+    },
+    /// The target body is farther from the parent colony's home body than
+    /// the current max outpost range allows (issue #241).
+    #[error(
+        "body is {distance_au:.2} AU from the parent colony's home body, exceeding the max \
+         outpost range of {max_range_au:.2} AU (research a propulsion or outpost-range tech \
+         to extend it)"
+    )]
+    OutpostOutOfRange {
+        /// Actual distance between the parent colony's home body and the target body, in AU.
+        distance_au: f32,
+        /// The current max allowed range, in AU.
+        max_range_au: f32,
+    },
+    /// The requested building requires a tech prerequisite that hasn't been
+    /// researched yet (issue #241, outpost construction only).
+    #[error("building '{building_id}' requires tech prerequisite '{tech_id}' to be researched")]
+    TechLocked {
+        /// The building that was requested.
+        building_id: String,
+        /// The unresearched tech id it requires.
+        tech_id: String,
     },
     /// A command was submitted after the game has been won.
     ///
@@ -3331,7 +3355,7 @@ impl GameEngine {
                 colony_id,
                 body_id,
             } => {
-                self.find_colony_index(*colony_id)?;
+                let colony_idx = self.find_colony_index(*colony_id)?;
                 let body = self
                     .state
                     .system_state
@@ -3341,6 +3365,29 @@ impl GameEngine {
                     .ok_or_else(|| {
                         EngineError::InvalidArgument(format!("body not found: {body_id}"))
                     })?;
+                // Range gate (issue #241) — only meaningful for a colony that
+                // is actually placed on a body (`home_body_id`); a colony
+                // founded via the bare `Command::FoundColony` (no spatial
+                // placement) has no "distance from home" concept, so the
+                // check is inert for it rather than defaulting to a
+                // spurious zero distance.
+                if let Some(home_body_id) = self.state.colonies[colony_idx].home_body_id.clone() {
+                    if let Some(home_body) =
+                        self.state.system_state.node_map.bodies.get(&home_body_id)
+                    {
+                        let distance_au = (home_body.distance_au - body.distance_au).abs();
+                        let max_range_au = outpost::max_outpost_range_au(
+                            self.state.system_state.node_map.propulsion_level,
+                            self.state.outpost_range_bonus_au,
+                        );
+                        if distance_au > max_range_au {
+                            return Err(EngineError::OutpostOutOfRange {
+                                distance_au,
+                                max_range_au,
+                            });
+                        }
+                    }
+                }
                 let mut new_outpost =
                     outpost::Outpost::new(name.clone(), *colony_id, body_id.clone());
                 new_outpost.category_modifiers.clone_from(&body.modifiers);
@@ -3373,6 +3420,24 @@ impl GameEngine {
                     return Err(EngineError::InvalidArgument(
                         "building_type must not be empty".into(),
                     ));
+                }
+                // Tech gate (issue #241) — only enforced when the registry
+                // actually defines this building (content-driven, mirrors
+                // `tech::unlocked_buildings`'s None-prerequisite-is-open
+                // convention); an unregistered `building_type` string (as
+                // used by several older tests) is left to fail downstream
+                // rather than being rejected here.
+                if let Some(reg) = self.state.registry.as_ref() {
+                    if let Some(def) = reg.building(building_type) {
+                        if let Some(tech_id) = &def.tech_prerequisite {
+                            if !self.state.tech_state.researched.contains(tech_id) {
+                                return Err(EngineError::TechLocked {
+                                    building_id: building_type.clone(),
+                                    tech_id: tech_id.clone(),
+                                });
+                            }
+                        }
+                    }
                 }
                 let idx = self.find_outpost_index(*outpost_id)?;
                 let available = self.state.outposts[idx].slots_available();
@@ -7112,6 +7177,250 @@ mod tests {
             body_id: bogus_body,
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn establish_outpost_within_range_succeeds_for_placed_colony() {
+        let mut engine = GameEngine::new();
+        let (colony_id, _) = setup_colony_and_body(&mut engine);
+
+        let home_events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Homeworld".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.0,
+            }))
+            .unwrap();
+        let home_body_id = match &home_events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].home_body_id = Some(home_body_id);
+
+        // Nearby target: within BASE_OUTPOST_RANGE_AU (3.0) * propulsion_level (1).
+        let target_events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Nearby Rock".into(),
+                kind: system::BodyKind::AsteroidBelt,
+                distance_au: 2.5,
+            }))
+            .unwrap();
+        let target_body_id = match &target_events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+
+        let result = engine.apply(&Command::EstablishOutpost {
+            name: "Nearby Camp".into(),
+            colony_id,
+            body_id: target_body_id,
+        });
+        assert!(
+            result.is_ok(),
+            "outpost within range must be established, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn establish_outpost_beyond_range_fails_for_placed_colony() {
+        let mut engine = GameEngine::new();
+        let (colony_id, _) = setup_colony_and_body(&mut engine);
+
+        let home_events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Homeworld".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.0,
+            }))
+            .unwrap();
+        let home_body_id = match &home_events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].home_body_id = Some(home_body_id);
+
+        // Far target: beyond BASE_OUTPOST_RANGE_AU (3.0) * propulsion_level (1).
+        let target_events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Distant Rock".into(),
+                kind: system::BodyKind::AsteroidBelt,
+                distance_au: 20.0,
+            }))
+            .unwrap();
+        let target_body_id = match &target_events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+
+        let result = engine.apply(&Command::EstablishOutpost {
+            name: "Distant Camp".into(),
+            colony_id,
+            body_id: target_body_id,
+        });
+        assert!(
+            matches!(result, Err(EngineError::OutpostOutOfRange { .. })),
+            "expected OutpostOutOfRange, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn establish_outpost_range_extending_tech_permits_a_previously_out_of_range_body() {
+        let mut engine = GameEngine::new();
+        let (colony_id, _) = setup_colony_and_body(&mut engine);
+
+        let home_events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Homeworld".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.0,
+            }))
+            .unwrap();
+        let home_body_id = match &home_events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].home_body_id = Some(home_body_id);
+
+        let target_events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Distant Rock".into(),
+                kind: system::BodyKind::AsteroidBelt,
+                distance_au: 5.5,
+            }))
+            .unwrap();
+        let target_body_id = match &target_events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+
+        // Out of range before any tech bonus (distance 4.5 AU > base 3.0 AU).
+        let before = engine.apply(&Command::EstablishOutpost {
+            name: "Too Far".into(),
+            colony_id,
+            body_id: target_body_id.clone(),
+        });
+        assert!(
+            matches!(before, Err(EngineError::OutpostOutOfRange { .. })),
+            "expected OutpostOutOfRange before tech bonus, got {before:?}"
+        );
+
+        engine.state.outpost_range_bonus_au = 5.0;
+
+        let after = engine.apply(&Command::EstablishOutpost {
+            name: "Now Reachable".into(),
+            colony_id,
+            body_id: target_body_id,
+        });
+        assert!(
+            after.is_ok(),
+            "expected outpost establishment to succeed after range-extending tech, got {after:?}"
+        );
+    }
+
+    #[test]
+    fn queue_outpost_construction_fails_when_tech_not_researched() {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Gated Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!("expected OutpostEstablished")
+        };
+        let outpost_id = *outpost_id;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "advanced_outpost_module".into(),
+            name: "Advanced Outpost Module".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: Some("advanced_outpost_tech".into()),
+            maintenance: vec![],
+        });
+        engine.state.registry = Some(reg);
+
+        let result = engine.apply(&Command::QueueOutpostConstruction {
+            outpost_id,
+            building_type: "advanced_outpost_module".into(),
+            slot_cost: 1,
+            labor_per_turn: 1,
+            construction_cost: vec![],
+            construction_turns: 1,
+        });
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::TechLocked { ref tech_id, .. }) if tech_id == "advanced_outpost_tech"
+            ),
+            "expected TechLocked, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn queue_outpost_construction_succeeds_once_tech_researched() {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Gated Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!("expected OutpostEstablished")
+        };
+        let outpost_id = *outpost_id;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "advanced_outpost_module".into(),
+            name: "Advanced Outpost Module".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: Some("advanced_outpost_tech".into()),
+            maintenance: vec![],
+        });
+        engine.state.registry = Some(reg);
+        engine
+            .state
+            .tech_state
+            .researched
+            .insert("advanced_outpost_tech".into());
+
+        let result = engine.apply(&Command::QueueOutpostConstruction {
+            outpost_id,
+            building_type: "advanced_outpost_module".into(),
+            slot_cost: 1,
+            labor_per_turn: 1,
+            construction_cost: vec![],
+            construction_turns: 1,
+        });
+        assert!(result.is_ok(), "expected success, got {result:?}");
     }
 
     #[test]

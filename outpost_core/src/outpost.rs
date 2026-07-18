@@ -13,10 +13,11 @@
 //!
 //! An outpost always belongs to a parent colony (`parent_colony_id`) and is
 //! anchored to a specific system body (`body_id`) — it extends that colony's
-//! reach rather than existing independently. What can be *built* at an
-//! outpost (tech/bonus gating, max range from the parent colony) is
-//! deliberately out of scope here — see issue #241. Promotion to a full
-//! colony is issue #242.
+//! reach rather than existing independently. Establishing an outpost beyond
+//! [`max_outpost_range_au`] of the parent colony's home body is rejected
+//! (issue #241); tech/bonus gating of *what can be built* at an outpost is
+//! enforced separately at `Command::QueueOutpostConstruction`. Promotion to a
+//! full colony is issue #242.
 
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +42,28 @@ pub const OUTPOST_BASE_SLOT_CAPACITY: u32 = 2;
 /// permanent or automated crew. A future automation tech could scale this
 /// per issue #241's "bonuses" framing; fixed for this first pass.
 pub const OUTPOST_BASE_LABOR: f32 = 2.0;
+
+/// Base max range (AU) an outpost may be established from its parent
+/// colony's home body, per point of `propulsion_level` (issue #241).
+///
+/// A colony with no `home_body_id` (never placed on the planet map — e.g.
+/// one founded via the bare `Command::FoundColony` used throughout the test
+/// suite) has no meaningful notion of "distance from home", so the range
+/// check is skipped entirely for it rather than defaulting to zero — see
+/// [`max_outpost_range_au`].
+pub const BASE_OUTPOST_RANGE_AU: f32 = 3.0;
+
+/// Compute the max distance (AU) an outpost may be established from its
+/// parent colony's home body, given the system's current propulsion level
+/// and any tech-driven range bonus (`TechEffect::ExtendOutpostRange`).
+///
+/// `max_range = BASE_OUTPOST_RANGE_AU * propulsion_level + range_bonus_au`.
+#[must_use]
+pub fn max_outpost_range_au(propulsion_level: u32, range_bonus_au: f32) -> f32 {
+    #[allow(clippy::cast_precision_loss)]
+    let level = propulsion_level.max(1) as f32;
+    BASE_OUTPOST_RANGE_AU * level + range_bonus_au.max(0.0)
+}
 
 /// A lightweight, single-purpose off-world presence anchored to a system
 /// body, established and owned by a parent colony.
