@@ -186,6 +186,18 @@ Orbital infrastructure is represented as a **schematic coverage map** (altitude/
 - **Orbit types (discrete tradeoffs):** Low Orbit (cheap surface access, more exposure), Geostationary (fixed over one colony, dedicated link), Lagrange (system-wide vantage, not tied to one body).
 - **Coverage layers (per satellite type, toggleable):** Comms, Sensor, Defense — each its own constellation and footprint. Layered map overlays, not a single blended blob.
 
+### 8.2A Satellite/station split + body scoping (issue #234)
+
+Two design decisions settle open questions from the original §8.2 model:
+
+**Station scaling — variable slot count per type, not a module-slot rework.** `StationType`'s three roles (Habitat/Industrial/Logistics) stay as fixed enum variants — the incremental path recommended by the issue itself — but each now scales across a type-specific `slot_range()` (Habitat 1-4, Industrial 2-6, Logistics 1-3, centred on the pre-#234 fixed costs of 2/3/2 so existing content stays valid) instead of every station of a type costing exactly one fixed value. `OrbitalStation::new` is now fallible, validating the caller's chosen `slot_cost` against the type's range (`OrbitalError::InvalidSlotCost`); construction time scales with chosen size (`StationType::construction_turns_for`). A full generic module-slot subsystem (N independently-typed slots per station) was explicitly not built — revisit only if the fixed-type-plus-range model turns out too coarse in play.
+
+**Body scoping — `Option<BodyId>` on both `OrbitalStation` and `SatelliteConstellation`.** `None` is reserved for `OrbitType::Lagrange` (a genuinely system-wide asset, matching the pre-#234 behavior for that band and Lagrange's real-world "vantage point between bodies" framing); `Low`/`Geostationary` entities carry `Some(body_id)`. `OrbitalRegistry::slots_used`/`slots_available` are now scoped by `(orbit_type, body_id)` — two bodies' Low orbits are independent 12-slot pools, not one shared system-wide pool. Coverage gained the body-aware `OrbitalRegistry::combined_coverage_for_body` alongside the pre-existing (now explicitly system-wide-only) `combined_coverage`.
+
+**Probes are not a new entity.** A probe is simply a `SatelliteConstellation` (typically `count: 1`) with `body_id` set to a body other than the founding colony's home body — it reuses the exact same coverage math, `DeployConstellation` command, and `OrbitalRegistry` storage as a standing coverage constellation. This was chosen over a distinct lightweight probe type since it reuses more code and probes don't (yet) need mechanics a constellation can't already express (one-way deployment, lifespan limits, and discovery events are all deferred until a concrete need for them shows up in play).
+
+**Deliberately out of scope for #234**: whether orbital stations and #233's surface `Outpost` should share a common "facility" abstraction — kept separate. They already run on genuinely different mechanics (slot-cost/registry accounting vs. body-anchored resource pool + buildings), and #233's `Outpost` had just landed with no second consumer to justify a shared trait yet; revisit if a real shared need emerges (e.g. during #242's promotion-to-colony work).
+
 ### 8.3 System zoom
 The distinct jobs the system scope owns that no lower scope does:
 

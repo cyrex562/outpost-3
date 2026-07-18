@@ -316,6 +316,7 @@ pub(crate) fn client_command_to_core(
             blueprint_id,
             colony_id,
             orbit_type,
+            body_id,
         } => {
             let id = ColonyId::from_str(&colony_id)
                 .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
@@ -325,10 +326,18 @@ pub(crate) fn client_command_to_core(
                 "lagrange" => OrbitType::Lagrange,
                 _ => return Err(format!("unknown orbit_type: {orbit_type}")),
             };
+            let body = body_id
+                .map(|b| {
+                    uuid::Uuid::parse_str(&b)
+                        .map(outpost_core::system::BodyId)
+                        .map_err(|_| format!("invalid body_id: {b}"))
+                })
+                .transpose()?;
             Ok(Command::BeginOrbitalConstruction {
                 blueprint_id,
                 colony_id: id,
                 orbit_type: ot,
+                body_id: body,
             })
         }
         ClientCommand::LaunchFieldExpedition {

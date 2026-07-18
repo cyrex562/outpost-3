@@ -164,6 +164,11 @@ pub enum ClientCommand {
         colony_id: String,
         /// Orbit band: "low", "geostationary", or "lagrange".
         orbit_type: String,
+        /// System body the finished station will orbit (issue #234), as a
+        /// UUID string. Omitted/`None` for a Lagrange-band, system-wide
+        /// station.
+        #[serde(default)]
+        body_id: Option<String>,
     },
     /// Launch a field expedition from a colony to a hex tile.
     LaunchFieldExpedition {
@@ -545,6 +550,9 @@ pub enum ServerEvent {
         orbit_type: String,
         /// Blueprint id that produced this station.
         blueprint_id: String,
+        /// System body the station orbits (issue #234), as a UUID string;
+        /// `None` for a Lagrange-band, system-wide station.
+        body_id: Option<String>,
     },
     /// A core event with no frontend representation; safely ignored.
     Ignored,
@@ -744,12 +752,14 @@ impl ServerEvent {
                 station_type,
                 orbit_type,
                 blueprint_id,
+                body_id,
             } => Self::OrbitalStationCompleted {
                 station_id: station_id.to_string(),
                 colony_id: colony_id.to_string(),
                 station_type: format!("{station_type:?}"),
                 orbit_type: format!("{orbit_type:?}"),
                 blueprint_id: blueprint_id.clone(),
+                body_id: body_id.as_ref().map(|b| b.0.to_string()),
             },
             // All remaining core events have no frontend representation.
             _ => Self::Ignored,
@@ -1020,11 +1030,13 @@ mod tests {
                         blueprint_id,
                         colony_id: _,
                         orbit_type,
+                        body_id,
                     },
             } => {
                 assert_eq!(seq, 8);
                 assert_eq!(blueprint_id, "relay_station");
                 assert_eq!(orbit_type, "low");
+                assert_eq!(body_id, None);
             }
             _ => panic!("unexpected variant"),
         }

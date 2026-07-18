@@ -364,10 +364,18 @@ pub enum Command {
         colony_id: ColonyId,
         /// Orbit band the finished station should occupy.
         orbit_type: orbital::OrbitType,
+        /// System body the finished station will orbit (issue #234). Should
+        /// be `Some` for `Low`/`Geostationary` (slot capacity is tracked per
+        /// body for those bands) and is conventionally `None` for `Lagrange`
+        /// (a system-wide asset).
+        #[serde(default)]
+        body_id: Option<system::BodyId>,
     },
     /// Build an orbital station in the given orbit band, linked to a colony.
     ///
-    /// Fails with [`EngineError::OrbitalSlotExceeded`] if the orbit band is full.
+    /// Fails with [`EngineError::OrbitalSlotExceeded`] if the orbit band is
+    /// full, or [`EngineError::InvalidArgument`] if `slot_cost` falls outside
+    /// `station_type`'s valid range (issue #234).
     BuildOrbitalStation {
         /// Colony that funds and operates the station.
         colony_id: ColonyId,
@@ -375,6 +383,16 @@ pub enum Command {
         station_type: orbital::StationType,
         /// Target orbit band.
         orbit_type: orbital::OrbitType,
+        /// System body the station orbits (issue #234); see
+        /// [`Command::BeginOrbitalConstruction`]'s doc comment for the
+        /// `None`-means-Lagrange convention.
+        #[serde(default)]
+        body_id: Option<system::BodyId>,
+        /// Chosen station size, within [`orbital::StationType::slot_range`]
+        /// (issue #234). Defaults to [`orbital::StationType::slot_cost`]
+        /// (the pre-#234 fixed size) when omitted.
+        #[serde(default)]
+        slot_cost: Option<u32>,
     },
     /// Demolish (decommission) an orbital station by its stable id.
     DecommissionOrbitalStation {
@@ -382,6 +400,10 @@ pub enum Command {
         station_id: uuid::Uuid,
     },
     /// Deploy a satellite constellation in the given orbit band.
+    ///
+    /// A **probe** (issue #234) is simply a small constellation (typically
+    /// `count: 1`) with `body_id` set to a body other than the founding
+    /// colony's home body — there is no separate probe command.
     DeployConstellation {
         /// Satellite type (coverage layer).
         satellite_type: orbital::SatelliteType,
@@ -389,6 +411,11 @@ pub enum Command {
         orbit_type: orbital::OrbitType,
         /// Number of satellites to deploy.
         count: u32,
+        /// System body this constellation covers (issue #234); see
+        /// [`Command::BeginOrbitalConstruction`]'s doc comment for the
+        /// `None`-means-Lagrange convention.
+        #[serde(default)]
+        body_id: Option<system::BodyId>,
     },
     /// Toggle the map-overlay visibility of a satellite constellation.
     ToggleConstellationOverlay {
@@ -1115,6 +1142,9 @@ pub enum Event {
         orbit_type: orbital::OrbitType,
         /// Strategic months until completion.
         build_months: u32,
+        /// System body the finished station will orbit (issue #234); `None`
+        /// for a Lagrange-band, system-wide station.
+        body_id: Option<system::BodyId>,
     },
     /// An orbital station construction project finished.
     OrbitalStationCompleted {
@@ -1128,6 +1158,8 @@ pub enum Event {
         orbit_type: orbital::OrbitType,
         /// Blueprint id that produced this station.
         blueprint_id: String,
+        /// System body the station orbits (issue #234); `None` for Lagrange.
+        body_id: Option<system::BodyId>,
     },
     /// An orbital station was built.
     OrbitalStationBuilt {
@@ -1141,6 +1173,8 @@ pub enum Event {
         orbit_type: orbital::OrbitType,
         /// Slots consumed in the orbit band.
         slot_cost: u32,
+        /// System body the station orbits (issue #234); `None` for Lagrange.
+        body_id: Option<system::BodyId>,
     },
     /// An orbital station was decommissioned; its slots are freed.
     OrbitalStationDecommissioned {
@@ -1157,6 +1191,10 @@ pub enum Event {
         orbit_type: orbital::OrbitType,
         /// Number of satellites in the array.
         count: u32,
+        /// System body this constellation covers (issue #234); `None` for a
+        /// Lagrange-band, system-wide constellation. A **probe** is simply a
+        /// small constellation with `body_id` set to a non-home body.
+        body_id: Option<system::BodyId>,
     },
     /// The map-overlay visibility of a constellation was toggled.
     ConstellationOverlayToggled {
@@ -1639,10 +1677,11 @@ impl GameEngine {
                             }
                         });
                         for project in completed_projects {
-                            let station = OrbitalStation::new(
+                            let station = OrbitalStation::new_default_size(
                                 project.station_type,
                                 project.orbit_type,
                                 project.colony_id,
+                                project.body_id.clone(),
                             );
                             let station_id = station.id;
                             // Best-effort: if the orbit band filled while the
@@ -1655,6 +1694,7 @@ impl GameEngine {
                                 station_type: project.station_type,
                                 orbit_type: project.orbit_type,
                                 blueprint_id: project.blueprint_id.clone(),
+                                body_id: project.body_id.clone(),
                             });
                         }
                     }
@@ -3237,6 +3277,7 @@ impl GameEngine {
                 blueprint_id,
                 colony_id,
                 orbit_type,
+                body_id,
             } => {
                 let colony_idx = self.find_colony_index(*colony_id)?;
                 // Look up the blueprint in the loaded registry.
@@ -3276,6 +3317,7 @@ impl GameEngine {
                     *orbit_type,
                     blueprint.station_type,
                     blueprint.build_months,
+                    body_id.clone(),
                 );
                 project.costs_paid = true;
                 let build_months = project.months_remaining;
@@ -3285,6 +3327,7 @@ impl GameEngine {
                     colony_id: *colony_id,
                     orbit_type: *orbit_type,
                     build_months,
+                    body_id: body_id.clone(),
                 }])
             }
 
@@ -3292,9 +3335,18 @@ impl GameEngine {
                 colony_id,
                 station_type,
                 orbit_type,
+                body_id,
+                slot_cost,
             } => {
                 self.find_colony_index(*colony_id)?;
-                let station = OrbitalStation::new(*station_type, *orbit_type, *colony_id);
+                let chosen_slot_cost = slot_cost.unwrap_or_else(|| station_type.slot_cost());
+                let station = OrbitalStation::new(
+                    *station_type,
+                    *orbit_type,
+                    *colony_id,
+                    body_id.clone(),
+                    chosen_slot_cost,
+                )?;
                 let station_id = station.id;
                 let slot_cost = station.slot_cost;
                 self.state.orbital_registry.add_station(station)?;
@@ -3304,6 +3356,7 @@ impl GameEngine {
                     station_type: *station_type,
                     orbit_type: *orbit_type,
                     slot_cost,
+                    body_id: body_id.clone(),
                 }])
             }
 
@@ -3318,14 +3371,19 @@ impl GameEngine {
                 satellite_type,
                 orbit_type,
                 count,
+                body_id,
             } => {
                 if *count == 0 {
                     return Err(EngineError::InvalidArgument(
                         "constellation count must be > 0".into(),
                     ));
                 }
-                let constellation =
-                    SatelliteConstellation::new(*satellite_type, *orbit_type, *count);
+                let constellation = SatelliteConstellation::new(
+                    *satellite_type,
+                    *orbit_type,
+                    *count,
+                    body_id.clone(),
+                );
                 let constellation_id = constellation.id;
                 self.state
                     .orbital_registry
@@ -3335,6 +3393,7 @@ impl GameEngine {
                     satellite_type: *satellite_type,
                     orbit_type: *orbit_type,
                     count: *count,
+                    body_id: body_id.clone(),
                 }])
             }
 
@@ -10021,6 +10080,7 @@ mod tests {
                 blueprint_id: "habitat_bp".into(),
                 colony_id,
                 orbit_type: orbital::OrbitType::Low,
+                body_id: None,
             })
             .unwrap();
 
@@ -10079,6 +10139,7 @@ mod tests {
                 blueprint_id: "habitat_bp".into(),
                 colony_id,
                 orbit_type: orbital::OrbitType::Low,
+                body_id: None,
             })
             .unwrap_err();
 
@@ -10116,6 +10177,7 @@ mod tests {
                 blueprint_id: "nonexistent_bp".into(),
                 colony_id,
                 orbit_type: orbital::OrbitType::Low,
+                body_id: None,
             })
             .unwrap_err();
 
@@ -10158,6 +10220,7 @@ mod tests {
                 blueprint_id: "habitat_bp".into(),
                 colony_id,
                 orbit_type: orbital::OrbitType::Low,
+                body_id: None,
             })
             .unwrap();
 

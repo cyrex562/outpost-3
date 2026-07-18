@@ -607,7 +607,8 @@ mod tests {
         state.add_colony(Colony::new("Alpha"), 100);
         let colony_id = state.colonies[0].id;
 
-        let station = OrbitalStation::new(StationType::Habitat, OrbitType::Low, colony_id);
+        let station =
+            OrbitalStation::new(StationType::Habitat, OrbitType::Low, colony_id, None, 2).unwrap();
         let station_id = station.id;
         state.orbital_registry.stations.push(station);
 
