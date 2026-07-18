@@ -26,6 +26,7 @@ mono_crash.*.json
 /target/
 outpost_tauri/target/
 outpost_tauri/gen/schemas/
+xtask/target/
 **/*.rs.bk
 *.pdb
 

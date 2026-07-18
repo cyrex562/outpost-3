@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+description = "In-repo build orchestration for Outpost 3 (run via `cargo xtask`)."
+publish = false
+
+[dependencies]
+# Portable SHA-256 for the portable-bundle checksum (avoids shelling out to
+# sha256sum / certutil, which differ across Linux and Windows).
+sha2 = "0.10"
+
+# Deliberately outside the root workspace (like outpost_tauri) so building or
+# testing it never pulls in outpost_core/outpost_web, and vice versa.
+[workspace]
