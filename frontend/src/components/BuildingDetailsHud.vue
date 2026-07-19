@@ -161,7 +161,34 @@ function shortfallLabel(kind: string): string {
           </p>
           <p class="flow-row">Cycle: {{ detail.recipe.cycle_sols }} sol{{ detail.recipe.cycle_sols !== 1 ? 's' : '' }}</p>
         </section>
-        <p v-else class="hint">No recipe (storage/habitat building).</p>
+
+        <section
+          v-if="detail.concurrent_recipes.length > 0"
+          class="section"
+          data-testid="concurrent-recipes-section"
+        >
+          <h5>Always-on recipes</h5>
+          <div v-for="r in detail.concurrent_recipes" :key="r.recipe_id" class="concurrent-recipe">
+            <p class="flow-row concurrent-recipe-name">{{ r.name }}</p>
+            <p class="flow-row">
+              <span class="flow-label">In:</span>
+              <span v-for="i in r.inputs" :key="i.commodity_id" class="flow-item">
+                {{ i.commodity_id }} ×{{ i.quantity }}
+              </span>
+              <span v-if="r.inputs.length === 0" class="hint">none</span>
+            </p>
+            <p class="flow-row">
+              <span class="flow-label">Out:</span>
+              <span v-for="i in r.outputs" :key="i.commodity_id" class="flow-item">
+                {{ i.commodity_id }} ×{{ i.quantity }}
+              </span>
+            </p>
+          </div>
+        </section>
+
+        <p v-if="!detail.recipe && detail.concurrent_recipes.length === 0" class="hint">
+          No recipe (storage/habitat building).
+        </p>
 
         <section v-if="detail.maintenance.length > 0" class="section" data-testid="maintenance-section">
           <h5>Maintenance (per sol)</h5>
@@ -247,6 +274,9 @@ function shortfallLabel(kind: string): string {
 .flow-row { font-size: 0.78rem; margin: 0.2rem 0; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: baseline; }
 .flow-label { color: #668; }
 .flow-item { color: #aab; background: #13131e; border: 1px solid #223; border-radius: 3px; padding: 0.1rem 0.35rem; }
+
+.concurrent-recipe { margin-bottom: 0.5rem; padding-left: 0.5rem; border-left: 2px solid #223; }
+.concurrent-recipe-name { color: #789; }
 
 .tag-full { color: #6adba5; font-size: 0.72rem; margin-left: 0.4rem; }
 
