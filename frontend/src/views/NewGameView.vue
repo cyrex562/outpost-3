@@ -24,8 +24,19 @@ const store = useWorldStore()
 
 const selectedDifficulty = ref<DifficultyPreset>('Normal')
 const planetSeed = ref<number>(Math.floor(Math.random() * 0xffffffff))
+/** Independent seed for star-system generation (issue #199) — defaults to
+ * `planetSeed` server-side when left at its initial mirrored value and never
+ * touched, but has its own Randomise control so the system can be rerolled
+ * without rerolling the founding planet's hex map. */
+const systemSeed = ref<number>(Math.floor(Math.random() * 0xffffffff))
 const loading = ref(false)
 const error = ref<string | null>(null)
+
+// Star-system generation tuning (playtest feedback: expose the generator's
+// tunable knobs as sliders instead of only the hardcoded defaults).
+const habitableZoneCenterAu = ref<number>(1.0)
+const innerPlanetCount = ref<number>(3)
+const abundanceScalar = ref<number>(1.0)
 
 const isConnected = computed(() => store.isConnected)
 
@@ -44,6 +55,11 @@ async function startGame() {
         kind: 'new_game',
         difficulty: selectedDifficulty.value,
         planet_seed: planetSeed.value,
+        system_seed: systemSeed.value,
+        habitable_zone_center_au: habitableZoneCenterAu.value,
+        min_inner_planets: innerPlanetCount.value,
+        max_inner_planets: innerPlanetCount.value,
+        abundance_scalar: abundanceScalar.value,
       },
     })
     // Navigate to colony view — the store will receive new_game_snapshot from the server.
@@ -57,6 +73,10 @@ async function startGame() {
 
 function randomiseSeed() {
   planetSeed.value = Math.floor(Math.random() * 0xffffffff)
+}
+
+function randomiseSystemSeed() {
+  systemSeed.value = Math.floor(Math.random() * 0xffffffff)
 }
 </script>
 
@@ -96,6 +116,76 @@ function randomiseSeed() {
           <button class="btn-secondary" data-testid="randomise-seed" @click="randomiseSeed">
             Randomise
           </button>
+        </div>
+      </section>
+
+      <section class="field-group">
+        <label class="field-label">Star System Seed</label>
+        <div class="seed-row">
+          <input
+            v-model.number="systemSeed"
+            type="number"
+            class="seed-input"
+            data-testid="system-seed-input"
+            min="0"
+            max="4294967295"
+          />
+          <button
+            class="btn-secondary"
+            data-testid="randomise-system-seed"
+            @click="randomiseSystemSeed"
+          >
+            Randomise
+          </button>
+        </div>
+        <p class="field-hint">
+          Independent of the planet seed — reroll the star system without rerolling the founding planet.
+        </p>
+      </section>
+
+      <section class="field-group">
+        <label class="field-label">System Generation</label>
+        <div class="slider-row">
+          <label class="slider-label" for="hz-slider">Habitable Zone Center</label>
+          <input
+            id="hz-slider"
+            v-model.number="habitableZoneCenterAu"
+            type="range"
+            min="0.5"
+            max="2.5"
+            step="0.05"
+            class="slider"
+            data-testid="hz-center-slider"
+          />
+          <span class="slider-value" data-testid="hz-center-value">{{ habitableZoneCenterAu.toFixed(2) }} AU</span>
+        </div>
+        <div class="slider-row">
+          <label class="slider-label" for="planets-slider">Inner Planets</label>
+          <input
+            id="planets-slider"
+            v-model.number="innerPlanetCount"
+            type="range"
+            min="2"
+            max="6"
+            step="1"
+            class="slider"
+            data-testid="inner-planet-count-slider"
+          />
+          <span class="slider-value" data-testid="inner-planet-count-value">{{ innerPlanetCount }}</span>
+        </div>
+        <div class="slider-row">
+          <label class="slider-label" for="abundance-slider">Resource Abundance</label>
+          <input
+            id="abundance-slider"
+            v-model.number="abundanceScalar"
+            type="range"
+            min="0.3"
+            max="3.0"
+            step="0.1"
+            class="slider"
+            data-testid="abundance-slider"
+          />
+          <span class="slider-value" data-testid="abundance-value">{{ abundanceScalar.toFixed(1) }}x</span>
         </div>
       </section>
 
@@ -152,6 +242,36 @@ function randomiseSeed() {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #889;
+}
+
+.field-hint {
+  font-size: 0.72rem;
+  color: #667;
+  margin: 0;
+}
+
+.slider-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr 4.5rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.slider-label {
+  font-size: 0.8rem;
+  color: #aab;
+}
+
+.slider {
+  width: 100%;
+  accent-color: #4af;
+}
+
+.slider-value {
+  color: #8cf;
+  font-family: monospace;
+  font-size: 0.85rem;
+  text-align: right;
 }
 
 .difficulty-grid {

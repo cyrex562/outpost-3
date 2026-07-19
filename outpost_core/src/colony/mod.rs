@@ -90,6 +90,17 @@ pub struct Colony {
     /// no entry here at all.
     #[serde(default)]
     pub active_recipes: std::collections::HashMap<String, String>,
+    /// Whether [`crate::Command::DeployStarterKit`] has already been used on
+    /// this colony (issue: playtest feedback round 2 — starter buildings
+    /// should land instantly, "like a lander", rather than sit in the
+    /// multi-turn `build_queue`).
+    ///
+    /// One-shot: prevents `DeployStarterKit` from being used as a
+    /// repeatable free-and-instant alternative to `QueueConstruction` later
+    /// in the game — it's meant for the founding moment only, not a
+    /// standing bypass of the normal construction-turn cost.
+    #[serde(default)]
+    pub starter_kit_deployed: bool,
 }
 
 fn default_habitability_modifier() -> f32 {
@@ -113,6 +124,7 @@ impl Colony {
             category_modifiers: Vec::new(),
             last_production: std::collections::HashMap::new(),
             active_recipes: std::collections::HashMap::new(),
+            starter_kit_deployed: false,
         }
     }
 

@@ -95,6 +95,10 @@ A **management screen, not a spatial grid.** The old grid + isometric placement 
 
 **Dependency:** Continuous re-tuning is only engaging if the world keeps drifting. The simulation must generate reasons to re-tune — resource depletion, tech unlocks shifting the optimal build, population growth changing labor, trade shifts, and events.
 
+**Starter buildings deploy instantly at founding, "lander"-style (playtest feedback round 2).** Buildings picked in the Found Colony wizard's loadout step are no longer queued through the normal multi-turn `build_queue` — they land operational the moment the colony is founded, via a dedicated one-shot `DeployStarterKit` command that places the whole batch directly into `colony.buildings`. This fixes two playtest pain points: (1) selecting a full starter roster could exceed the 5-slot budget and surface a confusing "build slot queue" error with no clear explanation, and (2) waiting multiple sols for a colony's very first buildings to complete felt wrong for what should be an immediate landing event. The batch is validated atomically (tech gates, total slot cost) before anything is placed, so a rejected request never partially deploys, and the one-shot guard (`Colony.starter_kit_deployed`) prevents it from becoming a standing free/instant alternative to `QueueConstruction` later in the game. Regular construction after founding is unaffected — it still goes through `build_queue`/`construction_turns` as before.
+
+*Deferred follow-up:* consolidating the starter roster into fewer, more capable multi-function buildings (e.g. a combined colony HQ, or a power/atmosphere/water utility building) was raised in the same playtest round but is explicitly out of scope here — it requires reworking the single-recipe-per-building-type architecture (`Colony.active_recipes` is keyed by `building_type`, colony-wide) to support true simultaneous multi-output buildings, and is tracked as a separate, larger future effort.
+
 ---
 
 ## 6. Population
@@ -198,6 +202,10 @@ effective = base × (1 + Σ tech_bonuses_in_category) × difficulty_scalar
 ### 8.1 Planet zoom
 A **hex map** of the planet showing terrain, biome, and resource deposits. Colonies are nodes on hexes. Infrastructure (roads, pipelines, power lines) are connections between nodes, with cost and throughput based on distance and terrain crossed. Trade flows **automatically once a route exists, with manual priority overrides**. Roughly equal weight on *where to expand* (site selection, prospecting) and *how to optimize what exists* (infrastructure, balancing).
 
+**Hex color layering (playtest feedback, resolved).** `PlanetHexMap.vue`'s fill color is a layered pipeline, in order: **terrain** (`outpost_core::map::Terrain` — the physical landform: Plains/Hills/Mountains/Wetlands/Ocean/Volcanic) sets the base ground color; a **vegetation overlay** derived from biome (Forest/Jungle/Grassland get a green tint of increasing strength, everything else none) blends on top; then the existing elevation-shading and temperature-tint layers apply unchanged. This replaced biome-only coloring (originally terrain wasn't a color input at all, only shown in the tooltip). There's no independent vegetation-density field today — deriving the overlay from biome (a category) rather than adding a real per-hex gradient was a deliberate scope call to ship without new core/wire work; a genuine `vegetation_density: f32` field is a natural follow-up if the approximation reads wrong in practice.
+
+**Deposit rendering, corrected + upgraded.** Deposits now render as a small colored box with a two-letter code (e.g. `SO` for `structural_ore`, `FI` for `fissile_ore`) rather than a plain colored dot — the code/color lookup table (`DEPOSIT_STYLE`) also fixed a real latent bug: the previous table's keys (`iron`, `rare_metals`, `water_ice`, ...) didn't match any of `outpost_core::map::VEIN_COMMODITIES`'s actual 9 entries (`structural_ore`/`conductive_ore`/`precious_ore`/`refractory_ore`/`semiconductor_ore`/`fissile_ore`/`silicates`/`hydrocarbons`/`biomass`), so every deposit had silently been falling back to a generic grey dot. Codes and colors are hand-picked client-side (no backend `short_code` field) with a first-two-letters-uppercased fallback for anything not in the table, so new commodities never render blank.
+
 ### 8.2 Orbital zoom
 Orbital infrastructure is represented as a **schematic coverage map** (altitude/footprint indicated, not physically accurate), not a spatial placement puzzle.
 
@@ -223,6 +231,17 @@ The distinct jobs the system scope owns that no lower scope does:
 - **World-scale specialization** — which body plays which role (e.g., inner planet = industry, belt = raw extraction, gas giant = volatiles/fuel).
 - **Inter-body logistics** — shipping goods between bodies, where **shipping/hauler capacity itself becomes a managed resource**.
 - **Megaprojects** — pooled from the entire system. This is where victory lives (the interstellar expedition; plus wormhole gate, terraforming engine, system-scale power, etc.).
+
+### 8.3AA Orbital-slot archetype variety + generation sliders (playtest feedback round 3)
+
+Playtest feedback: the innermost inner-planet slot ended up "always most habitable" in practice, and the generator produced little of the Mercury/Venus/Mars/Jupiter/Neptune-style variety a player would expect across a system's orbital slots. Root cause wasn't a hard-coded "innermost wins" rule — `force_habitable` (`system_gen.rs`) picks whichever slot lands *nearest* the habitable-zone center, not literally index 0 — but the original distance curve (tight `[0.3, 0.5)` AU start, `1.5-1.9×` growth per slot) concentrated realistic habitability odds into just the first one or two slots, and gravity/atmosphere were rolled almost independent of *which* slot a body occupied.
+
+Two changes, both in `system_gen.rs`:
+
+- **The innermost slot (index 0) is now explicitly biased toward a Mercury-like archetype** — forced non-Temperate temperature, no breathable-atmosphere roll, small gravity (`0.2-0.5g`), high radiation — rather than left to the same distance-only roll every other slot gets. Gas giants split Jupiter-like (warmer, `1.8-3.2g`) vs. Neptune-like (colder, `1.0-1.8g`) based on their already-rolled temperature band, reusing the same Frozen/Cold split `subtype_for` already made between `PlanetarySubtype::GasGiant` and `IceGiant`.
+- **The distance curve was widened** (closer start `0.25 + [0, 0.15)` AU, gentler `1.35-1.75×` growth, favorable-atmosphere band widened from `±0.35` to `±0.45` AU) so more than the first couple of slots have a realistic shot at landing near the habitable zone.
+
+**New: `SystemGenParams` struct** (`system_gen.rs`) lifts the previously-hardcoded `HABITABLE_ZONE_CENTER_AU`/`MIN_INNER_PLANETS`/`MAX_INNER_PLANETS` constants into a parameters struct threaded through `generate_system`, `SystemCommand::GenerateSystem`, and `ClientCommand::NewGame` (all new fields optional with defaults matching the pre-slider constants, for backward compatibility). The New Game screen (`NewGameView.vue`, browser mode) now exposes: an independent **Star System Seed** (the backend already supported rerolling the system independently of the planet map since issue #199 — the UI simply never sent it before this), a **Habitable Zone Center** slider, an **Inner Planets** count slider, and a **Resource Abundance** slider (overriding the difficulty-derived default when moved). `outpost_tauri`'s `bootstrap` command accepts the same optional parameters for the desktop-shell New Game flow, though its own New Game panel (`MainMenuView.vue`) doesn't yet surface slider UI for them — tracked as a smaller follow-up, since `outpost_tauri` can't be verified end-to-end in this project's sandbox environment (see CLAUDE.md's documented WebKit2GTK gap).
 
 ### 8.3A Founding-site resource guarantee (issue #232)
 

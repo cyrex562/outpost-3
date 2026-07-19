@@ -108,7 +108,18 @@ export type ClientCommand =
       construction_turns: number
     }
   | { kind: 'assign_labour'; colony_id: string; slot: string; labour: number }
-  | { kind: 'new_game'; difficulty: DifficultyPreset; planet_seed: number }
+  | {
+      kind: 'new_game'
+      difficulty: DifficultyPreset
+      planet_seed: number
+      /** Independent seed for star-system generation (issue #199); defaults to `planet_seed` server-side when omitted. */
+      system_seed?: number
+      /** Star-system generation tuning (playtest feedback: New Game sliders); each field defaults server-side when omitted. */
+      habitable_zone_center_au?: number
+      min_inner_planets?: number
+      max_inner_planets?: number
+      abundance_scalar?: number
+    }
 
 export type ClientQuery =
   | { kind: 'current_sol' }

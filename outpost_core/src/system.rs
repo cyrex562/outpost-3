@@ -184,6 +184,15 @@ fn default_radiation() -> RadiationLevel {
 fn default_abundance_scalar() -> f32 {
     1.0
 }
+fn default_habitable_zone_center_au() -> f32 {
+    crate::system_gen::SystemGenParams::default().habitable_zone_center_au
+}
+fn default_min_inner_planets() -> u32 {
+    crate::system_gen::SystemGenParams::default().min_inner_planets
+}
+fn default_max_inner_planets() -> u32 {
+    crate::system_gen::SystemGenParams::default().max_inner_planets
+}
 
 /// Surface/composition archetype for a body, orthogonal to [`BodyKind`]
 /// (issue #196).
@@ -1008,6 +1017,17 @@ pub enum SystemCommand {
         /// neutral (the default when omitted, e.g. by older callers/saves).
         #[serde(default = "default_abundance_scalar")]
         abundance_scalar: f32,
+        /// Distance (AU) treated as the center of the habitable zone
+        /// (playtest feedback: exposed as a New Game slider). Defaults to
+        /// [`crate::system_gen::SystemGenParams::default`]'s value.
+        #[serde(default = "default_habitable_zone_center_au")]
+        habitable_zone_center_au: f32,
+        /// Minimum inner-planet (rocky world) count.
+        #[serde(default = "default_min_inner_planets")]
+        min_inner_planets: u32,
+        /// Maximum inner-planet (rocky world) count.
+        #[serde(default = "default_max_inner_planets")]
+        max_inner_planets: u32,
     },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
@@ -1411,9 +1431,18 @@ pub fn apply_system_command(
         SystemCommand::GenerateSystem {
             seed,
             abundance_scalar,
+            habitable_zone_center_au,
+            min_inner_planets,
+            max_inner_planets,
         } => {
             state.node_map.bodies.clear();
-            let generated = crate::system_gen::generate_system(*seed, *abundance_scalar);
+            let gen_params = crate::system_gen::SystemGenParams {
+                habitable_zone_center_au: *habitable_zone_center_au,
+                min_inner_planets: *min_inner_planets,
+                max_inner_planets: *max_inner_planets,
+                abundance_scalar: *abundance_scalar,
+            };
+            let generated = crate::system_gen::generate_system(*seed, &gen_params);
             let body_ids: Vec<BodyId> = generated
                 .into_iter()
                 .map(|body| state.node_map.add_body(body))
@@ -2128,6 +2157,9 @@ mod tests {
             &SystemCommand::GenerateSystem {
                 seed: 7,
                 abundance_scalar: 1.0,
+                habitable_zone_center_au: default_habitable_zone_center_au(),
+                min_inner_planets: default_min_inner_planets(),
+                max_inner_planets: default_max_inner_planets(),
             },
         )
         .unwrap();
@@ -2151,6 +2183,9 @@ mod tests {
             &SystemCommand::GenerateSystem {
                 seed: 3,
                 abundance_scalar: 1.0,
+                habitable_zone_center_au: default_habitable_zone_center_au(),
+                min_inner_planets: default_min_inner_planets(),
+                max_inner_planets: default_max_inner_planets(),
             },
         )
         .unwrap();

@@ -278,46 +278,33 @@ async function finish(): Promise<void> {
         body_id: chosenBody.value.body_id,
       })
     }
-    // Queue N separate construction projects per selected building — the
-    // engine's existing per-call slot-capacity check
-    // (`EngineError::SlotCapacityExceeded`) is what actually enforces the
-    // starter build-slot budget; the wizard's running total (`overBudget`)
-    // is just a preview of that same rule, so a rejection here is still
-    // possible (e.g. stale `buildings.value` data). `sendCommand` never
-    // throws — it swallows errors into `gameStore.toastMessage` and
-    // resolves with an empty array — so failures must be checked
-    // explicitly rather than assumed away, or they'd silently vanish
-    // (previously: the loop kept going and always navigated to /colony,
-    // reading as a crash rather than a clear "N buildings didn't fit"
-    // message).
-    const failedBuildings: string[] = []
+    // Deploy the chosen starter buildings instantly in one "lander" batch —
+    // the engine places them directly into `colony.buildings` rather than the
+    // multi-turn `build_queue`, so they're operational the moment the colony
+    // is founded. The engine validates the whole batch (tech gates, total
+    // slot cost) atomically before placing anything.
+    const kitBuildings: [string, number][] = []
     for (const [bid, count] of Object.entries(buildingCounts.value)) {
       if (count <= 0) continue
       const b = buildings.value.find((x) => x.id === bid)
       if (!b) continue
       for (let i = 0; i < count; i += 1) {
-        const queueEvents = await gameStore.sendCommand({
-          kind: 'queue_construction',
-          colony_id: founded.colony_id,
-          building_type: b.id,
-          slot_cost: b.slot_cost,
-          labor_per_turn: b.labor_per_turn,
-          construction_cost: b.construction_cost,
-          construction_turns: b.construction_turns,
-        })
-        if (queueEvents.length === 0) failedBuildings.push(b.name)
+        kitBuildings.push([b.id, b.slot_cost])
       }
+    }
+    if (kitBuildings.length > 0) {
+      // sendCommand() already sets gameStore.toastMessage with the failure
+      // reason (or a success summary) — no separate fallback needed here.
+      await gameStore.sendCommand({
+        kind: 'deploy_starter_kit',
+        colony_id: founded.colony_id,
+        buildings: kitBuildings,
+      })
     }
     // If no starting buildings were queued, the selection change fires the
     // watcher which triggers a refresh. Await it explicitly here so that by
     // the time ColonyView mounts, its stockpile table has data.
     await gameStore.refreshColonyScreen(founded.colony_id)
-    // Set this AFTER refreshColonyScreen so a later success toast from that
-    // call can't clobber it, and persists across the navigation below since
-    // CommandPanel.vue (mounted on /colony) renders gameStore.toastMessage.
-    if (failedBuildings.length > 0) {
-      gameStore.toastMessage = `Colony founded, but ${failedBuildings.length} starting building(s) couldn't be queued (build-slot budget exceeded): ${failedBuildings.join(', ')}`
-    }
   }
   router.push('/colony')
 }
