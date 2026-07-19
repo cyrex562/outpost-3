@@ -7,6 +7,28 @@
 //! See `docs/DESIGN.md §5, §7`. The C#
 //! `ColonyTurnProcessor.ProcessProduction()` is the behavioural spec;
 //! the key improvement here is that scaling is continuous.
+//!
+//! # Concurrent (multi-function) recipes
+//!
+//! A building type can run **at most one** pick-one recipe (the
+//! `active_recipes`-selected kind, issue #166) plus **any number** of
+//! always-on [`RecipeDef::concurrent`] recipes, every turn, simultaneously —
+//! the "true simultaneous multi-output buildings" mechanism deferred from
+//! playtest feedback's multi-function starter building idea (a combined
+//! colony HQ / power-atmosphere-water building, etc.). Concurrent recipes
+//! never participate in [`crate::colony::Colony::active_recipes`]'s
+//! selection — they simply always run.
+//!
+//! All of a building instance's simultaneously-running recipes (pick-one +
+//! every concurrent one) share **one** combined scale factor this turn:
+//! their inputs, maintenance draws, and deposit-gated outputs are pooled
+//! into a single demand computation (mirroring how recipe inputs and
+//! maintenance already combine, issue #180), rather than each recipe
+//! getting its own independent scale. This keeps the "one building = one
+//! operational state this turn" mental model intact — a multi-function
+//! building throttles all its outputs together under a shared power/labor/
+//! input constraint, rather than one function silently continuing at full
+//! output while another starves.
 
 use crate::content::types::Ingredient;
 use crate::content::{BuildingCategory, ContentRegistry, RecipeDef};
@@ -89,8 +111,18 @@ pub enum ShortfallReason {
 pub struct BuildingProductionResult {
     /// Content-pack key of the building type.
     pub building_type: String,
-    /// Recipe that ran (or was attempted).
+    /// The pick-one recipe that ran (or was attempted), if the building has
+    /// one — empty string when the building has no pick-one recipe (either
+    /// no recipes at all, or every authored recipe is [`RecipeDef::concurrent`]).
     pub recipe_id: String,
+    /// Every additional `concurrent` recipe that ran alongside `recipe_id`
+    /// this turn (issue: multi-function starter buildings / "true
+    /// simultaneous multi-output buildings"). Empty for an ordinary
+    /// single-recipe building — this field is purely additive so existing
+    /// `recipe_id`-only consumers (UI, `last_production` lookups) keep
+    /// working unchanged.
+    #[serde(default)]
+    pub concurrent_recipe_ids: Vec<String>,
     /// Scale factor applied to all inputs and outputs, in `[0.0, 1.0]`.
     pub scale: f64,
     /// Shortfalls that reduced the scale below 1.0, if any.
@@ -124,6 +156,10 @@ pub struct ProductionStepOutcome {
 struct PendingProduction<'a> {
     building_type: &'a str,
     recipe: Option<&'a RecipeDef>,
+    /// Every `RecipeDef::concurrent` recipe this building type has — always
+    /// runs alongside `recipe`, sharing the same `scale`. See this module's
+    /// doc comment.
+    concurrent_recipes: Vec<&'a RecipeDef>,
     building_category: BuildingCategory,
     maintenance: &'a [Ingredient],
     /// Effective per-sol maintenance multiplier
@@ -328,18 +364,23 @@ pub fn process_production_scaled(
             continue; // unknown building type — skip
         };
         let recipe = recipe_for_building(building_type, active_recipes, registry);
+        let concurrent_recipes = concurrent_recipes_for_building(building_type, registry);
+        let has_any_recipe = recipe.is_some() || !concurrent_recipes.is_empty();
         let has_maintenance = maintenance_enabled && !bdef.maintenance.is_empty();
 
         // Buildings with neither a recipe nor an active maintenance list stay
         // out of the production pass entirely (unchanged pre-#180 behaviour).
-        if recipe.is_none() && !has_maintenance {
+        if !has_any_recipe && !has_maintenance {
             continue;
         }
 
-        // Combined per-commodity demand (recipe inputs + maintenance).
+        // Combined per-commodity demand (pick-one recipe inputs + every
+        // concurrent recipe's inputs + maintenance) — see this module's doc
+        // comment on why a multi-function building shares one scale.
         let (input_ratio, tight_commodity, tight_is_maintenance) = compute_effective_input_ratio(
             pool,
             recipe,
+            &concurrent_recipes,
             if has_maintenance {
                 bdef.maintenance.as_slice()
             } else {
@@ -350,7 +391,7 @@ pub fn process_production_scaled(
 
         // Power/labor ratios only apply to recipe-running buildings. A pure
         // maintenance-only building doesn't consume labour or drive brownouts.
-        let (power_ratio, applies_labor) = if recipe.is_some() {
+        let (power_ratio, applies_labor) = if has_any_recipe {
             let pr = if bdef.category == BuildingCategory::Power {
                 1.0
             } else {
@@ -364,7 +405,8 @@ pub fn process_production_scaled(
 
         // Deposit gating (issue #239) — only applies to deposit-gated
         // recipes; inert (ratio 1.0) for everything else.
-        let (deposit_ratio, deposit_tight) = compute_deposit_ratio(recipe, deposit_richness);
+        let (deposit_ratio, deposit_tight) =
+            compute_deposit_ratio(recipe, &concurrent_recipes, deposit_richness);
 
         // Overall scale factor.
         let scale = input_ratio
@@ -414,6 +456,7 @@ pub fn process_production_scaled(
         pending.push(PendingProduction {
             building_type,
             recipe,
+            concurrent_recipes,
             building_category: bdef.category.clone(),
             maintenance: if has_maintenance {
                 bdef.maintenance.as_slice()
@@ -430,8 +473,15 @@ pub fn process_production_scaled(
     let output_multiplier = f64::from(productivity_multiplier.max(0.0));
     let mut building_results: Vec<BuildingProductionResult> = Vec::new();
     for p in pending {
+        // Every simultaneously-running recipe (the pick-one recipe, if any,
+        // plus every concurrent one) shares `p.scale` — see this module's
+        // doc comment.
+        let running_recipes = p
+            .recipe
+            .into_iter()
+            .chain(p.concurrent_recipes.iter().copied());
         if p.scale > 1e-9 {
-            if let Some(recipe) = p.recipe {
+            for recipe in running_recipes.clone() {
                 for ingredient in &recipe.inputs {
                     pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
                 }
@@ -470,9 +520,11 @@ pub fn process_production_scaled(
             }
         }
         let recipe_id = p.recipe.map(|r| r.id.clone()).unwrap_or_default();
+        let concurrent_recipe_ids = p.concurrent_recipes.iter().map(|r| r.id.clone()).collect();
         building_results.push(BuildingProductionResult {
             building_type: p.building_type.to_owned(),
             recipe_id,
+            concurrent_recipe_ids,
             scale: p.scale,
             shortfalls: p.shortfalls,
         });
@@ -511,9 +563,12 @@ fn compute_power_grid_scaled(
         } else {
             demand += bdef.power_delta * mul;
         }
-        // Recipe power draw adds to demand.
-        if let Some(recipe) = recipe_for_building(building_type, active_recipes, registry) {
-            demand += recipe.power_draw * mul;
+        // Recipe power draw adds to demand — the pick-one recipe (if any)
+        // plus every concurrent recipe running alongside it.
+        let recipe = recipe_for_building(building_type, active_recipes, registry);
+        let concurrent_recipes = concurrent_recipes_for_building(building_type, registry);
+        for r in recipe.into_iter().chain(concurrent_recipes) {
+            demand += r.power_draw * mul;
         }
     }
 
@@ -545,23 +600,21 @@ fn compute_power_grid_scaled(
 /// genuinely matters rather than being a pure presence/absence toggle.
 fn compute_deposit_ratio(
     recipe: Option<&RecipeDef>,
+    concurrent: &[&RecipeDef],
     deposit_richness: Option<&std::collections::HashMap<String, f32>>,
 ) -> (f64, Option<String>) {
-    let Some(recipe) = recipe else {
-        return (1.0, None);
-    };
-    let vein_outputs: Vec<&str> = recipe
-        .outputs
-        .iter()
+    let running = recipe.into_iter().chain(concurrent.iter().copied());
+    let vein_outputs: Vec<&str> = running
+        .flat_map(|r| r.outputs.iter())
         .map(|o| o.id.as_str())
         .filter(|id| crate::map::VEIN_COMMODITIES.contains(id))
         .collect();
-    let Some(deposit_richness) = deposit_richness else {
-        return (1.0, None);
-    };
     if vein_outputs.is_empty() {
         return (1.0, None);
     }
+    let Some(deposit_richness) = deposit_richness else {
+        return (1.0, None);
+    };
 
     let mut worst_commodity = vein_outputs[0];
     let mut worst_richness = f32::MAX;
@@ -597,16 +650,25 @@ fn compute_deposit_ratio(
 fn compute_effective_input_ratio(
     pool: &ColonyPool,
     recipe: Option<&RecipeDef>,
+    concurrent: &[&RecipeDef],
     maintenance: &[Ingredient],
     maintenance_multiplier: f64,
 ) -> (f64, Option<String>, bool) {
     // Merged (id, quantity, has_recipe_demand) list, preserving deterministic
-    // order: recipe inputs first, then maintenance entries (with dedup).
+    // order: recipe inputs first (summed across the pick-one recipe and
+    // every concurrent recipe — a multi-function building's simultaneous
+    // demands are pooled, not tracked independently), then maintenance
+    // entries (with dedup).
     let mut demands: Vec<(String, f64, bool)> = Vec::new();
 
-    if let Some(r) = recipe {
+    for r in recipe.into_iter().chain(concurrent.iter().copied()) {
         for ing in &r.inputs {
-            if ing.quantity > 0.0 {
+            if ing.quantity <= 0.0 {
+                continue;
+            }
+            if let Some(existing) = demands.iter_mut().find(|d| d.0 == ing.id) {
+                existing.1 += ing.quantity;
+            } else {
                 demands.push((ing.id.clone(), ing.quantity, true));
             }
         }
@@ -642,9 +704,15 @@ fn compute_effective_input_ratio(
     (ratio.max(0.0), tight, tight_is_maintenance)
 }
 
-/// Return the first recipe whose `building` field matches `building_type`.
-/// Deterministic default recipe for a building type when no active selection
-/// applies: the lexicographically smallest recipe id among matches.
+/// Return the first **non-concurrent** (pick-one-eligible) recipe whose
+/// `building` field matches `building_type`. Deterministic default recipe
+/// for a building type when no active selection applies: the
+/// lexicographically smallest recipe id among matches.
+///
+/// [`RecipeDef::concurrent`] recipes are excluded — they always run
+/// regardless of this selection (see [`concurrent_recipes_for_building`]),
+/// so they must never also be picked as *the* pick-one default (that would
+/// run them twice).
 ///
 /// `ContentRegistry` stores recipes in a `HashMap`, so iteration order is
 /// otherwise unspecified — for a building with only one recipe this is moot,
@@ -657,17 +725,21 @@ fn first_recipe_for_building<'r>(
 ) -> Option<&'r RecipeDef> {
     registry
         .recipes()
-        .filter(|r| r.building == building_type)
+        .filter(|r| r.building == building_type && !r.concurrent)
         .min_by(|a, b| a.id.cmp(&b.id))
 }
 
-/// Resolve the recipe a building instance actually runs (issue #166).
+/// Resolve the pick-one recipe a building instance actually runs (issue
+/// #166).
 ///
 /// If `active_recipes` names a recipe for this `building_type` and that
-/// recipe both exists and actually belongs to this building, it wins;
-/// otherwise falls back to [`first_recipe_for_building`] (the pre-#166
-/// deterministic default — the first authored recipe for the type). This
-/// keeps single-recipe buildings working with no player action needed.
+/// recipe exists, actually belongs to this building, and is **not**
+/// [`RecipeDef::concurrent`], it wins; otherwise falls back to
+/// [`first_recipe_for_building`] (the pre-#166 deterministic default — the
+/// first authored non-concurrent recipe for the type). This keeps
+/// single-recipe buildings working with no player action needed, and a
+/// building whose every recipe is `concurrent` correctly returns `None`
+/// here (its recipes still run — see [`concurrent_recipes_for_building`]).
 pub(crate) fn recipe_for_building<'r>(
     building_type: &str,
     active_recipes: &std::collections::HashMap<String, String>,
@@ -676,7 +748,7 @@ pub(crate) fn recipe_for_building<'r>(
     if let Some(recipe_id) = active_recipes.get(building_type) {
         if let Some(recipe) = registry
             .recipes()
-            .find(|r| &r.id == recipe_id && r.building == building_type)
+            .find(|r| &r.id == recipe_id && r.building == building_type && !r.concurrent)
         {
             return Some(recipe);
         }
@@ -684,9 +756,28 @@ pub(crate) fn recipe_for_building<'r>(
     first_recipe_for_building(building_type, registry)
 }
 
-/// Returns true if there is at least one recipe for the given building type.
+/// Every [`RecipeDef::concurrent`] recipe authored for `building_type` —
+/// these always run alongside whatever [`recipe_for_building`] resolves
+/// (if anything), every turn, with no player selection needed. See this
+/// module's doc comment.
+pub(crate) fn concurrent_recipes_for_building<'r>(
+    building_type: &str,
+    registry: &'r ContentRegistry,
+) -> Vec<&'r RecipeDef> {
+    let mut recipes: Vec<&RecipeDef> = registry
+        .recipes()
+        .filter(|r| r.building == building_type && r.concurrent)
+        .collect();
+    // Deterministic ordering, same discipline as `first_recipe_for_building`.
+    recipes.sort_by(|a, b| a.id.cmp(&b.id));
+    recipes
+}
+
+/// Returns true if there is at least one recipe (pick-one or concurrent)
+/// for the given building type.
 fn has_recipe(building_type: &str, registry: &ContentRegistry) -> bool {
     first_recipe_for_building(building_type, registry).is_some()
+        || !concurrent_recipes_for_building(building_type, registry).is_empty()
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -744,6 +835,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 30.0,
+            concurrent: false,
         });
 
         // Smelter: converts ore to plates; needs 50 kW; 3 workers
@@ -775,6 +867,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 50.0,
+            concurrent: false,
         });
 
         reg
@@ -1074,6 +1167,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         });
 
         reg
@@ -1287,6 +1381,7 @@ mod tests {
             outputs: vec![],
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         });
 
         let mut pool = ColonyPool::new();
@@ -1634,6 +1729,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "refine_gadget".into(),
@@ -1646,6 +1742,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         });
         reg
     }
@@ -1762,6 +1859,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         });
         // Non-deposit-gated recipe (not in VEIN_COMMODITIES) — a control to
         // prove gating is scoped to deposit-tracked commodities only.
@@ -1790,6 +1888,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         });
         reg
     }
@@ -1963,5 +2062,237 @@ mod tests {
         assert!((well.scale - 1.0).abs() < 1e-9);
         assert!(well.shortfalls.is_empty());
         assert!((pool.amount("water") - 10.0).abs() < 1e-9);
+    }
+
+    // ── Concurrent (multi-function) recipes ──────────────────────────────────
+
+    /// A `colony_hq`-style building with two always-on `concurrent` recipes
+    /// (power generation + water purification) and no pick-one recipe at
+    /// all — the minimal "multi-function starter building" shape.
+    fn make_registry_with_concurrent_recipes() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "colony_hq".into(),
+            name: "Colony HQ".into(),
+            description: String::new(),
+            category: BuildingCategory::Services,
+            construction_cost: vec![],
+            power_delta: -20.0, // net generator once its own recipe draw is netted
+            worker_slots: 2,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "hq_generate_power".into(),
+            name: "Generate Power".into(),
+            building: "colony_hq".into(),
+            inputs: vec![],
+            outputs: vec![],
+            cycle_sols: 1,
+            power_draw: 0.0,
+            concurrent: true,
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "hq_purify_water".into(),
+            name: "Purify Water".into(),
+            building: "colony_hq".into(),
+            inputs: vec![Ingredient {
+                id: "raw_water".into(),
+                quantity: 2.0,
+            }],
+            outputs: vec![Ingredient {
+                id: "water".into(),
+                quantity: 2.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 5.0,
+            concurrent: true,
+        });
+        reg
+    }
+
+    #[test]
+    fn concurrent_recipes_all_run_simultaneously_with_no_active_recipe_selection() {
+        let reg = make_registry_with_concurrent_recipes();
+        let mut pool = ColonyPool::new();
+        pool.deposit("raw_water", 10.0);
+        let placed = buildings(&["colony_hq"]);
+
+        let outcome = process_production(&mut pool, &placed, 10.0_f32, &reg);
+
+        let hq = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "colony_hq")
+            .unwrap();
+        // No pick-one recipe exists for this building — recipe_id is empty —
+        // but both concurrent recipes ran.
+        assert_eq!(hq.recipe_id, "");
+        let mut ids = hq.concurrent_recipe_ids.clone();
+        ids.sort();
+        assert_eq!(ids, vec!["hq_generate_power", "hq_purify_water"]);
+        assert!(hq.is_full_production(), "shortfalls: {:?}", hq.shortfalls);
+
+        // Purify-water's input/output actually applied.
+        assert!((pool.amount("raw_water") - 8.0).abs() < 1e-9);
+        assert!((pool.amount("water") - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn concurrent_recipe_power_draw_is_summed_into_grid_demand() {
+        let reg = make_registry_with_concurrent_recipes();
+        let mut pool = ColonyPool::new();
+        pool.deposit("raw_water", 10.0);
+        let placed = buildings(&["colony_hq"]);
+
+        let outcome = process_production(&mut pool, &placed, 10.0_f32, &reg);
+
+        // colony_hq's own power_delta is -20 (generator); hq_purify_water
+        // draws 5 kW; hq_generate_power draws 0. Net capacity 20, demand 5.
+        assert!((outcome.power_grid.capacity - 20.0).abs() < 1e-9);
+        assert!((outcome.power_grid.demand - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn concurrent_recipe_input_shortfall_scales_the_whole_building_down() {
+        // Only 1 unit of raw_water available; hq_purify_water needs 2 ->
+        // input_ratio = 0.5. Since there's no other recipe/demand on this
+        // building, the whole instance's shared scale drops to 0.5.
+        let reg = make_registry_with_concurrent_recipes();
+        let mut pool = ColonyPool::new();
+        pool.deposit("raw_water", 1.0);
+        let placed = buildings(&["colony_hq"]);
+
+        let outcome = process_production(&mut pool, &placed, 10.0_f32, &reg);
+
+        let hq = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "colony_hq")
+            .unwrap();
+        assert!((hq.scale - 0.5).abs() < 1e-9, "scale was {}", hq.scale);
+        assert!(hq
+            .shortfalls
+            .iter()
+            .any(|s| matches!(s.reason, ShortfallReason::InputShort { .. })));
+        assert!((pool.amount("water") - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn concurrent_recipe_never_becomes_the_pick_one_default_or_selectable() {
+        // A building with ONE concurrent recipe and no pick-one recipes at
+        // all must resolve recipe_for_building -> None (it must not also be
+        // picked as "the" default, which would double-run it), while still
+        // running via concurrent_recipes_for_building.
+        let reg = make_registry_with_concurrent_recipes();
+        assert!(
+            recipe_for_building("colony_hq", &std::collections::HashMap::new(), &reg).is_none()
+        );
+        let concurrent = concurrent_recipes_for_building("colony_hq", &reg);
+        assert_eq!(concurrent.len(), 2);
+
+        // Even an explicit (mistaken) active_recipes selection naming a
+        // concurrent recipe must not resolve it as the pick-one recipe.
+        let mut active = std::collections::HashMap::new();
+        active.insert("colony_hq".to_string(), "hq_purify_water".to_string());
+        assert!(recipe_for_building("colony_hq", &active, &reg).is_none());
+    }
+
+    #[test]
+    fn pick_one_recipe_and_concurrent_recipes_coexist_and_share_one_scale() {
+        // A building with both a pick-one recipe (selected via
+        // active_recipes) and a concurrent recipe: both run together, both
+        // count toward the same shared scale/shortfalls.
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "hybrid_plant".into(),
+            name: "Hybrid Plant".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "hybrid_alt_a".into(),
+            name: "Alt A".into(),
+            building: "hybrid_plant".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "widget_a".into(),
+                quantity: 1.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+            concurrent: false,
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "hybrid_alt_b".into(),
+            name: "Alt B".into(),
+            building: "hybrid_plant".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "widget_b".into(),
+                quantity: 1.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+            concurrent: false,
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "hybrid_always_on".into(),
+            name: "Always On".into(),
+            building: "hybrid_plant".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "widget_c".into(),
+                quantity: 1.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+            concurrent: true,
+        });
+
+        let mut pool = ColonyPool::new();
+        let placed = buildings(&["hybrid_plant"]);
+        let mut active = std::collections::HashMap::new();
+        active.insert("hybrid_plant".to_string(), "hybrid_alt_b".to_string());
+
+        // Default (no active selection passed to process_production, which
+        // hardcodes an empty active_recipes map) picks the first pick-one
+        // alternative alphabetically: hybrid_alt_a.
+        process_production(&mut pool, &placed, 10.0_f32, &reg);
+        assert!((pool.amount("widget_a") - 1.0).abs() < 1e-9);
+        assert!((pool.amount("widget_c") - 1.0).abs() < 1e-9);
+        assert_eq!(pool.amount("widget_b"), 0.0);
+
+        // Now explicitly select hybrid_alt_b via active_recipes.
+        let mut pool2 = ColonyPool::new();
+        process_production_scaled(
+            &mut pool2,
+            &placed,
+            10.0,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &active,
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
+        );
+        assert!((pool2.amount("widget_b") - 1.0).abs() < 1e-9);
+        assert!((pool2.amount("widget_c") - 1.0).abs() < 1e-9);
+        assert_eq!(pool2.amount("widget_a"), 0.0);
     }
 }

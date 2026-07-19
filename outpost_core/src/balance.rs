@@ -33,6 +33,7 @@
 //!     outputs: vec![Ingredient { id: "iron_ore".into(), quantity: 10.0 }],
 //!     cycle_sols: 1,
 //!     power_draw: 0.0,
+//!     concurrent: false,
 //! };
 //! let buildings = vec![BuildingInstance { building: mine_def, recipe: Some(mine_recipe) }];
 //! let report = BalanceCalculator::compute(&buildings, &[]);
@@ -295,6 +296,7 @@ mod tests {
                 .collect(),
             cycle_sols: 1,
             power_draw: 0.0,
+            concurrent: false,
         }
     }
 
