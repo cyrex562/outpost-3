@@ -76,6 +76,41 @@
     - id: oxygen
       quantity: 7.0
 
+# colony_hq's three recipes are `concurrent: true` — all three always run
+# together every turn (see production.rs's module doc comment), rather than
+# `active_recipes` picking one. Outputs mirror generate_power_solar_mk1 /
+# pump_water / scrub_oxygen exactly, so colony_hq is a drop-in slot-efficient
+# alternative to building all three standalone structures.
+- id: hq_generate_power
+  name: Generate Power (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+  concurrent: true
+
+- id: hq_pump_water
+  name: Pump Water (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 24.0
+  concurrent: true
+
+- id: hq_scrub_oxygen
+  name: Scrub Oxygen (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 7.0
+  concurrent: true
+
 # ── Tier 1 ───────────────────────────────────────────────────────────────────
 
 - id: mine_structural_ore

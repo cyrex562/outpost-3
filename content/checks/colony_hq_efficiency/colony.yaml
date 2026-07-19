@@ -1,0 +1,17 @@
+# Colony configuration for the colony_hq efficiency balance check.
+#
+# One colony_hq instance, represented as 3 BuildingInstance entries (one per
+# concurrent recipe — see pack.yaml's approximation note), plus a synthetic
+# 100-colonist consumption sink covering water/oxygen/power only (no food —
+# colony_hq doesn't produce it).
+buildings:
+  - building_id: colony_hq
+    recipe_id: hq_generate_power
+  - building_id: colony_hq
+    recipe_id: hq_pump_water
+  - building_id: colony_hq
+    recipe_id: hq_scrub_oxygen
+  - building_id: colonist_life_support
+    recipe_id: colonist_consumption
+
+imports: []

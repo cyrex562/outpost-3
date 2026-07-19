@@ -1,0 +1,48 @@
+# Recipes used in the colony_hq efficiency balance check — rates mirror
+# content/base/recipes.yaml's hq_* recipes exactly.
+- id: hq_generate_power
+  name: Generate Power (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+  concurrent: true
+
+- id: hq_pump_water
+  name: Pump Water (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 24.0
+  concurrent: true
+
+- id: hq_scrub_oxygen
+  name: Scrub Oxygen (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 7.0
+  concurrent: true
+
+# Synthetic sink: models a 100-colonist population's per-capita draw from
+# outpost_core::needs::NeedsConfig::default_survival() (water 0.15, oxygen
+# 0.05, power 0.2 per colonist per sol). food_ration omitted — colony_hq
+# doesn't produce food, see hydroponic_bay/content/checks/bootstrap_colony.
+- id: colonist_consumption
+  name: Colonist Consumption (100 colonists)
+  building: colonist_life_support
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 15.0
+    - id: oxygen
+      quantity: 5.0
+    - id: power
+      quantity: 20.0
+  outputs: []

@@ -1,0 +1,15 @@
+# Commodities used in the colony_hq efficiency balance check.
+- id: water
+  name: Water
+  category: consumable
+  base_value: 5.0
+
+- id: oxygen
+  name: Oxygen
+  category: consumable
+  base_value: 6.0
+
+- id: power
+  name: Power
+  category: energy
+  base_value: 0.0

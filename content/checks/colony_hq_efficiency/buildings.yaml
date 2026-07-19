@@ -1,0 +1,10 @@
+# Buildings used in the colony_hq efficiency balance check — mirroring
+# content/base/buildings.yaml's colony_hq, plus a synthetic population sink
+# (see pack.yaml).
+- id: colony_hq
+  name: Colony HQ
+  category: services
+
+- id: colonist_life_support
+  name: Colonist Life Support (population sink)
+  category: other
