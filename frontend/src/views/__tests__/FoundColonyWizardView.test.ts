@@ -26,14 +26,19 @@ vi.mock('vue-router', () => ({
 
 const sendCommand = vi.fn<[Command], Promise<GameEvent[]>>()
 const refreshColonyScreen = vi.fn()
+// A single shared object (not a fresh literal per call) so tests can read
+// back mutations the component makes, e.g. `gameStoreMock.toastMessage`
+// after `finish()` sets it directly (mirrors the real Pinia store, which is
+// also a single shared instance).
+const gameStoreMock = {
+  sendCommand: (cmd: Command) => sendCommand(cmd),
+  busy: false,
+  selectedColonyId: null as string | null,
+  toastMessage: null as string | null,
+  refreshColonyScreen: (id?: string | null) => refreshColonyScreen(id),
+}
 vi.mock('@/stores/game', () => ({
-  useGameStore: () => ({
-    sendCommand: (cmd: Command) => sendCommand(cmd),
-    busy: false,
-    selectedColonyId: null,
-    toastMessage: null,
-    refreshColonyScreen: (id?: string | null) => refreshColonyScreen(id),
-  }),
+  useGameStore: () => gameStoreMock,
 }))
 
 const BODY = {
@@ -124,6 +129,8 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     routerPush.mockReset()
     sendCommand.mockReset()
     refreshColonyScreen.mockReset()
+    gameStoreMock.toastMessage = null
+    gameStoreMock.selectedColonyId = null
   })
 
   it('pre-fills supply spinners from the default preset, scaled to starting population', async () => {
@@ -195,6 +202,37 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
       expect((cmd as Extract<Command, { kind: 'queue_construction' }>).building_type).toBe('water_well')
     }
 
+    expect(routerPush).toHaveBeenCalledWith('/colony')
+  })
+
+  it('surfaces a clear toast (and still navigates) when a starting building fails to queue', async () => {
+    const wrapper = await mountAtStep3()
+
+    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
+
+    // Simulate the server rejecting the queue_construction call (e.g. a
+    // slot-budget or other mismatch the client-side preview didn't catch) —
+    // sendCommand's real implementation never throws on rejection, it
+    // resolves with an empty array (see game.ts), so that's what the mock
+    // returns here too.
+    sendCommand.mockImplementation(async (cmd: Command) => {
+      if (cmd.kind === 'found_colony_at_site') {
+        return [{ kind: 'colony_founded', colony_id: 'colony-1' } as unknown as GameEvent]
+      }
+      if (cmd.kind === 'queue_construction') {
+        return []
+      }
+      return []
+    })
+
+    await wrapper.find('.btn.primary').trigger('click') // Next -> step 4
+    await wrapper.find('.btn.primary').trigger('click') // Found Colony
+    await flushPromises()
+
+    expect(gameStoreMock.toastMessage).toContain('1 starting building')
+    expect(gameStoreMock.toastMessage).toContain('Water Well')
+    // The colony was still founded successfully — still navigate there
+    // rather than stranding the player on the wizard.
     expect(routerPush).toHaveBeenCalledWith('/colony')
   })
 })

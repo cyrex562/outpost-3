@@ -35,8 +35,12 @@ use std::path::PathBuf;
 use crate::util::{capture, repo_root, run, run_ok, sha256_file, Res};
 
 const TARGET: &str = "x86_64-pc-windows-msvc";
-const BIN_NAME: &str = "outpost_tauri";
+const BIN_NAME: &str = "outpost3";
 const PRODUCT_NAME: &str = "Outpost 3";
+/// Mirrors `outpost_tauri/tauri.conf.json`'s `identifier` — this is the
+/// folder name Tauri's log-dir resolver uses under `%LOCALAPPDATA%` on
+/// Windows, independent of wherever the exe itself is installed/run from.
+const BUNDLE_IDENTIFIER: &str = "com.cyrex562.outpost3";
 
 /// Install the Windows cross-compile target + `cargo-xwin`, if missing.
 /// Only relevant for the Linux/macOS cross-compile path — a no-op concept on
@@ -82,7 +86,125 @@ pub fn build_windows_portable() -> Res<()> {
     } else {
         build_cross_compiled()?
     };
+    let (stage, hash) = stage_bundle(&exe)?;
 
+    println!("== Zipping ==");
+    let root = repo_root();
+    let zip_path = root.join("dist/outpost3-windows-portable-x86_64.zip");
+    if zip_path.exists() {
+        fs::remove_file(&zip_path).map_err(|e| format!("rm {}: {e}", zip_path.display()))?;
+    }
+    let zip_ok = zip_directory(&root.join("dist/windows-portable"), PRODUCT_NAME, &zip_path);
+
+    println!();
+    println!("== Build complete ==");
+    println!("  Staged folder: {}", stage.display());
+    println!("  Exe checksum : {hash}");
+    if zip_ok {
+        println!("  Zip archive  : {}", zip_path.display());
+    } else {
+        println!(
+            "  No zip tool available (tried `zip`{}) — the staged folder above is still a \
+             complete portable bundle, just not zipped.",
+            if cfg!(windows) {
+                " and PowerShell's Compress-Archive"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(())
+}
+
+/// Build `outpost_tauri` and copy the result into a stable per-user
+/// directory on Windows (`%LOCALAPPDATA%\Outpost3\`), rather than a
+/// throwaway `dist/` folder — a fixed, repeatedly-overwritten install
+/// location makes it easy to re-run the exact same build across sessions
+/// while debugging (e.g. pin a shortcut to it) and prints where its log
+/// file will land so a fresh crash/bug report is easy to find immediately
+/// after reproducing an issue.
+///
+/// Windows-only: `%LOCALAPPDATA%` doesn't exist elsewhere, and this only
+/// exists to give a Windows playtester a stable local install, not to
+/// replace the portable zip (`build-windows-portable`) as the shareable
+/// artifact.
+pub fn install_windows() -> Res<()> {
+    if !cfg!(windows) {
+        return Err(
+            "install-windows copies the build into %LOCALAPPDATA% and only makes sense on \
+             Windows. Use `cargo xtask build-windows-portable` to produce a portable zip from \
+             any host instead."
+                .into(),
+        );
+    }
+
+    println!("== Building frontend ==");
+    run("npm", &["--prefix", "frontend", "install"])?;
+    run("npm", &["--prefix", "frontend", "run", "build"])?;
+
+    let exe = build_native()?;
+    let (stage, _hash) = stage_bundle(&exe)?;
+
+    let local_app_data = std::env::var("LOCALAPPDATA")
+        .map_err(|_| "LOCALAPPDATA environment variable is not set".to_string())?;
+    let install_dir = std::path::Path::new(&local_app_data).join(PRODUCT_NAME.replace(' ', ""));
+
+    println!("== Installing to {} ==", install_dir.display());
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir)
+            .map_err(|e| format!("clean {}: {e}", install_dir.display()))?;
+    }
+    copy_dir_recursive(&stage, &install_dir)?;
+
+    let exe_path = install_dir.join(format!("{PRODUCT_NAME}.exe"));
+    let log_path = std::path::Path::new(&local_app_data)
+        .join(BUNDLE_IDENTIFIER)
+        .join("logs")
+        .join("outpost3.log");
+
+    println!();
+    println!("== Install complete ==");
+    println!("  Installed exe: {}", exe_path.display());
+    println!("  Log file     : {}", log_path.display());
+    println!(
+        "  (the log file only appears after the app has been run at least once — \
+         every command's success/failure is logged there, verbosely, per issue playtesting \
+         feedback)"
+    );
+    Ok(())
+}
+
+/// Recursively copy a directory tree. `std::fs` has no built-in recursive
+/// copy; this only needs to handle the flat staged-bundle shape (exe +
+/// loose files, no nested directories) but walks recursively anyway in case
+/// that ever changes.
+fn copy_dir_recursive(src: &std::path::Path, dest: &std::path::Path) -> Res<()> {
+    fs::create_dir_all(dest).map_err(|e| format!("mkdir {}: {e}", dest.display()))?;
+    for entry in fs::read_dir(src).map_err(|e| format!("read_dir {}: {e}", src.display()))? {
+        let entry = entry.map_err(|e| format!("read_dir entry: {e}"))?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            fs::copy(&src_path, &dest_path).map_err(|e| {
+                format!(
+                    "copy {} -> {}: {e}",
+                    src_path.display(),
+                    dest_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Stage a built exe into `dist/windows-portable/{PRODUCT_NAME}/` alongside
+/// any sibling DLLs, a README, and a SHA256SUMS file. Returns the staged
+/// directory and the exe's SHA-256. Shared by [`build_windows_portable`]
+/// (which zips the result) and [`install_windows`] (which copies it into
+/// `%LOCALAPPDATA%`).
+fn stage_bundle(exe: &std::path::Path) -> Res<(PathBuf, String)> {
     println!("== Assembling portable bundle ==");
     let root = repo_root();
     let stage = root.join("dist/windows-portable").join(PRODUCT_NAME);
@@ -92,7 +214,7 @@ pub fn build_windows_portable() -> Res<()> {
     fs::create_dir_all(&stage).map_err(|e| format!("mkdir {}: {e}", stage.display()))?;
 
     let staged_exe = stage.join(format!("{PRODUCT_NAME}.exe"));
-    fs::copy(&exe, &staged_exe)
+    fs::copy(exe, &staged_exe)
         .map_err(|e| format!("copy {} -> {}: {e}", exe.display(), staged_exe.display()))?;
 
     // Any DLLs tauri-build placed next to the exe (e.g. a WebView2Loader.dll,
@@ -135,6 +257,12 @@ pub fn build_windows_portable() -> Res<()> {
              start, install it from:\n\
              \x20   https://developer.microsoft.com/microsoft-edge/webview2/\n\
              \n\
+             A verbose log of every command the app runs (success and\n\
+             failure alike) is written to\n\
+             \x20   %LOCALAPPDATA%\\{BUNDLE_IDENTIFIER}\\logs\\outpost3.log\n\
+             regardless of where this exe is run from — attach it to any\n\
+             bug report.\n\
+             \n\
              {readme_note}\n"
         ),
     )
@@ -147,31 +275,7 @@ pub fn build_windows_portable() -> Res<()> {
     )
     .map_err(|e| format!("write SHA256SUMS: {e}"))?;
 
-    println!("== Zipping ==");
-    let zip_path = root.join("dist/outpost3-windows-portable-x86_64.zip");
-    if zip_path.exists() {
-        fs::remove_file(&zip_path).map_err(|e| format!("rm {}: {e}", zip_path.display()))?;
-    }
-    let zip_ok = zip_directory(&root.join("dist/windows-portable"), PRODUCT_NAME, &zip_path);
-
-    println!();
-    println!("== Build complete ==");
-    println!("  Staged folder: {}", stage.display());
-    println!("  Exe checksum : {hash}");
-    if zip_ok {
-        println!("  Zip archive  : {}", zip_path.display());
-    } else {
-        println!(
-            "  No zip tool available (tried `zip`{}) — the staged folder above is still a \
-             complete portable bundle, just not zipped.",
-            if cfg!(windows) {
-                " and PowerShell's Compress-Archive"
-            } else {
-                ""
-            }
-        );
-    }
-    Ok(())
+    Ok((stage, hash))
 }
 
 /// Build `outpost_tauri` natively for the host toolchain — the correct path

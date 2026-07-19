@@ -737,10 +737,19 @@ pub fn bootstrap(
     system_seed: Option<u64>,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<SnapshotPayload> {
-    let registry = if content_dir.is_empty() || content_dir == "embedded" {
-        load_embedded_content()?
+    log::info!(
+        "bootstrap: content_dir={content_dir:?} planet_seed={planet_seed} difficulty={difficulty:?} system_seed={system_seed:?}"
+    );
+    let registry = match (if content_dir.is_empty() || content_dir == "embedded" {
+        load_embedded_content()
     } else {
-        load_content(Path::new(&content_dir))?
+        load_content(Path::new(&content_dir))
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("bootstrap FAILED loading content: {e}");
+            return Err(e);
+        }
     };
 
     let mut engine = GameEngine::new();
@@ -783,8 +792,17 @@ pub fn bootstrap(
     });
 
     load_embedded_tech(&mut engine);
+    log::info!(
+        "bootstrap: tech_registry loaded={}",
+        engine.state.tech_registry.is_some()
+    );
 
     let snap = build_snapshot(&engine);
+    log::info!(
+        "bootstrap OK: sol={} colonies={}",
+        snap.sol,
+        snap.colonies.len()
+    );
     *engine_state.engine.lock().unwrap() = Some(engine);
     Ok(snap)
 }
@@ -930,8 +948,25 @@ pub fn apply_command(
     command: ClientCommand,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<Vec<ServerEvent>> {
-    let mut guard = engine_state.engine.lock().unwrap();
-    let engine = guard.as_mut().ok_or(CmdError::NotInitialised)?;
+    let command_debug = format!("{command:?}");
+    log::debug!("apply_command: received {command_debug}");
+
+    let mut guard = match engine_state.engine.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            log::error!(
+                "apply_command: engine mutex POISONED (a prior command panicked mid-mutation) — recovering with the pre-panic state; command={command_debug}"
+            );
+            poisoned.into_inner()
+        }
+    };
+    let engine = match guard.as_mut().ok_or(CmdError::NotInitialised) {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("apply_command FAILED (not initialised): command={command_debug}");
+            return Err(e);
+        }
+    };
 
     let core_cmd = match command {
         ClientCommand::AdvanceSol => Command::AdvanceColonySol,
@@ -1087,8 +1122,20 @@ pub fn apply_command(
         },
     };
 
-    let events = engine.apply(&core_cmd).map_err(CmdError::from)?;
-    Ok(events.iter().map(ServerEvent::from_core).collect())
+    match engine.apply(&core_cmd) {
+        Ok(events) => {
+            log::info!(
+                "apply_command OK: {} event(s) from {command_debug} — {:?}",
+                events.len(),
+                events.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>()
+            );
+            Ok(events.iter().map(ServerEvent::from_core).collect())
+        }
+        Err(e) => {
+            log::error!("apply_command FAILED: {e} — command={command_debug}");
+            Err(CmdError::from(e))
+        }
+    }
 }
 
 /// Run a read-only query. Returns raw JSON to accommodate heterogeneous result shapes.
@@ -1097,8 +1144,25 @@ pub fn run_query(
     query: ClientQuery,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<serde_json::Value> {
-    let guard = engine_state.engine.lock().unwrap();
-    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    let query_debug = format!("{query:?}");
+    log::debug!("run_query: received {query_debug}");
+
+    let guard = match engine_state.engine.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            log::error!(
+                "run_query: engine mutex POISONED (a prior command panicked mid-mutation) — recovering with the pre-panic state; query={query_debug}"
+            );
+            poisoned.into_inner()
+        }
+    };
+    let engine = match guard.as_ref().ok_or(CmdError::NotInitialised) {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("run_query FAILED (not initialised): query={query_debug}");
+            return Err(e);
+        }
+    };
 
     let core_query = match query {
         ClientQuery::CurrentSol => Query::CurrentSol,
@@ -1120,7 +1184,14 @@ pub fn run_query(
         },
     };
 
-    let result = engine.query(&core_query).map_err(CmdError::from)?;
+    let result = match engine.query(&core_query) {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("run_query FAILED: {e} — query={query_debug}");
+            return Err(CmdError::from(e));
+        }
+    };
+    log::debug!("run_query OK: query={query_debug}");
     let value = match result {
         QueryResult::Counter(v) => serde_json::json!({ "kind": "counter", "value": v }),
         QueryResult::Colonies(list) => serde_json::json!({ "kind": "colonies", "colonies": list }),

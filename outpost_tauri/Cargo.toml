@@ -9,7 +9,13 @@ name = "outpost_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "outpost_tauri"
+# The actual executable filename (outpost3.exe on Windows) — kept distinct
+# from the crate/package name above, which stays `outpost_tauri` to avoid
+# rippling a rename through docs/scripts that reference the crate. Per
+# tauri-utils' own guidance, renaming the bin target directly (rather than
+# tauri.conf.json's `mainBinaryName` override) is the preferred way to name
+# the shipped binary.
+name = "outpost3"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -37,6 +43,8 @@ tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-log = "2"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

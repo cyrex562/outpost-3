@@ -152,7 +152,11 @@ const canAdvance = computed(() => {
     case 3:
       return startingPop.value > 0 && totalBuildingCount.value > 0 && !overBudget.value
     case 4:
-      return colonyName.value.trim().length > 0
+      // Re-check overBudget here too, not just on step 3's gate — step 3
+      // is the only place buildingCounts is edited today, but defending
+      // the actual submit action directly means this can't silently drift
+      // out of sync if that ever changes.
+      return colonyName.value.trim().length > 0 && !overBudget.value
     default:
       return false
   }
@@ -274,16 +278,25 @@ async function finish(): Promise<void> {
         body_id: chosenBody.value.body_id,
       })
     }
+    // Queue N separate construction projects per selected building — the
+    // engine's existing per-call slot-capacity check
+    // (`EngineError::SlotCapacityExceeded`) is what actually enforces the
+    // starter build-slot budget; the wizard's running total (`overBudget`)
+    // is just a preview of that same rule, so a rejection here is still
+    // possible (e.g. stale `buildings.value` data). `sendCommand` never
+    // throws — it swallows errors into `gameStore.toastMessage` and
+    // resolves with an empty array — so failures must be checked
+    // explicitly rather than assumed away, or they'd silently vanish
+    // (previously: the loop kept going and always navigated to /colony,
+    // reading as a crash rather than a clear "N buildings didn't fit"
+    // message).
+    const failedBuildings: string[] = []
     for (const [bid, count] of Object.entries(buildingCounts.value)) {
       if (count <= 0) continue
       const b = buildings.value.find((x) => x.id === bid)
       if (!b) continue
-      // Queue N separate construction projects — the engine's existing
-      // per-call slot-capacity check (`EngineError::SlotCapacityExceeded`)
-      // is what actually enforces the starter build-slot budget; the
-      // wizard's running total is just a preview of that same rule.
       for (let i = 0; i < count; i += 1) {
-        await gameStore.sendCommand({
+        const queueEvents = await gameStore.sendCommand({
           kind: 'queue_construction',
           colony_id: founded.colony_id,
           building_type: b.id,
@@ -292,12 +305,19 @@ async function finish(): Promise<void> {
           construction_cost: b.construction_cost,
           construction_turns: b.construction_turns,
         })
+        if (queueEvents.length === 0) failedBuildings.push(b.name)
       }
     }
     // If no starting buildings were queued, the selection change fires the
     // watcher which triggers a refresh. Await it explicitly here so that by
     // the time ColonyView mounts, its stockpile table has data.
     await gameStore.refreshColonyScreen(founded.colony_id)
+    // Set this AFTER refreshColonyScreen so a later success toast from that
+    // call can't clobber it, and persists across the navigation below since
+    // CommandPanel.vue (mounted on /colony) renders gameStore.toastMessage.
+    if (failedBuildings.length > 0) {
+      gameStore.toastMessage = `Colony founded, but ${failedBuildings.length} starting building(s) couldn't be queued (build-slot budget exceeded): ${failedBuildings.join(', ')}`
+    }
   }
   router.push('/colony')
 }
