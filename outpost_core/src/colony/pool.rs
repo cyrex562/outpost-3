@@ -240,6 +240,7 @@ mod tests {
             }],
             cycle_sols: 2,
             power_draw: 10.0,
+            concurrent: false,
         }
     }
 

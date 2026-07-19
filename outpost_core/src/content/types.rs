@@ -112,6 +112,19 @@ pub struct RecipeDef {
     /// Power consumed per cycle (kW); zero means no power requirement.
     #[serde(default)]
     pub power_draw: f64,
+    /// When `true`, this recipe always runs alongside every other recipe
+    /// marked `concurrent` for the same `building`, every turn — it never
+    /// participates in [`crate::colony::Colony::active_recipes`]'s
+    /// pick-one selection (issue: "true simultaneous multi-output
+    /// buildings" — playtest feedback's deferred multi-function starter
+    /// building idea). A building can mix at most one pick-one recipe set
+    /// (the ordinary, `active_recipes`-selected kind) with any number of
+    /// always-on `concurrent` recipes; see `production.rs`'s module doc
+    /// comment for how the two combine into one shared per-instance scale
+    /// factor. Defaults to `false` (ordinary pick-one-alternative recipe),
+    /// so every recipe authored before this field existed is unaffected.
+    #[serde(default)]
+    pub concurrent: bool,
 }
 
 fn default_cycle_sols() -> u32 {

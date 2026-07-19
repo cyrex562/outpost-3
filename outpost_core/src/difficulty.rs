@@ -702,6 +702,7 @@ mod tests {
             }],
             cycle_sols: 1,
             power_draw: 50.0,
+            concurrent: false,
         };
 
         let mut reg = ContentRegistry::default();
