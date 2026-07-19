@@ -15,6 +15,22 @@ path = "src/main.rs"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified, DO NOT REMOVE!!
+#
+# Tauri v2 decides dev-vs-production at compile time via this feature on the
+# `tauri` crate (see `tauri-macros::context::ContextData { dev: cfg!(not(feature
+# = "custom-protocol")), .. }`) — NOT `debug_assertions` and NOT an env var.
+# Without it, even a `--release` build embeds a dev-mode `Context` that tries
+# to load `build.devUrl` (http://localhost:5173) instead of the bundled
+# frontend, and fails at startup with a "can't connect to localhost" error
+# since no dev server is running. `cargo tauri build`/`cargo tauri dev` pass
+# this automatically by convention; any direct `cargo build`/`cargo xwin
+# build` invocation (e.g. `cargo xtask build-windows-portable`) must pass
+# `--features custom-protocol` explicitly.
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 outpost_core = { path = "../outpost_core" }
 tauri = { version = "2", features = ["devtools"] }

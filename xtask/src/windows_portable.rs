@@ -188,6 +188,8 @@ fn build_native() -> Res<PathBuf> {
             "--release",
             "--manifest-path",
             "outpost_tauri/Cargo.toml",
+            "--features",
+            "custom-protocol",
         ],
     )?;
     let exe = repo_root()
@@ -215,6 +217,8 @@ fn build_cross_compiled() -> Res<PathBuf> {
             "outpost_tauri/Cargo.toml",
             "--target",
             TARGET,
+            "--features",
+            "custom-protocol",
         ],
     );
     if !cross_ok {
