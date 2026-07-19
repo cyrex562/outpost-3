@@ -476,12 +476,12 @@ pub fn process_production_scaled(
         // Every simultaneously-running recipe (the pick-one recipe, if any,
         // plus every concurrent one) shares `p.scale` — see this module's
         // doc comment.
-        let running_recipes = p
-            .recipe
-            .into_iter()
-            .chain(p.concurrent_recipes.iter().copied());
         if p.scale > 1e-9 {
-            for recipe in running_recipes.clone() {
+            let running_recipes = p
+                .recipe
+                .into_iter()
+                .chain(p.concurrent_recipes.iter().copied());
+            for recipe in running_recipes {
                 for ingredient in &recipe.inputs {
                     pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
                 }
