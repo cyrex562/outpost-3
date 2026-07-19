@@ -8,6 +8,13 @@
 # harness proof. Everything else is gated by `tech_prerequisite` and unlocked
 # progressively via content/base/tech.yaml.
 #
+# `colony_hq` is a consolidated, multi-function alternative to building
+# solar_array_mk1 + water_well + life_support_module separately (playtest
+# feedback: "multi-function starter buildings") — one build slot instead of
+# three, via `concurrent: true` recipes (recipes.yaml) that all run
+# simultaneously. The three standalone buildings stay available too, for
+# players who'd rather spread hazard risk across separate structures.
+#
 # Buildings with no recipe are intentionally passive (pure power_delta/slot
 # infrastructure) — each one below says why in its description.
 
@@ -107,6 +114,31 @@
   construction_cost:
     - id: structural_metal
       quantity: 15.0
+
+- id: colony_hq
+  name: Colony HQ
+  description: >
+    A single prefab core facility that runs power generation, water
+    extraction, and oxygen scrubbing simultaneously — the same three
+    functions as solar_array_mk1 + water_well + life_support_module
+    combined, in one build slot instead of three (playtest feedback:
+    "multi-function starter buildings"). Trades flexibility (you can't
+    lose just the water function to a hazard without losing power and
+    oxygen too) for build-slot efficiency; the three standalone
+    buildings remain available for players who'd rather spread that
+    risk across separate structures. See recipes.yaml's hq_* recipes,
+    all `concurrent: true` — they always run together, sharing this
+    building's power/labor/input scale each turn (see
+    outpost_core/src/colony/production.rs's module doc comment).
+  category: services
+  power_delta: -13.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 37.0
 
 # ── Tier 1 (basic_construction / basic_power / resource_extraction) ────────
 

@@ -1622,6 +1622,77 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that `colony_hq` — the consolidated multi-function
+    /// starter building (playtest feedback: "multi-function starter
+    /// buildings") — actually runs all three of its `concurrent: true`
+    /// recipes (power, water, oxygen) simultaneously every turn against the
+    /// real content pack, matching the combined output of building
+    /// solar_array_mk1 + water_well + life_support_module standalone.
+    #[test]
+    fn colony_hq_runs_all_three_concurrent_recipes_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Colony HQ Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("colony_hq", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let pool = &engine.state.colonies[idx].pool;
+        assert!(
+            pool.amount("power") > 0.0,
+            "colony_hq should produce power (hq_generate_power)"
+        );
+        assert!(
+            pool.amount("water") > 0.0,
+            "colony_hq should produce water (hq_pump_water)"
+        );
+        assert!(
+            pool.amount("oxygen") > 0.0,
+            "colony_hq should produce oxygen (hq_scrub_oxygen)"
+        );
+
+        let hq_result = engine.state.colonies[idx]
+            .last_production
+            .get("colony_hq")
+            .expect("colony_hq should have a recorded production result");
+        let mut ids = hq_result.concurrent_recipe_ids.clone();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec!["hq_generate_power", "hq_pump_water", "hq_scrub_oxygen"],
+            "all three concurrent recipes should have run"
+        );
+    }
+
     /// Real-engine proof that the fission_reactor (#215) both produces
     /// power from nuclear_fuel and emits radioactive_waste as a byproduct
     /// of running — the resolved design decision that waste comes from

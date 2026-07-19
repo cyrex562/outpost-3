@@ -1,0 +1,25 @@
+# Assertions for the colony_hq efficiency balance check.
+#
+# Expected net rates at population=100 with one colony_hq instance:
+#   water:  24 produced − 15 colonists = +9/sol
+#   oxygen:  7 produced −  5 colonists = +2/sol
+#   power:  24 produced − 20 colonists = +4/sol
+#
+# Matches content/checks/bootstrap_colony/'s water/oxygen/power margins
+# exactly (colony_hq's recipes are identical rates to the 3 standalone
+# buildings it consolidates) while using 1 build slot instead of 3.
+
+- commodity: water
+  expect: closed
+  min_net: 5.0
+  label: water-surplus-at-least-5-per-sol
+
+- commodity: oxygen
+  expect: closed
+  min_net: 1.0
+  label: oxygen-surplus-at-least-1-per-sol
+
+- commodity: power
+  expect: closed
+  min_net: 2.0
+  label: power-surplus-at-least-2-per-sol

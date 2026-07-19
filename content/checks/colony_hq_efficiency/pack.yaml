@@ -1,0 +1,26 @@
+id: colony-hq-efficiency-check
+name: Colony HQ Consolidated-Building Sustainability Check
+version: '0.1.0'
+description: >
+  Proves colony_hq — the consolidated multi-function starter building
+  (playtest feedback: "multi-function starter buildings") — closes
+  water/oxygen/power for a 100-colonist population using exactly ONE build
+  slot, matching the combined output of building solar_array_mk1 +
+  water_well + life_support_module standalone (3 slots) in
+  content/checks/bootstrap_colony/. Population per-capita consumption is
+  modeled as the same synthetic sink pattern bootstrap_colony uses (minus
+  food_ration, since colony_hq doesn't produce food — see hydroponic_bay
+  for that function, unaffected by this consolidation).
+
+  colony_hq's three recipes (hq_generate_power, hq_pump_water,
+  hq_scrub_oxygen) are all `concurrent: true` — the real engine
+  (outpost_core::colony::production) runs them simultaneously against ONE
+  building instance sharing a single scale factor. This static balance
+  calculator has no concept of `concurrent` recipes or shared per-instance
+  scale, so it's approximated here as three separate BuildingInstance
+  entries all naming `colony_hq` as their `building_id` (one per recipe) —
+  equivalent at full production (no shortfall), which is what this
+  steady-state closure check verifies. The real shared-scale behavior
+  (a shortfall throttling all three outputs together) is proven instead by
+  outpost_web::ws::tests::colony_hq_runs_all_three_concurrent_recipes_from_real_pack,
+  which exercises the actual production.rs code path.
