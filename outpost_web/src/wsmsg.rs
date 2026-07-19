@@ -247,6 +247,22 @@ pub enum ClientCommand {
         /// only behavior a caller with a single seed field could have meant.
         #[serde(default)]
         system_seed: Option<u64>,
+        /// Optional star-system generation tuning (playtest feedback: New
+        /// Game sliders). Omitted/`None` fields fall back to
+        /// `outpost_core::system_gen::SystemGenParams::default`'s values.
+        #[serde(default)]
+        habitable_zone_center_au: Option<f32>,
+        /// See `habitable_zone_center_au`.
+        #[serde(default)]
+        min_inner_planets: Option<u32>,
+        /// See `habitable_zone_center_au`.
+        #[serde(default)]
+        max_inner_planets: Option<u32>,
+        /// Overrides the difficulty-derived deposit-abundance scalar when
+        /// present; otherwise the scalar is resolved from `difficulty` as
+        /// before.
+        #[serde(default)]
+        abundance_scalar: Option<f32>,
     },
     /// Establish a new outpost anchored to a body (issue #233/#243).
     EstablishOutpost {
@@ -1317,6 +1333,7 @@ mod tests {
                         difficulty,
                         planet_seed,
                         system_seed,
+                        ..
                     },
             } => {
                 assert_eq!(seq, 10);
