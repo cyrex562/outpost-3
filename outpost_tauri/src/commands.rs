@@ -96,6 +96,13 @@ pub enum ClientCommand {
         colony_id: String,
         project_id: String,
     },
+    /// Place a batch of starter buildings instantly at colony founding,
+    /// bypassing the normal construction queue (issue: playtest feedback
+    /// round 2 — "lander" mechanic).
+    DeployStarterKit {
+        colony_id: String,
+        buildings: Vec<(String, u32)>,
+    },
     ResearchTech {
         tech_id: String,
     },
@@ -982,6 +989,13 @@ pub fn apply_command(
             colony_id: parse_colony(&colony_id)?,
             project_id: Uuid::parse_str(&project_id)
                 .map_err(|_| CmdError::InvalidArg(format!("bad project_id: {project_id}")))?,
+        },
+        ClientCommand::DeployStarterKit {
+            colony_id,
+            buildings,
+        } => Command::DeployStarterKit {
+            colony_id: parse_colony(&colony_id)?,
+            buildings,
         },
         ClientCommand::ResearchTech { tech_id } => Command::ResearchTech { tech_id },
         ClientCommand::EnqueueResearch { tech_id } => Command::EnqueueResearch { tech_id },

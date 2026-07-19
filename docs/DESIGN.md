@@ -95,6 +95,10 @@ A **management screen, not a spatial grid.** The old grid + isometric placement 
 
 **Dependency:** Continuous re-tuning is only engaging if the world keeps drifting. The simulation must generate reasons to re-tune — resource depletion, tech unlocks shifting the optimal build, population growth changing labor, trade shifts, and events.
 
+**Starter buildings deploy instantly at founding, "lander"-style (playtest feedback round 2).** Buildings picked in the Found Colony wizard's loadout step are no longer queued through the normal multi-turn `build_queue` — they land operational the moment the colony is founded, via a dedicated one-shot `DeployStarterKit` command that places the whole batch directly into `colony.buildings`. This fixes two playtest pain points: (1) selecting a full starter roster could exceed the 5-slot budget and surface a confusing "build slot queue" error with no clear explanation, and (2) waiting multiple sols for a colony's very first buildings to complete felt wrong for what should be an immediate landing event. The batch is validated atomically (tech gates, total slot cost) before anything is placed, so a rejected request never partially deploys, and the one-shot guard (`Colony.starter_kit_deployed`) prevents it from becoming a standing free/instant alternative to `QueueConstruction` later in the game. Regular construction after founding is unaffected — it still goes through `build_queue`/`construction_turns` as before.
+
+*Deferred follow-up:* consolidating the starter roster into fewer, more capable multi-function buildings (e.g. a combined colony HQ, or a power/atmosphere/water utility building) was raised in the same playtest round but is explicitly out of scope here — it requires reworking the single-recipe-per-building-type architecture (`Colony.active_recipes` is keyed by `building_type`, colony-wide) to support true simultaneous multi-output buildings, and is tracked as a separate, larger future effort.
+
 ---
 
 ## 6. Population

@@ -20,6 +20,12 @@ export type Command =
   | { kind: 'assign_labour'; colony_id: string; slot: string; labour: number }
   | { kind: 'cancel_construction'; colony_id: string; project_id: string }
   | {
+      kind: 'deploy_starter_kit'
+      colony_id: string
+      /** `[building_type, slot_cost]` pairs to place instantly, in order. */
+      buildings: [string, number][]
+    }
+  | {
       kind: 'set_directive'
       directive: {
         id: string

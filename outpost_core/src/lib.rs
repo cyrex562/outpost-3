@@ -135,6 +135,25 @@ pub enum Command {
         /// Identifier of the construction project to cancel.
         project_id: ProjectId,
     },
+    /// Place a batch of buildings directly into a colony's `buildings` list,
+    /// bypassing `build_queue`/`construction_turns` entirely — a "lander"
+    /// mechanic for the founding moment, mirroring how
+    /// [`Command::BuildOrbitalStation`] already bypasses its own queued
+    /// sibling (`BeginOrbitalConstruction`).
+    ///
+    /// One-shot per colony (rejects once [`colony::Colony::starter_kit_deployed`]
+    /// is set) so this can't become a standing free-and-instant alternative
+    /// to `QueueConstruction` later in the game. Validates the whole batch
+    /// (tech gates, total slot cost) before placing anything, so a rejected
+    /// request never leaves a partially-deployed kit. Still subject to the
+    /// same [`EngineError::TechLocked`]/[`EngineError::SlotCapacityExceeded`]
+    /// gates `QueueConstruction` enforces.
+    DeployStarterKit {
+        /// Target colony — must not have deployed a starter kit already.
+        colony_id: ColonyId,
+        /// `(building_type, slot_cost)` pairs to place, in order.
+        buildings: Vec<(String, u32)>,
+    },
     /// Assign a number of labour units to a named slot in a colony.
     ///
     /// `slot` identifies the production slot; `labour` is the worker-unit count.
@@ -2791,6 +2810,66 @@ impl GameEngine {
                     building_type: building_type.clone(),
                     project_id,
                 }])
+            }
+
+            Command::DeployStarterKit {
+                colony_id,
+                buildings,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                if self.state.colonies[idx].starter_kit_deployed {
+                    return Err(EngineError::InvalidArgument(
+                        "starter kit already deployed for this colony".into(),
+                    ));
+                }
+
+                // Validate the whole batch before placing anything, so a
+                // rejection (bad building_type, tech-locked, over budget)
+                // never leaves a partially-deployed kit.
+                let mut total_slots: u32 = 0;
+                for (building_type, slot_cost) in buildings {
+                    if building_type.trim().is_empty() {
+                        return Err(EngineError::InvalidArgument(
+                            "building_type must not be empty".into(),
+                        ));
+                    }
+                    if let Some(reg) = self.state.registry.as_ref() {
+                        if let Some(def) = reg.building(building_type) {
+                            if let Some(tech_id) = &def.tech_prerequisite {
+                                if !self.state.tech_state.researched.contains(tech_id) {
+                                    return Err(EngineError::TechLocked {
+                                        building_id: building_type.clone(),
+                                        tech_id: tech_id.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    total_slots = total_slots.saturating_add(*slot_cost);
+                }
+                let available = self.state.colonies[idx].slots_available();
+                if total_slots > available {
+                    return Err(EngineError::SlotCapacityExceeded {
+                        needed: total_slots,
+                        available,
+                    });
+                }
+
+                let mut events = Vec::with_capacity(buildings.len());
+                for (building_type, slot_cost) in buildings {
+                    self.state.colonies[idx]
+                        .buildings
+                        .push(colony::PlacedBuilding::new(
+                            building_type.clone(),
+                            *slot_cost,
+                        ));
+                    events.push(Event::BuildingConstructed {
+                        colony_id: *colony_id,
+                        building_type: building_type.clone(),
+                    });
+                }
+                self.state.colonies[idx].starter_kit_deployed = true;
+                Ok(events)
             }
 
             Command::CancelConstruction {
@@ -5922,6 +6001,233 @@ mod tests {
 
         let result = engine.apply(&queue_cmd(colony_id, "anything_unregistered", 1));
         assert!(result.is_ok(), "expected success, got {result:?}");
+    }
+
+    // ── DeployStarterKit ──
+
+    #[test]
+    fn deploy_starter_kit_places_buildings_instantly() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Founding".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let events = engine
+            .apply(&Command::DeployStarterKit {
+                colony_id,
+                buildings: vec![("colony_hq".into(), 1), ("habitat_dome".into(), 1)],
+            })
+            .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().all(|e| matches!(
+            e,
+            Event::BuildingConstructed { colony_id: cid, .. } if *cid == colony_id
+        )));
+
+        let colony = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .unwrap();
+        assert_eq!(colony.buildings.len(), 2);
+        assert!(colony.build_queue.projects.is_empty());
+        assert!(colony.starter_kit_deployed);
+    }
+
+    #[test]
+    fn deploy_starter_kit_fails_when_tech_not_researched() {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Delta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "advanced_reactor".into(),
+            name: "Advanced Reactor".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: Some("fusion_engineering".into()),
+            maintenance: vec![],
+        });
+        engine.state.registry = Some(reg);
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("advanced_reactor".into(), 1)],
+        });
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::TechLocked { ref tech_id, .. }) if tech_id == "fusion_engineering"
+            ),
+            "expected TechLocked, got {result:?}"
+        );
+
+        let colony = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .unwrap();
+        assert!(colony.buildings.is_empty());
+        assert!(!colony.starter_kit_deployed);
+    }
+
+    #[test]
+    fn deploy_starter_kit_succeeds_once_tech_researched() {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Delta".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "advanced_reactor".into(),
+            name: "Advanced Reactor".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 1,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: Some("fusion_engineering".into()),
+            maintenance: vec![],
+        });
+        engine.state.registry = Some(reg);
+        engine
+            .state
+            .tech_state
+            .researched
+            .insert("fusion_engineering".into());
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("advanced_reactor".into(), 1)],
+        });
+        assert!(result.is_ok(), "expected success, got {result:?}");
+    }
+
+    #[test]
+    fn deploy_starter_kit_rejects_second_call() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Founding".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        engine
+            .apply(&Command::DeployStarterKit {
+                colony_id,
+                buildings: vec![("colony_hq".into(), 1)],
+            })
+            .unwrap();
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("habitat_dome".into(), 1)],
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected InvalidArgument on second deploy, got {result:?}"
+        );
+
+        let colony = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .unwrap();
+        assert_eq!(
+            colony.buildings.len(),
+            1,
+            "second call must not add buildings"
+        );
+    }
+
+    #[test]
+    fn deploy_starter_kit_rejects_over_budget_batch_atomically() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Founding".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // BASE_SLOT_CAPACITY is 5; request a batch totalling 6.
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![
+                ("colony_hq".into(), 1),
+                ("habitat_dome".into(), 1),
+                ("power_plant".into(), 1),
+                ("factory".into(), 1),
+                ("mine".into(), 1),
+                ("extra".into(), 1),
+            ],
+        });
+        assert!(
+            matches!(result, Err(EngineError::SlotCapacityExceeded { .. })),
+            "expected SlotCapacityExceeded, got {result:?}"
+        );
+
+        let colony = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .unwrap();
+        assert!(
+            colony.buildings.is_empty(),
+            "over-budget batch must not partially deploy"
+        );
+        assert!(!colony.starter_kit_deployed);
     }
 
     #[test]

@@ -164,7 +164,7 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     expect(preview.classes()).toContain('over')
   })
 
-  it('sends supply_overrides and queues N construction commands, omitting zeroed-out commodities', async () => {
+  it('sends supply_overrides and deploys a starter kit batch, omitting zeroed-out commodities', async () => {
     const wrapper = await mountAtStep3()
 
     // Zero out food_ration, and queue 2x water_well.
@@ -175,6 +175,12 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     sendCommand.mockImplementation(async (cmd: Command) => {
       if (cmd.kind === 'found_colony_at_site') {
         return [{ kind: 'colony_founded', colony_id: 'colony-1' } as unknown as GameEvent]
+      }
+      if (cmd.kind === 'deploy_starter_kit') {
+        return [
+          { kind: 'building_constructed', colony_id: 'colony-1', building_type: 'water_well' } as unknown as GameEvent,
+          { kind: 'building_constructed', colony_id: 'colony-1', building_type: 'water_well' } as unknown as GameEvent,
+        ]
       }
       return []
     })
@@ -189,12 +195,37 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     expect(foundCmd.starting_population).toBe(100)
     expect(foundCmd.supply_overrides).toEqual([['water', 50]])
 
-    const queueCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'queue_construction')
-    expect(queueCalls.length).toBe(2)
-    for (const [cmd] of queueCalls) {
-      expect((cmd as Extract<Command, { kind: 'queue_construction' }>).building_type).toBe('water_well')
-    }
+    const kitCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'deploy_starter_kit')
+    expect(kitCalls.length).toBe(1)
+    const kitCmd = kitCalls[0][0] as Extract<Command, { kind: 'deploy_starter_kit' }>
+    expect(kitCmd.colony_id).toBe('colony-1')
+    expect(kitCmd.buildings).toEqual([
+      ['water_well', 1],
+      ['water_well', 1],
+    ])
 
+    expect(routerPush).toHaveBeenCalledWith('/colony')
+  })
+
+  it('still navigates when the starter kit deploy is rejected (rejection surfaced via toastMessage)', async () => {
+    const wrapper = await mountAtStep3()
+
+    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
+
+    sendCommand.mockImplementation(async (cmd: Command) => {
+      if (cmd.kind === 'found_colony_at_site') {
+        return [{ kind: 'colony_founded', colony_id: 'colony-1' } as unknown as GameEvent]
+      }
+      // deploy_starter_kit rejected — engine returns no events.
+      return []
+    })
+
+    await wrapper.find('.btn.primary').trigger('click') // Next -> step 4
+    await wrapper.find('.btn.primary').trigger('click') // Found Colony
+    await flushPromises()
+
+    const kitCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'deploy_starter_kit')
+    expect(kitCalls.length).toBe(1)
     expect(routerPush).toHaveBeenCalledWith('/colony')
   })
 })

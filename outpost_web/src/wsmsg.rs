@@ -79,6 +79,15 @@ pub enum ClientCommand {
         /// UUID of the construction project to cancel.
         project_id: String,
     },
+    /// Place a batch of starter buildings instantly at colony founding,
+    /// bypassing the normal construction queue (issue: playtest feedback
+    /// round 2 — "lander" mechanic).
+    DeployStarterKit {
+        /// Target colony UUID.
+        colony_id: String,
+        /// `(building_type, slot_cost)` pairs to place, in order.
+        buildings: Vec<(String, u32)>,
+    },
     /// Assign labour to a production slot.
     AssignLabour {
         /// Target colony UUID.

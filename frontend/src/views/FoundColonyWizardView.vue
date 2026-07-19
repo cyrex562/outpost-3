@@ -274,24 +274,29 @@ async function finish(): Promise<void> {
         body_id: chosenBody.value.body_id,
       })
     }
+    // Deploy the chosen starter buildings instantly in one "lander" batch —
+    // the engine places them directly into `colony.buildings` rather than the
+    // multi-turn `build_queue`, so they're operational the moment the colony
+    // is founded. The engine validates the whole batch (tech gates, total
+    // slot cost) atomically before placing anything.
+    const kitBuildings: [string, number][] = []
     for (const [bid, count] of Object.entries(buildingCounts.value)) {
       if (count <= 0) continue
       const b = buildings.value.find((x) => x.id === bid)
       if (!b) continue
-      // Queue N separate construction projects — the engine's existing
-      // per-call slot-capacity check (`EngineError::SlotCapacityExceeded`)
-      // is what actually enforces the starter build-slot budget; the
-      // wizard's running total is just a preview of that same rule.
       for (let i = 0; i < count; i += 1) {
-        await gameStore.sendCommand({
-          kind: 'queue_construction',
-          colony_id: founded.colony_id,
-          building_type: b.id,
-          slot_cost: b.slot_cost,
-          labor_per_turn: b.labor_per_turn,
-          construction_cost: b.construction_cost,
-          construction_turns: b.construction_turns,
-        })
+        kitBuildings.push([b.id, b.slot_cost])
+      }
+    }
+    if (kitBuildings.length > 0) {
+      const kitEvents = await gameStore.sendCommand({
+        kind: 'deploy_starter_kit',
+        colony_id: founded.colony_id,
+        buildings: kitBuildings,
+      })
+      if (kitEvents.length === 0) {
+        gameStore.toastMessage =
+          gameStore.toastMessage ?? 'Starting buildings could not be deployed — check engine state.'
       }
     }
     // If no starting buildings were queued, the selection change fires the
