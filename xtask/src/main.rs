@@ -39,15 +39,17 @@ fn print_usage() {
          Usage: cargo xtask <command>\n\
          \n\
          Commands:\n\
-         \x20 build-windows-portable   Cross-compile outpost_tauri for Windows (best-effort,\n\
-         \x20                          via cargo-xwin) and zip an installer-free portable\n\
-         \x20                          bundle under dist/. Run on Linux/macOS.\n\
+         \x20 build-windows-portable   Build outpost_tauri and zip an installer-free portable\n\
+         \x20                          bundle under dist/. Natively on Windows; cross-compiled\n\
+         \x20                          via cargo-xwin (best-effort) on Linux/macOS.\n\
          \x20 setup-windows            Install the x86_64-pc-windows-msvc target + cargo-xwin,\n\
-         \x20                          without building (useful to pre-warm a CI cache).\n\
+         \x20                          without building. Only needed for the Linux/macOS\n\
+         \x20                          cross-compile path — a no-op concept on Windows itself.\n\
          \x20 help                     Show this help.\n\
          \n\
-         The authoritative Windows build remains `cargo tauri build`, run on\n\
-         a real Windows host from inside outpost_tauri/ — this command exists\n\
-         for CI smoke-testing / portable dev builds without a Windows runner.\n"
+         The authoritative *installer* build remains `cargo tauri build`, run\n\
+         on Windows from inside outpost_tauri/ — this command exists for a\n\
+         zip-and-go dev/distribution artifact, not to replace NSIS/WiX\n\
+         packaging.\n"
     );
 }
