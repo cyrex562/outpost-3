@@ -289,15 +289,13 @@ async function finish(): Promise<void> {
       }
     }
     if (kitBuildings.length > 0) {
-      const kitEvents = await gameStore.sendCommand({
+      // sendCommand() already sets gameStore.toastMessage with the failure
+      // reason (or a success summary) — no separate fallback needed here.
+      await gameStore.sendCommand({
         kind: 'deploy_starter_kit',
         colony_id: founded.colony_id,
         buildings: kitBuildings,
       })
-      if (kitEvents.length === 0) {
-        gameStore.toastMessage =
-          gameStore.toastMessage ?? 'Starting buildings could not be deployed — check engine state.'
-      }
     }
     // If no starting buildings were queued, the selection change fires the
     // watcher which triggers a refresh. Await it explicitly here so that by

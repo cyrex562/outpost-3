@@ -144,14 +144,21 @@ pub enum Command {
     /// One-shot per colony (rejects once [`colony::Colony::starter_kit_deployed`]
     /// is set) so this can't become a standing free-and-instant alternative
     /// to `QueueConstruction` later in the game. Validates the whole batch
-    /// (tech gates, total slot cost) before placing anything, so a rejected
-    /// request never leaves a partially-deployed kit. Still subject to the
-    /// same [`EngineError::TechLocked`]/[`EngineError::SlotCapacityExceeded`]
+    /// (non-empty, tech gates, total slot cost) before placing anything, so
+    /// a rejected request never leaves a partially-deployed kit and never
+    /// consumes the one-shot flag. Still subject to the same
+    /// [`EngineError::TechLocked`]/[`EngineError::SlotCapacityExceeded`]
     /// gates `QueueConstruction` enforces.
+    ///
+    /// Unlike `QueueConstruction`, this skips `labor_per_turn` and
+    /// `construction_cost` entirely — starter buildings are meant to arrive
+    /// fully paid-for as part of the founding moment, not drip-fed labor
+    /// over several sols the colony doesn't have workers for yet.
     DeployStarterKit {
         /// Target colony — must not have deployed a starter kit already.
         colony_id: ColonyId,
-        /// `(building_type, slot_cost)` pairs to place, in order.
+        /// `(building_type, slot_cost)` pairs to place, in order. Must not
+        /// be empty.
         buildings: Vec<(String, u32)>,
     },
     /// Assign a number of labour units to a named slot in a colony.
@@ -2820,6 +2827,11 @@ impl GameEngine {
                 if self.state.colonies[idx].starter_kit_deployed {
                     return Err(EngineError::InvalidArgument(
                         "starter kit already deployed for this colony".into(),
+                    ));
+                }
+                if buildings.is_empty() {
+                    return Err(EngineError::InvalidArgument(
+                        "starter kit batch must not be empty".into(),
                     ));
                 }
 
@@ -6041,6 +6053,41 @@ mod tests {
         assert_eq!(colony.buildings.len(), 2);
         assert!(colony.build_queue.projects.is_empty());
         assert!(colony.starter_kit_deployed);
+    }
+
+    #[test]
+    fn deploy_starter_kit_rejects_empty_batch_without_consuming_one_shot() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Founding".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![],
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected InvalidArgument for an empty batch, got {result:?}"
+        );
+
+        let colony = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .unwrap();
+        assert!(
+            !colony.starter_kit_deployed,
+            "a rejected empty batch must not consume the one-shot flag"
+        );
     }
 
     #[test]
