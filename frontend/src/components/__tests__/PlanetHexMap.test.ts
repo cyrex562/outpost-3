@@ -57,8 +57,9 @@ describe('PlanetHexMap temperature tint (#191)', () => {
       props: { map: makeMap(hexes), selectedSite: null },
     })
     const fill = wrapper.find('polygon').attributes('fill')
-    // Grassland (#8ab558) at elevation 0.5 -> factor 0.965.
-    expect(fill).toBe('rgb(133, 175, 85)')
+    // Plains terrain (#8a7f5a) + Grassland vegetation overlay (strength 0.25
+    // toward #2f6b2f) -> rgb(115, 122, 79), then elevation 0.5 -> factor 0.965.
+    expect(fill).toBe('rgb(111, 118, 76)')
   })
 
   it('tints cold bands toward blue and the hot band toward orange/red', () => {
@@ -118,5 +119,58 @@ describe('PlanetHexMap harsh-climate suitability warning (#190)', () => {
     })
     await wrapper.find('g').trigger('mouseenter')
     expect(wrapper.find('.tt-warn').text()).toBe('Impassable')
+  })
+})
+
+describe('PlanetHexMap deposit boxes', () => {
+  it('renders a two-letter code box per deposit, for real VEIN_COMMODITIES entries', () => {
+    const hexes = [
+      makeHex({
+        q: 0,
+        r: 0,
+        site_id: 'deposit-hex',
+        deposits: [
+          { commodity_id: 'structural_ore', richness: 0.8 },
+          { commodity_id: 'fissile_ore', richness: 0.4 },
+        ],
+      }),
+    ]
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap(hexes), selectedSite: null },
+    })
+    const codes = wrapper.findAll('.deposit-code').map((n) => n.text())
+    expect(codes.sort()).toEqual(['FI', 'SO'])
+  })
+
+  it('falls back to the first two letters, uppercased, for an unlisted commodity', () => {
+    const hexes = [
+      makeHex({
+        q: 0,
+        r: 0,
+        site_id: 'unknown-deposit',
+        deposits: [{ commodity_id: 'exotic_gas', richness: 0.5 }],
+      }),
+    ]
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap(hexes), selectedSite: null },
+    })
+    expect(wrapper.find('.deposit-code').text()).toBe('EX')
+  })
+
+  it('lists only commodities actually present on the map in the legend, with matching codes', () => {
+    const hexes = [
+      makeHex({
+        q: 0,
+        r: 0,
+        site_id: 'deposit-hex',
+        deposits: [{ commodity_id: 'silicates', richness: 0.6 }],
+      }),
+    ]
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap(hexes), selectedSite: null },
+    })
+    const legend = wrapper.get('[data-testid="planet-map-legend"]')
+    expect(legend.text()).toContain('SL')
+    expect(legend.text()).toContain('silicates')
   })
 })

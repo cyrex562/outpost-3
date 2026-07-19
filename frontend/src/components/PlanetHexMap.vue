@@ -172,33 +172,58 @@ function hexPoints(cx: number, cy: number): string {
   return pts.join(' ')
 }
 
-// Biome color palette
-const BIOME_COLOR: Record<string, string> = {
-  Desert: '#c9a566',
-  Tundra: '#a9c0c8',
-  Polar: '#e2ecef',
-  Forest: '#3d7a3d',
-  Jungle: '#276b28',
-  Grassland: '#8ab558',
-  Barren: '#8a7f6a',
+// Terrain is the primary color signal — the physical landform (rock, soil,
+// water, ash) rather than what's growing on it. Mirrors `outpost_core::map::Terrain`.
+const TERRAIN_COLOR: Record<string, string> = {
+  Plains: '#8a7f5a',
+  Hills: '#9c8a66',
+  Mountains: '#7d7468',
+  Wetlands: '#5c6e58',
   Ocean: '#2c4665',
-  Geothermal: '#b04a2a',
+  Volcanic: '#5a3324',
 }
 
-function biomeColor(hex: PlanetHex): string {
-  const base = hex.habitable ? BIOME_COLOR[hex.biome] ?? '#556' : BIOME_COLOR.Ocean
-  const elevated = applyElevationShading(base, hex.elevation)
+// Vegetation is layered on top of terrain as a green tint, derived from
+// biome (there's no independent vegetation-density field today — this is a
+// deliberate approximation: biome is a category, not a gradient, but it's
+// the best signal available without new backend data). Mirrors
+// `outpost_core::map::Biome`; biomes not listed here (Desert/Tundra/Polar/
+// Barren/Ocean/Geothermal) get no vegetation overlay.
+const VEGETATION_STRENGTH: Record<string, number> = {
+  Jungle: 0.7,
+  Forest: 0.55,
+  Grassland: 0.25,
+}
+const VEGETATION_COLOR = '#2f6b2f'
+
+function terrainColor(hex: PlanetHex): string {
+  const base = TERRAIN_COLOR[hex.terrain] ?? '#556'
+  const vegetated = applyVegetation(base, hex.biome)
+  const elevated = applyElevationShading(vegetated, hex.elevation)
   return applyTemperatureTint(elevated, hex.temperature)
+}
+
+/** Blend the vegetation tint over a terrain base color, if this biome has any. */
+function applyVegetation(rgbOrHex: string, biome: string): string {
+  const strength = VEGETATION_STRENGTH[biome]
+  if (!strength) return rgbOrHex
+  const base = parseRgb(rgbOrHex)
+  const target = parseHex(VEGETATION_COLOR)
+  if (!base || !target) return rgbOrHex
+  const r = clamp255(base.r + (target.r - base.r) * strength)
+  const g = clamp255(base.g + (target.g - base.g) * strength)
+  const b = clamp255(base.b + (target.b - base.b) * strength)
+  return `rgb(${r}, ${g}, ${b})`
 }
 
 /**
  * Modulate a hex-fill colour by elevation to create subtle relief shading.
- * Low basins darken, high peaks brighten — kept modest so the biome palette
- * still dominates the read.
+ * Low basins darken, high peaks brighten — kept modest so the terrain/
+ * vegetation colour still dominates the read.
  */
-function applyElevationShading(hex: string, elevation: number): string {
-  const rgb = parseHex(hex)
-  if (!rgb) return hex
+function applyElevationShading(color: string, elevation: number): string {
+  const rgb = parseRgb(color)
+  if (!rgb) return color
   // elevation 0.5 -> 1.0 (neutral); 0.0 -> 0.78 (dark valley); 1.0 -> 1.15 (bright peak).
   const t = Math.max(0, Math.min(1, elevation))
   const factor = 0.78 + t * 0.37
@@ -223,7 +248,8 @@ const TEMPERATURE_TINT: Record<string, { color: string; strength: number }> = {
 /**
  * Blend a subtle cool→warm tint over an already elevation-shaded colour so
  * the thermal gradient reads at a glance without a hover (issue #191).
- * Kept weak enough that biome colour and elevation shading still dominate.
+ * Kept weak enough that terrain/vegetation colour and elevation shading
+ * still dominate.
  */
 function applyTemperatureTint(rgbColor: string, temperature: string): string {
   const tint = TEMPERATURE_TINT[temperature]
@@ -255,43 +281,49 @@ function clamp255(v: number): number {
   return Math.max(0, Math.min(255, Math.round(v)))
 }
 
-// Per-commodity colour palette for deposit dots. Unknown commodities fall
-// back to a neutral grey — the id also appears in the hover tooltip so the
-// player can still identify it.
-const DEPOSIT_COLOR: Record<string, string> = {
-  iron: '#c88a4a',
-  silicates: '#c9b8a5',
-  rare_metals: '#e6c04a',
-  water_ice: '#a8d6e6',
-  water: '#5a9ac9',
-  methane: '#8d6ac8',
-  sulfur: '#e6d84a',
-  geothermal_energy: '#e07a3a',
-  organics: '#6ac26a',
+// Per-commodity colour + two-letter code for deposit boxes. Covers
+// `outpost_core::map::VEIN_COMMODITIES` (the only commodities that ever
+// actually appear as a hex deposit) explicitly; anything else falls back to
+// a neutral grey box with its first two letters, uppercased — the full id
+// also appears in the hover tooltip so the player can always identify it.
+const DEPOSIT_STYLE: Record<string, { color: string; code: string }> = {
+  structural_ore: { color: '#c88a4a', code: 'SO' },
+  conductive_ore: { color: '#d4703a', code: 'CO' },
+  precious_ore: { color: '#e6c04a', code: 'PO' },
+  refractory_ore: { color: '#a85a4a', code: 'RO' },
+  semiconductor_ore: { color: '#8d6ac8', code: 'SI' },
+  fissile_ore: { color: '#b8e64a', code: 'FI' },
+  silicates: { color: '#c9b8a5', code: 'SL' },
+  hydrocarbons: { color: '#4a3a2a', code: 'HC' },
+  biomass: { color: '#6ac26a', code: 'BM' },
 }
 
 function depositColor(commodity_id: string): string {
-  return DEPOSIT_COLOR[commodity_id] ?? '#aab'
+  return DEPOSIT_STYLE[commodity_id]?.color ?? '#aab'
 }
 
-// Layout multiple deposit dots inside a hex, evenly spaced around the top
+function depositCode(commodity_id: string): string {
+  return DEPOSIT_STYLE[commodity_id]?.code ?? commodity_id.slice(0, 2).toUpperCase()
+}
+
+// Layout multiple deposit boxes inside a hex, evenly spaced around the top
 // half so they don't overlap the colony star underneath.
-function depositPositions(hex: Positioned): { cx: number; cy: number; r: number; color: string; commodity_id: string; richness: number }[] {
+function depositPositions(
+  hex: Positioned,
+): { cx: number; cy: number; size: number; color: string; code: string; commodity_id: string; richness: number }[] {
   const n = hex.deposits.length
   if (n === 0) return []
   const orbit = HEX_SIZE * 0.45
   const startAngle = -Math.PI / 2 // straight up
   return hex.deposits.map((d, i) => {
-    const angle =
-      n === 1
-        ? startAngle
-        : startAngle + ((i - (n - 1) / 2) * (Math.PI / 3))
+    const angle = n === 1 ? startAngle : startAngle + (i - (n - 1) / 2) * (Math.PI / 3)
     return {
       cx: hex.cx + orbit * Math.cos(angle),
       cy: hex.cy + orbit * Math.sin(angle),
-      // Richness is [0,1]; map to a modest radius so dense hexes don't clutter.
-      r: 2 + Math.max(0.5, d.richness) * 3,
+      // Richness is [0,1]; map to a modest box side so dense hexes don't clutter.
+      size: 9 + Math.max(0.3, d.richness) * 5,
       color: depositColor(d.commodity_id),
+      code: depositCode(d.commodity_id),
       commodity_id: d.commodity_id,
       richness: d.richness,
     }
@@ -299,14 +331,14 @@ function depositPositions(hex: Positioned): { cx: number; cy: number; r: number;
 }
 
 // Legend entries: only show commodities that actually appear on the map.
-const legend = computed<{ commodity_id: string; color: string }[]>(() => {
+const legend = computed<{ commodity_id: string; color: string; code: string }[]>(() => {
   const seen = new Set<string>()
   for (const h of props.map.hexes) {
     for (const d of h.deposits) seen.add(d.commodity_id)
   }
   return Array.from(seen)
     .sort()
-    .map((id) => ({ commodity_id: id, color: depositColor(id) }))
+    .map((id) => ({ commodity_id: id, color: depositColor(id), code: depositCode(id) }))
 })
 
 /** Axial hex distance, matching the Rust `HexCoord::distance` cube-coordinate formula. */
@@ -439,17 +471,28 @@ defineExpose({ focusSite, resetView })
         @mousemove="onHexMove"
         @mouseleave="onHexLeave"
       >
-        <polygon :points="hexPoints(h.cx, h.cy)" :fill="biomeColor(h)" />
-        <circle
-          v-for="d in depositPositions(h)"
-          :key="`${h.site_id}-${d.commodity_id}`"
-          :cx="d.cx"
-          :cy="d.cy"
-          :r="d.r"
-          :fill="d.color"
-          stroke="#000"
-          stroke-width="0.5"
-        />
+        <polygon :points="hexPoints(h.cx, h.cy)" :fill="terrainColor(h)" />
+        <g v-for="d in depositPositions(h)" :key="`${h.site_id}-${d.commodity_id}`">
+          <rect
+            :x="d.cx - d.size / 2"
+            :y="d.cy - d.size / 2"
+            :width="d.size"
+            :height="d.size"
+            rx="1.5"
+            :fill="d.color"
+            stroke="#000"
+            stroke-width="0.5"
+          />
+          <text
+            :x="d.cx"
+            :y="d.cy"
+            text-anchor="middle"
+            dominant-baseline="central"
+            class="deposit-code"
+          >
+            {{ d.code }}
+          </text>
+        </g>
         <text
           v-if="h.occupied_by"
           :x="h.cx"
@@ -497,7 +540,9 @@ defineExpose({ focusSite, resetView })
           :key="d.commodity_id"
           class="tt-deposit"
         >
-          <span class="tt-dot" :style="{ background: depositColor(d.commodity_id) }" />
+          <span class="tt-box" :style="{ background: depositColor(d.commodity_id) }">{{
+            depositCode(d.commodity_id)
+          }}</span>
           {{ d.commodity_id }} · {{ (d.richness * 100).toFixed(0) }}%
         </div>
       </div>
@@ -506,7 +551,7 @@ defineExpose({ focusSite, resetView })
     <div v-if="legend.length" class="legend" data-testid="planet-map-legend">
       <div class="legend-title">Deposits</div>
       <div v-for="e in legend" :key="e.commodity_id" class="legend-row">
-        <span class="legend-dot" :style="{ background: e.color }" />
+        <span class="legend-box" :style="{ background: e.color }">{{ e.code }}</span>
         <span class="legend-label">{{ e.commodity_id }}</span>
       </div>
     </div>
@@ -579,12 +624,17 @@ defineExpose({ focusSite, resetView })
 .tt-warn { color: #d86; }
 .tt-deposits { margin-top: 0.3rem; }
 .tt-deposit { display: flex; align-items: center; gap: 0.35rem; color: #aab; }
-.tt-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.tt-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 14px;
+  border-radius: 2px;
   border: 1px solid #000;
+  color: #000;
+  font-size: 0.6rem;
+  font-weight: bold;
 }
 
 .legend {
@@ -603,12 +653,26 @@ defineExpose({ focusSite, resetView })
 }
 .legend-title { color: #668; margin-bottom: 0.2rem; }
 .legend-row { display: flex; align-items: center; gap: 0.35rem; }
-.legend-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.legend-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 12px;
+  border-radius: 2px;
   border: 1px solid #000;
+  color: #000;
+  font-size: 0.55rem;
+  font-weight: bold;
 }
 .legend-label { white-space: nowrap; }
+
+.deposit-code {
+  font-family: monospace;
+  font-size: 5px;
+  font-weight: bold;
+  fill: #000;
+  pointer-events: none;
+  user-select: none;
+}
 </style>
