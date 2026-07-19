@@ -26,14 +26,19 @@ vi.mock('vue-router', () => ({
 
 const sendCommand = vi.fn<[Command], Promise<GameEvent[]>>()
 const refreshColonyScreen = vi.fn()
+// A single shared object (not a fresh literal per call) so tests can read
+// back mutations the component makes, e.g. `gameStoreMock.toastMessage`
+// after `finish()` sets it directly (mirrors the real Pinia store, which is
+// also a single shared instance).
+const gameStoreMock = {
+  sendCommand: (cmd: Command) => sendCommand(cmd),
+  busy: false,
+  selectedColonyId: null as string | null,
+  toastMessage: null as string | null,
+  refreshColonyScreen: (id?: string | null) => refreshColonyScreen(id),
+}
 vi.mock('@/stores/game', () => ({
-  useGameStore: () => ({
-    sendCommand: (cmd: Command) => sendCommand(cmd),
-    busy: false,
-    selectedColonyId: null,
-    toastMessage: null,
-    refreshColonyScreen: (id?: string | null) => refreshColonyScreen(id),
-  }),
+  useGameStore: () => gameStoreMock,
 }))
 
 const BODY = {
@@ -124,6 +129,8 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     routerPush.mockReset()
     sendCommand.mockReset()
     refreshColonyScreen.mockReset()
+    gameStoreMock.toastMessage = null
+    gameStoreMock.selectedColonyId = null
   })
 
   it('pre-fills supply spinners from the default preset, scaled to starting population', async () => {

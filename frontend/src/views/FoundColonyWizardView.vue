@@ -152,7 +152,11 @@ const canAdvance = computed(() => {
     case 3:
       return startingPop.value > 0 && totalBuildingCount.value > 0 && !overBudget.value
     case 4:
-      return colonyName.value.trim().length > 0
+      // Re-check overBudget here too, not just on step 3's gate — step 3
+      // is the only place buildingCounts is edited today, but defending
+      // the actual submit action directly means this can't silently drift
+      // out of sync if that ever changes.
+      return colonyName.value.trim().length > 0 && !overBudget.value
     default:
       return false
   }
