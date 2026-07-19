@@ -24,6 +24,17 @@ const error = ref<string | null>(null)
 // New game form
 const contentDir = ref('embedded')
 const seed = ref(0)
+/** Independent seed for star-system generation (issue #199) — defaults to
+ * `seed` (the planet seed) server-side when omitted, but has its own
+ * Randomise control so the system can be rerolled without rerolling the
+ * founding planet's hex map (playtest feedback round 3). */
+const systemSeed = ref<number>(Math.floor(Math.random() * 0xffffffff))
+// Star-system generation tuning (playtest feedback round 3): mirrors
+// NewGameView.vue's (browser-mode) sliders for the Tauri desktop New Game
+// panel.
+const habitableZoneCenterAu = ref<number>(1.0)
+const innerPlanetCount = ref<number>(3)
+const abundanceScalar = ref<number>(1.0)
 // Difficulty selection: built-in preset name, "Custom", or "custom:<name>" for a saved preset.
 const difficulty = ref<string>('Normal')
 const savedPresets = ref<CustomPreset[]>([])
@@ -107,6 +118,13 @@ async function startNewGame(): Promise<void> {
       cp?.menaceEnabled,
       cp?.hazardsEnabled,
       cp?.maintenanceEnabled,
+      systemSeed.value,
+      {
+        habitableZoneCenterAu: habitableZoneCenterAu.value,
+        minInnerPlanets: innerPlanetCount.value,
+        maxInnerPlanets: innerPlanetCount.value,
+        abundanceScalarOverride: abundanceScalar.value,
+      },
     )
     worldStore.hydrate({ sol: snap.sol, month: snap.month, colonies: snap.colonies })
     router.push('/system')
@@ -115,6 +133,14 @@ async function startNewGame(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+function randomiseSeed(): void {
+  seed.value = Math.floor(Math.random() * 0xffffffff)
+}
+
+function randomiseSystemSeed(): void {
+  systemSeed.value = Math.floor(Math.random() * 0xffffffff)
 }
 
 async function openLoad(): Promise<void> {
@@ -169,9 +195,75 @@ async function exitApp(): Promise<void> {
         <input v-model="contentDir" class="input" placeholder="content/sample" />
       </label>
       <label>
-        Seed
-        <input v-model.number="seed" class="input" type="number" />
+        Planet Seed
+        <div class="seed-row">
+          <input v-model.number="seed" class="input" type="number" data-testid="planet-seed-input" />
+          <button type="button" class="btn small" data-testid="randomise-seed" @click="randomiseSeed">
+            Randomise
+          </button>
+        </div>
       </label>
+      <label>
+        Star System Seed
+        <div class="seed-row">
+          <input
+            v-model.number="systemSeed"
+            class="input"
+            type="number"
+            data-testid="system-seed-input"
+          />
+          <button
+            type="button"
+            class="btn small"
+            data-testid="randomise-system-seed"
+            @click="randomiseSystemSeed"
+          >
+            Randomise
+          </button>
+        </div>
+        <span class="hint">Independent of the planet seed — reroll the system without rerolling the founding planet.</span>
+      </label>
+      <div class="slider-group">
+        <label class="slider-row">
+          <span class="slider-label">Habitable Zone Center</span>
+          <input
+            v-model.number="habitableZoneCenterAu"
+            type="range"
+            min="0.5"
+            max="2.5"
+            step="0.05"
+            class="slider"
+            data-testid="hz-center-slider"
+          />
+          <span class="slider-value" data-testid="hz-center-value">{{ habitableZoneCenterAu.toFixed(2) }} AU</span>
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Inner Planets</span>
+          <input
+            v-model.number="innerPlanetCount"
+            type="range"
+            min="2"
+            max="6"
+            step="1"
+            class="slider"
+            data-testid="inner-planet-count-slider"
+          />
+          <span class="slider-value" data-testid="inner-planet-count-value">{{ innerPlanetCount }}</span>
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Resource Abundance</span>
+          <input
+            v-model.number="abundanceScalar"
+            type="range"
+            min="0.3"
+            max="3.0"
+            step="0.1"
+            class="slider"
+            data-testid="abundance-slider"
+          />
+          <span class="slider-value" data-testid="abundance-value">{{ abundanceScalar.toFixed(1) }}x</span>
+        </label>
+      </div>
       <label>
         Difficulty
         <select v-model="difficulty" class="input" data-testid="difficulty-select">
@@ -278,6 +370,29 @@ async function exitApp(): Promise<void> {
   font-family: monospace;
   font-size: 0.85rem;
 }
+
+.seed-row { display: flex; gap: 0.4rem; }
+.seed-row .input { flex: 1; }
+
+.slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px solid #223;
+  border-radius: 3px;
+  padding: 0.5rem;
+}
+
+.slider-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr 4.5rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.slider-label { font-size: 0.8rem; color: #aab; }
+.slider { width: 100%; accent-color: #4af; }
+.slider-value { color: #8cf; font-family: monospace; font-size: 0.85rem; text-align: right; }
 
 .btn {
   background: #1a1a28;
