@@ -201,6 +201,17 @@ pub(crate) fn client_command_to_core(
                 project_id,
             })
         }
+        ClientCommand::DeployStarterKit {
+            colony_id,
+            buildings,
+        } => {
+            let id = ColonyId::from_str(&colony_id)
+                .map_err(|_| format!("invalid colony_id: {colony_id}"))?;
+            Ok(Command::DeployStarterKit {
+                colony_id: id,
+                buildings,
+            })
+        }
         ClientCommand::AssignLabour {
             colony_id,
             slot,
