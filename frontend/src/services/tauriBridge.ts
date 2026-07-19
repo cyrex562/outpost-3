@@ -78,6 +78,13 @@ export async function bootstrap(
   customMaintenanceEnabled?: boolean,
   /** Independent seed for star-system generation (issue #199); defaults to `planetSeed` when omitted. */
   systemSeed?: number,
+  /** Star-system generation tuning (playtest feedback: New Game sliders); each field defaults server-side when omitted. */
+  genParams?: {
+    habitableZoneCenterAu?: number
+    minInnerPlanets?: number
+    maxInnerPlanets?: number
+    abundanceScalarOverride?: number
+  },
 ): Promise<SnapshotPayload> {
   return invoke<SnapshotPayload>('bootstrap', {
     contentDir,
@@ -88,6 +95,10 @@ export async function bootstrap(
     customHazardsEnabled: customHazardsEnabled ?? null,
     customMaintenanceEnabled: customMaintenanceEnabled ?? null,
     systemSeed: systemSeed ?? null,
+    habitableZoneCenterAu: genParams?.habitableZoneCenterAu ?? null,
+    minInnerPlanets: genParams?.minInnerPlanets ?? null,
+    maxInnerPlanets: genParams?.maxInnerPlanets ?? null,
+    abundanceScalarOverride: genParams?.abundanceScalarOverride ?? null,
   })
 }
 

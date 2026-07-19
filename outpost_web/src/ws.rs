@@ -88,10 +88,31 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
                 difficulty,
                 planet_seed,
                 system_seed,
+                habitable_zone_center_au,
+                min_inner_planets,
+                max_inner_planets,
+                abundance_scalar,
             } = command
             {
                 let system_seed = system_seed.unwrap_or(planet_seed);
-                handle_new_game(seq, difficulty, planet_seed, system_seed, state, socket).await;
+                let gen_defaults = outpost_core::system_gen::SystemGenParams::default();
+                let gen_overrides = GenerationOverrides {
+                    habitable_zone_center_au: habitable_zone_center_au
+                        .unwrap_or(gen_defaults.habitable_zone_center_au),
+                    min_inner_planets: min_inner_planets.unwrap_or(gen_defaults.min_inner_planets),
+                    max_inner_planets: max_inner_planets.unwrap_or(gen_defaults.max_inner_planets),
+                    abundance_scalar,
+                };
+                handle_new_game(
+                    seq,
+                    difficulty,
+                    planet_seed,
+                    system_seed,
+                    gen_overrides,
+                    state,
+                    socket,
+                )
+                .await;
                 return;
             }
 
@@ -513,6 +534,19 @@ fn build_snapshot(state: &AppState) -> WorldSnapshot {
     }
 }
 
+/// Player-tunable star-system generation overrides, resolved from
+/// `ClientCommand::NewGame`'s optional fields against
+/// [`outpost_core::system_gen::SystemGenParams::default`] (playtest
+/// feedback: New Game sliders).
+struct GenerationOverrides {
+    habitable_zone_center_au: f32,
+    min_inner_planets: u32,
+    max_inner_planets: u32,
+    /// `None` means "resolve from the difficulty scalar as before"; `Some`
+    /// overrides that resolution entirely.
+    abundance_scalar: Option<f32>,
+}
+
 /// Execute the new-game initialisation sequence and respond with a full snapshot.
 ///
 /// Steps: load content pack → apply difficulty → set needs config → generate
@@ -522,6 +556,7 @@ async fn handle_new_game(
     difficulty: DifficultyPreset,
     planet_seed: u64,
     system_seed: u64,
+    gen_overrides: GenerationOverrides,
     state: &AppState,
     socket: &mut WebSocket,
 ) {
@@ -577,14 +612,19 @@ async fn handle_new_game(
         // scenarios (still available separately via `seed_system_from_content`
         // for a future hand-authored-scenario picker). Independent seed from
         // the planet map so the player can reroll one without the other.
-        let abundance_scalar = engine
-            .state
-            .difficulty_scalar
-            .scalar_for(&ModifiableQuantity::DepositAbundance);
+        let abundance_scalar = gen_overrides.abundance_scalar.unwrap_or_else(|| {
+            engine
+                .state
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::DepositAbundance)
+        });
         let system_evs = engine
             .apply(&Command::System(SystemCommand::GenerateSystem {
                 seed: system_seed,
                 abundance_scalar,
+                habitable_zone_center_au: gen_overrides.habitable_zone_center_au,
+                min_inner_planets: gen_overrides.min_inner_planets,
+                max_inner_planets: gen_overrides.max_inner_planets,
             }))
             .map_err(|e| format!("GenerateSystem failed: {e}"))?;
         events.extend(system_evs);
@@ -922,10 +962,14 @@ mod tests {
             let mut engine = GameEngine::new();
             engine.state.registry = Some(registry);
 
+            let gen_defaults = outpost_core::system_gen::SystemGenParams::default();
             engine
                 .apply(&Command::System(SystemCommand::GenerateSystem {
                     seed,
                     abundance_scalar: 1.0,
+                    habitable_zone_center_au: gen_defaults.habitable_zone_center_au,
+                    min_inner_planets: gen_defaults.min_inner_planets,
+                    max_inner_planets: gen_defaults.max_inner_planets,
                 }))
                 .expect("generate system");
             engine

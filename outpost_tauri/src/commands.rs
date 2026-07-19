@@ -742,6 +742,10 @@ pub fn bootstrap(
     custom_hazards_enabled: Option<bool>,
     custom_maintenance_enabled: Option<bool>,
     system_seed: Option<u64>,
+    habitable_zone_center_au: Option<f32>,
+    min_inner_planets: Option<u32>,
+    max_inner_planets: Option<u32>,
+    abundance_scalar_override: Option<f32>,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<SnapshotPayload> {
     let registry = if content_dir.is_empty() || content_dir == "embedded" {
@@ -775,13 +779,20 @@ pub fn bootstrap(
     // planet map by default; falls back to `planet_seed` when the caller
     // doesn't supply one, matching the only behavior a single-seed caller
     // could have meant.
-    let abundance_scalar = engine
-        .state
-        .difficulty_scalar
-        .scalar_for(&ModifiableQuantity::DepositAbundance);
+    let abundance_scalar = abundance_scalar_override.unwrap_or_else(|| {
+        engine
+            .state
+            .difficulty_scalar
+            .scalar_for(&ModifiableQuantity::DepositAbundance)
+    });
+    let gen_defaults = outpost_core::system_gen::SystemGenParams::default();
     let _ = engine.apply(&Command::System(SystemCommand::GenerateSystem {
         seed: system_seed.unwrap_or(planet_seed),
         abundance_scalar,
+        habitable_zone_center_au: habitable_zone_center_au
+            .unwrap_or(gen_defaults.habitable_zone_center_au),
+        min_inner_planets: min_inner_planets.unwrap_or(gen_defaults.min_inner_planets),
+        max_inner_planets: max_inner_planets.unwrap_or(gen_defaults.max_inner_planets),
     }));
 
     let _ = engine.apply(&Command::SeedPlanet {
