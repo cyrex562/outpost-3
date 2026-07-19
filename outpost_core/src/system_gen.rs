@@ -110,7 +110,13 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     let hz_center = params.habitable_zone_center_au;
 
     // ── Inner planets ──────────────────────────────────────────────────────
-    let inner_count = rng.gen_range(params.min_inner_planets..=params.max_inner_planets);
+    // `min_inner_planets`/`max_inner_planets` can arrive independently from
+    // the wire (New Game sliders) with no cross-field validation upstream —
+    // normalize rather than let an inverted range panic `gen_range` on a
+    // player-reachable input.
+    let min_inner_planets = params.min_inner_planets.min(params.max_inner_planets);
+    let max_inner_planets = params.min_inner_planets.max(params.max_inner_planets);
+    let inner_count = rng.gen_range(min_inner_planets..=max_inner_planets);
     // Titius-Bode-style progression: each body sits ~1.35-1.75x farther out
     // than the last, plus jitter, so spacing is coherent-but-varied rather
     // than uniformly stepped or fully random (mirrors
@@ -884,6 +890,28 @@ mod tests {
                 "seed {seed}: expected exactly 3 inner planets with min=max=3"
             );
         }
+    }
+
+    #[test]
+    fn inverted_inner_planet_bounds_do_not_panic() {
+        // min_inner_planets/max_inner_planets can arrive independently from
+        // the wire (New Game sliders sent out of order, a malformed direct
+        // API/harness call, etc.) with no cross-field validation upstream of
+        // generate_system — an inverted range must not panic `gen_range`.
+        let inverted_params = SystemGenParams {
+            min_inner_planets: 5,
+            max_inner_planets: 2,
+            ..SystemGenParams::default()
+        };
+        let bodies = generate_system(123, &inverted_params);
+        let inner_count = bodies
+            .iter()
+            .filter(|b| matches!(b.kind, BodyKind::InnerPlanet))
+            .count();
+        assert!(
+            (2..=5).contains(&inner_count),
+            "expected inner_count in [2, 5], got {inner_count}"
+        );
     }
 
     #[test]
