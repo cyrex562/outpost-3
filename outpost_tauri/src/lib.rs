@@ -66,6 +66,7 @@ pub fn run() {
             commands::bootstrap,
             commands::is_ready,
             commands::exit_app,
+            commands::log_frontend_error,
             commands::snapshot,
             commands::apply_command,
             commands::run_query,

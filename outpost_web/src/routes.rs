@@ -23,6 +23,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/colonies", get(list_colonies))
         .route("/api/sol", get(current_sol))
         .route("/api/command", post(apply_shared_command))
+        .route("/api/log", post(log_frontend_error))
         .route(
             "/api/colonize-targets",
             get(query_routes::get_colonize_targets),
@@ -147,6 +148,30 @@ async fn apply_shared_command(
             (status, Json(json!({ "error": e.to_string() }))).into_response()
         }
     }
+}
+
+/// A frontend-reported error, forwarded into the server's log so a
+/// browser-mode session that goes blank (an uncaught Vue render exception,
+/// same failure mode as the Tauri desktop shell) leaves a trace on disk
+/// instead of only in a devtools console nobody was watching.
+#[derive(serde::Deserialize)]
+struct FrontendErrorReport {
+    source: String,
+    message: String,
+    stack: Option<String>,
+}
+
+/// Record a frontend error report (`POST /api/log`) via `tracing`.
+async fn log_frontend_error(Json(report): Json<FrontendErrorReport>) -> impl IntoResponse {
+    match &report.stack {
+        Some(stack) => {
+            tracing::error!(source = %report.source, message = %report.message, stack = %stack, "frontend error");
+        }
+        None => {
+            tracing::error!(source = %report.source, message = %report.message, "frontend error");
+        }
+    }
+    StatusCode::NO_CONTENT
 }
 
 // ─── Session endpoints ────────────────────────────────────────────────────────

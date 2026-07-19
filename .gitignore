@@ -28,6 +28,9 @@ outpost_tauri/target/
 outpost_tauri/gen/schemas/
 xtask/target/
 **/*.rs.bk
+
+# outpost_web's file logging (tracing-appender, see main.rs) — local debug output only.
+/logs/
 *.pdb
 
 # Node / frontend (old web stack, kept in node_modules for reference but not needed)
