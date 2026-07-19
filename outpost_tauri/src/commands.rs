@@ -942,6 +942,23 @@ pub fn is_ready(engine_state: State<'_, EngineState>) -> bool {
     engine_state.engine.lock().unwrap().is_some()
 }
 
+/// Record a frontend (Vue/JS) error into the same log file the Rust side
+/// writes to (`tauri_plugin_log`'s file target, see `lib.rs`).
+///
+/// The webview has no error boundary of its own, so an uncaught exception
+/// during a component's render/setup can leave the screen blank with
+/// nothing in the OS-level log to explain it. `main.ts` wires a global
+/// `app.config.errorHandler` plus `window.onerror`/`unhandledrejection`
+/// listeners that call this command so those failures land here instead of
+/// vanishing silently.
+#[tauri::command]
+pub fn log_frontend_error(source: String, message: String, stack: Option<String>) {
+    match stack {
+        Some(stack) => log::error!("FRONTEND ERROR [{source}]: {message}\n{stack}"),
+        None => log::error!("FRONTEND ERROR [{source}]: {message}"),
+    }
+}
+
 /// Terminate the app process cleanly.
 ///
 /// Using `AppHandle::exit(0)` instead of `WebviewWindow::close()` avoids the

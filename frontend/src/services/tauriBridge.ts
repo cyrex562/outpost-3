@@ -55,6 +55,30 @@ export interface QueryResult {
   [key: string]: unknown
 }
 
+/**
+ * Forward an uncaught frontend error to the backend's log file — the
+ * webview/browser has no error boundary of its own, so an exception during
+ * a component's render/setup can leave the screen blank with nothing but
+ * this call to explain it afterward. Wired up from `main.ts`'s global
+ * handlers. Never throws — logging a failure must not itself crash further.
+ */
+export async function logFrontendError(source: string, message: string, stack?: string): Promise<void> {
+  try {
+    if (isTauri) {
+      await invoke('log_frontend_error', { source, message, stack: stack ?? null })
+    } else {
+      await fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, message, stack: stack ?? null }),
+      })
+    }
+  } catch {
+    // best-effort — the backend log/HTTP endpoint may be unreachable
+    // (e.g. before bootstrap); console still has the original error.
+  }
+}
+
 // ── Command translation ──────────────────────────────────────────────────────
 
 /** Translate a frontend `Command` into the payload the Rust `apply_command` accepts. */
