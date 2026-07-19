@@ -29,6 +29,7 @@ function makeDetail(overrides: Partial<BuildingDetail>): BuildingDetail {
       cycle_sols: 1,
     },
     available_recipes: [],
+    concurrent_recipes: [],
     last_run: {
       scale: 1.0,
       is_full_production: true,
@@ -134,6 +135,42 @@ describe('BuildingDetailsHud (#182)', () => {
 
     expect(setActiveRecipe).toHaveBeenCalledWith('colony-1', 'refinery', 'refine_plate_to_components')
     expect(wrapper.text()).toContain('Refine Plate to Components')
+  })
+
+  it('renders always-on recipes for a concurrent-only building instead of "No recipe" (colony_hq, issue #272)', async () => {
+    getBuildingDetail.mockResolvedValueOnce(
+      makeDetail({
+        building_type: 'colony_hq',
+        name: 'Colony HQ',
+        recipe: null,
+        available_recipes: [],
+        concurrent_recipes: [
+          {
+            recipe_id: 'hq_generate_power',
+            name: 'Generate Power (Colony HQ)',
+            inputs: [],
+            outputs: [{ commodity_id: 'power', quantity: 24 }],
+            cycle_sols: 1,
+          },
+          {
+            recipe_id: 'hq_pump_water',
+            name: 'Pump Water (Colony HQ)',
+            inputs: [],
+            outputs: [{ commodity_id: 'water', quantity: 24 }],
+            cycle_sols: 1,
+          },
+        ],
+      }),
+    )
+    const wrapper = mount(BuildingDetailsHud, {
+      props: { colonyId: 'colony-1', buildingType: 'colony_hq' },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="concurrent-recipes-section"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Generate Power (Colony HQ)')
+    expect(wrapper.text()).toContain('Pump Water (Colony HQ)')
+    expect(wrapper.text()).not.toContain('No recipe (storage/habitat building).')
   })
 
   it('emits close when the backdrop is clicked', async () => {

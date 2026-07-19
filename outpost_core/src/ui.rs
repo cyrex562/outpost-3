@@ -122,6 +122,12 @@ pub struct BuildingDetailData {
     /// most one recipe — `recipe` alone covers that case; a selector only
     /// makes sense once there's a real choice.
     pub available_recipes: Vec<RecipeRow>,
+    /// Every [`crate::content::types::RecipeDef::concurrent`] recipe authored
+    /// for this building type — these always run alongside `recipe` (if any),
+    /// every turn, with no player selection needed. A building with only
+    /// concurrent recipes (e.g. `colony_hq`) has `recipe: None` here but a
+    /// non-empty `concurrent_recipes`.
+    pub concurrent_recipes: Vec<RecipeRow>,
     /// Outcome of the building's most recent production attempt, if it has
     /// run at least once since the colony was founded.
     pub last_run: Option<BuildingRunRow>,

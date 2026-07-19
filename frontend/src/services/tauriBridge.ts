@@ -302,6 +302,8 @@ export interface BuildingDetail {
   recipe: RecipeRow | null
   /** Every recipe authored for this building type (issue #166). Empty unless there's a real choice (more than one). */
   available_recipes: RecipeRow[]
+  /** Recipes that always run alongside `recipe` every turn (concurrent/multi-function buildings, issue #272). */
+  concurrent_recipes: RecipeRow[]
   last_run: BuildingRunRow | null
 }
 

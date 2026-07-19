@@ -4844,7 +4844,7 @@ impl GameEngine {
 
                 let mut available_recipes: Vec<&content::types::RecipeDef> = registry
                     .recipes()
-                    .filter(|r| &r.building == building_type)
+                    .filter(|r| &r.building == building_type && !r.concurrent)
                     .collect();
                 available_recipes.sort_by(|a, b| a.id.cmp(&b.id));
                 let available_recipes: Vec<ui::RecipeRow> = if available_recipes.len() > 1 {
@@ -4904,6 +4904,13 @@ impl GameEngine {
                         .collect(),
                     recipe,
                     available_recipes,
+                    concurrent_recipes: colony::production::concurrent_recipes_for_building(
+                        building_type,
+                        registry,
+                    )
+                    .into_iter()
+                    .map(to_recipe_row)
+                    .collect(),
                     last_run,
                 }))
             }
@@ -8928,6 +8935,74 @@ mod tests {
         assert_eq!(ids, vec!["refine_a", "refine_b"], "must be sorted by id");
         // No active_recipes entry set yet — falls back to the sorted-first default.
         assert_eq!(data.recipe.unwrap().recipe_id, "refine_a");
+    }
+
+    /// A building with only [`content::types::RecipeDef::concurrent`] recipes
+    /// (e.g. `colony_hq`) has no pick-one `recipe` and must not surface those
+    /// always-on recipes as if they were mutually-exclusive choices in
+    /// `available_recipes` — they belong in `concurrent_recipes` instead
+    /// (issue #272 follow-up: the `available_recipes` filter previously
+    /// missed `!r.concurrent`, so a concurrent-only building's 3 recipes
+    /// wrongly populated a working-looking recipe-switcher in the UI).
+    #[test]
+    fn query_building_detail_concurrent_only_building_has_no_pick_one_available_recipes() {
+        use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+
+        let mut registry = engine.state.registry.clone().unwrap();
+        registry.insert_building(BuildingDef {
+            id: "hq".into(),
+            name: "HQ".into(),
+            description: String::new(),
+            category: BuildingCategory::Services,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
+            registry.insert_recipe(RecipeDef {
+                id: id.into(),
+                name: id.into(),
+                building: "hq".into(),
+                inputs: vec![],
+                outputs: vec![Ingredient {
+                    id: commodity.into(),
+                    quantity: 1.0,
+                }],
+                cycle_sols: 1,
+                power_draw: 0.0,
+                concurrent: true,
+            });
+        }
+        engine.state.registry = Some(registry);
+
+        let result = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "hq".into(),
+            })
+            .unwrap();
+        let QueryResult::BuildingDetail(data) = result else {
+            panic!()
+        };
+        assert!(data.recipe.is_none());
+        assert!(
+            data.available_recipes.is_empty(),
+            "concurrent recipes must not appear in the pick-one available_recipes list"
+        );
+        let concurrent_ids: Vec<&str> = data
+            .concurrent_recipes
+            .iter()
+            .map(|r| r.recipe_id.as_str())
+            .collect();
+        assert_eq!(concurrent_ids, vec!["hq_power", "hq_water"]);
     }
 
     /// Query::BuildingDetail errors on an unknown building type.
