@@ -7,11 +7,13 @@
  */
 
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useWorldStore } from '@/stores/worldStore'
 
 const gameStore = useGameStore()
 const worldStore = useWorldStore()
+const router = useRouter()
 
 // ─── Colony selector ──────────────────────────────────────────────────────────
 
@@ -22,24 +24,6 @@ const colonies = computed(() => worldStore.colonies)
 function selectColony(id: string): void {
   selectedId.value = id
   gameStore.selectedColonyId = id
-}
-
-// ─── Found colony dialog ──────────────────────────────────────────────────────
-
-const showFoundDialog = ref(false)
-const newColonyName = ref('')
-const newColonyPop = ref(100)
-
-async function foundColony(): Promise<void> {
-  if (!newColonyName.value.trim()) return
-  await gameStore.sendCommand({
-    kind: 'found_colony',
-    name: newColonyName.value.trim(),
-    starting_population: newColonyPop.value,
-  })
-  newColonyName.value = ''
-  newColonyPop.value = 100
-  showFoundDialog.value = false
 }
 
 // ─── Set directive dialog ─────────────────────────────────────────────────────
@@ -120,7 +104,7 @@ async function advanceTurn(): Promise<void> {
       <button
         class="btn"
         data-testid="btn-found-colony"
-        @click="showFoundDialog = true"
+        @click="router.push('/found')"
       >
         Found Colony
       </button>
@@ -151,21 +135,6 @@ async function advanceTurn(): Promise<void> {
       @click="gameStore.dismissToast()"
     >
       {{ gameStore.toastMessage }}
-    </div>
-
-    <!-- Found colony dialog -->
-    <div v-if="showFoundDialog" class="dialog-backdrop">
-      <div class="dialog" data-testid="found-colony-dialog">
-        <h4>Found New Colony</h4>
-        <label class="field-label">Name</label>
-        <input v-model="newColonyName" class="input" placeholder="Colony name" />
-        <label class="field-label">Starting population</label>
-        <input v-model.number="newColonyPop" class="input" type="number" min="1" />
-        <div class="dialog-actions">
-          <button class="btn btn-primary" @click="foundColony">Found</button>
-          <button class="btn" @click="showFoundDialog = false">Cancel</button>
-        </div>
-      </div>
     </div>
 
     <!-- Set directive dialog -->

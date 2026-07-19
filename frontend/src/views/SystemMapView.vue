@@ -361,10 +361,10 @@ function foundColony(body?: SystemBody | null): void {
           />
           <text
             x="0"
-            :y="-20 * labelScale"
+            :y="-(14 + labelOffsetY)"
             text-anchor="middle"
-            fill="#fda"
-            :font-size="Math.max(8, 11 * labelScale)"
+            fill="#aac"
+            :font-size="labelFontSize"
             font-family="monospace"
             class="body-label"
           >
