@@ -1,10 +1,14 @@
 <script setup lang="ts">
 /**
- * Building details HUD (issue #182) — a modal overlay showing a single
- * building type's full production picture: category, recipe flows,
- * maintenance upkeep, and the outcome of its most recent production
- * attempt (scale + shortfalls, including a dedicated MaintenanceShort
- * indicator surfacing #180's per-sol upkeep gate).
+ * Building details (issue #182) — a single building type's full production
+ * picture: category, recipe flows, maintenance upkeep, and the outcome of
+ * its most recent production attempt (scale + shortfalls, including a
+ * dedicated MaintenanceShort indicator surfacing #180's per-sol upkeep
+ * gate). Renders either as a modal overlay (default) or, with `asPage`, as
+ * plain inline content for `FacilityView.vue`'s routed facility page
+ * (navigation rework #7 phase 2 — promoted from modal-only so a facility
+ * has its own back-stack position instead of only existing as long as a
+ * parent component's local ref stays non-null).
  *
  * Fetches fresh detail every time `buildingType` changes, since scale/
  * shortfalls are per-sol and stale data would misrepresent the building's
@@ -14,11 +18,16 @@
 import { ref, watch } from 'vue'
 import { getBuildingDetail, setActiveRecipe, type BuildingDetail } from '@/services/tauriBridge'
 
-const props = defineProps<{
-  colonyId: string | null
-  /** `null` closes the HUD. */
-  buildingType: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    colonyId: string | null
+    /** `null` closes the HUD (modal mode only — ignored in page mode). */
+    buildingType: string | null
+    /** Render as plain inline content (no backdrop/overlay) for a routed page. */
+    asPage?: boolean
+  }>(),
+  { asPage: false },
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -75,19 +84,28 @@ const SHORTFALL_LABELS: Record<string, string> = {
 function shortfallLabel(kind: string): string {
   return SHORTFALL_LABELS[kind] ?? kind
 }
+
+/** Backdrop click-outside-to-close only makes sense in modal mode — a page
+ * has no overlay to click "outside" of. */
+function onBackdropClick(): void {
+  if (!props.asPage) emit('close')
+}
 </script>
 
 <template>
   <div
-    v-if="props.buildingType !== null"
-    class="hud-backdrop"
-    data-testid="building-details-hud"
-    @click.self="emit('close')"
+    v-if="asPage || props.buildingType !== null"
+    :class="asPage ? 'facility-page' : 'hud-backdrop'"
+    :data-testid="asPage ? 'facility-page' : 'building-details-hud'"
+    @click.self="onBackdropClick"
   >
-    <div class="hud-panel">
+    <div :class="['hud-panel', { 'hud-panel--page': asPage }]">
       <div class="hud-header">
+        <button v-if="asPage" class="btn-back" data-testid="facility-back" @click="emit('close')">
+          ← Back
+        </button>
         <h4 class="hud-title">{{ detail?.name ?? props.buildingType }}</h4>
-        <button class="btn-close" data-testid="close-details-hud" @click="emit('close')">×</button>
+        <button v-if="!asPage" class="btn-close" data-testid="close-details-hud" @click="emit('close')">×</button>
       </div>
 
       <div v-if="loading" class="hint">Loading…</div>
@@ -226,8 +244,29 @@ function shortfallLabel(kind: string): string {
   color: #aab;
 }
 
-.hud-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.facility-page { padding: 1rem; }
+.hud-panel--page {
+  width: min(640px, 100%);
+  max-height: none;
+  margin: 0 auto;
+}
+
+/* Modal mode: (title, close-button) — spread to opposite edges.
+   Page mode: (back-button, title) — sit together at the start instead. */
+.hud-header { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+.facility-page .hud-header { justify-content: flex-start; }
 .hud-title { color: #8cf; font-size: 1rem; margin: 0; }
+.btn-back {
+  background: none;
+  border: 1px solid #334;
+  border-radius: 3px;
+  color: #aab;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  margin-right: 0.6rem;
+}
+.btn-back:hover { color: #cdd; border-color: #446; }
 .btn-close {
   background: none;
   border: none;
