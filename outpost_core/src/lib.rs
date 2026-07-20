@@ -893,6 +893,15 @@ pub enum Query {
         /// Content-pack key of the building type.
         building_type: String,
     },
+    /// Return full detail for one building type within an outpost (navigation
+    /// rework #7 phase 4 — outpost drill-down parity with colonies). Same
+    /// response shape as [`Query::BuildingDetail`]; only the owner differs.
+    OutpostBuildingDetail {
+        /// Target outpost.
+        outpost_id: outpost::OutpostId,
+        /// Content-pack key of the building type.
+        building_type: String,
+    },
     /// Return the interrupt digest from the most recent advance run.
     ///
     /// Returns an empty digest when no advance has been run yet.
@@ -4800,119 +4809,27 @@ impl GameEngine {
                 building_type,
             } => {
                 let idx = self.find_colony_index(*colony_id)?;
-                let registry = self.state.registry.as_ref().ok_or_else(|| {
-                    EngineError::InvalidArgument("no content registry loaded".into())
-                })?;
-                let def = registry
-                    .buildings()
-                    .find(|b| &b.id == building_type)
-                    .ok_or_else(|| {
-                        EngineError::InvalidArgument(format!(
-                            "unknown building type: {building_type}"
-                        ))
-                    })?;
-
-                let to_recipe_row = |r: &content::types::RecipeDef| ui::RecipeRow {
-                    recipe_id: r.id.clone(),
-                    name: r.name.clone(),
-                    inputs: r
-                        .inputs
-                        .iter()
-                        .map(|i| ui::IngredientRow {
-                            commodity_id: i.id.clone(),
-                            quantity: i.quantity,
-                        })
-                        .collect(),
-                    outputs: r
-                        .outputs
-                        .iter()
-                        .map(|i| ui::IngredientRow {
-                            commodity_id: i.id.clone(),
-                            quantity: i.quantity,
-                        })
-                        .collect(),
-                    cycle_sols: r.cycle_sols,
-                };
-
-                let active_recipes = &self.state.colonies[idx].active_recipes;
-                let recipe = colony::production::recipe_for_building(
+                let colony = &self.state.colonies[idx];
+                let data = self.build_building_detail_data(
                     building_type,
-                    active_recipes,
-                    registry,
-                )
-                .map(to_recipe_row);
+                    &colony.active_recipes,
+                    &colony.last_production,
+                )?;
+                Ok(QueryResult::BuildingDetail(data))
+            }
 
-                let mut available_recipes: Vec<&content::types::RecipeDef> = registry
-                    .recipes()
-                    .filter(|r| &r.building == building_type && !r.concurrent)
-                    .collect();
-                available_recipes.sort_by(|a, b| a.id.cmp(&b.id));
-                let available_recipes: Vec<ui::RecipeRow> = if available_recipes.len() > 1 {
-                    available_recipes.into_iter().map(to_recipe_row).collect()
-                } else {
-                    Vec::new()
-                };
-
-                let last_run = self.state.colonies[idx]
-                    .last_production
-                    .get(building_type)
-                    .map(|r| ui::BuildingRunRow {
-                        scale: r.scale,
-                        is_full_production: r.is_full_production(),
-                        shortfalls: r
-                            .shortfalls
-                            .iter()
-                            .map(|s| {
-                                let (kind, commodity_id) = match &s.reason {
-                                    colony::ShortfallReason::InputShort { commodity_id } => {
-                                        ("input_short", Some(commodity_id.clone()))
-                                    }
-                                    colony::ShortfallReason::PowerBrownout => {
-                                        ("power_brownout", None)
-                                    }
-                                    colony::ShortfallReason::LaborShort => ("labor_short", None),
-                                    colony::ShortfallReason::MaintenanceShort { commodity_id } => {
-                                        ("maintenance_short", Some(commodity_id.clone()))
-                                    }
-                                    colony::ShortfallReason::DepositShort { commodity_id } => {
-                                        ("deposit_short", Some(commodity_id.clone()))
-                                    }
-                                };
-                                ui::ShortfallRow {
-                                    kind: kind.to_string(),
-                                    commodity_id,
-                                    effective_scale: s.effective_scale,
-                                }
-                            })
-                            .collect(),
-                    });
-
-                Ok(QueryResult::BuildingDetail(ui::BuildingDetailData {
-                    building_type: def.id.clone(),
-                    name: def.name.clone(),
-                    description: def.description.clone(),
-                    category: format!("{:?}", def.category),
-                    slot_cost: def.slot_cost,
-                    power_delta: def.power_delta,
-                    maintenance: def
-                        .maintenance
-                        .iter()
-                        .map(|i| ui::IngredientRow {
-                            commodity_id: i.id.clone(),
-                            quantity: i.quantity,
-                        })
-                        .collect(),
-                    recipe,
-                    available_recipes,
-                    concurrent_recipes: colony::production::concurrent_recipes_for_building(
-                        building_type,
-                        registry,
-                    )
-                    .into_iter()
-                    .map(to_recipe_row)
-                    .collect(),
-                    last_run,
-                }))
+            Query::OutpostBuildingDetail {
+                outpost_id,
+                building_type,
+            } => {
+                let idx = self.find_outpost_index(*outpost_id)?;
+                let post = &self.state.outposts[idx];
+                let data = self.build_building_detail_data(
+                    building_type,
+                    &post.active_recipes,
+                    &post.last_production,
+                )?;
+                Ok(QueryResult::BuildingDetail(data))
             }
 
             Query::InterruptDigest => {
@@ -5355,6 +5272,125 @@ impl GameEngine {
             .iter()
             .position(|o| o.id == id)
             .ok_or(EngineError::OutpostNotFound(id))
+    }
+
+    /// Build [`ui::BuildingDetailData`] for one building type, given the
+    /// owner's (colony's or outpost's) active-recipe selections and last
+    /// production outcomes. Shared by [`Query::BuildingDetail`] and
+    /// [`Query::OutpostBuildingDetail`] — the response shape is identical,
+    /// only the owner differs.
+    fn build_building_detail_data(
+        &self,
+        building_type: &str,
+        active_recipes: &std::collections::HashMap<String, String>,
+        last_production: &std::collections::HashMap<String, colony::BuildingProductionResult>,
+    ) -> Result<ui::BuildingDetailData, EngineError> {
+        let registry = self
+            .state
+            .registry
+            .as_ref()
+            .ok_or_else(|| EngineError::InvalidArgument("no content registry loaded".into()))?;
+        let def = registry
+            .buildings()
+            .find(|b| b.id == building_type)
+            .ok_or_else(|| {
+                EngineError::InvalidArgument(format!("unknown building type: {building_type}"))
+            })?;
+
+        let to_recipe_row = |r: &content::types::RecipeDef| ui::RecipeRow {
+            recipe_id: r.id.clone(),
+            name: r.name.clone(),
+            inputs: r
+                .inputs
+                .iter()
+                .map(|i| ui::IngredientRow {
+                    commodity_id: i.id.clone(),
+                    quantity: i.quantity,
+                })
+                .collect(),
+            outputs: r
+                .outputs
+                .iter()
+                .map(|i| ui::IngredientRow {
+                    commodity_id: i.id.clone(),
+                    quantity: i.quantity,
+                })
+                .collect(),
+            cycle_sols: r.cycle_sols,
+        };
+
+        let recipe =
+            colony::production::recipe_for_building(building_type, active_recipes, registry)
+                .map(to_recipe_row);
+
+        let mut available_recipes: Vec<&content::types::RecipeDef> = registry
+            .recipes()
+            .filter(|r| r.building == building_type && !r.concurrent)
+            .collect();
+        available_recipes.sort_by(|a, b| a.id.cmp(&b.id));
+        let available_recipes: Vec<ui::RecipeRow> = if available_recipes.len() > 1 {
+            available_recipes.into_iter().map(to_recipe_row).collect()
+        } else {
+            Vec::new()
+        };
+
+        let last_run = last_production
+            .get(building_type)
+            .map(|r| ui::BuildingRunRow {
+                scale: r.scale,
+                is_full_production: r.is_full_production(),
+                shortfalls: r
+                    .shortfalls
+                    .iter()
+                    .map(|s| {
+                        let (kind, commodity_id) = match &s.reason {
+                            colony::ShortfallReason::InputShort { commodity_id } => {
+                                ("input_short", Some(commodity_id.clone()))
+                            }
+                            colony::ShortfallReason::PowerBrownout => ("power_brownout", None),
+                            colony::ShortfallReason::LaborShort => ("labor_short", None),
+                            colony::ShortfallReason::MaintenanceShort { commodity_id } => {
+                                ("maintenance_short", Some(commodity_id.clone()))
+                            }
+                            colony::ShortfallReason::DepositShort { commodity_id } => {
+                                ("deposit_short", Some(commodity_id.clone()))
+                            }
+                        };
+                        ui::ShortfallRow {
+                            kind: kind.to_string(),
+                            commodity_id,
+                            effective_scale: s.effective_scale,
+                        }
+                    })
+                    .collect(),
+            });
+
+        Ok(ui::BuildingDetailData {
+            building_type: def.id.clone(),
+            name: def.name.clone(),
+            description: def.description.clone(),
+            category: format!("{:?}", def.category),
+            slot_cost: def.slot_cost,
+            power_delta: def.power_delta,
+            maintenance: def
+                .maintenance
+                .iter()
+                .map(|i| ui::IngredientRow {
+                    commodity_id: i.id.clone(),
+                    quantity: i.quantity,
+                })
+                .collect(),
+            recipe,
+            available_recipes,
+            concurrent_recipes: colony::production::concurrent_recipes_for_building(
+                building_type,
+                registry,
+            )
+            .into_iter()
+            .map(to_recipe_row)
+            .collect(),
+            last_run,
+        })
     }
 
     /// Instantiate default directives from the loaded content registry and
@@ -8425,6 +8461,68 @@ mod tests {
             recipe_id: "mine_structural_ore_outpost".into(),
         });
         assert!(result.is_err());
+    }
+
+    /// Query::OutpostBuildingDetail returns the same recipe + last-run shape
+    /// as Query::BuildingDetail, but scoped to an outpost (navigation
+    /// rework #7 phase 4).
+    #[test]
+    fn query_outpost_building_detail_returns_recipe_and_last_run() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_mining_outpost_building());
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!()
+        };
+        let outpost_id = *outpost_id;
+        engine
+            .apply(&Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type: "mining_outpost".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap(); // construction completes
+        engine.apply(&Command::AdvanceColonySol).unwrap(); // production runs
+
+        let result = engine
+            .query(&Query::OutpostBuildingDetail {
+                outpost_id,
+                building_type: "mining_outpost".into(),
+            })
+            .unwrap();
+        match result {
+            QueryResult::BuildingDetail(data) => {
+                assert_eq!(data.building_type, "mining_outpost");
+                let recipe = data.recipe.expect("mining_outpost should have a recipe");
+                assert_eq!(recipe.recipe_id, "mine_structural_ore_outpost");
+                let last_run = data.last_run.expect("mining_outpost should have run once");
+                assert!(last_run.scale > 0.0);
+            }
+            other => panic!("expected BuildingDetail, got {other:?}"),
+        }
+    }
+
+    /// Query::OutpostBuildingDetail errors on an unknown outpost id.
+    #[test]
+    fn query_outpost_building_detail_unknown_outpost_returns_error() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_mining_outpost_building());
+        let result = engine.query(&Query::OutpostBuildingDetail {
+            outpost_id: uuid::Uuid::new_v4(),
+            building_type: "mining_outpost".into(),
+        });
+        assert!(matches!(result, Err(EngineError::OutpostNotFound(_))));
     }
 
     #[test]

@@ -10,23 +10,35 @@
  * has its own back-stack position instead of only existing as long as a
  * parent component's local ref stays non-null).
  *
+ * `ownerType` selects colony- or outpost-scoped detail/recipe-selection
+ * calls (navigation rework #7 phase 4 — outpost drill-down parity with
+ * colonies); the response shape and rendering are identical either way.
+ *
  * Fetches fresh detail every time `buildingType` changes, since scale/
  * shortfalls are per-sol and stale data would misrepresent the building's
  * current state.
  */
 
 import { ref, watch } from 'vue'
-import { getBuildingDetail, setActiveRecipe, type BuildingDetail } from '@/services/tauriBridge'
+import {
+  getBuildingDetail,
+  setActiveRecipe,
+  getOutpostBuildingDetail,
+  setOutpostActiveRecipe,
+  type BuildingDetail,
+} from '@/services/tauriBridge'
 
 const props = withDefaults(
   defineProps<{
-    colonyId: string | null
+    /** Which owner kind `ownerId` refers to. Defaults to `'colony'` for pre-#7-phase-4 callers. */
+    ownerType?: 'colony' | 'outpost'
+    ownerId: string | null
     /** `null` closes the HUD (modal mode only — ignored in page mode). */
     buildingType: string | null
     /** Render as plain inline content (no backdrop/overlay) for a routed page. */
     asPage?: boolean
   }>(),
-  { asPage: false },
+  { ownerType: 'colony', asPage: false },
 )
 
 const emit = defineEmits<{
@@ -39,14 +51,17 @@ const error = ref<string | null>(null)
 const switching = ref(false)
 
 async function load(): Promise<void> {
-  if (!props.colonyId || !props.buildingType) {
+  if (!props.ownerId || !props.buildingType) {
     detail.value = null
     return
   }
   loading.value = true
   error.value = null
   try {
-    detail.value = await getBuildingDetail(props.colonyId, props.buildingType)
+    detail.value =
+      props.ownerType === 'outpost'
+        ? await getOutpostBuildingDetail(props.ownerId, props.buildingType)
+        : await getBuildingDetail(props.ownerId, props.buildingType)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     detail.value = null
@@ -55,13 +70,17 @@ async function load(): Promise<void> {
   }
 }
 
-watch(() => [props.colonyId, props.buildingType], load, { immediate: true })
+watch(() => [props.ownerType, props.ownerId, props.buildingType], load, { immediate: true })
 
 async function switchRecipe(recipeId: string): Promise<void> {
-  if (!props.colonyId || !props.buildingType || switching.value) return
+  if (!props.ownerId || !props.buildingType || switching.value) return
   switching.value = true
   try {
-    await setActiveRecipe(props.colonyId, props.buildingType, recipeId)
+    if (props.ownerType === 'outpost') {
+      await setOutpostActiveRecipe(props.ownerId, props.buildingType, recipeId)
+    } else {
+      await setActiveRecipe(props.ownerId, props.buildingType, recipeId)
+    }
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)

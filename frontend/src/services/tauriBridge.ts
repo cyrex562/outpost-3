@@ -373,6 +373,36 @@ export async function listOutposts(): Promise<Outpost[]> {
   return invoke<Outpost[]>('list_outposts')
 }
 
+/**
+ * Full detail for one building type within an outpost (navigation rework #7
+ * phase 4 — mirrors `getBuildingDetail` for colonies). Tauri-only for now,
+ * same as `getBuildingDetail`/`setActiveRecipe` — browser mode has no
+ * generic query endpoint yet; this is an existing gap, not new to outposts.
+ */
+export async function getOutpostBuildingDetail(outpostId: string, buildingType: string): Promise<BuildingDetail> {
+  const q = await query({ kind: 'outpost_building_detail', outpost_id: outpostId, building_type: buildingType })
+  if (q.kind !== 'building_detail' || !q.data) {
+    throw new Error(`unexpected query result for outpost_building_detail: ${JSON.stringify(q)}`)
+  }
+  return q.data as BuildingDetail
+}
+
+/** Select which recipe a building type runs at an outpost (navigation rework #7 phase 4). */
+export async function setOutpostActiveRecipe(
+  outpostId: string,
+  buildingType: string,
+  recipeId: string,
+): Promise<GameEvent[]> {
+  return invoke<GameEvent[]>('apply_command', {
+    command: {
+      kind: 'set_outpost_active_recipe',
+      outpost_id: outpostId,
+      building_type: buildingType,
+      recipe_id: recipeId,
+    },
+  })
+}
+
 export interface OutpostTarget {
   body_id: string
   body_name: string
