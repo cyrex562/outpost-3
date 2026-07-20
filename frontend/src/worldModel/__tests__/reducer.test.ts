@@ -278,6 +278,47 @@ describe('applyEvent — pass-through events', () => {
     { kind: 'directive_removed' as const, directive_id: 'dir-1' },
     { kind: 'directive_fired' as const, colony_id: COLONY_ID, directive_id: 'dir-1' },
     { kind: 'manual_override_changed' as const, colony_id: COLONY_ID, enabled: true },
+    // colony_home_body_set is fired by the founding wizard right after
+    // found_colony/found_colony_at_site whenever the player picked a body
+    // — i.e. on nearly every real playthrough. A regression here (an
+    // omitted case in a switch with no default silently returns
+    // `undefined` instead of a WorldState, corrupting the whole store) is
+    // exactly what caused the "blank screen after founding a colony" bug:
+    // outpost_tauri's IPC bridge forwards this event with a typed `kind`
+    // the frontend didn't recognise (unlike outpost_web's WS bridge, which
+    // falls back untyped core events to `{"kind": "ignored"}`).
+    {
+      kind: 'colony_home_body_set' as const,
+      colony_id: COLONY_ID,
+      body_id: 'body-1',
+      habitability_modifier: 1.1,
+    },
+    {
+      kind: 'active_recipe_set' as const,
+      colony_id: COLONY_ID,
+      building_type: 'refinery',
+      recipe_id: 'refine_a',
+    },
+    { kind: 'difficulty_changed' as const, preset: 'standard' },
+    {
+      kind: 'outpost_established' as const,
+      outpost_id: 'outpost-1',
+      colony_id: COLONY_ID,
+      body_id: 'body-1',
+    },
+    { kind: 'outpost_decommissioned' as const, outpost_id: 'outpost-1' },
+    {
+      kind: 'outpost_construction_queued' as const,
+      outpost_id: 'outpost-1',
+      building_type: 'mine',
+      project_id: 'proj-1',
+    },
+    {
+      kind: 'outpost_promoted' as const,
+      outpost_id: 'outpost-1',
+      colony_id: COLONY_ID,
+      name: 'New Colony',
+    },
   ]
   for (const ev of passThrough) {
     it(`returns unchanged state for ${ev.kind}`, () => {
@@ -286,6 +327,21 @@ describe('applyEvent — pass-through events', () => {
       expect(state).toBe(base)
     })
   }
+})
+
+describe('applyEvent — unrecognised event kind', () => {
+  it('returns unchanged state instead of undefined (defense in depth)', () => {
+    const base = stateWithColony()
+    // Simulate a future core event the frontend's ServerEvent type doesn't
+    // know about yet, forwarded verbatim by a wire layer that force-casts
+    // (`as unknown as ServerEvent`) rather than validating — this is
+    // exactly how `outpost_tauri`'s bridge behaves today.
+    const unknownEvent = { kind: 'some_future_event_kind' } as unknown as Parameters<
+      typeof applyEvent
+    >[1]
+    const state = applyEvent(base, unknownEvent)
+    expect(state).toBe(base)
+  })
 })
 
 describe('reducer immutability', () => {
