@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getSystemBodies, type SystemBody } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
 
+const route = useRoute()
 const router = useRouter()
 const worldStore = useWorldStore()
 
@@ -17,6 +18,12 @@ onMounted(async () => {
     // After the body list arrives, fit the viewBox to the data if the user
     // hasn't already customised it (persisted state overrides fit-all).
     if (!persistedLoaded.value) resetView()
+    // Deep link from the System Bodies list screen (navigation rework #7
+    // phase 3): `?body=<id>` preselects that body's info panel.
+    const requestedBodyId = route.query.body
+    if (typeof requestedBodyId === 'string') {
+      selected.value = bodies.value.find((b) => b.id === requestedBodyId) ?? null
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }

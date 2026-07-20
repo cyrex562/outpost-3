@@ -7,6 +7,9 @@ import TechTreeView from './views/TechTreeView.vue'
 import NewGameView from './views/NewGameView.vue'
 import OutpostsView from './views/OutpostsView.vue'
 import FacilityView from './views/FacilityView.vue'
+import InstallationsView from './views/InstallationsView.vue'
+import SystemBodiesView from './views/SystemBodiesView.vue'
+import BuildingsListView from './views/BuildingsListView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -23,6 +26,9 @@ const router = createRouter({
     { path: '/found', component: FoundColonyWizardView, name: 'found' },
     { path: '/tech', component: TechTreeView, name: 'tech' },
     { path: '/outposts', component: OutpostsView, name: 'outposts' },
+    { path: '/installations', component: InstallationsView, name: 'installations' },
+    { path: '/bodies', component: SystemBodiesView, name: 'bodies' },
+    { path: '/buildings', component: BuildingsListView, name: 'buildings' },
   ],
 })
 
