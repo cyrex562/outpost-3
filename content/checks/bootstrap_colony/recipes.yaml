@@ -1,17 +1,38 @@
 # Recipes used in the bootstrap-colony balance check — rates mirror
-# content/base/recipes.yaml exactly for the 4 flow-representable needs.
-- id: pump_water
-  name: Pump Water
-  building: water_well
+# content/base/recipes.yaml exactly.
+- id: hq_generate_power
+  name: Generate Power (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+  concurrent: true
+
+- id: hq_pump_water
+  name: Pump Water (Colony HQ)
+  building: colony_hq
   cycle_sols: 1
   inputs: []
   outputs:
     - id: water
       quantity: 24.0
+  concurrent: true
 
-- id: grow_rations
-  name: Grow Rations
-  building: hydroponic_bay
+- id: hq_scrub_oxygen
+  name: Scrub Oxygen (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 7.0
+  concurrent: true
+
+- id: grow_rations_dome
+  name: Grow Rations (Greenhouse Dome)
+  building: greenhouse_dome
   cycle_sols: 1
   inputs:
     - id: water
@@ -21,24 +42,6 @@
       quantity: 12.0
     - id: biomass
       quantity: 3.0
-
-- id: scrub_oxygen
-  name: Scrub Oxygen
-  building: life_support_module
-  cycle_sols: 1
-  inputs: []
-  outputs:
-    - id: oxygen
-      quantity: 7.0
-
-- id: generate_power_solar_mk1
-  name: Generate Power (Solar Mk1)
-  building: solar_array_mk1
-  cycle_sols: 1
-  inputs: []
-  outputs:
-    - id: power
-      quantity: 24.0
 
 # Synthetic sink: models a 100-colonist population's per-capita draw from
 # outpost_core::needs::NeedsConfig::default_survival() (food_ration 0.1,

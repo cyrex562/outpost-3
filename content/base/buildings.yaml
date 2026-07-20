@@ -8,28 +8,169 @@
 # harness proof. Everything else is gated by `tech_prerequisite` and unlocked
 # progressively via content/base/tech.yaml.
 #
-# `colony_hq` is a consolidated, multi-function alternative to building
-# solar_array_mk1 + water_well + life_support_module separately (playtest
-# feedback: "multi-function starter buildings") — one build slot instead of
-# three, via `concurrent: true` recipes (recipes.yaml) that all run
-# simultaneously. The three standalone buildings stay available too, for
-# players who'd rather spread hazard risk across separate structures.
+# Landing-kit redesign (playtest feedback round 2): every starter building is
+# now self-powered (`power_delta <= 0`, a small net producer) so the founding
+# loadout never depends on a single shared grid — losing one building to a
+# hazard doesn't brown out the rest. `colony_hq` remains the consolidated
+# "physical plant" option (power + water + oxygen in one slot via
+# `concurrent: true` recipes, recipes.yaml); the other seven are single-
+# purpose landing-kit buildings players can bring individually instead of, or
+# alongside, colony_hq. The pre-existing water_well / hydroponic_bay /
+# smelter / research_lab / basic_habitat / solar_array_mk1 /
+# life_support_module set has been moved behind Tier 1 tech (still cheap,
+# still useful as a second source once researched) — see each entry's
+# `tech_prerequisite` below.
 #
 # Buildings with no recipe are intentionally passive (pure power_delta/slot
 # infrastructure) — each one below says why in its description.
 
 # ── Starter set (no tech_prerequisite) ──────────────────────────────────────
 
+- id: colony_hq
+  name: Colony HQ
+  description: >
+    A single prefab core facility that runs power generation, water
+    extraction, and oxygen scrubbing simultaneously — the same three
+    functions as solar_array_mk1 + water_well + life_support_module
+    combined, in one build slot instead of three (playtest feedback:
+    "multi-function starter buildings"). See recipes.yaml's hq_* recipes,
+    all `concurrent: true` — they always run together, sharing this
+    building's power/labor/input scale each turn (see
+    outpost_core/src/colony/production.rs's module doc comment).
+  category: services
+  power_delta: -13.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 37.0
+
+- id: ice_miner
+  name: Ice Miner
+  description: >
+    Drills subsurface ice and melts it into potable water — the colony's
+    primary bulk water source, alongside colony_hq's smaller recycling
+    output. Self-powered.
+  category: extraction
+  power_delta: -2.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+- id: excavation_rig
+  name: Excavation Rig
+  description: >
+    Basic surface mining and excavation equipment — drills and hauls
+    structural ore from local deposits. Output scales with local deposit
+    richness (issue #232). Self-powered.
+  category: extraction
+  power_delta: -2.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+- id: fabrication_complex
+  name: Fabrication Complex
+  description: >
+    Combination foundry and machine shop. Switch it between smelting ore
+    into structural metal or machining metal into finished components
+    (issue #166 recipe selection) — runs one at a time. Self-powered.
+  category: processing
+  power_delta: -2.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+
+- id: air_miner
+  name: Air Miner
+  description: >
+    Draws in and cracks the local atmosphere for oxygen, with elemental
+    carbon as a byproduct feedstock for chem_plant. Self-powered.
+  category: life_support
+  power_delta: -2.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+- id: chem_plant
+  name: Chem Plant
+  description: >
+    Synthesizes basic industrial chemicals from air_miner's carbon
+    byproduct and water. Self-powered.
+  category: processing
+  power_delta: -2.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+- id: greenhouse_dome
+  name: Greenhouse Dome
+  description: >
+    Sealed growing chamber that produces food rations from water under
+    artificial lighting — the landing kit's food source. Self-powered.
+  category: extraction
+  power_delta: -2.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+- id: habitat_pod
+  name: Habitat Pod
+  description: >
+    Pressurized bunks — the colony's first housing, available at founding
+    so a landing party always has somewhere to shelter. Self-powered.
+  category: housing
+  power_delta: -2.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+# ── Tier 1 (basic_construction / basic_power / resource_extraction) ────────
+# Pre-redesign starter set — still Tier 1 (cheap, no deep prerequisites),
+# now unlocked by research rather than available at founding. Useful as a
+# second/backup source once you have the tech.
+
 - id: water_well
   name: Water Well
   description: >
-    Draws groundwater or subsurface ice to the surface. The colony's most
-    basic water source — available from first landing.
+    Draws groundwater or subsurface ice to the surface. A second water
+    source alongside colony_hq/ice_miner.
   category: extraction
   power_delta: 4.0
   worker_slots: 1
   slot_cost: 1
   construction_turns: 2
+  tech_prerequisite: resource_extraction
   construction_cost:
     - id: structural_metal
       quantity: 10.0
@@ -42,6 +183,7 @@
   category: extraction
   power_delta: 5.0
   worker_slots: 1
+  tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
       quantity: 10.0
@@ -52,6 +194,7 @@
   category: processing
   power_delta: 10.0
   worker_slots: 2
+  tech_prerequisite: resource_extraction
   construction_cost:
     - id: structural_metal
       quantity: 20.0
@@ -67,6 +210,7 @@
   worker_slots: 3
   slot_cost: 1
   construction_turns: 4
+  tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
       quantity: 30.0
@@ -74,27 +218,29 @@
 - id: basic_habitat
   name: Basic Habitat
   description: >
-    Minimal pressurized bunks — the colony's first housing, available at
-    founding so a landing party always has somewhere to shelter.
+    Minimal pressurized bunks — a second housing source alongside
+    habitat_pod.
   category: housing
   power_delta: 1.0
   worker_slots: 0
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
       quantity: 15.0
 
 - id: solar_array_mk1
   name: Solar Array Mk1
-  description: Basic photovoltaic panel array. The colony's first power source.
+  description: Basic photovoltaic panel array. A dedicated power source.
   category: power
   power_delta: -20.0
   worker_slots: 0
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  tech_prerequisite: basic_power
   construction_cost:
     - id: structural_metal
       quantity: 12.0
@@ -103,44 +249,18 @@
   name: Life Support Module
   description: >
     Compact atmosphere scrubber/generator — cheap, low-output baseline
-    oxygen supply available from first landing. See atmospheric_harvester
-    for a higher-throughput upgrade.
+    oxygen supply. See atmospheric_harvester for a higher-throughput
+    upgrade.
   category: life_support
   power_delta: 3.0
   worker_slots: 1
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  tech_prerequisite: basic_power
   construction_cost:
     - id: structural_metal
       quantity: 15.0
-
-- id: colony_hq
-  name: Colony HQ
-  description: >
-    A single prefab core facility that runs power generation, water
-    extraction, and oxygen scrubbing simultaneously — the same three
-    functions as solar_array_mk1 + water_well + life_support_module
-    combined, in one build slot instead of three (playtest feedback:
-    "multi-function starter buildings"). Trades flexibility (you can't
-    lose just the water function to a hazard without losing power and
-    oxygen too) for build-slot efficiency; the three standalone
-    buildings remain available for players who'd rather spread that
-    risk across separate structures. See recipes.yaml's hq_* recipes,
-    all `concurrent: true` — they always run together, sharing this
-    building's power/labor/input scale each turn (see
-    outpost_core/src/colony/production.rs's module doc comment).
-  category: services
-  power_delta: -13.0
-  worker_slots: 2
-  labor_required: 2
-  slot_cost: 1
-  construction_turns: 3
-  construction_cost:
-    - id: structural_metal
-      quantity: 37.0
-
-# ── Tier 1 (basic_construction / basic_power / resource_extraction) ────────
 
 - id: structural_mine
   name: Structural Mine

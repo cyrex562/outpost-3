@@ -1,9 +1,9 @@
 # Assertions for the bootstrap-colony balance check.
 #
-# Expected net rates at population=100 with the 5 starter buildings:
-#   water:      24 produced − (2 hydroponic + 15 colonists) = +7/sol
+# Expected net rates at population=100 with colony_hq + greenhouse_dome:
+#   water:      24 produced − (2 greenhouse + 15 colonists) = +7/sol
 #   food_ration: 12 produced − 10 colonists                 = +2/sol
-#   biomass:     3 produced (grow_rations byproduct, issue #211), no
+#   biomass:     3 produced (grow_rations_dome byproduct), no
 #                starter-set consumer                        = +3/sol
 #   oxygen:      7 produced − 5 colonists                   = +2/sol
 #   power:      24 produced − 20 colonists                  = +4/sol
