@@ -420,9 +420,11 @@
   name: Carbon
   description: >
     Atmosphere-captured elemental carbon — a byproduct of
-    `atmospheric_harvester`'s `harvest_atmosphere` recipe (issue #166)
-    alongside its primary oxygen output, rather than a new dedicated
-    extractor (issue #216). Feedstock for `carbon_composites`.
+    `atmospheric_harvester`'s `harvest_atmosphere` recipe (issue #166) and
+    the starter-tier `air_miner`'s `mine_atmosphere_basic` recipe (landing-
+    kit redesign, playtest feedback round 2), both alongside their primary
+    oxygen output, rather than a new dedicated extractor (issue #216).
+    Feedstock for `carbon_composites` and `chem_plant`'s `chemicals`.
   category: raw_material
   phase: solid
   base_value: 8.0

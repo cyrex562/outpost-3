@@ -111,6 +111,100 @@
       quantity: 7.0
   concurrent: true
 
+# ── Landing kit (self-powered starter buildings, see buildings.yaml) ───────
+
+- id: mine_ice_water
+  name: Mine Ice Water
+  building: ice_miner
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 20.0
+
+- id: excavate_structural_ore
+  name: Excavate Structural Ore
+  building: excavation_rig
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: structural_ore
+      quantity: 10.0
+
+# fabrication_complex runs one of these two at a time (active_recipes
+# selection, issue #166) — sorted-first default is foundry_smelt_ore.
+- id: foundry_smelt_ore
+  name: Smelt Ore (Foundry)
+  building: fabrication_complex
+  cycle_sols: 1
+  inputs:
+    - id: structural_ore
+      quantity: 5.0
+  outputs:
+    - id: structural_metal
+      quantity: 4.0
+
+- id: machine_shop_fabricate_components
+  name: Fabricate Components (Machine Shop)
+  building: fabrication_complex
+  cycle_sols: 2
+  inputs:
+    - id: structural_metal
+      quantity: 3.0
+  outputs:
+    - id: components
+      quantity: 2.0
+
+- id: mine_atmosphere_basic
+  name: Mine Atmosphere
+  building: air_miner
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 10.0
+    - id: carbon
+      quantity: 3.0
+
+# Deliberately a low-throughput trickle (1.0/2 sols = 0.5/sol) compared to
+# petrochemical_plant's tech-gated refine_chemicals (2.0/1 sol = 2.0/sol,
+# from hydrocarbons) — a starter-tier fallback shouldn't undercut the
+# incentive to research advanced_materials for real chemical production.
+- id: synthesize_chemicals
+  name: Synthesize Chemicals
+  building: chem_plant
+  cycle_sols: 2
+  inputs:
+    - id: carbon
+      quantity: 3.0
+    - id: water
+      quantity: 5.0
+  outputs:
+    - id: chemicals
+      quantity: 1.0
+
+- id: grow_rations_dome
+  name: Grow Rations (Greenhouse Dome)
+  building: greenhouse_dome
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 2.0
+  outputs:
+    - id: food_ration
+      quantity: 12.0
+    - id: biomass
+      quantity: 3.0
+
+- id: house_colonists_pod
+  name: House Colonists (Habitat Pod)
+  building: habitat_pod
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: housing
+      quantity: 110.0
+
 # ── Tier 1 ───────────────────────────────────────────────────────────────────
 
 - id: mine_structural_ore

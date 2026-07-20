@@ -38,6 +38,9 @@
   unlocks:
     buildings:
       - warehouse
+      - hydroponic_bay
+      - research_lab
+      - basic_habitat
     bonuses:
       - construction_speed_10_percent
 
@@ -51,6 +54,8 @@
   unlocks:
     buildings:
       - wind_turbine
+      - solar_array_mk1
+      - life_support_module
     bonuses: []
 
 - id: resource_extraction
@@ -69,6 +74,8 @@
       - fissile_mine
       - semiconductor_mine
       - silicate_quarry
+      - water_well
+      - smelter
     bonuses:
       - mining_efficiency_10_percent
 

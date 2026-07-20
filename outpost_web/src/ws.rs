@@ -1040,22 +1040,18 @@ mod tests {
             .position(|c| c.id == colony_id)
             .unwrap();
 
-        // Fill all 5 default build slots with the starter buildings that
-        // cover the 5 survival needs — bypasses the construction queue's
-        // multi-sol build time, matching the established test pattern for
-        // isolating production/needs behavior from construction timing.
-        for building_type in [
-            "water_well",
-            "hydroponic_bay",
-            "life_support_module",
-            "solar_array_mk1",
-            "basic_habitat",
-        ] {
+        // Fill build slots with the landing-kit starter buildings that
+        // cover the 5 survival needs (colony_hq: power+water+oxygen;
+        // greenhouse_dome: food; habitat_pod: housing) — bypasses the
+        // construction queue's multi-sol build time, matching the
+        // established test pattern for isolating production/needs behavior
+        // from construction timing.
+        for building_type in ["colony_hq", "greenhouse_dome", "habitat_pod"] {
             engine.state.colonies[idx]
                 .buildings
                 .push(PlacedBuilding::new(building_type, 1));
         }
-        assert_eq!(engine.state.colonies[idx].slots_used(), 5);
+        assert_eq!(engine.state.colonies[idx].slots_used(), 3);
 
         // Advance 20 sols and confirm the colony doesn't spiral: stability
         // stays healthy and population never declines below its starting
@@ -1690,6 +1686,97 @@ mod tests {
             ids,
             vec!["hq_generate_power", "hq_pump_water", "hq_scrub_oxygen"],
             "all three concurrent recipes should have run"
+        );
+    }
+
+    /// Real-engine proof that the other 5 landing-kit buildings from the
+    /// starter-roster redesign (`ice_miner`, `excavation_rig`,
+    /// `fabrication_complex`, `air_miner`, `chem_plant`) actually produce
+    /// against the real content pack, and that `fabrication_complex`'s
+    /// ore→metal recipe (its sorted-first default) and `chem_plant`'s
+    /// carbon+water recipe pick up `excavation_rig`/`air_miner`/
+    /// `ice_miner`'s outputs on the following sol (inputs are drawn from
+    /// start-of-turn pool state, so a producer's own first-sol output isn't
+    /// available to a consumer until the next sol — matching the
+    /// established pattern in
+    /// `semiconductor_chain_produces_semiconductors_from_real_pack`).
+    #[test]
+    fn landing_kit_extraction_and_processing_buildings_produce_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Landing Kit Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        for building_type in [
+            "ice_miner",
+            "excavation_rig",
+            "fabrication_complex",
+            "air_miner",
+            "chem_plant",
+        ] {
+            engine.state.colonies[idx]
+                .buildings
+                .push(PlacedBuilding::new(building_type, 1));
+        }
+
+        // Sol 1: each extraction building deposits its raw output into the
+        // pool (fabrication_complex/chem_plant have no input yet, so their
+        // recipes don't run this sol — that's expected).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        {
+            let pool = &engine.state.colonies[idx].pool;
+            assert!(pool.amount("water") > 0.0, "ice_miner should produce water");
+            assert!(
+                pool.amount("structural_ore") > 0.0,
+                "excavation_rig should produce ore"
+            );
+            assert!(
+                pool.amount("oxygen") > 0.0,
+                "air_miner should produce oxygen"
+            );
+            assert!(
+                pool.amount("carbon") > 0.0,
+                "air_miner should produce carbon"
+            );
+        }
+
+        // Sol 2: fabrication_complex/chem_plant now have start-of-turn
+        // inputs available from sol 1's production.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let pool = &engine.state.colonies[idx].pool;
+        assert!(
+            pool.amount("structural_metal") > 0.0,
+            "fabrication_complex's default recipe (foundry_smelt_ore) should consume \
+             excavation_rig's sol-1 ore and produce structural_metal"
+        );
+        assert!(
+            pool.amount("chemicals") > 0.0,
+            "chem_plant should synthesize chemicals from air_miner's carbon + ice_miner's water"
         );
     }
 

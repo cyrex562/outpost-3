@@ -2,13 +2,18 @@ id: bootstrap-colony-check
 name: Bootstrap Colony Sustainability Check
 version: '0.1.0'
 description: >
-  Proves the base pack's starter (no-tech-prerequisite) building set closes
-  food/water/oxygen/power for a 100-colonist population (the founding
-  wizard's default) using exactly the 5 default build slots — one each of
-  water_well, hydroponic_bay, life_support_module, solar_array_mk1, and
-  basic_habitat (issue #166). Population per-capita consumption is modeled
-  as a synthetic sink building (`colonist_life_support`) with no output,
-  matching outpost_core::needs::NeedsConfig::default_survival()'s rates at
+  Proves the base pack's new starter (no-tech-prerequisite) landing-kit
+  covers food/water/oxygen/power for a 100-colonist population (the
+  founding wizard's default) using just 2 of the 8 available starter
+  buildings (well within the colony's 5 default build slots) — colony_hq
+  (power+water+oxygen, concurrent recipes) and greenhouse_dome (food) —
+  landing-kit redesign, playtest feedback round 2. The other 6 starter
+  buildings (ice_miner, excavation_rig,
+  fabrication_complex, air_miner, chem_plant, habitat_pod) round out the
+  economy/housing but aren't required to survive the first sol. Population
+  per-capita consumption is modeled as a synthetic sink building
+  (`colonist_life_support`) with no output, matching
+  outpost_core::needs::NeedsConfig::default_survival()'s rates at
   population=100. Housing is a capacity check, not a flow rate, so it isn't
   representable here — see outpost_web::ws::tests::
   bootstrap_starter_buildings_sustain_default_starting_population for the
