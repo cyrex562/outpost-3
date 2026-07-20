@@ -12,6 +12,7 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Splitpanes, Pane } from 'splitpanes'
 import type { SplitpanesResizedPayload } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -35,32 +36,61 @@ import {
 
 const worldStore = useWorldStore()
 const gameStore = useGameStore()
+const route = useRoute()
+const router = useRouter()
 
 // ─── Colony selection ─────────────────────────────────────────────────────────
+//
+// The route's `:colonyId` param (issue #7 navigation rework, phase 1) is the
+// source of truth for which colony is being viewed — this makes the URL
+// itself a back/forward-navigable, deep-linkable representation of
+// selection, rather than selection living only in `gameStore` (which had no
+// way to distinguish "no colony selected yet" from "browser back button
+// pressed"). `gameStore.selectedColonyId` is kept in sync below (via watch)
+// purely so existing consumers — its own colonyScreen-refresh watcher, and
+// any other view still reading it directly — keep working unchanged.
 
 const colonies = computed(() => worldStore.colonies)
 
-const selectedColony = computed((): ColonyState | null => {
-  const id = gameStore.selectedColonyId
-  if (!id) return colonies.value[0] ?? null
-  return worldStore.world.colonies[id] ?? null
+const routeColonyId = computed((): string | null => {
+  const raw = route.params.colonyId
+  return typeof raw === 'string' && raw.length > 0 ? raw : null
 })
 
-onMounted(() => {
-  // Auto-select first colony if none is selected. The `watch` on
-  // `selectedColonyId` in the game store will fetch the colony_screen in
-  // Tauri mode; nothing else to do here.
-  if (!gameStore.selectedColonyId && colonies.value.length > 0) {
-    gameStore.selectedColonyId = colonies.value[0].id
-    return
-  }
-  // Selection was already set (e.g. after founding, then navigating back).
-  // Ensure the screen is populated for the current selection.
-  const id = gameStore.selectedColonyId
-  if (id && (!gameStore.colonyScreen || gameStore.colonyScreen.colony_id !== id)) {
-    void gameStore.refreshColonyScreen(id)
-  }
+const selectedColony = computed((): ColonyState | null => {
+  const id = routeColonyId.value ?? gameStore.selectedColonyId
+  if (!id) return colonies.value[0] ?? null
+  return worldStore.world.colonies[id] ?? colonies.value[0] ?? null
 })
+
+watch(
+  () => selectedColony.value?.id ?? null,
+  (id) => {
+    if (!id) return
+    gameStore.selectedColonyId = id
+    // Keep the URL in sync with whatever actually resolved — covers the
+    // bare `/colony` landing case (no param yet), colonies loading in
+    // asynchronously after mount (worldStore starts empty and populates
+    // reactively, so a mount-only check would miss this), and the routed
+    // colony having disappeared from `worldStore` (its id fell through to
+    // `colonies.value[0]` in the computed above) — in every case, `id` is
+    // the source of truth and any mismatch gets corrected (replace, not
+    // push: these are all "the URL was wrong," not user-initiated
+    // navigation the user should be able to back out of).
+    if (id !== routeColonyId.value) {
+      void router.replace({ name: 'colony', params: { colonyId: id } })
+    }
+  },
+  { immediate: true },
+)
+
+/** Navigate to a colony tab — skips the push when it's already selected, so
+ * clicking the active tab doesn't trigger Vue Router's duplicate-navigation
+ * warning/rejection for an identical route. */
+function selectColony(colonyId: string): void {
+  if (selectedColony.value?.id === colonyId) return
+  void router.push({ name: 'colony', params: { colonyId } })
+}
 
 /** The colony screen data, but only when it matches the selected colony. */
 const screen = computed(() => {
@@ -270,7 +300,7 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
             :key="col.id"
             class="tab"
             :class="{ active: selectedColony?.id === col.id }"
-            @click="gameStore.selectedColonyId = col.id"
+            @click="selectColony(col.id)"
           >
             {{ col.name }}
           </button>
