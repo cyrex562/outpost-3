@@ -13,7 +13,7 @@ const router = createRouter({
     { path: '/', component: MainMenuView, name: 'menu' },
     { path: '/system', component: SystemMapView, name: 'system' },
     { path: '/new-game', component: NewGameView, name: 'new-game' },
-    { path: '/colony', component: ColonyView, name: 'colony' },
+    { path: '/colony/:colonyId?', component: ColonyView, name: 'colony' },
     { path: '/found', component: FoundColonyWizardView, name: 'found' },
     { path: '/tech', component: TechTreeView, name: 'tech' },
     { path: '/outposts', component: OutpostsView, name: 'outposts' },

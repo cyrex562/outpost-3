@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameSocket } from '@/composables/useGameSocket'
 import { useWorldStore } from '@/stores/worldStore'
@@ -107,6 +107,41 @@ async function exitApp(): Promise<void> {
     window.close()
   }
 }
+
+// ─── Escape-to-back navigation (navigation rework #7 phase 1) ──────────────
+//
+// Route params (`:colonyId` etc.) are now the source of truth for drill-down
+// depth, so `router.back()` naturally walks the stack — no manual bookkeeping
+// needed. Known limitation, deferred to a later phase: this doesn't yet know
+// about component-local modals (e.g. BuildingDetailsHud) — pressing Escape
+// while one is open navigates back *and* leaves the modal open, rather than
+// closing the modal first. Promoting that modal to a routed facility page
+// (phase 2) removes the ambiguity entirely rather than requiring cross-
+// component modal-state plumbing here.
+/** True while focus is inside a form control — Escape there should let the
+ * browser/input handle it (e.g. clear focus, close a native dropdown)
+ * rather than navigate the whole app away and discard in-progress input. */
+function isEditingFormField(): boolean {
+  const el = document.activeElement
+  if (!el) return false
+  if (el instanceof HTMLElement && el.isContentEditable) return true
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  if (route.path === '/') return
+  if (isEditingFormField()) return
+  // A direct deep-link load (or a fresh Tauri session) has no in-app
+  // history to go back to — `history.length` is 1 in that case. Without
+  // this guard, `router.back()` would navigate the whole window away from
+  // the app (browser mode) or do nothing useful (Tauri).
+  if (window.history.length <= 1) return
+  router.back()
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
