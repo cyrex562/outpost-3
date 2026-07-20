@@ -188,6 +188,64 @@ export interface OrbitalStationCompletedEvent {
   blueprint_id: string
 }
 
+/** A colony's home body was recorded (issue #163). Fired by the founding
+ * wizard right after `found_colony`/`found_colony_at_site` whenever the
+ * player picked a body — i.e. on nearly every real playthrough. This event
+ * kind has its own typed `ServerEvent` variant on both wire layers
+ * (`outpost_web`'s WS bridge and `outpost_tauri`'s IPC bridge) — it just
+ * wasn't declared here, so a Tauri session forwarding it hit a frontend
+ * type/reducer that couldn't recognise the `kind` string at all. */
+export interface ColonyHomeBodySetEvent {
+  kind: 'colony_home_body_set'
+  colony_id: string
+  body_id: string
+  habitability_modifier: number
+}
+
+/** A building type's active (pick-one) recipe was changed (issue #166). */
+export interface ActiveRecipeSetEvent {
+  kind: 'active_recipe_set'
+  colony_id: string
+  building_type: string
+  recipe_id: string
+}
+
+/** The active difficulty preset changed (issue #161). */
+export interface DifficultyChangedEvent {
+  kind: 'difficulty_changed'
+  preset: string
+}
+
+/** A new outpost was established (issue #233/#243). */
+export interface OutpostEstablishedEvent {
+  kind: 'outpost_established'
+  outpost_id: string
+  colony_id: string
+  body_id: string
+}
+
+/** An outpost was decommissioned (issue #233/#243). */
+export interface OutpostDecommissionedEvent {
+  kind: 'outpost_decommissioned'
+  outpost_id: string
+}
+
+/** An outpost queued a construction project (issue #233/#243). */
+export interface OutpostConstructionQueuedEvent {
+  kind: 'outpost_construction_queued'
+  outpost_id: string
+  building_type: string
+  project_id: string
+}
+
+/** An outpost was promoted into a full colony (issue #242/#243). */
+export interface OutpostPromotedEvent {
+  kind: 'outpost_promoted'
+  outpost_id: string
+  colony_id: string
+  name: string
+}
+
 /** A core event that the frontend does not need to act on. */
 export interface IgnoredEvent {
   kind: 'ignored'
@@ -221,4 +279,11 @@ export type ServerEvent =
   | MenaceCriticalEvent
   | CargoDeliveredEvent
   | OrbitalStationCompletedEvent
+  | ColonyHomeBodySetEvent
+  | ActiveRecipeSetEvent
+  | DifficultyChangedEvent
+  | OutpostEstablishedEvent
+  | OutpostDecommissionedEvent
+  | OutpostConstructionQueuedEvent
+  | OutpostPromotedEvent
   | IgnoredEvent

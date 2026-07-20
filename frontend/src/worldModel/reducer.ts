@@ -175,6 +175,26 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
       // return unchanged state so the reducer remains total over all event kinds.
       return state
 
+    case 'colony_home_body_set':
+    case 'active_recipe_set':
+    case 'difficulty_changed':
+    case 'outpost_established':
+    case 'outpost_decommissioned':
+    case 'outpost_construction_queued':
+    case 'outpost_promoted':
+      // The current world model does not yet track home-body/habitability,
+      // per-building active recipe, difficulty, or outpost state in detail
+      // (outposts are queried separately — see `services/tauriBridge.ts`'s
+      // `listOutposts`). Return unchanged state rather than omitting these
+      // cases: an omitted case still type-checks (TS can't see events a
+      // wire layer forwards via an `as unknown as ServerEvent` cast) but
+      // falls through with no matching arm, and a switch with no `default`
+      // silently returns `undefined` — which is exactly what happened here
+      // (issue: blank screen after founding, `world.value` became
+      // `undefined` because `colony_home_body_set` — fired by the founding
+      // wizard on nearly every real playthrough — had no case at all).
+      return state
+
     case 'production_shortfall': {
       const colony = state.colonies[event.colony_id]
       const notification = {
@@ -295,6 +315,22 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
 
     case 'ignored':
       // Explicitly mapped to indicate no frontend action required.
+      return state
+
+    default:
+      // Defense in depth against the exact failure class above recurring:
+      // both wire layers (`outpost_web`'s WS bridge and `outpost_tauri`'s
+      // IPC bridge) can forward a `kind` this switch has no case for —
+      // either a genuinely new core `Event` variant not yet given a typed
+      // `ServerEvent` case anywhere, or `outpost_tauri`'s own `"unknown"`
+      // catch-all for core events it hasn't typed yet either. A switch
+      // with no matching case and no `default` returns `undefined` here,
+      // silently corrupting the whole world state — which is exactly what
+      // shipped for `colony_home_body_set` before this file added a case
+      // for it. `console.warn` rather than silence, so a genuinely new
+      // event type that DOES need modelling doesn't go unnoticed forever;
+      // `state` unchanged is still the safe fallback either way.
+      console.warn(`applyEvent: unrecognised event kind "${(event as { kind?: string }).kind}" — ignoring`)
       return state
   }
 }
