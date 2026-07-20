@@ -26,7 +26,6 @@ const STUBS = {
   PopulationPanel: true,
   CommoditiesPanel: true,
   BuildingsPanel: true,
-  BuildingDetailsHud: true,
   ConstructionQueuePanel: true,
   AlertsPanel: true,
   Splitpanes: true,
@@ -129,4 +128,46 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
     expect(wrapper.find('[data-testid="no-colonies"]').exists()).toBe(true)
   })
+
+  it('navigates to the facility route when a building requests details (navigation rework #7 phase 2)', async () => {
+    seedColonies()
+    routeParams.colonyId = 'colony-1'
+    const gameStore = useGameStore()
+    gameStore.colonyScreen = {
+      colony_id: 'colony-1',
+      name: 'Alpha Base',
+      population: 100,
+      stability: 0.9,
+      slots_used: 1,
+      slot_capacity: 5,
+      labour_available: 5,
+      labour_total: 10,
+      buildings: [{ building_type: 'colony_hq', labour_assigned: 0, slot_cost: 1, full_capacity: true }],
+      stockpile: [],
+      construction_queue: [],
+      manual_override: false,
+    }
+
+    // Mount with the real BuildingsPanel (not stubbed) so its actual
+    // "view details" button emits the real event ColonyView listens for —
+    // Splitpanes/Pane need slot-rendering stubs instead of the default
+    // auto-stub (which drops slot content) so BuildingsPanel actually mounts.
+    const wrapper = mount(ColonyView, {
+      global: {
+        stubs: {
+          ...STUBS,
+          BuildingsPanel: false,
+          Splitpanes: { template: '<div><slot /></div>' },
+          Pane: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+    await wrapper.get('[data-testid="view-details-colony_hq"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'facility',
+      params: { colonyId: 'colony-1', buildingType: 'colony_hq' },
+    })
+  })
+
 })

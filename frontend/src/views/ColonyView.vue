@@ -22,7 +22,6 @@ import CommandPanel from '@/components/CommandPanel.vue'
 import PopulationPanel from '@/components/PopulationPanel.vue'
 import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
 import BuildingsPanel from '@/components/BuildingsPanel.vue'
-import BuildingDetailsHud from '@/components/BuildingDetailsHud.vue'
 import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
 import AlertsPanel from '@/components/AlertsPanel.vue'
 import type { ColonyState } from '@/worldModel/model'
@@ -223,16 +222,12 @@ async function assignLabour(buildingType: string, labour: number): Promise<void>
   })
 }
 
-// ─── Building details HUD (issue #182) ─────────────────────────────────────────
-
-const detailsBuildingType = ref<string | null>(null)
+// ─── Building details (issue #182; routed page as of navigation rework #7 phase 2) ──
 
 function openBuildingDetails(buildingType: string): void {
-  detailsBuildingType.value = buildingType
-}
-
-function closeBuildingDetails(): void {
-  detailsBuildingType.value = null
+  const col = selectedColony.value
+  if (!col) return
+  void router.push({ name: 'facility', params: { colonyId: col.id, buildingType } })
 }
 
 // ─── Panel layout persistence ───────────────────────────────────────────────────
@@ -361,12 +356,6 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
       <div class="research-total" data-testid="research-total">
         System research: {{ worldStore.researchTotal.toFixed(1) }} RP
       </div>
-
-      <BuildingDetailsHud
-        :colony-id="selectedColony?.id ?? null"
-        :building-type="detailsBuildingType"
-        @close="closeBuildingDetails"
-      />
     </template>
   </div>
 </template>
