@@ -1,15 +1,21 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import BuildingDetailsHud from '@/components/BuildingDetailsHud.vue'
 import type { BuildingDetail } from '@/services/tauriBridge'
 
 const getBuildingDetail = vi.fn<[string, string], Promise<BuildingDetail>>()
 const setActiveRecipe = vi.fn<[string, string, string], Promise<unknown>>()
+const getOutpostBuildingDetail = vi.fn<[string, string], Promise<BuildingDetail>>()
+const setOutpostActiveRecipe = vi.fn<[string, string, string], Promise<unknown>>()
 
 vi.mock('@/services/tauriBridge', () => ({
   getBuildingDetail: (colonyId: string, buildingType: string) => getBuildingDetail(colonyId, buildingType),
   setActiveRecipe: (colonyId: string, buildingType: string, recipeId: string) =>
     setActiveRecipe(colonyId, buildingType, recipeId),
+  getOutpostBuildingDetail: (outpostId: string, buildingType: string) =>
+    getOutpostBuildingDetail(outpostId, buildingType),
+  setOutpostActiveRecipe: (outpostId: string, buildingType: string, recipeId: string) =>
+    setOutpostActiveRecipe(outpostId, buildingType, recipeId),
 }))
 
 function makeDetail(overrides: Partial<BuildingDetail>): BuildingDetail {
@@ -40,9 +46,13 @@ function makeDetail(overrides: Partial<BuildingDetail>): BuildingDetail {
 }
 
 describe('BuildingDetailsHud (#182)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('is hidden when buildingType is null', () => {
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: null },
+      props: { ownerId: 'colony-1', buildingType: null },
     })
     expect(wrapper.find('[data-testid="building-details-hud"]').exists()).toBe(false)
   })
@@ -50,7 +60,7 @@ describe('BuildingDetailsHud (#182)', () => {
   it('fetches and renders detail when a building type is selected', async () => {
     getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: 'research_lab' },
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
     })
     await flushPromises()
 
@@ -71,7 +81,7 @@ describe('BuildingDetailsHud (#182)', () => {
       }),
     )
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: 'research_lab' },
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
     })
     await flushPromises()
 
@@ -82,7 +92,7 @@ describe('BuildingDetailsHud (#182)', () => {
   it('shows no recipe selector when there is only one recipe', async () => {
     getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: 'research_lab' },
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
     })
     await flushPromises()
     expect(wrapper.find('[data-testid="recipe-selector"]').exists()).toBe(false)
@@ -112,7 +122,7 @@ describe('BuildingDetailsHud (#182)', () => {
       }),
     )
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: 'refinery' },
+      props: { ownerId: 'colony-1', buildingType: 'refinery' },
     })
     await flushPromises()
 
@@ -163,7 +173,7 @@ describe('BuildingDetailsHud (#182)', () => {
       }),
     )
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: 'colony_hq' },
+      props: { ownerId: 'colony-1', buildingType: 'colony_hq' },
     })
     await flushPromises()
 
@@ -176,11 +186,59 @@ describe('BuildingDetailsHud (#182)', () => {
   it('emits close when the backdrop is clicked', async () => {
     getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
     const wrapper = mount(BuildingDetailsHud, {
-      props: { colonyId: 'colony-1', buildingType: 'research_lab' },
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
     })
     await flushPromises()
 
     await wrapper.find('[data-testid="close-details-hud"]').trigger('click')
     expect(wrapper.emitted('close')).toBeTruthy()
+  })
+
+  describe('ownerType="outpost" (navigation rework #7 phase 4)', () => {
+    it('fetches outpost-scoped detail instead of colony detail', async () => {
+      getOutpostBuildingDetail.mockResolvedValueOnce(makeDetail({ building_type: 'mining_outpost', name: 'Mining Outpost' }))
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerType: 'outpost', ownerId: 'outpost-1', buildingType: 'mining_outpost' },
+      })
+      await flushPromises()
+
+      expect(getOutpostBuildingDetail).toHaveBeenCalledWith('outpost-1', 'mining_outpost')
+      expect(getBuildingDetail).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('Mining Outpost')
+    })
+
+    it('switches recipe via the outpost-scoped command', async () => {
+      const recipeA = {
+        recipe_id: 'mine_a',
+        name: 'Mine A',
+        inputs: [],
+        outputs: [{ commodity_id: 'structural_ore', quantity: 10 }],
+        cycle_sols: 1,
+      }
+      const recipeB = {
+        recipe_id: 'mine_b',
+        name: 'Mine B',
+        inputs: [],
+        outputs: [{ commodity_id: 'conductive_ore', quantity: 8 }],
+        cycle_sols: 1,
+      }
+      getOutpostBuildingDetail.mockResolvedValueOnce(
+        makeDetail({ building_type: 'mining_outpost', recipe: recipeA, available_recipes: [recipeA, recipeB] }),
+      )
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerType: 'outpost', ownerId: 'outpost-1', buildingType: 'mining_outpost' },
+      })
+      await flushPromises()
+
+      getOutpostBuildingDetail.mockResolvedValueOnce(
+        makeDetail({ building_type: 'mining_outpost', recipe: recipeB, available_recipes: [recipeA, recipeB] }),
+      )
+      setOutpostActiveRecipe.mockResolvedValueOnce([])
+      await wrapper.find('[data-testid="recipe-select"]').setValue('mine_b')
+      await flushPromises()
+
+      expect(setOutpostActiveRecipe).toHaveBeenCalledWith('outpost-1', 'mining_outpost', 'mine_b')
+      expect(setActiveRecipe).not.toHaveBeenCalled()
+    })
   })
 })

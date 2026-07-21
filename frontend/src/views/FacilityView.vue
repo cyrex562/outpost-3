@@ -37,7 +37,8 @@ function backToColony(): void {
 
 <template>
   <BuildingDetailsHud
-    :colony-id="colonyId"
+    owner-type="colony"
+    :owner-id="colonyId"
     :building-type="buildingType"
     as-page
     @close="backToColony"

@@ -10,10 +10,12 @@
  */
 
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
 import { listOutposts, type Outpost } from '@/services/tauriBridge'
 
+const router = useRouter()
 const worldStore = useWorldStore()
 const gameStore = useGameStore()
 
@@ -58,6 +60,11 @@ async function decommission(outpostId: string): Promise<void> {
 }
 
 const sortedOutposts = computed(() => [...outposts.value].sort((a, b) => a.name.localeCompare(b.name)))
+
+/** Navigation rework #7 phase 4: drill down into this outpost's own page. */
+function openOutpost(outpostId: string): void {
+  void router.push({ name: 'outpost', params: { outpostId } })
+}
 </script>
 
 <template>
@@ -78,7 +85,7 @@ const sortedOutposts = computed(() => [...outposts.value].sort((a, b) => a.name.
         class="installation-card"
         :data-testid="`installation-${o.id}`"
       >
-        <div class="installation-header">
+        <div class="installation-header installation-header--link" @click="openOutpost(o.id)">
           <h3>{{ o.name }}</h3>
           <span class="body-tag">{{ o.body_name }}</span>
         </div>
@@ -127,6 +134,8 @@ const sortedOutposts = computed(() => [...outposts.value].sort((a, b) => a.name.
 .installation-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
 .installation-card { background: #101018; border: 1px solid #334; border-radius: 6px; padding: 0.75rem 1rem; }
 .installation-header { display: flex; align-items: center; gap: 0.5rem; }
+.installation-header--link { cursor: pointer; }
+.installation-header--link:hover h3 { color: #adf; }
 .installation-header h3 { color: #8cf; margin: 0; }
 .body-tag { color: #779; font-size: 0.78rem; }
 

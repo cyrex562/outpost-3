@@ -14,6 +14,11 @@ vi.mock('@/services/tauriBridge', () => ({
   listOutposts: () => listOutposts(),
 }))
 
+const routerPush = vi.fn()
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+}))
+
 const sendCommand = vi.fn<[Command], Promise<GameEvent[]>>()
 // A single shared object (not a fresh literal per call) so the component's
 // `gameStore.toastMessage` reads see whatever a test sets on it, mirroring
@@ -46,6 +51,7 @@ describe('InstallationsView (navigation rework #7 phase 3: system-wide installat
     setActivePinia(createPinia())
     listOutposts.mockReset()
     sendCommand.mockReset()
+    routerPush.mockReset()
     gameStoreMock.toastMessage = null
   })
 
@@ -120,5 +126,15 @@ describe('InstallationsView (navigation rework #7 phase 3: system-wide installat
     expect(listOutposts).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-testid="installation-outpost-1"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Error: outpost has active projects.')
+  })
+
+  it('navigates to the outpost drill-down page when a card header is clicked (navigation rework #7 phase 4)', async () => {
+    listOutposts.mockResolvedValueOnce([makeOutpost({ id: 'outpost-1' })])
+    const wrapper = mount(InstallationsView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="installation-outpost-1"] .installation-header').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({ name: 'outpost', params: { outpostId: 'outpost-1' } })
   })
 })

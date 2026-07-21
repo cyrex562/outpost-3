@@ -10,6 +10,8 @@ import FacilityView from './views/FacilityView.vue'
 import InstallationsView from './views/InstallationsView.vue'
 import SystemBodiesView from './views/SystemBodiesView.vue'
 import BuildingsListView from './views/BuildingsListView.vue'
+import OutpostView from './views/OutpostView.vue'
+import OutpostFacilityView from './views/OutpostFacilityView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -29,6 +31,12 @@ const router = createRouter({
     { path: '/installations', component: InstallationsView, name: 'installations' },
     { path: '/bodies', component: SystemBodiesView, name: 'bodies' },
     { path: '/buildings', component: BuildingsListView, name: 'buildings' },
+    { path: '/outpost/:outpostId', component: OutpostView, name: 'outpost' },
+    {
+      path: '/outpost/:outpostId/facility/:buildingType',
+      component: OutpostFacilityView,
+      name: 'outpost-facility',
+    },
   ],
 })
 

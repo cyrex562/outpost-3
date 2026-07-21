@@ -177,6 +177,13 @@ pub enum ClientCommand {
         name: String,
         starting_population: u64,
     },
+    /// Select which recipe a building type runs at an outpost (navigation
+    /// rework #7 phase 4 — mirrors `SetActiveRecipe` for colonies).
+    SetOutpostActiveRecipe {
+        outpost_id: String,
+        building_type: String,
+        recipe_id: String,
+    },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -196,6 +203,12 @@ pub enum ClientQuery {
     /// Full detail for one building type within a colony (issue #182).
     BuildingDetail {
         colony_id: String,
+        building_type: String,
+    },
+    /// Full detail for one building type within an outpost (navigation
+    /// rework #7 phase 4).
+    OutpostBuildingDetail {
+        outpost_id: String,
         building_type: String,
     },
 }
@@ -285,6 +298,13 @@ pub enum ServerEvent {
         outpost_id: String,
         colony_id: String,
         name: String,
+    },
+    /// An outpost building type's active recipe was set (navigation rework
+    /// #7 phase 4 — mirrors `ActiveRecipeSet` for colonies).
+    OutpostActiveRecipeSet {
+        outpost_id: String,
+        building_type: String,
+        recipe_id: String,
     },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
@@ -431,6 +451,15 @@ impl ServerEvent {
                 outpost_id: outpost_id.to_string(),
                 colony_id: colony_id.to_string(),
                 name: name.clone(),
+            },
+            Event::OutpostActiveRecipeSet {
+                outpost_id,
+                building_type,
+                recipe_id,
+            } => Self::OutpostActiveRecipeSet {
+                outpost_id: outpost_id.to_string(),
+                building_type: building_type.clone(),
+                recipe_id: recipe_id.clone(),
             },
             other => Self::Unknown {
                 core_kind: format!("{other:?}")
@@ -1162,6 +1191,16 @@ pub fn apply_command(
             name,
             starting_population,
         },
+        ClientCommand::SetOutpostActiveRecipe {
+            outpost_id,
+            building_type,
+            recipe_id,
+        } => Command::SetOutpostActiveRecipe {
+            outpost_id: Uuid::parse_str(&outpost_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad outpost_id: {outpost_id}")))?,
+            building_type,
+            recipe_id,
+        },
     };
 
     match engine.apply(&core_cmd) {
@@ -1222,6 +1261,14 @@ pub fn run_query(
             building_type,
         } => Query::BuildingDetail {
             colony_id: parse_colony(&colony_id)?,
+            building_type,
+        },
+        ClientQuery::OutpostBuildingDetail {
+            outpost_id,
+            building_type,
+        } => Query::OutpostBuildingDetail {
+            outpost_id: Uuid::parse_str(&outpost_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad outpost_id: {outpost_id}")))?,
             building_type,
         },
     };
