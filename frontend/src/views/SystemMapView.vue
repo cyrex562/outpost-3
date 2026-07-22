@@ -38,6 +38,14 @@ onMounted(async () => {
 
 const WORLD_SCALE = 100 // 1 AU = 100 world units
 
+// Moon nesting (system fixes B1): moons orbit their parent planet/giant
+// rather than sitting on their own star-centered ring. Each moon gets a
+// concentric mini-orbit around the parent — ring radius grows with the
+// moon's index among its siblings so a giant's many moons don't collapse
+// onto each other.
+const MOON_ORBIT_BASE = 10 // gap from parent's edge to the innermost moon ring
+const MOON_ORBIT_STEP = 7 // additional radius per sibling ring outward
+
 /** Deterministic angle per body (radians) so orbits don't reshuffle. */
 function angleFor(id: string): number {
   let h = 0
@@ -45,11 +53,92 @@ function angleFor(id: string): number {
   return ((h >>> 0) % 360) * (Math.PI / 180)
 }
 
-function bodyPos(b: SystemBody): { x: number; y: number } {
+/** Star-centered position from a body's own orbital distance. */
+function starCenteredPos(b: SystemBody): { x: number; y: number } {
   const r = b.distance_au * WORLD_SCALE
   const a = angleFor(b.id)
   return { x: r * Math.cos(a), y: r * Math.sin(a) }
 }
+
+/** Lookup of a body by its (unique, within a generated system) name, so a
+ * moon can find its parent from `parent_body_name`. */
+const bodyByName = computed(() => {
+  const m = new Map<string, SystemBody>()
+  for (const b of bodies.value) m.set(b.name, b)
+  return m
+})
+
+/** A moon's index among the moons sharing its parent, ordered deterministically
+ * by id, so concentric mini-orbits step outward without overlapping. */
+const moonSiblingIndex = computed(() => {
+  const idx = new Map<string, number>()
+  const nextForParent = new Map<string, number>()
+  const moons = bodies.value
+    .filter((b) => b.kind === 'Moon' && b.parent_body_name)
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+  for (const moon of moons) {
+    const key = moon.parent_body_name as string
+    const n = nextForParent.get(key) ?? 0
+    idx.set(moon.id, n)
+    nextForParent.set(key, n + 1)
+  }
+  return idx
+})
+
+/** Ring radius (world units) of a moon's mini-orbit around its parent. */
+function moonRingRadius(moon: SystemBody, parent: SystemBody): number {
+  const ring = moonSiblingIndex.value.get(moon.id) ?? 0
+  return bodyRadius(parent) + MOON_ORBIT_BASE + ring * MOON_ORBIT_STEP
+}
+
+/** Resolved screen position per body id: non-moons sit on their star-centered
+ * orbit; moons nest on a mini-orbit around their resolved parent position.
+ * A `resolving` guard breaks any (data-model-permitted but generator-absent)
+ * moon-of-moon cycle by falling back to the star-centered position. */
+const posById = computed(() => {
+  const pos = new Map<string, { x: number; y: number }>()
+  const resolving = new Set<string>()
+  const resolve = (b: SystemBody): { x: number; y: number } => {
+    const cached = pos.get(b.id)
+    if (cached) return cached
+    const parent =
+      b.kind === 'Moon' && b.parent_body_name ? bodyByName.value.get(b.parent_body_name) : undefined
+    let result: { x: number; y: number }
+    if (parent && parent.id !== b.id && !resolving.has(b.id)) {
+      resolving.add(b.id)
+      const pp = resolve(parent)
+      resolving.delete(b.id)
+      const r = moonRingRadius(b, parent)
+      const a = angleFor(b.id)
+      result = { x: pp.x + r * Math.cos(a), y: pp.y + r * Math.sin(a) }
+    } else {
+      result = starCenteredPos(b)
+    }
+    pos.set(b.id, result)
+    return result
+  }
+  for (const b of bodies.value) resolve(b)
+  return pos
+})
+
+function bodyPos(b: SystemBody): { x: number; y: number } {
+  return posById.value.get(b.id) ?? starCenteredPos(b)
+}
+
+/** Faint per-moon orbit rings, centered on each moon's parent. */
+const moonOrbits = computed(() => {
+  const out: { key: string; cx: number; cy: number; r: number }[] = []
+  for (const b of bodies.value) {
+    if (b.kind !== 'Moon' || !b.parent_body_name) continue
+    const parent = bodyByName.value.get(b.parent_body_name)
+    if (!parent) continue
+    const pp = posById.value.get(parent.id)
+    if (!pp) continue
+    out.push({ key: b.id, cx: pp.x, cy: pp.y, r: moonRingRadius(b, parent) })
+  }
+  return out
+})
 
 function bodyColor(b: SystemBody): string {
   switch (b.kind) {
@@ -100,8 +189,11 @@ function formatYieldCategory(category: string): string {
   return category.replace(/([a-z])([A-Z])/g, '$1 $2')
 }
 
+// Star-centered orbit tracks: one per non-moon body. Moons get their own
+// mini-orbit rings around their parent (see `moonOrbits`), not a
+// star-centered ring at their own distance.
 const orbitRadii = computed(() =>
-  bodies.value.map((b) => b.distance_au * WORLD_SCALE),
+  bodies.value.filter((b) => b.kind !== 'Moon').map((b) => b.distance_au * WORLD_SCALE),
 )
 
 // ── Persistence ──────────────────────────────────────────────────────────
@@ -378,7 +470,7 @@ function foundColony(body?: SystemBody | null): void {
             KEPLER
           </text>
 
-          <!-- Orbit tracks -->
+          <!-- Orbit tracks (star-centered, non-moon bodies) -->
           <circle
             v-for="(r, i) in orbitRadii"
             :key="`orbit-${i}`"
@@ -391,12 +483,26 @@ function foundColony(body?: SystemBody | null): void {
             :stroke-dasharray="`${2 * strokeScale} ${3 * strokeScale}`"
           />
 
+          <!-- Moon mini-orbit tracks (centered on each moon's parent) -->
+          <circle
+            v-for="mo in moonOrbits"
+            :key="`moon-orbit-${mo.key}`"
+            :cx="mo.cx"
+            :cy="mo.cy"
+            :r="mo.r"
+            fill="none"
+            stroke="#2a2a3a"
+            :stroke-width="strokeScale * 0.75"
+            :stroke-dasharray="`${1 * strokeScale} ${2 * strokeScale}`"
+          />
+
           <!-- Bodies -->
           <g
             v-for="b in bodies"
             :key="b.id"
             class="body-group"
             :class="{ selected: selected?.id === b.id }"
+            :data-testid="`body-node-${b.id}`"
             @click.stop="selected = b"
           >
             <circle
@@ -407,7 +513,10 @@ function foundColony(body?: SystemBody | null): void {
               stroke="#000"
               stroke-width="1"
             />
+            <!-- Moons only label when selected — a giant's many moons would
+                 otherwise bury the diagram in overlapping text. -->
             <text
+              v-if="b.kind !== 'Moon' || selected?.id === b.id"
               :x="bodyPos(b).x"
               :y="bodyPos(b).y + bodyRadius(b) + labelOffsetY"
               text-anchor="middle"
