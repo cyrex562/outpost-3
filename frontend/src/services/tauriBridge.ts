@@ -198,6 +198,28 @@ export interface SystemBody {
   parent_body_name: string | null
   /** Per-category production modifiers (issue #184) — category name to multiplier, e.g. `["PowerOutput", 1.35]`. Empty when unauthored. */
   category_modifiers: [string, number][]
+  /** Density-zoned annulus profile for belt-kind bodies (system-screen fix B2). `null` for non-belt bodies. */
+  belt_profile: BeltProfile | null
+}
+
+/** One angular zone of a belt's annulus (system-screen fix B2). */
+export interface BeltZone {
+  /** Angular start of the zone, in degrees `[0, 360)`. */
+  start_deg: number
+  /** Angular sweep of the zone, in degrees. */
+  sweep_deg: number
+  /** Fill density `[0, 1]` — drives the annulus fill opacity. */
+  density: number
+}
+
+/** Radial/angular density profile of a belt, for annulus rendering (system-screen fix B2). */
+export interface BeltProfile {
+  /** Inner radius of the annulus, in AU. */
+  inner_au: number
+  /** Outer radius of the annulus, in AU. */
+  outer_au: number
+  /** Angular zones subdividing the annulus. */
+  zones: BeltZone[]
 }
 
 export async function getSystemBodies(): Promise<SystemBody[]> {

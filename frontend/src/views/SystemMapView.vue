@@ -140,6 +140,72 @@ const moonOrbits = computed(() => {
   return out
 })
 
+// ── Belt annuli (system fixes B2) ──────────────────────────────────────────
+//
+// Belts (asteroid + cometary) render as a star-centered annulus between their
+// profile's inner/outer AU, subdivided into angular zones whose fill opacity
+// tracks each zone's density — so a belt reads as clumpy rather than a single
+// dot. Opacity is mapped into a visible band so even sparse zones show faintly.
+const BELT_MIN_OPACITY = 0.1
+const BELT_MAX_OPACITY = 0.8
+
+/** Cartesian point at `deg` degrees on a circle of radius `r` about the star. */
+function polar(r: number, deg: number): { x: number; y: number } {
+  const a = (deg * Math.PI) / 180
+  return { x: r * Math.cos(a), y: r * Math.sin(a) }
+}
+
+/** SVG path for an annular sector (a wedge of the ring between two radii). */
+function annularSectorPath(innerR: number, outerR: number, startDeg: number, sweepDeg: number): string {
+  // A full 360° sweep makes the start and end points coincide, which renders
+  // as an SVG-undefined (empty) arc. The generator always emits 8×45° zones,
+  // but an authored belt could supply a single full-ring zone — clamp just
+  // under 360° so it still draws as a near-complete ring.
+  const clampedSweep = Math.min(sweepDeg, 359.99)
+  const endDeg = startDeg + clampedSweep
+  const largeArc = clampedSweep > 180 ? 1 : 0
+  const o0 = polar(outerR, startDeg)
+  const o1 = polar(outerR, endDeg)
+  const i1 = polar(innerR, endDeg)
+  const i0 = polar(innerR, startDeg)
+  return [
+    `M ${o0.x} ${o0.y}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 1 ${o1.x} ${o1.y}`,
+    `L ${i1.x} ${i1.y}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 0 ${i0.x} ${i0.y}`,
+    'Z',
+  ].join(' ')
+}
+
+function isBelt(b: SystemBody): boolean {
+  return b.belt_profile !== null && b.belt_profile !== undefined
+}
+
+/** Per-belt annular-sector descriptors, keyed by body id. */
+const beltRenders = computed(() => {
+  const map = new Map<string, { key: string; path: string; opacity: number }[]>()
+  for (const b of bodies.value) {
+    const bp = b.belt_profile
+    if (!bp) continue
+    const innerR = bp.inner_au * WORLD_SCALE
+    const outerR = bp.outer_au * WORLD_SCALE
+    const sectors = bp.zones.map((z, i) => {
+      const d = Math.max(0, Math.min(1, z.density))
+      return {
+        key: `${b.id}-z${i}`,
+        path: annularSectorPath(innerR, outerR, z.start_deg, z.sweep_deg),
+        opacity: BELT_MIN_OPACITY + (BELT_MAX_OPACITY - BELT_MIN_OPACITY) * d,
+      }
+    })
+    map.set(b.id, sectors)
+  }
+  return map
+})
+
+function beltSectorsFor(b: SystemBody): { key: string; path: string; opacity: number }[] {
+  return beltRenders.value.get(b.id) ?? []
+}
+
 function bodyColor(b: SystemBody): string {
   switch (b.kind) {
     case 'InnerPlanet':
@@ -149,7 +215,9 @@ function bodyColor(b: SystemBody): string {
     case 'Moon':
       return '#aab'
     case 'AsteroidBelt':
-      return '#665'
+      return '#998866'
+    case 'CometaryBelt':
+      return '#6aa6c8'
     case 'OrbitalStation':
       return '#4c8'
     default:
@@ -189,11 +257,13 @@ function formatYieldCategory(category: string): string {
   return category.replace(/([a-z])([A-Z])/g, '$1 $2')
 }
 
-// Star-centered orbit tracks: one per non-moon body. Moons get their own
-// mini-orbit rings around their parent (see `moonOrbits`), not a
-// star-centered ring at their own distance.
+// Star-centered orbit tracks: one per planet/giant/station. Moons get their
+// own mini-orbit rings around their parent (see `moonOrbits`); belts render
+// as an annulus (see `beltRenders`) rather than a single-line track.
 const orbitRadii = computed(() =>
-  bodies.value.filter((b) => b.kind !== 'Moon').map((b) => b.distance_au * WORLD_SCALE),
+  bodies.value
+    .filter((b) => b.kind !== 'Moon' && !b.belt_profile)
+    .map((b) => b.distance_au * WORLD_SCALE),
 )
 
 // ── Persistence ──────────────────────────────────────────────────────────
@@ -268,7 +338,7 @@ const viewBoxStr = computed(
  */
 function resetView(): void {
   const maxAu = bodies.value.length
-    ? Math.max(1, ...bodies.value.map((b) => b.distance_au))
+    ? Math.max(1, ...bodies.value.map((b) => b.belt_profile?.outer_au ?? b.distance_au))
     : 5
   const worldMax = maxAu * WORLD_SCALE * 1.2
   viewBox.value = { x: -worldMax, y: -worldMax, w: worldMax * 2, h: worldMax * 2 }
@@ -505,7 +575,22 @@ function foundColony(body?: SystemBody | null): void {
             :data-testid="`body-node-${b.id}`"
             @click.stop="selected = b"
           >
+            <!-- Belts render as a density-zoned annulus; every other body is
+                 a single circle. -->
+            <template v-if="isBelt(b) && beltSectorsFor(b).length">
+              <path
+                v-for="sector in beltSectorsFor(b)"
+                :key="sector.key"
+                :d="sector.path"
+                :fill="bodyColor(b)"
+                :fill-opacity="sector.opacity"
+                :stroke="selected?.id === b.id ? '#8cf' : 'none'"
+                :stroke-width="selected?.id === b.id ? strokeScale : 0"
+                class="belt-zone"
+              />
+            </template>
             <circle
+              v-else
               :cx="bodyPos(b).x"
               :cy="bodyPos(b).y"
               :r="bodyRadius(b)"
@@ -587,6 +672,14 @@ function foundColony(body?: SystemBody | null): void {
           </template>
           <dt>Subtype</dt>
           <dd>{{ selected.subtype }}</dd>
+          <template v-if="selected.belt_profile">
+            <dt>Belt span</dt>
+            <dd data-testid="belt-span">
+              {{ selected.belt_profile.inner_au.toFixed(2) }}–{{ selected.belt_profile.outer_au.toFixed(2) }} AU
+            </dd>
+            <dt>Zones</dt>
+            <dd>{{ selected.belt_profile.zones.length }}</dd>
+          </template>
           <dt v-if="selected.parent_body_name">Orbits</dt>
           <dd v-if="selected.parent_body_name">{{ selected.parent_body_name }}</dd>
           <dt>Rotation</dt>
@@ -682,6 +775,8 @@ function foundColony(body?: SystemBody | null): void {
 
 .body-group { cursor: pointer; }
 .body-group.selected circle { stroke: #8cf; stroke-width: 2; }
+.belt-zone { transition: fill-opacity 0.15s ease; }
+.body-group:hover .belt-zone { fill-opacity: 0.9; }
 
 .side-panel {
   min-width: 220px;

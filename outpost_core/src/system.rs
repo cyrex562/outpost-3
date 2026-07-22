@@ -49,8 +49,48 @@ pub enum BodyKind {
     Moon,
     /// Asteroid belt aggregate node.
     AsteroidBelt,
+    /// Cometary belt — icy volatiles at the cold outer edge (Kuiper-like).
+    CometaryBelt,
     /// Orbital station (not a natural body).
     OrbitalStation,
+}
+
+impl BodyKind {
+    /// Whether this kind is a belt (asteroid or cometary) — belts carry a
+    /// [`BeltProfile`] and render as a density-zoned annulus rather than a
+    /// point body (system-screen fix B2).
+    #[must_use]
+    pub fn is_belt(&self) -> bool {
+        matches!(self, BodyKind::AsteroidBelt | BodyKind::CometaryBelt)
+    }
+}
+
+/// One angular zone of a belt's annulus, carrying its own density
+/// (system-screen fix B2). Zones subdivide the ring so a belt reads as
+/// clumpy — denser and sparser arcs — rather than a uniform band.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeltZone {
+    /// Angular start of the zone, in degrees `[0, 360)`.
+    pub start_deg: f32,
+    /// Angular sweep of the zone, in degrees.
+    pub sweep_deg: f32,
+    /// Fill density `[0, 1]` — drives the annulus fill opacity for this zone.
+    pub density: f32,
+}
+
+/// Radial + angular profile of an asteroid or cometary belt (system-screen
+/// fix B2). Drawn as an annulus between `inner_au` and `outer_au`, subdivided
+/// into `zones` whose densities vary the fill opacity around the ring. `None`
+/// on non-belt bodies and on authored belts that don't specify one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeltProfile {
+    /// Inner radius of the annulus, in AU.
+    pub inner_au: f32,
+    /// Outer radius of the annulus, in AU.
+    pub outer_au: f32,
+    /// Angular zones subdividing the annulus. Contiguous and covering the
+    /// full ring when procedurally generated.
+    pub zones: Vec<BeltZone>,
 }
 
 /// Assigned system-role for a celestial body.
@@ -250,7 +290,10 @@ impl PlanetarySubtype {
             Self::Rocky | Self::Icy => {
                 matches!(
                     kind,
-                    BodyKind::InnerPlanet | BodyKind::Moon | BodyKind::AsteroidBelt
+                    BodyKind::InnerPlanet
+                        | BodyKind::Moon
+                        | BodyKind::AsteroidBelt
+                        | BodyKind::CometaryBelt
                 )
             }
             Self::GasGiant | Self::IceGiant => matches!(kind, BodyKind::GasGiant),
@@ -428,6 +471,11 @@ pub struct Body {
     /// survey (issue #235), if any.
     #[serde(default)]
     pub candidate_site_name: Option<String>,
+    /// Radial/angular density profile for belt-kind bodies (system-screen
+    /// fix B2). `None` for non-belt bodies and for authored belts that don't
+    /// specify one — in which case the belt falls back to a point marker.
+    #[serde(default)]
+    pub belt_profile: Option<BeltProfile>,
 }
 
 impl Body {
@@ -455,6 +503,7 @@ impl Body {
             deposits: Vec::new(),
             surveyed: false,
             candidate_site_name: None,
+            belt_profile: None,
         }
     }
 

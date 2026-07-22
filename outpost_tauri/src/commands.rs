@@ -1365,6 +1365,32 @@ pub struct SystemBodyWire {
     /// Per-category production modifiers (issue #184) — category name to
     /// multiplier, e.g. `("power_output", 1.3)`. Empty when unauthored.
     pub category_modifiers: Vec<(String, f32)>,
+    /// Density-zoned annulus profile for belt-kind bodies (system-screen fix
+    /// B2). `None` for non-belt bodies.
+    pub belt_profile: Option<BeltProfileWire>,
+}
+
+/// One angular zone of a belt's annulus (system-screen fix B2).
+#[derive(Debug, Serialize)]
+pub struct BeltZoneWire {
+    /// Angular start of the zone, in degrees `[0, 360)`.
+    pub start_deg: f32,
+    /// Angular sweep of the zone, in degrees.
+    pub sweep_deg: f32,
+    /// Fill density `[0, 1]` — drives the annulus fill opacity.
+    pub density: f32,
+}
+
+/// Radial/angular density profile of a belt, for annulus rendering
+/// (system-screen fix B2).
+#[derive(Debug, Serialize)]
+pub struct BeltProfileWire {
+    /// Inner radius of the annulus, in AU.
+    pub inner_au: f32,
+    /// Outer radius of the annulus, in AU.
+    pub outer_au: f32,
+    /// Angular zones subdividing the annulus.
+    pub zones: Vec<BeltZoneWire>,
 }
 
 /// Return the current list of system bodies with rendering hints.
@@ -1411,6 +1437,19 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
                 .iter()
                 .map(|m| (format!("{:?}", m.category), m.multiplier))
                 .collect(),
+            belt_profile: b.belt_profile.as_ref().map(|p| BeltProfileWire {
+                inner_au: p.inner_au,
+                outer_au: p.outer_au,
+                zones: p
+                    .zones
+                    .iter()
+                    .map(|z| BeltZoneWire {
+                        start_deg: z.start_deg,
+                        sweep_deg: z.sweep_deg,
+                        density: z.density,
+                    })
+                    .collect(),
+            }),
         })
         .collect();
     Ok(bodies)
