@@ -5297,31 +5297,9 @@ impl GameEngine {
                 EngineError::InvalidArgument(format!("unknown building type: {building_type}"))
             })?;
 
-        let to_recipe_row = |r: &content::types::RecipeDef| ui::RecipeRow {
-            recipe_id: r.id.clone(),
-            name: r.name.clone(),
-            inputs: r
-                .inputs
-                .iter()
-                .map(|i| ui::IngredientRow {
-                    commodity_id: i.id.clone(),
-                    quantity: i.quantity,
-                })
-                .collect(),
-            outputs: r
-                .outputs
-                .iter()
-                .map(|i| ui::IngredientRow {
-                    commodity_id: i.id.clone(),
-                    quantity: i.quantity,
-                })
-                .collect(),
-            cycle_sols: r.cycle_sols,
-        };
-
         let recipe =
             colony::production::recipe_for_building(building_type, active_recipes, registry)
-                .map(to_recipe_row);
+                .map(recipe_to_row);
 
         let mut available_recipes: Vec<&content::types::RecipeDef> = registry
             .recipes()
@@ -5329,7 +5307,7 @@ impl GameEngine {
             .collect();
         available_recipes.sort_by(|a, b| a.id.cmp(&b.id));
         let available_recipes: Vec<ui::RecipeRow> = if available_recipes.len() > 1 {
-            available_recipes.into_iter().map(to_recipe_row).collect()
+            available_recipes.into_iter().map(recipe_to_row).collect()
         } else {
             Vec::new()
         };
@@ -5387,7 +5365,7 @@ impl GameEngine {
                 registry,
             )
             .into_iter()
-            .map(to_recipe_row)
+            .map(recipe_to_row)
             .collect(),
             last_run,
         })
@@ -5436,6 +5414,33 @@ impl GameEngine {
                 directive::Directive::new(colony_id, def.predicate, action, def.priority);
             self.state.directive_store.set_directive(directive);
         }
+    }
+}
+
+/// Map a content-pack [`content::types::RecipeDef`] onto its wire
+/// [`ui::RecipeRow`]. Shared by [`GameEngine::build_building_detail_data`]'s
+/// active/available/concurrent recipe projections.
+fn recipe_to_row(r: &content::types::RecipeDef) -> ui::RecipeRow {
+    ui::RecipeRow {
+        recipe_id: r.id.clone(),
+        name: r.name.clone(),
+        inputs: r
+            .inputs
+            .iter()
+            .map(|i| ui::IngredientRow {
+                commodity_id: i.id.clone(),
+                quantity: i.quantity,
+            })
+            .collect(),
+        outputs: r
+            .outputs
+            .iter()
+            .map(|i| ui::IngredientRow {
+                commodity_id: i.id.clone(),
+                quantity: i.quantity,
+            })
+            .collect(),
+        cycle_sols: r.cycle_sols,
     }
 }
 

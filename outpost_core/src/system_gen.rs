@@ -34,7 +34,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::map::VEIN_COMMODITIES;
 use crate::system::{
-    AtmosphereDensity, AtmosphereHazard, Body, BodyDeposit, BodyKind, PlanetarySubtype,
+    AtmosphereDensity, AtmosphereHazard, Body, BodyDeposit, BodyId, BodyKind, PlanetarySubtype,
     RadiationLevel, SystemRole, TemperatureBand, HABITABILITY_FOUNDING_THRESHOLD,
 };
 
@@ -48,6 +48,13 @@ const DEFAULT_HABITABLE_ZONE_CENTER_AU: f32 = 1.0;
 /// Defaults for [`SystemGenParams::min_inner_planets`]/`max_inner_planets`.
 const DEFAULT_MIN_INNER_PLANETS: u32 = 2;
 const DEFAULT_MAX_INNER_PLANETS: u32 = 4;
+
+/// Moon-count bounds per parent body. Gas/ice giants carry extensive moon
+/// systems (Jupiter/Saturn scale), capped for sim sanity; rocky inner planets
+/// host at most a small handful (Earth/Mars scale).
+const MIN_GIANT_MOONS: u32 = 2;
+const MAX_GIANT_MOONS: u32 = 20;
+const MAX_ROCKY_MOONS: u32 = 3;
 
 /// Tunable knobs for [`generate_system`] (playtest feedback: expose these as
 /// New Game sliders rather than only the hardcoded defaults). All fields
@@ -126,15 +133,32 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     // landing near the habitable zone — see this fn's doc comment.
     let mut distance_au = 0.25 + rng.gen_range(0.0..0.15);
     for i in 0..inner_count {
-        let body = generate_body(
+        let planet_name = format!("Body-{}", i + 1);
+        let mut body = generate_body(
             &mut rng,
-            format!("Body-{}", i + 1),
+            planet_name.clone(),
             &BodyKind::InnerPlanet,
             distance_au,
             hz_center,
             i == 0,
         );
+        // Rocky worlds host a small handful of moons at most (Earth/Mars
+        // scale), unlike the giants' extensive moon systems below.
+        let moon_count = rng.gen_range(0..=MAX_ROCKY_MOONS);
+        body.moon_count = moon_count;
+        let planet_id = body.id.clone();
+        let planet_distance = body.distance_au;
         bodies.push(body);
+        attach_moons(
+            &mut rng,
+            &mut bodies,
+            &planet_id,
+            &planet_name,
+            planet_distance,
+            moon_count,
+            hz_center,
+            false,
+        );
         distance_au *= rng.gen_range(1.35..1.75);
     }
 
@@ -152,7 +176,7 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         distance_au *= rng.gen_range(1.4..1.8);
     }
 
-    // ── Gas giants, each with a chance of moons ──────────────────────────────
+    // ── Gas giants, each with an extensive moon system ───────────────────────
     // The first (innermost) giant tends to roll warmer given the distance
     // curve, so it typically lands Jupiter-like; later giants trend colder
     // and land Neptune-like — see `subtype_for`/`gravity_for_kind`.
@@ -170,25 +194,24 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         let giant_id = giant.id.clone();
         let giant_distance = giant.distance_au;
 
-        let moon_count = rng.gen_range(0..=2u32);
+        // Gas/ice giants carry extensive moon systems (Jupiter/Saturn scale),
+        // capped at [`MAX_GIANT_MOONS`] for sim sanity. A giant always has at
+        // least a couple, so it visibly reads as a moon-rich system.
+        let moon_count = rng.gen_range(MIN_GIANT_MOONS..=MAX_GIANT_MOONS);
         giant.moon_count = moon_count;
         bodies.push(giant);
 
-        for m in 0..moon_count {
-            let moon_distance = giant_distance + rng.gen_range(0.02..0.15);
-            let mut moon = generate_body(
-                &mut rng,
-                format!("{giant_name}-Moon-{}", m + 1),
-                &BodyKind::Moon,
-                moon_distance,
-                hz_center,
-                false,
-            );
-            moon.parent_body = Some(giant_id.clone());
+        attach_moons(
+            &mut rng,
+            &mut bodies,
+            &giant_id,
+            &giant_name,
+            giant_distance,
+            moon_count,
+            hz_center,
             // Moons of giants sit deep in the radiation belt.
-            moon.radiation = RadiationLevel::High;
-            bodies.push(moon);
-        }
+            true,
+        );
 
         distance_au *= rng.gen_range(1.6..2.2);
     }
@@ -376,6 +399,42 @@ fn generate_body(
     body.moon_count = 0; // populated by the caller when moons are attached.
 
     body
+}
+
+/// Generate and append `count` `Moon`-kind bodies orbiting `parent`.
+///
+/// Each moon's `parent_body` links back to `parent_id` (the system diagram
+/// nests moons around their parent via this link rather than placing them on
+/// their own star-centered orbit). A moon's own `distance_au` sits just
+/// outside the parent's orbit and still drives travel time. `high_radiation`
+/// forces the deep-radiation-belt environment giants impose on their moons.
+#[allow(clippy::too_many_arguments)]
+fn attach_moons(
+    rng: &mut ChaCha8Rng,
+    bodies: &mut Vec<Body>,
+    parent_id: &BodyId,
+    parent_name: &str,
+    parent_distance: f32,
+    count: u32,
+    hz_center: f32,
+    high_radiation: bool,
+) {
+    for m in 0..count {
+        let moon_distance = parent_distance + rng.gen_range(0.02..0.15);
+        let mut moon = generate_body(
+            rng,
+            format!("{parent_name}-Moon-{}", m + 1),
+            &BodyKind::Moon,
+            moon_distance,
+            hz_center,
+            false,
+        );
+        moon.parent_body = Some(parent_id.clone());
+        if high_radiation {
+            moon.radiation = RadiationLevel::High;
+        }
+        bodies.push(moon);
+    }
 }
 
 /// Ordinal thresholding from distance to [`TemperatureBand`], mirroring
@@ -762,18 +821,90 @@ mod tests {
     }
 
     #[test]
-    fn gas_giant_moon_count_matches_attached_moons() {
+    fn body_moon_count_matches_attached_moons() {
+        // Every non-moon body's reported `moon_count` must equal the number of
+        // `Moon`-kind bodies whose `parent_body` points at it — for rocky
+        // inner planets and giants alike (both now emit real moon bodies).
         for seed in 0..32u64 {
             let bodies = generate_system(seed, &params(1.0));
-            for giant in bodies.iter().filter(|b| b.kind == BodyKind::GasGiant) {
+            for parent in bodies.iter().filter(|b| b.kind != BodyKind::Moon) {
                 let attached = bodies
                     .iter()
-                    .filter(|b| b.parent_body.as_ref() == Some(&giant.id))
+                    .filter(|b| b.parent_body.as_ref() == Some(&parent.id))
                     .count();
                 assert_eq!(
-                    giant.moon_count as usize, attached,
+                    parent.moon_count as usize, attached,
                     "seed {seed}: {} reports moon_count {} but has {attached} attached moons",
-                    giant.name, giant.moon_count
+                    parent.name, parent.moon_count
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gas_giants_carry_extensive_moon_systems() {
+        // Every giant should have at least MIN_GIANT_MOONS, capped at
+        // MAX_GIANT_MOONS, and across a seed sweep some giant should land a
+        // genuinely moon-rich count (more than a rocky world's cap) so the
+        // system diagram reads as moon-rich.
+        let mut saw_moon_rich = false;
+        for seed in 0..64u64 {
+            let bodies = generate_system(seed, &params(1.0));
+            for giant in bodies.iter().filter(|b| b.kind == BodyKind::GasGiant) {
+                assert!(
+                    (MIN_GIANT_MOONS..=MAX_GIANT_MOONS).contains(&giant.moon_count),
+                    "seed {seed}: giant {} has {} moons, outside [{MIN_GIANT_MOONS}, {MAX_GIANT_MOONS}]",
+                    giant.name,
+                    giant.moon_count
+                );
+                if giant.moon_count > MAX_ROCKY_MOONS {
+                    saw_moon_rich = true;
+                }
+            }
+        }
+        assert!(
+            saw_moon_rich,
+            "no moon-rich giant (> {MAX_ROCKY_MOONS} moons) seen across the seed sweep"
+        );
+    }
+
+    #[test]
+    fn rocky_planet_moons_stay_within_the_small_cap() {
+        // Rocky inner planets host at most MAX_ROCKY_MOONS moons, and every
+        // moon of a rocky planet links back to it.
+        for seed in 0..64u64 {
+            let bodies = generate_system(seed, &params(1.0));
+            for planet in bodies.iter().filter(|b| b.kind == BodyKind::InnerPlanet) {
+                assert!(
+                    planet.moon_count <= MAX_ROCKY_MOONS,
+                    "seed {seed}: rocky planet {} has {} moons, above cap {MAX_ROCKY_MOONS}",
+                    planet.name,
+                    planet.moon_count
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moon_parents_are_never_moons() {
+        // The generator only hangs moons off planets/giants, never off other
+        // moons (moon-of-moon is representable in the data model but not
+        // produced here).
+        for seed in 0..32u64 {
+            let bodies = generate_system(seed, &params(1.0));
+            let by_id: std::collections::HashMap<_, _> =
+                bodies.iter().map(|b| (b.id.clone(), b)).collect();
+            for moon in bodies.iter().filter(|b| b.kind == BodyKind::Moon) {
+                let parent = moon
+                    .parent_body
+                    .as_ref()
+                    .and_then(|id| by_id.get(id))
+                    .expect("moon parent must resolve");
+                assert_ne!(
+                    parent.kind,
+                    BodyKind::Moon,
+                    "seed {seed}: moon {} orbits another moon",
+                    moon.name
                 );
             }
         }
