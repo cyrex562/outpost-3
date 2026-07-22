@@ -34,8 +34,9 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::map::VEIN_COMMODITIES;
 use crate::system::{
-    AtmosphereDensity, AtmosphereHazard, Body, BodyDeposit, BodyId, BodyKind, PlanetarySubtype,
-    RadiationLevel, SystemRole, TemperatureBand, HABITABILITY_FOUNDING_THRESHOLD,
+    AtmosphereDensity, AtmosphereHazard, BeltProfile, BeltZone, Body, BodyDeposit, BodyId,
+    BodyKind, PlanetarySubtype, RadiationLevel, SystemRole, TemperatureBand,
+    HABITABILITY_FOUNDING_THRESHOLD,
 };
 
 /// Distance (AU) treated as the center of the habitable zone. No stellar
@@ -164,7 +165,7 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
 
     // ── Asteroid belt (usually present, placed just past the inner worlds) ──
     if rng.gen_bool(0.75) {
-        let belt = generate_body(
+        let mut belt = generate_body(
             &mut rng,
             "Belt".to_string(),
             &BodyKind::AsteroidBelt,
@@ -172,6 +173,15 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
             hz_center,
             false,
         );
+        // A moderately dense, comparatively narrow ring of rock/metal.
+        let width = rng.gen_range(0.3..0.6);
+        let base_density = rng.gen_range(0.45..0.8);
+        belt.belt_profile = Some(generate_belt_profile(
+            &mut rng,
+            distance_au,
+            width,
+            base_density,
+        ));
         bodies.push(belt);
         distance_au *= rng.gen_range(1.4..1.8);
     }
@@ -214,6 +224,29 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         );
 
         distance_au *= rng.gen_range(1.6..2.2);
+    }
+
+    // ── Cometary belt at the cold outer edge (Kuiper-like) ──────────────────
+    // A wide, sparse ring of icy volatiles beyond the giants. Usually present.
+    if rng.gen_bool(0.6) {
+        let comet_center = distance_au * rng.gen_range(1.3..1.8);
+        let mut comet = generate_body(
+            &mut rng,
+            "Cometary Belt".to_string(),
+            &BodyKind::CometaryBelt,
+            comet_center,
+            hz_center,
+            false,
+        );
+        let width = rng.gen_range(1.0..3.0);
+        let base_density = rng.gen_range(0.08..0.3);
+        comet.belt_profile = Some(generate_belt_profile(
+            &mut rng,
+            comet_center,
+            width,
+            base_density,
+        ));
+        bodies.push(comet);
     }
 
     // ── Playability guarantee: force at least one founding-viable body ──────
@@ -336,6 +369,13 @@ fn commodity_affinity(body: &Body, commodity: &str) -> f32 {
             "fissile_ore" => 1.3,
             _ => 1.0,
         },
+        // Comets are icy volatile reservoirs — favour hydrocarbons, poor in
+        // heavy rock/metal.
+        BodyKind::CometaryBelt => match commodity {
+            "hydrocarbons" => 1.4,
+            "structural_ore" | "precious_ore" | "refractory_ore" | "silicates" => 0.2,
+            _ => 1.0,
+        },
         BodyKind::InnerPlanet | BodyKind::OrbitalStation => 1.0,
     };
     (subtype_mult * kind_mult).max(0.05)
@@ -437,6 +477,46 @@ fn attach_moons(
     }
 }
 
+/// Number of angular zones a generated belt is subdivided into.
+const BELT_ZONE_COUNT: u32 = 8;
+
+/// Build a [`BeltProfile`] for a belt centered on `center_au`, spanning
+/// `width_au` radially and subdivided into [`BELT_ZONE_COUNT`] contiguous
+/// angular zones (system-screen fix B2). Each zone's density jitters around
+/// `base_density` so the ring reads as clumpy rather than uniform; densities
+/// are clamped to `[0, 1]`. Zones are contiguous and cover the full 360°.
+// The two `u32 as f32` casts below are on the small, exact `BELT_ZONE_COUNT`
+// (8) and a zone index in `0..8` — no precision is actually lost.
+#[allow(clippy::cast_precision_loss)]
+fn generate_belt_profile(
+    rng: &mut ChaCha8Rng,
+    center_au: f32,
+    width_au: f32,
+    base_density: f32,
+) -> BeltProfile {
+    let half = width_au / 2.0;
+    let inner_au = (center_au - half).max(0.05);
+    let outer_au = center_au + half;
+    let sweep = 360.0 / BELT_ZONE_COUNT as f32;
+    let zones = (0..BELT_ZONE_COUNT)
+        .map(|i| {
+            let start_deg = i as f32 * sweep;
+            let jitter = rng.gen_range(-0.25..0.25);
+            let density = (base_density + jitter).clamp(0.0, 1.0);
+            BeltZone {
+                start_deg,
+                sweep_deg: sweep,
+                density,
+            }
+        })
+        .collect();
+    BeltProfile {
+        inner_au,
+        outer_au,
+        zones,
+    }
+}
+
 /// Ordinal thresholding from distance to [`TemperatureBand`], mirroring
 /// `map.rs::cell_temperature`'s technique: map the enum onto an integer
 /// scale, shift by a continuous input, clamp, map back.
@@ -504,7 +584,7 @@ fn gravity_for_kind(kind: &BodyKind, temperature: TemperatureBand, rng: &mut Cha
             }
         }
         BodyKind::Moon => rng.gen_range(0.05..0.3),
-        BodyKind::AsteroidBelt => rng.gen_range(0.02..0.08),
+        BodyKind::AsteroidBelt | BodyKind::CometaryBelt => rng.gen_range(0.02..0.08),
         BodyKind::OrbitalStation => 0.0,
     }
 }
@@ -525,7 +605,10 @@ fn atmosphere_for(
     rng: &mut ChaCha8Rng,
     force_airless: bool,
 ) -> (AtmosphereDensity, AtmosphereHazard) {
-    if matches!(kind, BodyKind::AsteroidBelt | BodyKind::Moon) {
+    if matches!(
+        kind,
+        BodyKind::AsteroidBelt | BodyKind::CometaryBelt | BodyKind::Moon
+    ) {
         // Airless small bodies, occasionally a thin exosphere.
         let density = if rng.gen_bool(0.85) {
             AtmosphereDensity::Vacuum
@@ -586,7 +669,7 @@ fn subtype_for(body: &Body, rng: &mut ChaCha8Rng) -> PlanetarySubtype {
                 PlanetarySubtype::GasGiant
             }
         }
-        BodyKind::Moon | BodyKind::AsteroidBelt => {
+        BodyKind::Moon | BodyKind::AsteroidBelt | BodyKind::CometaryBelt => {
             if matches!(
                 body.temperature,
                 TemperatureBand::Frozen | TemperatureBand::Cold
@@ -883,6 +966,75 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn belts_carry_a_valid_density_zoned_profile() {
+        // Every generated belt (asteroid or cometary) must have a BeltProfile
+        // with inner < outer, contiguous zones covering the full 360°, and
+        // densities within [0, 1] — the annulus the diagram renders.
+        for seed in 0..64u64 {
+            let bodies = generate_system(seed, &params(1.0));
+            for belt in bodies.iter().filter(|b| b.kind.is_belt()) {
+                let profile = belt
+                    .belt_profile
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("seed {seed}: belt {} has no profile", belt.name));
+                assert!(
+                    profile.inner_au < profile.outer_au,
+                    "seed {seed}: belt {} inner {} !< outer {}",
+                    belt.name,
+                    profile.inner_au,
+                    profile.outer_au
+                );
+                assert!(
+                    profile.inner_au > 0.0,
+                    "seed {seed}: belt {} inner radius must be positive",
+                    belt.name
+                );
+                assert!(!profile.zones.is_empty(), "seed {seed}: belt has no zones");
+                let total_sweep: f32 = profile.zones.iter().map(|z| z.sweep_deg).sum();
+                assert!(
+                    (total_sweep - 360.0).abs() < 0.01,
+                    "seed {seed}: belt {} zones sweep {total_sweep}°, expected 360°",
+                    belt.name
+                );
+                for zone in &profile.zones {
+                    assert!(
+                        (0.0..=1.0).contains(&zone.density),
+                        "seed {seed}: belt {} zone density {} out of [0, 1]",
+                        belt.name,
+                        zone.density
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cometary_belts_are_sparser_and_farther_than_asteroid_belts() {
+        // Across a seed sweep, at least one system pairs an asteroid belt with
+        // a cometary belt, and where both exist the cometary belt sits farther
+        // out. (Statistical over the sweep, like the other generator tests.)
+        let mut saw_both = false;
+        for seed in 0..64u64 {
+            let bodies = generate_system(seed, &params(1.0));
+            let asteroid = bodies.iter().find(|b| b.kind == BodyKind::AsteroidBelt);
+            let cometary = bodies.iter().find(|b| b.kind == BodyKind::CometaryBelt);
+            if let (Some(a), Some(c)) = (asteroid, cometary) {
+                saw_both = true;
+                assert!(
+                    c.distance_au > a.distance_au,
+                    "seed {seed}: cometary belt ({}) should sit beyond the asteroid belt ({})",
+                    c.distance_au,
+                    a.distance_au
+                );
+            }
+        }
+        assert!(
+            saw_both,
+            "no system in the sweep produced both an asteroid and a cometary belt"
+        );
     }
 
     #[test]

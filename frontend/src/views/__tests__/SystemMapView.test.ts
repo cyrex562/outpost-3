@@ -40,6 +40,7 @@ function makeBody(overrides: Partial<SystemBody>): SystemBody {
     moon_count: 0,
     parent_body_name: null,
     category_modifiers: [],
+    belt_profile: null,
     ...overrides,
   } as SystemBody
 }
@@ -103,5 +104,69 @@ describe('SystemMapView (system fixes B1: moons orbit their parent)', () => {
     // Selecting the moon reveals its label.
     await wrapper.get('[data-testid="body-node-giant-1-moon-1"]').trigger('click')
     expect(wrapper.find('[data-testid="body-node-giant-1-moon-1"] text').exists()).toBe(true)
+  })
+
+  it('renders a belt as a density-zoned annulus (paths, not a dot), opacity tracking density', async () => {
+    const belt = makeBody({
+      id: 'belt-1',
+      name: 'Belt',
+      kind: 'AsteroidBelt',
+      distance_au: 2.5,
+      belt_profile: {
+        inner_au: 2.3,
+        outer_au: 2.7,
+        zones: [
+          { start_deg: 0, sweep_deg: 180, density: 0.0 },
+          { start_deg: 180, sweep_deg: 180, density: 1.0 },
+        ],
+      },
+    })
+    getSystemBodies.mockResolvedValueOnce([belt])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    const node = wrapper.get('[data-testid="body-node-belt-1"]')
+    // Annulus sectors are <path>, and the belt has no single-dot <circle>.
+    const paths = node.findAll('path')
+    expect(paths).toHaveLength(2)
+    expect(node.find('circle').exists()).toBe(false)
+
+    // Zone opacity maps density 0 -> BELT_MIN_OPACITY (0.1), 1 -> BELT_MAX (0.8).
+    const opacities = paths.map((p) => Number(p.attributes('fill-opacity'))).sort((a, b) => a - b)
+    expect(opacities[0]).toBeCloseTo(0.1, 5)
+    expect(opacities[1]).toBeCloseTo(0.8, 5)
+
+    // Each zone is an annular-sector path: move, outer arc, inner arc, close —
+    // two arcs winding oppositely (flag 1 then 0) so it fills the ring band,
+    // not the whole disk.
+    const d = paths[0].attributes('d') ?? ''
+    expect(d.startsWith('M')).toBe(true)
+    expect(d.trimEnd().endsWith('Z')).toBe(true)
+    expect((d.match(/A /g) ?? []).length).toBe(2)
+    expect(d).toMatch(/A [\d.-]+ [\d.-]+ 0 \d 1 /) // outer arc, sweep-flag 1
+    expect(d).toMatch(/A [\d.-]+ [\d.-]+ 0 \d 0 /) // inner arc, sweep-flag 0
+  })
+
+  it('shows the belt span and zone count in the side panel when a belt is selected', async () => {
+    const belt = makeBody({
+      id: 'belt-1',
+      name: 'Belt',
+      kind: 'AsteroidBelt',
+      distance_au: 2.5,
+      belt_profile: {
+        inner_au: 2.3,
+        outer_au: 2.7,
+        zones: [
+          { start_deg: 0, sweep_deg: 180, density: 0.4 },
+          { start_deg: 180, sweep_deg: 180, density: 0.6 },
+        ],
+      },
+    })
+    getSystemBodies.mockResolvedValueOnce([belt])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-node-belt-1"]').trigger('click')
+    expect(wrapper.get('[data-testid="belt-span"]').text()).toContain('2.30–2.70 AU')
   })
 })
