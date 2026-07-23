@@ -21,8 +21,8 @@ function makeHex(overrides: Partial<PlanetHex>): PlanetHex {
   }
 }
 
-function makeMap(hexes: PlanetHex[]): PlanetMap {
-  return { seed: 1, radius: 1, hexes }
+function makeMap(hexes: PlanetHex[], edges: PlanetMap['edges'] = []): PlanetMap {
+  return { seed: 1, radius: 1, hexes, edges }
 }
 
 describe('PlanetHexMap temperature tint (#191)', () => {
@@ -158,6 +158,56 @@ describe('PlanetHexMap occupied-hex selection (persistent map, phase A1)', () =>
       props: { map: makeMap([occupiedHex()]), selectedSite: null },
     })
     expect(wrapper.find('[data-testid="colony-node-label-colony-1"]').text()).toBe('Alpha Base')
+  })
+})
+
+describe('PlanetHexMap infrastructure edges (map/nav plan phase A3)', () => {
+  const twoColonies = () => [
+    makeHex({ q: 0, r: 0, site_id: 's1', occupied_by: 'Alpha', occupant_colony_id: 'colony-1' }),
+    makeHex({ q: 2, r: 0, site_id: 's2', occupied_by: 'Beta', occupant_colony_id: 'colony-2' }),
+  ]
+
+  it('draws a line between the two colonies an edge connects', () => {
+    const wrapper = mount(PlanetHexMap, {
+      props: {
+        map: makeMap(twoColonies(), [
+          {
+            from_colony_id: 'colony-1',
+            to_colony_id: 'colony-2',
+            infra_type: 'road',
+            throughput: 50,
+            cost: 10,
+          },
+        ]),
+        selectedSite: null,
+      },
+    })
+
+    const line = wrapper.get('[data-testid="infra-edge-colony-1-colony-2-road"]')
+    // Endpoints are the two colonies' hex centers: colony-1 at (0,0), colony-2
+    // to its right (axialToPixel(2,0) has x > 0, y == 0).
+    expect(line.attributes('x1')).toBe('0')
+    expect(line.attributes('y1')).toBe('0')
+    expect(Number(line.attributes('x2'))).toBeGreaterThan(0)
+    expect(line.attributes('stroke')).toBe('#b8a06a') // road color
+  })
+
+  it('skips an edge whose endpoint colony is not on the map', () => {
+    const wrapper = mount(PlanetHexMap, {
+      props: {
+        map: makeMap(twoColonies(), [
+          {
+            from_colony_id: 'colony-1',
+            to_colony_id: 'colony-missing',
+            infra_type: 'rail',
+            throughput: 200,
+            cost: 50,
+          },
+        ]),
+        selectedSite: null,
+      },
+    })
+    expect(wrapper.findAll('.infra-edge')).toHaveLength(0)
   })
 })
 
