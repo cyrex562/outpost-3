@@ -83,12 +83,11 @@ watch(
   { immediate: true },
 )
 
-/** Navigate to a colony tab — skips the push when it's already selected, so
- * clicking the active tab doesn't trigger Vue Router's duplicate-navigation
- * warning/rejection for an identical route. */
-function selectColony(colonyId: string): void {
-  if (selectedColony.value?.id === colonyId) return
-  void router.push({ name: 'colony', params: { colonyId } })
+/** Return to the planet map — the hub for switching between colonies
+ * (map/nav plan phase A2, which replaced the old per-colony tab bar with
+ * map-driven navigation: click a colony node on `/planet` to open it). */
+function goToPlanetMap(): void {
+  void router.push({ name: 'planet' })
 }
 
 /** The colony screen data, but only when it matches the selected colony. */
@@ -289,16 +288,16 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
 
     <template v-else>
       <div class="colony-header">
-        <div class="colony-tabs" data-testid="colony-tabs">
+        <div class="colony-titlebar">
           <button
-            v-for="col in colonies"
-            :key="col.id"
-            class="tab"
-            :class="{ active: selectedColony?.id === col.id }"
-            @click="selectColony(col.id)"
+            class="btn-map"
+            data-testid="btn-planet-map"
+            title="Back to the planet map to switch colonies"
+            @click="goToPlanetMap"
           >
-            {{ col.name }}
+            ← Planet Map
           </button>
+          <h2 class="colony-title" data-testid="colony-title">{{ selectedColony?.name }}</h2>
         </div>
         <CommandPanel />
       </div>
@@ -374,19 +373,20 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
   flex-wrap: wrap;
 }
 
-.colony-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.tab {
+.colony-titlebar { display: flex; align-items: center; gap: 0.75rem; }
+.colony-title { color: #8cf; font-size: 1.05rem; margin: 0; }
+.btn-map {
   background: #151520;
-  border: 1px solid #334;
+  border: 1px solid #446;
   border-radius: 3px;
-  color: #889;
-  padding: 0.25rem 0.6rem;
+  color: #8cf;
+  padding: 0.3rem 0.7rem;
   font-family: monospace;
   font-size: 0.8rem;
   cursor: pointer;
+  white-space: nowrap;
 }
-.tab.active { border-color: #558; color: #aac; background: #1a1a2a; }
-.tab:hover:not(.active) { border-color: #446; color: #aab; }
+.btn-map:hover { background: #1a1a2a; border-color: #558; }
 
 .panel-layout {
   height: 70vh;

@@ -1,30 +1,23 @@
 <script setup lang="ts">
 /**
- * Command panel — lets the player issue game commands for the selected colony.
- *
- * Props:
- *   colonies — list of available colony summaries for the dropdown.
+ * Command panel — lets the player issue game commands for the colony
+ * currently in view. The colony context comes from
+ * `gameStore.selectedColonyId` (kept in sync with the `/colony/:colonyId`
+ * route param by `ColonyView`); switching colonies happens on the planet
+ * map (map/nav plan phase A2), not from a control in this panel.
  */
 
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/game'
-import { useWorldStore } from '@/stores/worldStore'
 
 const gameStore = useGameStore()
-const worldStore = useWorldStore()
 const router = useRouter()
 
-// ─── Colony selector ──────────────────────────────────────────────────────────
-
-const selectedId = ref<string>(gameStore.selectedColonyId ?? '')
-
-const colonies = computed(() => worldStore.colonies)
-
-function selectColony(id: string): void {
-  selectedId.value = id
-  gameStore.selectedColonyId = id
-}
+// Colony context comes from `gameStore.selectedColonyId`, which `ColonyView`
+// keeps in sync with the `/colony/:colonyId` route param. Switching between
+// colonies happens on the planet map (map/nav plan phase A2), which replaced
+// this panel's old colony dropdown and `ColonyView`'s tab bar.
 
 // ─── Set directive dialog ─────────────────────────────────────────────────────
 
@@ -33,7 +26,7 @@ const directiveLabel = ref('')
 const directivePriority = ref(50)
 
 async function setDirective(): Promise<void> {
-  const colId = selectedId.value
+  const colId = gameStore.selectedColonyId
   if (!colId || !directiveLabel.value.trim()) return
   await gameStore.sendCommand({
     kind: 'set_directive',
@@ -73,23 +66,6 @@ async function advanceTurn(): Promise<void> {
   <div class="command-panel" data-testid="command-panel">
     <h3 class="panel-title">Commands</h3>
 
-    <!-- Colony selector -->
-    <div class="field">
-      <label class="field-label" for="colony-select">Colony</label>
-      <select
-        id="colony-select"
-        class="select"
-        :value="selectedId"
-        data-testid="colony-select"
-        @change="selectColony(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="" disabled>— select colony —</option>
-        <option v-for="col in colonies" :key="col.id" :value="col.id">
-          {{ col.name }}
-        </option>
-      </select>
-    </div>
-
     <!-- Action buttons -->
     <div class="actions">
       <button
@@ -111,7 +87,7 @@ async function advanceTurn(): Promise<void> {
 
       <button
         class="btn"
-        :disabled="!selectedId"
+        :disabled="!gameStore.selectedColonyId"
         data-testid="btn-set-directive"
         @click="showDirectiveDialog = true"
       >

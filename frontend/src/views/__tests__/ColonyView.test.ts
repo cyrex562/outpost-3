@@ -77,7 +77,7 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     expect(wrapper.get('[data-testid^="colony-detail-"]').attributes('data-testid')).toBe(
       'colony-detail-colony-2',
     )
-    expect(wrapper.find('.tab.active').text()).toBe('Beta Outpost')
+    expect(wrapper.get('[data-testid="colony-title"]').text()).toBe('Beta Outpost')
   })
 
   it('falls back to gameStore.selectedColonyId when no route param is present', () => {
@@ -100,28 +100,14 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     expect(routerReplace).toHaveBeenCalledWith({ name: 'colony', params: { colonyId: 'colony-1' } })
   })
 
-  it('navigates via router.push when a colony tab is clicked', async () => {
+  it('returns to the planet map when the back button is clicked (map/nav plan phase A2)', async () => {
     seedColonies()
     routeParams.colonyId = 'colony-1'
 
     const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
-    const tabs = wrapper.findAll('.tab')
-    const betaTab = tabs.find((t) => t.text() === 'Beta Outpost')
-    await betaTab?.trigger('click')
+    await wrapper.get('[data-testid="btn-planet-map"]').trigger('click')
 
-    expect(routerPush).toHaveBeenCalledWith({ name: 'colony', params: { colonyId: 'colony-2' } })
-  })
-
-  it('does not re-push when clicking the already-active tab (avoids a duplicate-navigation warning)', async () => {
-    seedColonies()
-    routeParams.colonyId = 'colony-1'
-
-    const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
-    const tabs = wrapper.findAll('.tab')
-    const alphaTab = tabs.find((t) => t.text() === 'Alpha Base')
-    await alphaTab?.trigger('click')
-
-    expect(routerPush).not.toHaveBeenCalled()
+    expect(routerPush).toHaveBeenCalledWith({ name: 'planet' })
   })
 
   it('shows the empty state when no colonies exist', () => {
