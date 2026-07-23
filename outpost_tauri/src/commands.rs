@@ -1785,6 +1785,9 @@ pub struct PlanetHexWire {
     pub habitable: bool,
     pub suitability: f32,
     pub occupied_by: Option<String>,
+    /// Id of the colony occupying this cell, if any (persistent planet map,
+    /// phase A1) — lets a map node link through to `/colony/:id`.
+    pub occupant_colony_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1867,7 +1870,7 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
         .filter_map(|node| {
             colony_names
                 .get(&node.colony_id)
-                .map(|name| (node.coord, name.clone()))
+                .map(|name| (node.coord, (node.colony_id, name.clone())))
         })
         .collect();
 
@@ -1897,7 +1900,12 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
                     .collect(),
                 habitable: cell.is_habitable(),
                 suitability: cell.suitability(),
-                occupied_by: coord_to_colony.get(&cell.coord).cloned(),
+                occupied_by: coord_to_colony
+                    .get(&cell.coord)
+                    .map(|(_, name)| name.clone()),
+                occupant_colony_id: coord_to_colony
+                    .get(&cell.coord)
+                    .map(|(id, _)| id.to_string()),
             }
         })
         .collect();

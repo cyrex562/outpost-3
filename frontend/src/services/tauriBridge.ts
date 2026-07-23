@@ -303,6 +303,8 @@ export interface PlanetHex {
   habitable: boolean
   suitability: number
   occupied_by: string | null
+  /** Id of the colony occupying this cell, if any (persistent planet map, phase A1) — for link-through to `/colony/:id`. */
+  occupant_colony_id: string | null
 }
 
 export interface PlanetMap {
