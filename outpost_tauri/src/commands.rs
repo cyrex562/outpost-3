@@ -184,6 +184,19 @@ pub enum ClientCommand {
         building_type: String,
         recipe_id: String,
     },
+    /// Build an infrastructure edge between two colonies (map/nav plan phase
+    /// A3b). `infra_type` is `"road"`, `"rail"`, or `"pipeline"`.
+    BuildInfrastructure {
+        from_colony: String,
+        to_colony: String,
+        infra_type: String,
+    },
+    /// Remove the infrastructure edge between two colonies (map/nav plan
+    /// phase A3b).
+    DemolishInfrastructure {
+        from_colony: String,
+        to_colony: String,
+    },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -492,6 +505,19 @@ pub struct ColonyWire {
 
 fn parse_colony(id: &str) -> Result<ColonyId, CmdError> {
     ColonyId::from_str(id).map_err(|_| CmdError::InvalidArg(format!("bad colony id: {id}")))
+}
+
+/// Parse an infrastructure-type string (`road`/`rail`/`pipeline`) into
+/// [`outpost_core::map::InfraType`] (map/nav plan phase A3b). Mirrors the
+/// `outpost_web` WS mapping.
+fn parse_infra_type(s: &str) -> Result<outpost_core::map::InfraType, CmdError> {
+    use outpost_core::map::InfraType;
+    match s.to_lowercase().as_str() {
+        "road" => Ok(InfraType::Road),
+        "rail" => Ok(InfraType::Rail),
+        "pipeline" => Ok(InfraType::Pipeline),
+        _ => Err(CmdError::InvalidArg(format!("unknown infra_type: {s}"))),
+    }
 }
 
 fn build_snapshot(engine: &GameEngine) -> SnapshotPayload {
@@ -1200,6 +1226,22 @@ pub fn apply_command(
                 .map_err(|_| CmdError::InvalidArg(format!("bad outpost_id: {outpost_id}")))?,
             building_type,
             recipe_id,
+        },
+        ClientCommand::BuildInfrastructure {
+            from_colony,
+            to_colony,
+            infra_type,
+        } => Command::BuildInfrastructure {
+            from_colony: parse_colony(&from_colony)?,
+            to_colony: parse_colony(&to_colony)?,
+            infra_type: parse_infra_type(&infra_type)?,
+        },
+        ClientCommand::DemolishInfrastructure {
+            from_colony,
+            to_colony,
+        } => Command::DemolishInfrastructure {
+            from_colony: parse_colony(&from_colony)?,
+            to_colony: parse_colony(&to_colony)?,
         },
     };
 

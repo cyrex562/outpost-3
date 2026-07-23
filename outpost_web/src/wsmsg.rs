@@ -170,6 +170,13 @@ pub enum ClientCommand {
         /// Infrastructure type: "road", "rail", or "pipeline".
         infra_type: String,
     },
+    /// Remove the infrastructure edge between two colonies.
+    DemolishInfrastructure {
+        /// Source colony UUID.
+        from_colony: String,
+        /// Destination colony UUID.
+        to_colony: String,
+    },
     /// Begin construction of an orbital station using a blueprint.
     BeginOrbitalConstruction {
         /// Content-pack blueprint identifier.
@@ -1159,6 +1166,27 @@ mod tests {
             } => {
                 assert_eq!(seq, 7);
                 assert_eq!(infra_type, "road");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_demolish_infrastructure_deserialises() {
+        let raw = r#"{"type":"command","seq":9,"command":{"kind":"demolish_infrastructure","from_colony":"00000000-0000-0000-0000-000000000001","to_colony":"00000000-0000-0000-0000-000000000002"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::DemolishInfrastructure {
+                        from_colony,
+                        to_colony,
+                    },
+            } => {
+                assert_eq!(seq, 9);
+                assert_eq!(from_colony, "00000000-0000-0000-0000-000000000001");
+                assert_eq!(to_colony, "00000000-0000-0000-0000-000000000002");
             }
             _ => panic!("unexpected variant"),
         }

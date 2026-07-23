@@ -1,25 +1,34 @@
 <script setup lang="ts">
 /**
- * Planet map (map/nav plan, phase A1) — a persistent, routed view of the
- * founding planet's hex map showing every colony as a node on its hex. This
- * promotes `PlanetHexMap` out of the founding wizard (where it's a one-time
- * site picker) into a standing strategic view: clicking a colony node drills
- * into that colony's dashboard.
+ * Planet map (map/nav plan) — a persistent, routed view of the founding
+ * planet's hex map showing every colony as a node on its hex.
  *
- * Read-only for now — infrastructure links between colonies and making this
- * the primary colony-navigation hub come in later phases (A2/A3).
+ * - Navigate mode (default): clicking a colony node opens its dashboard
+ *   (phase A1/A2 — this is the colony-switching hub).
+ * - Build mode (phase A3b): pick two colony nodes and an infrastructure type
+ *   to lay a road / rail / pipeline between them; existing edges can be
+ *   demolished. The edges themselves are drawn by `PlanetHexMap` (phase A3a).
  */
 
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PlanetHexMap from '@/components/PlanetHexMap.vue'
-import { getPlanetMap, type PlanetHex, type PlanetMap } from '@/services/tauriBridge'
+import { useGameStore } from '@/stores/game'
+import { getPlanetMap, type InfraEdge, type PlanetHex, type PlanetMap } from '@/services/tauriBridge'
 
 const router = useRouter()
+const gameStore = useGameStore()
 
 const planetMap = ref<PlanetMap | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(false)
+
+type Mode = 'navigate' | 'build'
+const mode = ref<Mode>('navigate')
+const fromColonyId = ref<string | null>(null)
+const toColonyId = ref<string | null>(null)
+const infraType = ref<'road' | 'rail' | 'pipeline'>('road')
+const busy = ref(false)
 
 async function refresh(): Promise<void> {
   loading.value = true
@@ -35,10 +44,103 @@ async function refresh(): Promise<void> {
 
 onMounted(refresh)
 
-/** Clicking a colony node routes to that colony's dashboard. */
+/** Colony id → display name, from the occupied hexes. */
+const colonyNameById = computed(() => {
+  const m = new Map<string, string>()
+  for (const h of planetMap.value?.hexes ?? []) {
+    if (h.occupant_colony_id && h.occupied_by) m.set(h.occupant_colony_id, h.occupied_by)
+  }
+  return m
+})
+
+function nameOf(id: string | null): string {
+  return id ? (colonyNameById.value.get(id) ?? id) : ''
+}
+
+const edges = computed<InfraEdge[]>(() => planetMap.value?.edges ?? [])
+
+/** Highlight the chosen `from` endpoint's hex on the map while building. */
+const selectedSite = computed<string | null>(() => {
+  if (mode.value !== 'build' || !fromColonyId.value) return null
+  const hex = planetMap.value?.hexes.find((h) => h.occupant_colony_id === fromColonyId.value)
+  return hex?.site_id ?? null
+})
+
+function toggleMode(): void {
+  mode.value = mode.value === 'build' ? 'navigate' : 'build'
+  fromColonyId.value = null
+  toColonyId.value = null
+}
+
+/** In build mode, clicking colony nodes fills the two endpoint slots. */
+function pickEndpoint(cid: string): void {
+  if (fromColonyId.value === cid) {
+    fromColonyId.value = null
+  } else if (toColonyId.value === cid) {
+    toColonyId.value = null
+  } else if (!fromColonyId.value) {
+    fromColonyId.value = cid
+  } else {
+    toColonyId.value = cid
+  }
+}
+
 function onHexSelect(hex: PlanetHex): void {
-  if (hex.occupant_colony_id) {
-    void router.push({ name: 'colony', params: { colonyId: hex.occupant_colony_id } })
+  const cid = hex.occupant_colony_id
+  if (!cid) return
+  if (mode.value === 'navigate') {
+    void router.push({ name: 'colony', params: { colonyId: cid } })
+  } else {
+    pickEndpoint(cid)
+  }
+}
+
+const canBuild = computed(
+  () => !!fromColonyId.value && !!toColonyId.value && fromColonyId.value !== toColonyId.value && !busy.value,
+)
+
+// build/demolish always emit an event on success (InfrastructureBuilt /
+// InfrastructureDemolished), and sendCommand returns [] only when the engine
+// rejected the command (it surfaces the reason on gameStore.toastMessage) —
+// so an empty result here means "rejected", not "accepted with no effect".
+async function build(): Promise<void> {
+  if (!canBuild.value || !fromColonyId.value || !toColonyId.value) return
+  busy.value = true
+  try {
+    const events = await gameStore.sendCommand({
+      kind: 'build_infrastructure',
+      from_colony: fromColonyId.value,
+      to_colony: toColonyId.value,
+      infra_type: infraType.value,
+    })
+    if (events.length > 0) {
+      fromColonyId.value = null
+      toColonyId.value = null
+      await refresh()
+    } else {
+      error.value = gameStore.toastMessage ?? 'Build rejected.'
+    }
+  } finally {
+    busy.value = false
+  }
+}
+
+async function demolish(edge: InfraEdge): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    const events = await gameStore.sendCommand({
+      kind: 'demolish_infrastructure',
+      from_colony: edge.from_colony_id,
+      to_colony: edge.to_colony_id,
+    })
+    if (events.length > 0) {
+      await refresh()
+    } else {
+      error.value = gameStore.toastMessage ?? 'Demolish rejected.'
+    }
+  } finally {
+    busy.value = false
   }
 }
 </script>
@@ -47,29 +149,103 @@ function onHexSelect(hex: PlanetHex): void {
   <div class="planet-view" data-testid="planet-view">
     <div class="toolbar">
       <h2>Planet Map</h2>
-      <span class="hint">Click a colony to open its dashboard.</span>
+      <span class="hint">
+        {{ mode === 'build' ? 'Pick two colonies to connect.' : 'Click a colony to open its dashboard.' }}
+      </span>
+      <button class="btn" data-testid="btn-toggle-build" :class="{ active: mode === 'build' }" @click="toggleMode">
+        {{ mode === 'build' ? 'Done' : 'Build Infrastructure' }}
+      </button>
     </div>
 
     <p v-if="error" class="err" data-testid="planet-error">{{ error }}</p>
     <p v-else-if="loading" class="hint">Loading…</p>
 
-    <div v-else-if="planetMap" class="map-host">
-      <PlanetHexMap
-        :map="planetMap"
-        :selected-site="null"
-        :highlight-top-n="0"
-        selectable-occupied
-        @select="onHexSelect"
-      />
-    </div>
+    <template v-else-if="planetMap">
+      <div v-if="mode === 'build'" class="build-panel" data-testid="build-panel">
+        <div class="endpoints">
+          <span class="slot" :class="{ filled: fromColonyId }">From: {{ fromColonyId ? nameOf(fromColonyId) : '—' }}</span>
+          <span class="slot" :class="{ filled: toColonyId }">To: {{ toColonyId ? nameOf(toColonyId) : '—' }}</span>
+          <select v-model="infraType" class="type-select" data-testid="infra-type-select">
+            <option value="road">Road</option>
+            <option value="rail">Rail</option>
+            <option value="pipeline">Pipeline</option>
+          </select>
+          <button class="btn primary" data-testid="btn-build" :disabled="!canBuild" @click="build">Build</button>
+        </div>
+
+        <div v-if="edges.length" class="edge-list" data-testid="edge-list">
+          <div v-for="e in edges" :key="`${e.from_colony_id}-${e.to_colony_id}-${e.infra_type}`" class="edge-row">
+            <span class="edge-desc">
+              {{ nameOf(e.from_colony_id) }} ↔ {{ nameOf(e.to_colony_id) }} · {{ e.infra_type }}
+              ({{ e.throughput.toFixed(0) }}/turn)
+            </span>
+            <button class="btn danger" :disabled="busy" @click="demolish(e)">Demolish</button>
+          </div>
+        </div>
+        <p v-else class="hint">No infrastructure built yet.</p>
+      </div>
+
+      <div class="map-host">
+        <PlanetHexMap
+          :map="planetMap"
+          :selected-site="selectedSite"
+          :highlight-top-n="0"
+          selectable-occupied
+          @select="onHexSelect"
+        />
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .planet-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; }
-.toolbar { display: flex; align-items: baseline; gap: 1rem; }
+.toolbar { display: flex; align-items: center; gap: 1rem; }
 .toolbar h2 { color: #8cf; margin: 0; }
 .hint { color: #557; font-style: italic; font-size: 0.85rem; }
 .err { color: #d66; font-size: 0.8rem; }
 .map-host { flex: 1; min-height: 70vh; }
+
+.btn {
+  background: #1a1a28;
+  border: 1px solid #446;
+  border-radius: 3px;
+  color: #aac;
+  padding: 0.35rem 0.7rem;
+  font-family: monospace;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.btn:hover { background: #22223a; }
+.btn.active { border-color: #8cf; color: #8cf; }
+.btn.primary { border-color: #468; color: #8cf; }
+.btn.danger { border-color: #632; color: #d86; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Push the mode-toggle button to the right edge of the toolbar. */
+.toolbar > .btn { margin-left: auto; }
+
+.build-panel {
+  background: #101018;
+  border: 1px solid #334;
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.endpoints { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.slot { color: #668; font-size: 0.82rem; }
+.slot.filled { color: #aac; }
+.type-select {
+  background: #0d0d15;
+  border: 1px solid #334;
+  border-radius: 3px;
+  color: #cdd;
+  padding: 0.3rem 0.4rem;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+.edge-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.edge-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; color: #aab; }
+.edge-desc { font-family: monospace; }
 </style>

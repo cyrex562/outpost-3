@@ -75,6 +75,13 @@ export type Command =
       name: string
       starting_population: number
     }
+  | {
+      kind: 'build_infrastructure'
+      from_colony: string
+      to_colony: string
+      infra_type: 'road' | 'rail' | 'pipeline'
+    }
+  | { kind: 'demolish_infrastructure'; from_colony: string; to_colony: string }
 
 /** Directive trigger condition shape. */
 export interface DirectiveCondition {
