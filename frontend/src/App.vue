@@ -158,6 +158,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <h1>Outpost 3</h1>
       <nav class="header-nav">
         <RouterLink to="/system" class="nav-link">System</RouterLink>
+        <RouterLink to="/planet" class="nav-link">Planet</RouterLink>
         <RouterLink to="/colony" class="nav-link">Colony</RouterLink>
         <RouterLink to="/tech" class="nav-link">Tech</RouterLink>
         <RouterLink to="/outposts" class="nav-link">Outposts</RouterLink>

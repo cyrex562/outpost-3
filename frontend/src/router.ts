@@ -12,12 +12,14 @@ import SystemBodiesView from './views/SystemBodiesView.vue'
 import BuildingsListView from './views/BuildingsListView.vue'
 import OutpostView from './views/OutpostView.vue'
 import OutpostFacilityView from './views/OutpostFacilityView.vue'
+import PlanetView from './views/PlanetView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', component: MainMenuView, name: 'menu' },
     { path: '/system', component: SystemMapView, name: 'system' },
+    { path: '/planet', component: PlanetView, name: 'planet' },
     { path: '/new-game', component: NewGameView, name: 'new-game' },
     { path: '/colony/:colonyId?', component: ColonyView, name: 'colony' },
     {

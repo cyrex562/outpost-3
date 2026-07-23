@@ -62,6 +62,7 @@ const HEX = {
   habitable: true,
   suitability: 90,
   occupied_by: null,
+  occupant_colony_id: null,
 }
 
 const BUILDING_A = {

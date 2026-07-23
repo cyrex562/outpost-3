@@ -6,6 +6,13 @@ const props = defineProps<{
   map: PlanetMap
   selectedSite: string | null
   highlightTopN?: number
+  /**
+   * When true (persistent map browse mode, phase A1), clicking an occupied
+   * hex emits `select` so the parent can drill into that colony. Default
+   * false keeps the founding wizard's behavior, where occupied hexes are
+   * inert (you can't found on top of an existing colony).
+   */
+  selectableOccupied?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'select', hex: PlanetHex): void
@@ -382,13 +389,20 @@ function classes(hex: Positioned): Record<string, boolean> {
     selected: isSelected(hex),
     recommended: topSiteIds.value.has(hex.site_id) && !isSelected(hex),
     occupied: hex.occupied_by !== null,
+    'occupied-clickable': hex.occupied_by !== null && !!props.selectableOccupied,
   }
 }
 
 function onHexClick(hex: Positioned): void {
   // Suppress click when the mouse was actually dragging the map.
   if (dragMoved) return
-  if (!hex.habitable || hex.occupied_by !== null) return
+  if (hex.occupied_by !== null) {
+    // Browse mode: an occupied hex is a colony node — let the parent react
+    // (e.g. route to that colony). Wizard mode leaves it inert.
+    if (props.selectableOccupied) emit('select', hex)
+    return
+  }
+  if (!hex.habitable) return
   emit('select', hex)
 }
 
@@ -502,6 +516,16 @@ defineExpose({ focusSite, resetView })
         >
           ★
         </text>
+        <text
+          v-if="h.occupied_by"
+          :x="h.cx"
+          :y="h.cy + HEX_SIZE * 0.72"
+          text-anchor="middle"
+          class="colony-name"
+          :data-testid="`colony-node-label-${h.occupant_colony_id ?? h.site_id}`"
+        >
+          {{ h.occupied_by }}
+        </text>
       </g>
     </svg>
 
@@ -583,8 +607,13 @@ defineExpose({ focusSite, resetView })
 }
 .hex.not-habitable polygon { cursor: not-allowed; opacity: 0.6; }
 .hex.occupied polygon { cursor: not-allowed; }
+.hex.occupied-clickable polygon { cursor: pointer; }
 .hex:not(.not-habitable):not(.occupied):hover polygon {
   stroke: #aac;
+  stroke-width: 2;
+}
+.hex.occupied-clickable:hover polygon {
+  stroke: #8cf;
   stroke-width: 2;
 }
 .hex.selected polygon {
@@ -602,6 +631,15 @@ defineExpose({ focusSite, resetView })
   font-family: monospace;
   font-size: 12px;
   pointer-events: none;
+}
+.colony-name {
+  fill: #cde;
+  font-family: monospace;
+  font-size: 7px;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: #05050b;
+  stroke-width: 2px;
 }
 
 .hex-tooltip {

@@ -16,6 +16,7 @@ function makeHex(overrides: Partial<PlanetHex>): PlanetHex {
     habitable: true,
     suitability: 10,
     occupied_by: null,
+    occupant_colony_id: null,
     ...overrides,
   }
 }
@@ -119,6 +120,44 @@ describe('PlanetHexMap harsh-climate suitability warning (#190)', () => {
     })
     await wrapper.find('g').trigger('mouseenter')
     expect(wrapper.find('.tt-warn').text()).toBe('Impassable')
+  })
+})
+
+describe('PlanetHexMap occupied-hex selection (persistent map, phase A1)', () => {
+  const occupiedHex = () =>
+    makeHex({
+      q: 0,
+      r: 0,
+      site_id: 's1',
+      occupied_by: 'Alpha Base',
+      occupant_colony_id: 'colony-1',
+    })
+
+  it('leaves occupied hexes inert by default (wizard mode)', async () => {
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap([occupiedHex()]), selectedSite: null },
+    })
+    // Target the occupied hex group explicitly (not the first <g>, which
+    // could be a non-hex element) so the assertion truly pins inertness.
+    await wrapper.get('.hex.occupied').trigger('click')
+    expect(wrapper.emitted('select')).toBeFalsy()
+  })
+
+  it('emits select for an occupied hex when selectableOccupied is set (browse mode)', async () => {
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap([occupiedHex()]), selectedSite: null, selectableOccupied: true },
+    })
+    await wrapper.get('.hex.occupied-clickable').trigger('click')
+    const events = wrapper.emitted('select')
+    expect(events).toBeTruthy()
+    expect((events?.[0][0] as { occupant_colony_id: string }).occupant_colony_id).toBe('colony-1')
+  })
+
+  it('renders the colony name label on an occupied hex', () => {
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: makeMap([occupiedHex()]), selectedSite: null },
+    })
+    expect(wrapper.find('[data-testid="colony-node-label-colony-1"]').text()).toBe('Alpha Base')
   })
 })
 

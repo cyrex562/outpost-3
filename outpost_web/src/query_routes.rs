@@ -216,6 +216,9 @@ pub struct PlanetHexWire {
     pub suitability: f32,
     /// Name of the colony occupying this cell, if any.
     pub occupied_by: Option<String>,
+    /// Id of the colony occupying this cell, if any (persistent planet map,
+    /// phase A1) — lets a map node link through to `/colony/:id`.
+    pub occupant_colony_id: Option<String>,
 }
 
 /// A resource deposit within a [`PlanetHexWire`].
@@ -273,7 +276,7 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
         .filter_map(|node| {
             colony_names
                 .get(&node.colony_id)
-                .map(|name| (node.coord, name.clone()))
+                .map(|name| (node.coord, (node.colony_id, name.clone())))
         })
         .collect();
 
@@ -303,7 +306,12 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
                     .collect(),
                 habitable: cell.is_habitable(),
                 suitability: cell.suitability(),
-                occupied_by: coord_to_colony.get(&cell.coord).cloned(),
+                occupied_by: coord_to_colony
+                    .get(&cell.coord)
+                    .map(|(_, name)| name.clone()),
+                occupant_colony_id: coord_to_colony
+                    .get(&cell.coord)
+                    .map(|(id, _)| id.to_string()),
             }
         })
         .collect();
