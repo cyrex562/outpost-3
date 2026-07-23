@@ -307,10 +307,24 @@ export interface PlanetHex {
   occupant_colony_id: string | null
 }
 
+/** An infrastructure edge between two colonies (map/nav plan phase A3). */
+export interface InfraEdge {
+  from_colony_id: string
+  to_colony_id: string
+  /** `road` | `rail` | `pipeline`. */
+  infra_type: string
+  /** Cargo throughput per turn (before tech modifiers). */
+  throughput: number
+  /** Construction cost (abstract resource units). */
+  cost: number
+}
+
 export interface PlanetMap {
   seed: number
   radius: number
   hexes: PlanetHex[]
+  /** Infrastructure edges connecting colony nodes (map/nav plan phase A3). */
+  edges: InfraEdge[]
 }
 
 export interface IngredientRow {

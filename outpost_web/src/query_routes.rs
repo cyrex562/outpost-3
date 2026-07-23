@@ -239,6 +239,25 @@ pub struct PlanetMapWire {
     pub radius: u32,
     /// Every cell on the map.
     pub hexes: Vec<PlanetHexWire>,
+    /// Infrastructure edges connecting colony nodes (map/nav plan phase A3).
+    pub edges: Vec<InfraEdgeWire>,
+}
+
+/// An infrastructure edge between two colonies, for planet-map rendering
+/// (map/nav plan phase A3). Endpoints are resolved to hex positions on the
+/// frontend via each colony's `occupant_colony_id`.
+#[derive(Debug, Serialize)]
+pub struct InfraEdgeWire {
+    /// Id of the colony the edge runs from.
+    pub from_colony_id: String,
+    /// Id of the colony the edge runs to.
+    pub to_colony_id: String,
+    /// Infrastructure type (`road`, `rail`, `pipeline`).
+    pub infra_type: String,
+    /// Cargo throughput per turn (before tech modifiers).
+    pub throughput: f32,
+    /// Construction cost (abstract resource units).
+    pub cost: f32,
 }
 
 /// `GET /api/planet-map` — the current planet's hex map with per-cell
@@ -319,10 +338,23 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
     // Stable ordering so the frontend doesn't churn cell z-order between calls.
     hexes.sort_by_key(|h| (h.r, h.q));
 
+    let edges: Vec<InfraEdgeWire> = pm
+        .edges
+        .iter()
+        .map(|e| InfraEdgeWire {
+            from_colony_id: e.from.to_string(),
+            to_colony_id: e.to.to_string(),
+            infra_type: format!("{:?}", e.infra_type).to_lowercase(),
+            throughput: e.throughput,
+            cost: e.cost,
+        })
+        .collect();
+
     Json(PlanetMapWire {
         seed: pm.seed,
         radius: pm.radius,
         hexes,
+        edges,
     })
     .into_response()
 }

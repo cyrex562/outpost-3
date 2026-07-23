@@ -46,6 +46,62 @@ const positioned = computed<Positioned[]>(() =>
   }),
 )
 
+// ── Infrastructure edges (map/nav plan phase A3) ───────────────────────────
+//
+// Each edge connects two colonies; endpoints are resolved to hex centers via
+// each colony's occupant_colony_id (surfaced in phase A1). Colonies occupy
+// exactly one hex, so this lookup is unambiguous.
+const colonyCenters = computed<Map<string, { cx: number; cy: number }>>(() => {
+  const m = new Map<string, { cx: number; cy: number }>()
+  for (const h of positioned.value) {
+    if (h.occupant_colony_id) m.set(h.occupant_colony_id, { cx: h.cx, cy: h.cy })
+  }
+  return m
+})
+
+/** Occupied hexes, for the top colony-marker layer (drawn above edges). */
+const occupiedHexes = computed<Positioned[]>(() =>
+  positioned.value.filter((h) => h.occupied_by !== null),
+)
+
+const INFRA_COLOR: Record<string, string> = {
+  road: '#b8a06a',
+  rail: '#d8c85a',
+  pipeline: '#6ab0d8',
+}
+
+interface RenderedEdge {
+  key: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  color: string
+  width: number
+  infra_type: string
+}
+
+const infraEdges = computed<RenderedEdge[]>(() => {
+  const out: RenderedEdge[] = []
+  for (const e of props.map.edges ?? []) {
+    const from = colonyCenters.value.get(e.from_colony_id)
+    const to = colonyCenters.value.get(e.to_colony_id)
+    if (!from || !to) continue // an endpoint colony isn't on the map (yet)
+    out.push({
+      key: `${e.from_colony_id}-${e.to_colony_id}-${e.infra_type}`,
+      x1: from.cx,
+      y1: from.cy,
+      x2: to.cx,
+      y2: to.cy,
+      color: INFRA_COLOR[e.infra_type] ?? '#889',
+      // Thicker line = more throughput, clamped so a rail line doesn't dominate.
+      width: 1.2 + Math.min(4, e.throughput / 60),
+      infra_type: e.infra_type,
+    })
+  }
+  return out
+})
+
 const contentBounds = computed(() => {
   let minX = Infinity
   let minY = Infinity
@@ -507,17 +563,32 @@ defineExpose({ focusSite, resetView })
             {{ d.code }}
           </text>
         </g>
+      </g>
+
+      <!-- Infrastructure edges (phase A3): drawn above terrain but beneath
+           the colony markers below, so nodes stay legible. -->
+      <g class="infra-layer" data-testid="infra-layer">
+        <line
+          v-for="edge in infraEdges"
+          :key="edge.key"
+          :x1="edge.x1"
+          :y1="edge.y1"
+          :x2="edge.x2"
+          :y2="edge.y2"
+          :stroke="edge.color"
+          :stroke-width="edge.width"
+          stroke-linecap="round"
+          class="infra-edge"
+          :data-testid="`infra-edge-${edge.key}`"
+        />
+      </g>
+
+      <!-- Colony markers, on top of the infrastructure layer. The labels are
+           pointer-events:none, so clicks fall through to the occupied hex
+           group below (which owns selection) — no marker click handler needed. -->
+      <g v-for="h in occupiedHexes" :key="`marker-${h.site_id}`" class="colony-marker">
+        <text :x="h.cx" :y="h.cy + 4" text-anchor="middle" class="colony-label">★</text>
         <text
-          v-if="h.occupied_by"
-          :x="h.cx"
-          :y="h.cy + 4"
-          text-anchor="middle"
-          class="colony-label"
-        >
-          ★
-        </text>
-        <text
-          v-if="h.occupied_by"
           :x="h.cx"
           :y="h.cy + HEX_SIZE * 0.72"
           text-anchor="middle"
@@ -641,6 +712,11 @@ defineExpose({ focusSite, resetView })
   stroke: #05050b;
   stroke-width: 2px;
 }
+
+/* Infrastructure edges are decorative in phase A3 — don't let them intercept
+   clicks meant for the hexes they cross over. */
+.infra-layer { pointer-events: none; }
+.infra-edge { opacity: 0.85; }
 
 .hex-tooltip {
   position: absolute;

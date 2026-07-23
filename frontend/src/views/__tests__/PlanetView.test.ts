@@ -41,6 +41,7 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
     getPlanetMap.mockResolvedValueOnce({
       seed: 1,
       radius: 1,
+      edges: [],
       hexes: [
         makeHex({ q: 0, r: 0, site_id: 's0' }),
         makeHex({
@@ -63,6 +64,7 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
     getPlanetMap.mockResolvedValueOnce({
       seed: 1,
       radius: 1,
+      edges: [],
       hexes: [
         makeHex({
           q: 0,
@@ -86,6 +88,7 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
     getPlanetMap.mockResolvedValueOnce({
       seed: 1,
       radius: 1,
+      edges: [],
       hexes: [makeHex({ q: 0, r: 0, site_id: 's0', habitable: true })],
     })
     const wrapper = mount(PlanetView)
