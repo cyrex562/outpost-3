@@ -346,6 +346,19 @@ pub(crate) fn client_command_to_core(
                 infra_type: it,
             })
         }
+        ClientCommand::DemolishInfrastructure {
+            from_colony,
+            to_colony,
+        } => {
+            let from = ColonyId::from_str(&from_colony)
+                .map_err(|_| format!("invalid from_colony: {from_colony}"))?;
+            let to = ColonyId::from_str(&to_colony)
+                .map_err(|_| format!("invalid to_colony: {to_colony}"))?;
+            Ok(Command::DemolishInfrastructure {
+                from_colony: from,
+                to_colony: to,
+            })
+        }
         ClientCommand::BeginOrbitalConstruction {
             blueprint_id,
             colony_id,
