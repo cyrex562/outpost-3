@@ -15,6 +15,8 @@ import {
 } from '@/services/tauriBridge'
 import { useGameStore } from '@/stores/game'
 import CustomDifficultyPanel from '@/components/CustomDifficultyPanel.vue'
+import SystemStatsBar from '@/components/SystemStatsBar.vue'
+import TurnControlBar from '@/components/TurnControlBar.vue'
 
 useGameSocket()
 
@@ -172,14 +174,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         :data-status="store.connectionStatus"
         data-testid="connection-status"
       >{{ store.connectionStatus }}</span>
-      <div class="time-display" data-testid="time-display">
-        Sol {{ store.sol }} · Month {{ store.month }}
-      </div>
     </header>
+
+    <SystemStatsBar v-if="inGame" />
 
     <main class="app-main">
       <RouterView />
     </main>
+
+    <TurnControlBar v-if="inGame" />
 
     <div v-if="showMenu" class="menu-backdrop" @click.self="closeMenu">
       <div class="menu-dialog" data-testid="app-menu-dialog">
@@ -237,17 +240,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 body { font-family: monospace; background: #0a0a0f; color: #cdd; }
 
 /*
- * App shell (UI-rework PR2): a fixed-height grid that fills the viewport and
- * never lets the page (body) scroll — the header is auto-height, the main
- * workspace takes the rest. `overflow: hidden` + `height: 100dvh` pins the
- * shell to the viewport; `.app-main` (`min-height: 0`) becomes the single
- * internal scroll container so an overflowing view scrolls itself instead of
- * pushing a full-page scrollbar. Later PRs add the system-stats and
- * turn-control rows and convert individual views to fill without scrolling.
+ * App shell (UI-rework PR2/PR3): a fixed-height flex column that fills the
+ * viewport and never lets the page (body) scroll. The header, system-stats
+ * bar, and turn-control footer are auto-height; the main workspace takes the
+ * rest (`flex: 1; min-height: 0`) and is the single internal scroll container
+ * so an overflowing view scrolls itself instead of pushing a full-page
+ * scrollbar. Flex (not a fixed-row grid) keeps `main` filling correctly even
+ * when the bars are hidden (e.g. on the root menu route). Later PRs convert
+ * individual views to fill without scrolling.
  */
 .app {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100dvh;
   overflow: hidden;
 }
@@ -287,14 +291,13 @@ body { font-family: monospace; background: #0a0a0f; color: #cdd; }
 .nav-link:hover { color: #aac; background: #1a1a2a; }
 .nav-link.router-link-active { color: #8cf; border-color: #446; background: #1a1a2a; }
 
+.connection-status { margin-left: auto; }
 .connection-status[data-status="connected"] { color: #4c4; }
 .connection-status[data-status="connecting"] { color: #cc4; }
 .connection-status[data-status="disconnected"] { color: #888; }
 .connection-status[data-status="error"] { color: #c44; }
 
-.time-display { margin-left: auto; color: #8a8; font-size: 0.85rem; }
-
-.app-main { min-height: 0; overflow: auto; padding: 1rem; }
+.app-main { flex: 1; min-height: 0; overflow: auto; padding: 1rem; }
 
 .menu-backdrop {
   position: fixed;
