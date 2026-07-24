@@ -120,7 +120,40 @@ pub struct TradeNetwork {
     /// All active infrastructure routes.
     pub routes: Vec<TradeRoute>,
     /// Per-colony-per-commodity manual overrides keyed by `(colony_id, commodity_id)`.
+    ///
+    /// Serialized as a flat list of [`TradeOverride`] values (each already
+    /// carries its `colony_id` + `commodity_id`), not as a JSON object:
+    /// `serde_json` — the snapshot/save format — cannot serialize a map with a
+    /// `(ColonyId, String)` tuple key, which used to fail every save with
+    /// `"key must be a string"` once any override existed.
+    #[serde(with = "overrides_serde")]
     pub overrides: HashMap<(ColonyId, String), TradeOverride>,
+}
+
+/// (De)serialize [`TradeNetwork::overrides`] as a flat `Vec<TradeOverride>`,
+/// rebuilding the `(colony_id, commodity_id)` keys from each value on load —
+/// the tuple key can't be a JSON object key. See the field's doc comment.
+mod overrides_serde {
+    use super::{ColonyId, HashMap, TradeOverride};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        overrides: &HashMap<(ColonyId, String), TradeOverride>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let values: Vec<&TradeOverride> = overrides.values().collect();
+        values.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<(ColonyId, String), TradeOverride>, D::Error> {
+        let values = Vec::<TradeOverride>::deserialize(deserializer)?;
+        Ok(values
+            .into_iter()
+            .map(|ov| ((ov.colony_id, ov.commodity_id.clone()), ov))
+            .collect())
+    }
 }
 
 impl TradeNetwork {
