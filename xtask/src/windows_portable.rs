@@ -36,7 +36,15 @@ use crate::util::{capture, repo_root, run, run_ok, sha256_file, Res};
 
 const TARGET: &str = "x86_64-pc-windows-msvc";
 const BIN_NAME: &str = "outpost3";
+/// Human-readable product name — used only in README prose, never in a
+/// filesystem path or the shipped exe name.
 const PRODUCT_NAME: &str = "Outpost 3";
+/// Space-free name for every filesystem artifact the portable build emits —
+/// the staged/installed folder and the `.exe`. A space in the exe name breaks
+/// shortcuts, command-line invocation, and scripts on Windows, so the portable
+/// output deliberately keeps no space (the compiled binary is already
+/// [`BIN_NAME`]; this just avoids renaming it back to a spaced name on stage).
+const PORTABLE_NAME: &str = "Outpost3";
 /// Mirrors `outpost_tauri/tauri.conf.json`'s `identifier` — this is the
 /// folder name Tauri's log-dir resolver uses under `%LOCALAPPDATA%` on
 /// Windows, independent of wherever the exe itself is installed/run from.
@@ -94,7 +102,11 @@ pub fn build_windows_portable() -> Res<()> {
     if zip_path.exists() {
         fs::remove_file(&zip_path).map_err(|e| format!("rm {}: {e}", zip_path.display()))?;
     }
-    let zip_ok = zip_directory(&root.join("dist/windows-portable"), PRODUCT_NAME, &zip_path);
+    let zip_ok = zip_directory(
+        &root.join("dist/windows-portable"),
+        PORTABLE_NAME,
+        &zip_path,
+    );
 
     println!();
     println!("== Build complete ==");
@@ -147,7 +159,7 @@ pub fn install_windows() -> Res<()> {
 
     let local_app_data = std::env::var("LOCALAPPDATA")
         .map_err(|_| "LOCALAPPDATA environment variable is not set".to_string())?;
-    let install_dir = std::path::Path::new(&local_app_data).join(PRODUCT_NAME.replace(' ', ""));
+    let install_dir = std::path::Path::new(&local_app_data).join(PORTABLE_NAME);
 
     println!("== Installing to {} ==", install_dir.display());
     if install_dir.exists() {
@@ -156,7 +168,7 @@ pub fn install_windows() -> Res<()> {
     }
     copy_dir_recursive(&stage, &install_dir)?;
 
-    let exe_path = install_dir.join(format!("{PRODUCT_NAME}.exe"));
+    let exe_path = install_dir.join(format!("{PORTABLE_NAME}.exe"));
     let log_path = std::path::Path::new(&local_app_data)
         .join(BUNDLE_IDENTIFIER)
         .join("logs")
@@ -199,7 +211,7 @@ fn copy_dir_recursive(src: &std::path::Path, dest: &std::path::Path) -> Res<()> 
     Ok(())
 }
 
-/// Stage a built exe into `dist/windows-portable/{PRODUCT_NAME}/` alongside
+/// Stage a built exe into `dist/windows-portable/{PORTABLE_NAME}/` alongside
 /// any sibling DLLs, a README, and a SHA256SUMS file. Returns the staged
 /// directory and the exe's SHA-256. Shared by [`build_windows_portable`]
 /// (which zips the result) and [`install_windows`] (which copies it into
@@ -207,13 +219,13 @@ fn copy_dir_recursive(src: &std::path::Path, dest: &std::path::Path) -> Res<()> 
 fn stage_bundle(exe: &std::path::Path) -> Res<(PathBuf, String)> {
     println!("== Assembling portable bundle ==");
     let root = repo_root();
-    let stage = root.join("dist/windows-portable").join(PRODUCT_NAME);
+    let stage = root.join("dist/windows-portable").join(PORTABLE_NAME);
     if stage.exists() {
         fs::remove_dir_all(&stage).map_err(|e| format!("clean {}: {e}", stage.display()))?;
     }
     fs::create_dir_all(&stage).map_err(|e| format!("mkdir {}: {e}", stage.display()))?;
 
-    let staged_exe = stage.join(format!("{PRODUCT_NAME}.exe"));
+    let staged_exe = stage.join(format!("{PORTABLE_NAME}.exe"));
     fs::copy(exe, &staged_exe)
         .map_err(|e| format!("copy {} -> {}: {e}", exe.display(), staged_exe.display()))?;
 
@@ -250,7 +262,7 @@ fn stage_bundle(exe: &std::path::Path) -> Res<(PathBuf, String)> {
         format!(
             "{PRODUCT_NAME} — portable Windows build\n\
              \n\
-             Run \"{PRODUCT_NAME}.exe\" directly; no installer needed.\n\
+             Run \"{PORTABLE_NAME}.exe\" directly; no installer needed.\n\
              \n\
              Requires the Microsoft Edge WebView2 Runtime, pre-installed on\n\
              Windows 11 and recent Windows 10 builds. If the app fails to\n\
@@ -271,7 +283,7 @@ fn stage_bundle(exe: &std::path::Path) -> Res<(PathBuf, String)> {
     let hash = sha256_file(&staged_exe)?;
     fs::write(
         stage.join("SHA256SUMS"),
-        format!("{hash}  {PRODUCT_NAME}.exe\n"),
+        format!("{hash}  {PORTABLE_NAME}.exe\n"),
     )
     .map_err(|e| format!("write SHA256SUMS: {e}"))?;
 
@@ -378,4 +390,38 @@ fn zip_directory(parent_dir: &std::path::Path, dir_name: &str, zip_path: &std::p
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BIN_NAME, PORTABLE_NAME};
+
+    /// The portable build must emit no space in any filesystem artifact name
+    /// (folder or `.exe`) — a space breaks Windows shortcuts, command-line
+    /// invocation, and scripts, which is the whole reason this name is kept
+    /// distinct from the human-readable product name.
+    #[test]
+    fn portable_artifact_names_have_no_space() {
+        assert!(
+            !PORTABLE_NAME.contains(char::is_whitespace),
+            "PORTABLE_NAME must not contain whitespace: {PORTABLE_NAME:?}"
+        );
+        let exe = format!("{PORTABLE_NAME}.exe");
+        assert!(
+            !exe.contains(char::is_whitespace),
+            "portable exe name must not contain whitespace: {exe:?}"
+        );
+    }
+
+    /// The staged exe name should match the compiled binary's base name
+    /// (case-insensitively) so what ships is recognizably the same artifact
+    /// that was built.
+    #[test]
+    fn portable_name_matches_compiled_binary() {
+        assert_eq!(
+            PORTABLE_NAME.to_ascii_lowercase(),
+            BIN_NAME.to_ascii_lowercase(),
+            "portable artifact name should track the compiled binary name"
+        );
+    }
 }
