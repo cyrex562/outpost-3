@@ -11,7 +11,7 @@
 //! so browser-mode screens — the colony-founding wizard in particular — can
 //! reach them without a Tauri IPC bridge.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -279,7 +279,39 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
         )
             .into_response();
     };
+    Json(build_planet_map_wire(pm, &engine)).into_response()
+}
 
+/// `GET /api/body-surface/:id` — a read-only, procedurally-generated surface
+/// preview for any system body ("view surface" from the system map). Unlike
+/// `/api/planet-map`, this is derived on demand from the body (not stored) and
+/// carries no colonies or infrastructure.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_body_surface(
+    State(state): State<AppState>,
+    Path(body_id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    match engine.body_surface_preview(&outpost_core::system::BodyId(body_id)) {
+        Ok(pm) => Json(build_planet_map_wire(&pm, &engine)).into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Serialize a [`outpost_core::map::PlanetMap`] to the wire shape. Shared by
+/// the live planet map and the per-body surface preview; colony/occupancy
+/// fields resolve against the live colony list (empty for a fresh preview).
+fn build_planet_map_wire(
+    pm: &outpost_core::map::PlanetMap,
+    engine: &outpost_core::GameEngine,
+) -> PlanetMapWire {
     let coord_to_site: std::collections::HashMap<_, _> =
         pm.sites.iter().map(|(sid, coord)| (*coord, *sid)).collect();
 
@@ -350,13 +382,12 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
         })
         .collect();
 
-    Json(PlanetMapWire {
+    PlanetMapWire {
         seed: pm.seed,
         radius: pm.radius,
         hexes,
         edges,
-    })
-    .into_response()
+    }
 }
 
 /// A body on the system map, positioned for rendering.

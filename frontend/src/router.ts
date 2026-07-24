@@ -13,6 +13,7 @@ import BuildingsListView from './views/BuildingsListView.vue'
 import OutpostView from './views/OutpostView.vue'
 import OutpostFacilityView from './views/OutpostFacilityView.vue'
 import PlanetView from './views/PlanetView.vue'
+import SurfaceView from './views/SurfaceView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -20,6 +21,7 @@ const router = createRouter({
     { path: '/', component: MainMenuView, name: 'menu' },
     { path: '/system', component: SystemMapView, name: 'system' },
     { path: '/planet', component: PlanetView, name: 'planet' },
+    { path: '/surface/:bodyId', component: SurfaceView, name: 'surface' },
     { path: '/new-game', component: NewGameView, name: 'new-game' },
     { path: '/colony/:colonyId?', component: ColonyView, name: 'colony' },
     {

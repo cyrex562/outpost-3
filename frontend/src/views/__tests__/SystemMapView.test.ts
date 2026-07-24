@@ -4,9 +4,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import SystemMapView from '@/views/SystemMapView.vue'
 import type { SystemBody } from '@/services/tauriBridge'
 
+const routerPush = vi.fn()
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: routerPush }),
 }))
 
 const getSystemBodies = vi.fn<[], Promise<SystemBody[]>>()
@@ -168,5 +169,61 @@ describe('SystemMapView (system fixes B1: moons orbit their parent)', () => {
 
     await wrapper.get('[data-testid="body-node-belt-1"]').trigger('click')
     expect(wrapper.get('[data-testid="belt-span"]').text()).toContain('2.30–2.70 AU')
+  })
+})
+
+describe('SystemMapView (map/nav plan: view body surface)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getSystemBodies.mockReset()
+    routerPush.mockReset()
+    window.localStorage.clear()
+  })
+
+  it('offers "View Surface" for a planet and routes to the surface preview on click', async () => {
+    const planet = makeBody({ id: 'planet-1', name: 'Chiron', kind: 'InnerPlanet', distance_au: 1.0 })
+    getSystemBodies.mockResolvedValueOnce([planet])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-node-planet-1"]').trigger('click')
+    const btn = wrapper.get('[data-testid="btn-view-surface"]')
+    await btn.trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'surface',
+      params: { bodyId: 'planet-1' },
+      query: { name: 'Chiron' },
+    })
+  })
+
+  it('offers "View Surface" for a moon', async () => {
+    const moon = makeBody({ id: 'moon-1', name: 'Nessus', kind: 'Moon', parent_body_name: 'Chiron' })
+    getSystemBodies.mockResolvedValueOnce([moon])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-node-moon-1"]').trigger('click')
+    expect(wrapper.find('[data-testid="btn-view-surface"]').exists()).toBe(true)
+  })
+
+  it('hides "View Surface" for belts (no solid surface)', async () => {
+    const belt = makeBody({
+      id: 'belt-1',
+      name: 'Belt',
+      kind: 'AsteroidBelt',
+      distance_au: 2.5,
+      belt_profile: {
+        inner_au: 2.3,
+        outer_au: 2.7,
+        zones: [{ start_deg: 0, sweep_deg: 360, density: 0.5 }],
+      },
+    })
+    getSystemBodies.mockResolvedValueOnce([belt])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-node-belt-1"]').trigger('click')
+    expect(wrapper.find('[data-testid="btn-view-surface"]').exists()).toBe(false)
   })
 })

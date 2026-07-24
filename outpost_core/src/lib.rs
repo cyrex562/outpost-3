@@ -78,6 +78,11 @@ const POPULATION_WARNING_ETA: u32 = 10;
 /// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
 pub const DEFAULT_SEED: u64 = 0;
 
+/// Hex radius used for a body's read-only surface preview
+/// ([`GameEngine::body_surface_preview`]). Sized for a quick scouting look —
+/// smaller than the live founding planet's map.
+const BODY_SURFACE_PREVIEW_RADIUS: u32 = 8;
+
 /// Cargo-capacity stand-in for [`Command::FoundColonyAtSite`]'s
 /// `supply_overrides` (issue #167, open design question: "bounded by a
 /// cargo capacity?"). Each per-commodity override is capped at this many
@@ -4603,6 +4608,49 @@ impl GameEngine {
         }
     }
 
+    /// Generate a deterministic, read-only surface preview for any system
+    /// body ("view surface" from the system map). The preview is derived from
+    /// the body's id-hashed seed plus its temperature and subtype; it is NOT
+    /// persisted and carries no colonies or infrastructure — a scouting look
+    /// at what a world's surface would be, distinct from the live
+    /// founding-planet map in [`GameState::planet_map`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::InvalidArgument`] if `body_id` names no body in
+    /// the current system, or names a body with no solid surface (a belt or an
+    /// orbital station — see [`BodyKind::has_surface`](system::BodyKind::has_surface)).
+    pub fn body_surface_preview(
+        &self,
+        body_id: &system::BodyId,
+    ) -> Result<map::PlanetMap, EngineError> {
+        let body = self
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .get(body_id)
+            .ok_or_else(|| EngineError::InvalidArgument(format!("unknown body: {}", body_id.0)))?;
+        if !body.kind.has_surface() {
+            return Err(EngineError::InvalidArgument(format!(
+                "body {} ({:?}) has no surface to preview",
+                body_id.0, body.kind
+            )));
+        }
+        // Hash the body's UUID down to a stable u64 seed so the same body
+        // always previews the same surface, and different bodies differ. A
+        // wrapping-multiply combine (not XOR) keeps the two halves order-
+        // sensitive so swapped-half UUIDs don't collide on the same seed.
+        let (hi, lo) = body.id.0.as_u64_pair();
+        let seed = hi.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(lo);
+        Ok(map::PlanetMap::generate_for_body_and_subtype(
+            seed,
+            BODY_SURFACE_PREVIEW_RADIUS,
+            body.temperature,
+            body.subtype,
+        ))
+    }
+
     /// Evaluate a read-only [`Query`] and return a [`QueryResult`].
     ///
     /// Queries never mutate game state.
@@ -7731,6 +7779,100 @@ mod tests {
                 .push(system::BodyDeposit::new("structural_ore", 1.0));
         }
         (colony_id, body_id)
+    }
+
+    /// Add a surfaced body (default `InnerPlanet`) to the system and return its id.
+    fn add_surface_body(
+        engine: &mut GameEngine,
+        name: &str,
+        kind: system::BodyKind,
+    ) -> system::BodyId {
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: name.into(),
+                kind,
+                distance_au: 1.0,
+            }))
+            .unwrap();
+        match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn body_surface_preview_is_deterministic_and_body_specific() {
+        let mut engine = GameEngine::new();
+        let body_id = add_surface_body(&mut engine, "First World", system::BodyKind::InnerPlanet);
+
+        // Same body → identical surface across calls (not persisted, purely
+        // derived from the body).
+        let a = engine.body_surface_preview(&body_id).unwrap();
+        let b = engine.body_surface_preview(&body_id).unwrap();
+        assert_eq!(a.seed, b.seed);
+        assert_eq!(a.cells.len(), b.cells.len());
+        assert!(!a.cells.is_empty(), "a preview should have hex cells");
+        // A preview is a bare surface — no colonies or infrastructure.
+        assert!(a.colonies.is_empty());
+        assert!(a.edges.is_empty());
+
+        // A different body previews a different surface.
+        let other = add_surface_body(&mut engine, "Second World", system::BodyKind::InnerPlanet);
+        let c = engine.body_surface_preview(&other).unwrap();
+        assert_ne!(
+            a.seed, c.seed,
+            "different bodies must preview different surfaces"
+        );
+    }
+
+    #[test]
+    fn body_surface_preview_works_for_moons() {
+        let mut engine = GameEngine::new();
+        let moon = add_surface_body(&mut engine, "Nessus", system::BodyKind::Moon);
+        let preview = engine
+            .body_surface_preview(&moon)
+            .expect("a moon has a previewable surface");
+        assert!(!preview.cells.is_empty());
+    }
+
+    #[test]
+    fn body_surface_preview_unknown_body_errors() {
+        let engine = GameEngine::new();
+        let result = engine.body_surface_preview(&system::BodyId::new());
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn body_surface_preview_rejects_bodies_without_surface() {
+        // Belts and orbital stations have no solid surface — the preview is
+        // scoped out for them, so the engine rejects rather than fabricating a
+        // nonsensical hex map (defends the endpoint against a client that
+        // bypasses the frontend's `canPreviewSurface` gate).
+        let mut engine = GameEngine::new();
+        for kind in [
+            system::BodyKind::AsteroidBelt,
+            system::BodyKind::CometaryBelt,
+            system::BodyKind::OrbitalStation,
+        ] {
+            let label = format!("{kind:?}");
+            let events = engine
+                .apply(&Command::System(system::SystemCommand::AddBody {
+                    name: label.clone(),
+                    kind,
+                    distance_au: 3.0,
+                }))
+                .unwrap();
+            let Event::System(system::SystemEvent::BodyAdded { body_id, .. }) = &events[0] else {
+                panic!("expected BodyAdded")
+            };
+            assert!(
+                matches!(
+                    engine.body_surface_preview(body_id),
+                    Err(EngineError::InvalidArgument(_))
+                ),
+                "{label} should have no previewable surface"
+            );
+        }
     }
 
     fn registry_with_mining_outpost_building() -> crate::content::ContentRegistry {

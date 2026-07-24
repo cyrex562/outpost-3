@@ -63,6 +63,19 @@ impl BodyKind {
     pub fn is_belt(&self) -> bool {
         matches!(self, BodyKind::AsteroidBelt | BodyKind::CometaryBelt)
     }
+
+    /// Whether this kind has a solid surface worth previewing as a hex map
+    /// (planet, giant, or moon). Belts are diffuse aggregates and an
+    /// [`OrbitalStation`](BodyKind::OrbitalStation) is a built structure, not a
+    /// world — neither has a surface, so the "view surface" action is scoped
+    /// out for them (map/nav plan).
+    #[must_use]
+    pub fn has_surface(&self) -> bool {
+        matches!(
+            self,
+            BodyKind::InnerPlanet | BodyKind::GasGiant | BodyKind::Moon
+        )
+    }
 }
 
 /// One angular zone of a belt's annulus, carrying its own density
