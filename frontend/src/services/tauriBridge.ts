@@ -463,6 +463,17 @@ export async function getPlanetMap(): Promise<PlanetMap> {
   return invoke<PlanetMap>('get_planet_map')
 }
 
+/**
+ * Fetch a read-only, procedurally-generated surface preview for any system
+ * body (planet or moon), whether or not a colony has been founded there.
+ * Used by the system map's "View Surface" action (map/nav plan). The preview
+ * carries terrain/biome/deposit metadata but no colonies or infrastructure.
+ */
+export async function getBodySurface(bodyId: string): Promise<PlanetMap> {
+  if (!isTauri) return fetchJson<PlanetMap>(`/api/body-surface/${bodyId}`)
+  return invoke<PlanetMap>('get_body_surface', { bodyId })
+}
+
 export interface SupplyPackage {
   id: string
   name: string

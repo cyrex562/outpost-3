@@ -1914,6 +1914,37 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
         .as_ref()
         .ok_or_else(|| CmdError::Engine("no planet map — bootstrap first".into()))?;
 
+    Ok(build_planet_map_wire(pm, engine))
+}
+
+/// Return a read-only surface preview for any body in the system (planet or
+/// moon), regardless of whether a colony has been founded there. Used by the
+/// system map's "View Surface" action (map/nav plan).
+#[tauri::command]
+pub fn get_body_surface(
+    engine_state: State<'_, EngineState>,
+    body_id: String,
+) -> CmdResult<PlanetMapWire> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+
+    let uuid = uuid::Uuid::parse_str(&body_id)
+        .map_err(|e| CmdError::Engine(format!("invalid body id: {e}")))?;
+    let pm = engine
+        .body_surface_preview(&outpost_core::system::BodyId(uuid))
+        .map_err(|e| CmdError::Engine(e.to_string()))?;
+
+    Ok(build_planet_map_wire(&pm, engine))
+}
+
+/// Convert a [`map::PlanetMap`] into its wire form, resolving per-cell site
+/// ids, colony occupancy, and infrastructure edges from the engine state.
+/// Shared by [`get_planet_map`] (the live founding map) and
+/// [`get_body_surface`] (a generated read-only preview).
+fn build_planet_map_wire(
+    pm: &outpost_core::map::PlanetMap,
+    engine: &outpost_core::GameEngine,
+) -> PlanetMapWire {
     // Build reverse coord → site_id lookup so hex rows carry a site_id.
     let coord_to_site: std::collections::HashMap<_, _> =
         pm.sites.iter().map(|(sid, coord)| (*coord, *sid)).collect();
@@ -1986,12 +2017,12 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
         })
         .collect();
 
-    Ok(PlanetMapWire {
+    PlanetMapWire {
         seed: pm.seed,
         radius: pm.radius,
         hexes,
         edges,
-    })
+    }
 }
 
 /// List `*.o3save` files in the given directory. Returns filenames only.

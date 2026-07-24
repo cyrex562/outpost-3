@@ -488,6 +488,20 @@ function foundColony(body?: SystemBody | null): void {
     router.push('/found')
   }
 }
+
+/**
+ * Whether a body has a surface worth previewing. Belts (asteroid/cometary)
+ * and orbital stations have no solid surface, so the "View Surface" action is
+ * hidden for them; planets, giants, and moons all qualify.
+ */
+function canPreviewSurface(body: SystemBody): boolean {
+  return body.kind !== 'AsteroidBelt' && body.kind !== 'CometaryBelt' && body.kind !== 'OrbitalStation'
+}
+
+/** Open the read-only surface preview for any body (map/nav plan). */
+function viewSurface(body: SystemBody): void {
+  router.push({ name: 'surface', params: { bodyId: body.id }, query: { name: body.name } })
+}
 </script>
 
 <template>
@@ -690,13 +704,23 @@ function foundColony(body?: SystemBody | null): void {
           <dt v-if="selected.moon_count > 0">Moons</dt>
           <dd v-if="selected.moon_count > 0">{{ selected.moon_count }}</dd>
         </dl>
-        <button
-          v-if="selected.colonizable"
-          class="btn primary"
-          @click="foundColony(selected)"
-        >
-          Found Colony Here
-        </button>
+        <div class="body-actions">
+          <button
+            v-if="selected.colonizable"
+            class="btn primary"
+            @click="foundColony(selected)"
+          >
+            Found Colony Here
+          </button>
+          <button
+            v-if="canPreviewSurface(selected)"
+            class="btn"
+            data-testid="btn-view-surface"
+            @click="viewSurface(selected)"
+          >
+            View Surface
+          </button>
+        </div>
       </aside>
       <aside v-else class="side-panel hint">
         Scroll to zoom, drag to pan, corner grip to resize.<br />
@@ -727,6 +751,7 @@ function foundColony(body?: SystemBody | null): void {
 }
 .btn:hover { background: #22223a; }
 .btn.primary { border-color: #468; color: #8cf; }
+.body-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .content { display: flex; gap: 1rem; align-items: flex-start; }
 

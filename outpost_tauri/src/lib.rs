@@ -79,6 +79,7 @@ pub fn run() {
             commands::get_colonize_targets,
             commands::list_buildings,
             commands::get_planet_map,
+            commands::get_body_surface,
             commands::list_supply_packages,
             commands::get_difficulty_knobs,
             commands::list_custom_presets,
