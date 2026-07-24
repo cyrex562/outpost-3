@@ -69,3 +69,30 @@ describe('App.vue Escape-to-back handler (navigation rework #7 phase 1)', () => 
     input.remove()
   })
 })
+
+describe('App.vue shell structure (UI-rework PR2: no-scroll app shell)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routePath = '/colony'
+    primeHistory()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('renders the header (with nav) and the scrollable main region while in game', () => {
+    const wrapper = mount(App, { global: { stubs: { RouterLink: true, RouterView: true } } })
+    expect(wrapper.find('.app-header').exists()).toBe(true)
+    expect(wrapper.find('.header-nav').exists()).toBe(true)
+    // The main workspace is the single internal scroll container.
+    expect(wrapper.find('.app-main').exists()).toBe(true)
+  })
+
+  it('hides the header on the root menu route so the menu fills the shell', () => {
+    routePath = '/'
+    const wrapper = mount(App, { global: { stubs: { RouterLink: true, RouterView: true } } })
+    expect(wrapper.find('.app-header').exists()).toBe(false)
+    expect(wrapper.find('.app-main').exists()).toBe(true)
+  })
+})

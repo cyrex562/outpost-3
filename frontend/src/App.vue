@@ -236,7 +236,21 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: monospace; background: #0a0a0f; color: #cdd; }
 
-.app { display: flex; flex-direction: column; min-height: 100vh; }
+/*
+ * App shell (UI-rework PR2): a fixed-height grid that fills the viewport and
+ * never lets the page (body) scroll — the header is auto-height, the main
+ * workspace takes the rest. `overflow: hidden` + `height: 100dvh` pins the
+ * shell to the viewport; `.app-main` (`min-height: 0`) becomes the single
+ * internal scroll container so an overflowing view scrolls itself instead of
+ * pushing a full-page scrollbar. Later PRs add the system-stats and
+ * turn-control rows and convert individual views to fill without scrolling.
+ */
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100dvh;
+  overflow: hidden;
+}
 
 .app-header {
   display: flex;
@@ -280,7 +294,7 @@ body { font-family: monospace; background: #0a0a0f; color: #cdd; }
 
 .time-display { margin-left: auto; color: #8a8; font-size: 0.85rem; }
 
-.app-main { flex: 1; padding: 1rem; }
+.app-main { min-height: 0; overflow: auto; padding: 1rem; }
 
 .menu-backdrop {
   position: fixed;
