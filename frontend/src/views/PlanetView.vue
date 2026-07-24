@@ -13,6 +13,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PlanetHexMap from '@/components/PlanetHexMap.vue'
+import FloatingWindow from '@/components/FloatingWindow.vue'
 import { useGameStore } from '@/stores/game'
 import { getPlanetMap, type InfraEdge, type PlanetHex, type PlanetMap } from '@/services/tauriBridge'
 
@@ -185,14 +186,27 @@ async function demolish(edge: InfraEdge): Promise<void> {
         <p v-else class="hint">No infrastructure built yet.</p>
       </div>
 
+      <!-- The planet map is a resizable, moveable window (UI-rework PR6):
+           drag its title bar to reposition, drag the corner to resize; its
+           geometry persists per-player. `.map-host` is the positioned area it
+           floats within. -->
       <div class="map-host">
-        <PlanetHexMap
-          :map="planetMap"
-          :selected-site="selectedSite"
-          :highlight-top-n="0"
-          selectable-occupied
-          @select="onHexSelect"
-        />
+        <FloatingWindow
+          title="Planet Map"
+          storage-key="outpost3.planet-window"
+          :initial-x="16"
+          :initial-y="16"
+          :initial-width="760"
+          :initial-height="520"
+        >
+          <PlanetHexMap
+            :map="planetMap"
+            :selected-site="selectedSite"
+            :highlight-top-n="0"
+            selectable-occupied
+            @select="onHexSelect"
+          />
+        </FloatingWindow>
       </div>
     </template>
   </div>
@@ -204,7 +218,10 @@ async function demolish(edge: InfraEdge): Promise<void> {
 .toolbar h2 { color: #8cf; margin: 0; }
 .hint { color: #557; font-style: italic; font-size: 0.85rem; }
 .err { color: #d66; font-size: 0.8rem; }
-.map-host { flex: 1; min-height: 70vh; }
+/* Positioned host the floating planet-map window lives inside (UI-rework
+   PR6). `position: relative` anchors the window's absolute coordinates; it
+   fills the remaining space so the window has room to move/resize. */
+.map-host { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 
 .btn {
   background: #1a1a28;
