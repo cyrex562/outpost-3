@@ -22,6 +22,7 @@ import VitalStatsPanel from '@/components/VitalStatsPanel.vue'
 import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
 import BuildingsPanel from '@/components/BuildingsPanel.vue'
 import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
+import BuildDialog from '@/components/BuildDialog.vue'
 import AlertsPanel from '@/components/AlertsPanel.vue'
 import type { ColonyState } from '@/worldModel/model'
 import {
@@ -120,6 +121,9 @@ const populationTrend = computed((): number[] => {
 
 const queueBusy = ref(false)
 
+/** Whether the build dialog (catalog + quantity picker) is open. */
+const showBuildDialog = ref(false)
+
 /** Full building catalog from the loaded content pack. */
 const buildingCatalog = ref<BuildingOption[]>([])
 
@@ -166,20 +170,28 @@ function disabledReason(b: BuildingOption): string | null {
   return null
 }
 
-async function queueBuilding(b: BuildingOption): Promise<void> {
+/**
+ * Queue `quantity` copies of a building. The build dialog lets the player
+ * pick a count, so this dispatches one `queue_construction` per copy (there's
+ * no batch command); each is a separate project the engine schedules in turn.
+ */
+async function queueBuilding(b: BuildingOption, quantity = 1): Promise<void> {
   const col = selectedColony.value
   if (!col || queueBusy.value || disabledReason(b) !== null) return
+  const count = Math.max(1, Math.floor(quantity))
   queueBusy.value = true
   try {
-    await gameStore.sendCommand({
-      kind: 'queue_construction',
-      colony_id: col.id,
-      building_type: b.id,
-      slot_cost: b.slot_cost,
-      labor_per_turn: b.labor_per_turn,
-      construction_cost: b.construction_cost,
-      construction_turns: b.construction_turns,
-    })
+    for (let i = 0; i < count; i++) {
+      await gameStore.sendCommand({
+        kind: 'queue_construction',
+        colony_id: col.id,
+        building_type: b.id,
+        slot_cost: b.slot_cost,
+        labor_per_turn: b.labor_per_turn,
+        construction_cost: b.construction_cost,
+        construction_turns: b.construction_turns,
+      })
+    }
   } finally {
     queueBusy.value = false
   }
@@ -356,12 +368,8 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
               <Pane :size="centerSizes[1]" min-size="10">
                 <ConstructionQueuePanel
                   :queue="screen ? screen.construction_queue : null"
-                  :catalog="buildingCatalog"
-                  :disabled-reason="disabledReason"
-                  :slots-available="slotsAvailable"
-                  :queue-busy="queueBusy"
                   :canceling-ids="cancelingIds"
-                  @queue="queueBuilding"
+                  @open-build="showBuildDialog = true"
                   @cancel="cancelConstruction"
                 />
               </Pane>
@@ -378,9 +386,20 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
           </Pane>
         </Splitpanes>
       </div>
+
+      <BuildDialog
+        v-if="showBuildDialog"
+        :catalog="buildingCatalog"
+        :disabled-reason="disabledReason"
+        :slots-available="slotsAvailable"
+        :busy="queueBusy"
+        @queue="queueBuilding"
+        @close="showBuildDialog = false"
+      />
     </template>
   </div>
 </template>
+
 
 <style scoped>
 /* Fill the shell's main region (UI-rework PR4): a flex column whose panel

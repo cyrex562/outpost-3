@@ -61,4 +61,13 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   // the new colony selected.
   await expect(page).toHaveURL(/#\/colony/)
   await expect(page.locator('[data-testid^="colony-detail-"]')).toBeVisible({ timeout: 15_000 })
+
+  // ── UI-rework PR5: the construction-queue panel's "Build…" button opens the
+  // build dialog (the catalog itself only populates in Tauri mode, so here we
+  // just verify the panel → dialog wiring, then dismiss it).
+  await expect(page.getByTestId('construction-queue-panel')).toBeVisible()
+  await page.getByTestId('btn-open-build').click()
+  await expect(page.getByTestId('build-dialog')).toBeVisible()
+  await page.getByTestId('btn-close-build').click()
+  await expect(page.getByTestId('build-dialog')).toHaveCount(0)
 })

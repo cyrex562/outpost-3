@@ -26,6 +26,7 @@ const STUBS = {
   CommoditiesPanel: true,
   BuildingsPanel: true,
   ConstructionQueuePanel: true,
+  BuildDialog: true,
   AlertsPanel: true,
   Splitpanes: true,
   Pane: true,
