@@ -7,8 +7,8 @@
  * localStorage, mirroring the pattern SystemMapView.vue already uses for
  * its own layout state.
  *
- * CommandPanel stays outside the resizable panel area — it's a colony-level
- * action bar (advance turn, found colony, ...), not a data-display panel.
+ * Turn control (Advance Turn) and system-wide stats now live in the app
+ * shell's footer/stats bars (UI-rework PR3), not in this view.
  */
 
 import { computed, onMounted, ref, watch } from 'vue'
@@ -18,7 +18,6 @@ import type { SplitpanesResizedPayload } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
-import CommandPanel from '@/components/CommandPanel.vue'
 import PopulationPanel from '@/components/PopulationPanel.vue'
 import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
 import BuildingsPanel from '@/components/BuildingsPanel.vue'
@@ -283,7 +282,7 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
 <template>
   <div class="colony-view">
     <div v-if="colonies.length === 0" class="empty-state" data-testid="no-colonies">
-      No colonies founded yet. Use the command panel to found one.
+      No colonies founded yet. Found one from the system map.
     </div>
 
     <template v-else>
@@ -299,7 +298,6 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
           </button>
           <h2 class="colony-title" data-testid="colony-title">{{ selectedColony?.name }}</h2>
         </div>
-        <CommandPanel />
       </div>
 
       <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
@@ -351,10 +349,6 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
           </Pane>
         </Splitpanes>
       </div>
-
-      <div class="research-total" data-testid="research-total">
-        System research: {{ worldStore.researchTotal.toFixed(1) }} RP
-      </div>
     </template>
   </div>
 </template>
@@ -395,8 +389,6 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
   border-radius: 4px;
   overflow: hidden;
 }
-
-.research-total { margin-top: 0.75rem; font-size: 0.78rem; color: #6a8; }
 </style>
 
 <style>

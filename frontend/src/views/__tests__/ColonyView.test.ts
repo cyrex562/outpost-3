@@ -22,7 +22,6 @@ vi.mock('@/services/tauriBridge', () => ({
 }))
 
 const STUBS = {
-  CommandPanel: true,
   PopulationPanel: true,
   CommoditiesPanel: true,
   BuildingsPanel: true,
