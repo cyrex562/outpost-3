@@ -70,4 +70,22 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   await expect(page.getByTestId('build-dialog')).toBeVisible()
   await page.getByTestId('btn-close-build').click()
   await expect(page.getByTestId('build-dialog')).toHaveCount(0)
+
+  // ── UI-rework PR6: the planet map is a draggable floating window; drag its
+  // title bar and confirm it actually moves.
+  await page.getByRole('link', { name: 'Planet', exact: true }).click()
+  await expect(page).toHaveURL(/#\/planet/)
+  const win = page.getByTestId('floating-window')
+  await expect(win).toBeVisible()
+  await expect(page.getByTestId('planet-hex-map')).toBeVisible()
+  const before = await win.boundingBox()
+  const bar = page.getByTestId('fw-titlebar')
+  const barBox = (await bar.boundingBox())!
+  await page.mouse.move(barBox.x + 40, barBox.y + 10)
+  await page.mouse.down()
+  await page.mouse.move(barBox.x + 140, barBox.y + 70, { steps: 5 })
+  await page.mouse.up()
+  const after = await win.boundingBox()
+  expect(after!.x).toBeGreaterThan(before!.x)
+  expect(after!.y).toBeGreaterThan(before!.y)
 })
