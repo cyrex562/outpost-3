@@ -460,6 +460,36 @@ mod tests {
     // ── round-trip fidelity ─────────────────────────────────────────────────────
 
     #[test]
+    fn save_succeeds_with_trade_overrides_present() {
+        // Regression: `TradeNetwork.overrides` is a `HashMap<(ColonyId,
+        // String), _>` — a tuple key that `serde_json` cannot serialize as a
+        // JSON object. A non-empty overrides map (set once the player tweaks
+        // trade priorities) used to make every save fail with a JSON error.
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        let mut state = make_state_with_colonies();
+        let colony_id = state.colonies[0].id;
+        state
+            .trade_network
+            .set_override(crate::trade::TradeOverride {
+                colony_id,
+                commodity_id: "water".into(),
+                suppress_auto: true,
+                cap: Some(5.0),
+            });
+
+        snap.save(&state)
+            .expect("save must succeed with trade overrides");
+        let restored = snap.load().unwrap();
+        let ov = restored
+            .trade_network
+            .overrides
+            .get(&(colony_id, "water".to_string()))
+            .expect("override must survive the round trip");
+        assert!(ov.suppress_auto);
+        assert_eq!(ov.cap, Some(5.0));
+    }
+
+    #[test]
     fn round_trip_preserves_turn_counters() {
         let mut snap = Snapshot::open_in_memory().unwrap();
         let state = make_state_with_colonies();
