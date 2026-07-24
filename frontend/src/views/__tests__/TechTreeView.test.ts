@@ -160,4 +160,22 @@ describe('TechTreeView', () => {
     const effects = wrapper.get('[data-testid="tech-effects"]')
     expect(effects.text()).toContain('foundry')
   })
+
+  it('shows a prompt in the always-visible detail sidebar until a node is selected', async () => {
+    const wrapper = mount(TechTreeView)
+    await flushPromises()
+    // The sidebar is present with a prompt before any selection...
+    expect(wrapper.find('[data-testid="tech-detail-empty"]').exists()).toBe(true)
+    // ...and clicking a node replaces the prompt with that node's details.
+    await wrapper.get('.node.state-available').trigger('click')
+    expect(wrapper.find('[data-testid="tech-detail-empty"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="tech-detail"]').text()).toContain('Alpha Tech')
+  })
+
+  it('highlights the selected node in the graph', async () => {
+    const wrapper = mount(TechTreeView)
+    await flushPromises()
+    await wrapper.get('[data-testid="tech-node-alpha"]').trigger('click')
+    expect(wrapper.get('[data-testid="tech-node-alpha"]').classes()).toContain('selected')
+  })
 })

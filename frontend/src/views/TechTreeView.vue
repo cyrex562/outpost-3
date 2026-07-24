@@ -242,6 +242,7 @@ function effectLabel(effect: TechEffect): string {
       </ol>
     </div>
 
+    <div class="tech-body">
     <div class="graph-wrap">
       <svg
         :width="totalWidth"
@@ -263,7 +264,8 @@ function effectLabel(effect: TechEffect): string {
           <g
             v-for="n in laidOut"
             :key="n.id"
-            :class="['node', nodeClass(n.state)]"
+            :class="['node', nodeClass(n.state), { selected: n.id === selected?.id }]"
+            :data-testid="`tech-node-${n.id}`"
             @click="selected = n"
           >
             <rect
@@ -303,7 +305,8 @@ function effectLabel(effect: TechEffect): string {
       </svg>
     </div>
 
-    <aside v-if="selected" class="detail" data-testid="tech-detail">
+    <aside class="detail" data-testid="tech-detail">
+      <template v-if="selected">
       <h3>{{ selected.name }}</h3>
       <div class="badges">
         <span class="status" :class="nodeClass(selected.state)">
@@ -346,14 +349,25 @@ function effectLabel(effect: TechEffect): string {
       <div v-if="selected.state === 'locked'" class="hint">
         Complete prerequisites to unlock.
       </div>
+      </template>
+      <p v-else class="hint select-hint" data-testid="tech-detail-empty">
+        Click a tech node to see its details and research it.
+      </p>
     </aside>
+    </div>
 
     <p v-if="error" class="err">{{ error }}</p>
   </div>
 </template>
 
 <style scoped>
-.tech-view { display: flex; flex-direction: column; gap: 0.75rem; }
+.tech-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; }
+
+/* Graph + detail sit side by side and fill the remaining height, so
+   selecting a node shows its details + Research button without scrolling
+   past a tall graph (UI-rework: tech selection was effectively hidden below
+   the fold). */
+.tech-body { flex: 1; min-height: 0; display: flex; gap: 0.75rem; }
 .head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .head h2 { color: #8cf; }
 .legend { display: flex; gap: 0.5rem; margin-left: auto; }
@@ -409,6 +423,8 @@ function effectLabel(effect: TechEffect): string {
 .effects li::before { content: '▸ '; color: #575; }
 
 .graph-wrap {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: #05050b;
   border: 1px solid #223;
@@ -433,14 +449,20 @@ function effectLabel(effect: TechEffect): string {
 .node.state-locked rect { fill: #0d0d15; stroke: #223; opacity: 0.65; }
 .node.state-locked .node-title { fill: #557; }
 
+/* Selected node — a bright outline so a click is obviously registered. */
+.node.selected rect { stroke: #8cf; stroke-width: 2.5; }
+
 .detail {
+  flex: none;
+  width: 340px;
+  overflow-y: auto;
   background: #101018;
   border: 1px solid #334;
   border-radius: 6px;
   padding: 1rem;
   color: #aab;
-  max-width: 480px;
 }
+.select-hint { margin: 0; }
 .detail h3 { color: #8cf; margin-bottom: 0.25rem; }
 .status {
   display: inline-block;
