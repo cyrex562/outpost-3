@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
 import type { ConstructionQueueRow } from '@/types/screen'
-import type { BuildingOption } from '@/services/tauriBridge'
 
 function makeQueueRow(overrides: Partial<ConstructionQueueRow>): ConstructionQueueRow {
   return {
@@ -15,32 +14,10 @@ function makeQueueRow(overrides: Partial<ConstructionQueueRow>): ConstructionQue
   }
 }
 
-function makeBuildingOption(overrides: Partial<BuildingOption>): BuildingOption {
-  return {
-    id: 'smelter',
-    name: 'Smelter',
-    description: '',
-    category: 'Industry',
-    slot_cost: 2,
-    labor_per_turn: 3,
-    construction_turns: 5,
-    construction_cost: [],
-    tech_prerequisite: null,
-    ...overrides,
-  }
-}
-
-describe('ConstructionQueuePanel cancel (issue #169)', () => {
+describe('ConstructionQueuePanel (UI-rework PR5: in-progress list only)', () => {
   it('emits cancel with the project id when clicked', async () => {
     const wrapper = mount(ConstructionQueuePanel, {
-      props: {
-        queue: [makeQueueRow({ project_id: 'proj-42' })],
-        catalog: [],
-        disabledReason: () => null,
-        slotsAvailable: 3,
-        queueBusy: false,
-        cancelingIds: new Set<string>(),
-      },
+      props: { queue: [makeQueueRow({ project_id: 'proj-42' })], cancelingIds: new Set<string>() },
     })
     await wrapper.find('[data-testid="btn-cancel-proj-42"]').trigger('click')
     expect(wrapper.emitted('cancel')).toEqual([['proj-42']])
@@ -48,68 +25,33 @@ describe('ConstructionQueuePanel cancel (issue #169)', () => {
 
   it('disables and relabels the cancel button while a cancel is in flight', () => {
     const wrapper = mount(ConstructionQueuePanel, {
-      props: {
-        queue: [makeQueueRow({ project_id: 'proj-42' })],
-        catalog: [],
-        disabledReason: () => null,
-        slotsAvailable: 3,
-        queueBusy: false,
-        cancelingIds: new Set(['proj-42']),
-      },
+      props: { queue: [makeQueueRow({ project_id: 'proj-42' })], cancelingIds: new Set(['proj-42']) },
     })
     const btn = wrapper.find('[data-testid="btn-cancel-proj-42"]')
     expect(btn.attributes('disabled')).toBeDefined()
     expect(btn.text()).toBe('Cancelling…')
   })
 
-  it('shows a hint instead of a list when the queue is empty', () => {
+  it('shows a hint instead of a list when nothing is under construction', () => {
     const wrapper = mount(ConstructionQueuePanel, {
-      props: {
-        queue: [],
-        catalog: [],
-        disabledReason: () => null,
-        slotsAvailable: 3,
-        queueBusy: false,
-        cancelingIds: new Set<string>(),
-      },
+      props: { queue: [], cancelingIds: new Set<string>() },
     })
     expect(wrapper.find('[data-testid="construction-queue-list"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('No projects in queue.')
-  })
-})
-
-describe('ConstructionQueuePanel build catalog', () => {
-  it('emits queue with the building option when Queue is clicked', async () => {
-    const option = makeBuildingOption({ id: 'research_lab' })
-    const wrapper = mount(ConstructionQueuePanel, {
-      props: {
-        queue: null,
-        catalog: [option],
-        disabledReason: () => null,
-        slotsAvailable: 3,
-        queueBusy: false,
-        cancelingIds: new Set<string>(),
-      },
-    })
-    await wrapper.find('[data-testid="btn-queue-research_lab"]').trigger('click')
-    expect(wrapper.emitted('queue')).toEqual([[option]])
+    expect(wrapper.text()).toContain('Nothing under construction')
   })
 
-  it('disables the Queue button and shows the reason when disabledReason returns non-null', () => {
-    const option = makeBuildingOption({ id: 'research_lab' })
+  it('emits open-build when the Build button is clicked', async () => {
     const wrapper = mount(ConstructionQueuePanel, {
-      props: {
-        queue: null,
-        catalog: [option],
-        disabledReason: () => 'Requires: basic_metallurgy',
-        slotsAvailable: 3,
-        queueBusy: false,
-        cancelingIds: new Set<string>(),
-      },
+      props: { queue: [], cancelingIds: new Set<string>() },
     })
-    expect(wrapper.find('[data-testid="btn-queue-research_lab"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('[data-testid="build-card-reason-research_lab"]').text()).toBe(
-      'Requires: basic_metallurgy',
-    )
+    await wrapper.find('[data-testid="btn-open-build"]').trigger('click')
+    expect(wrapper.emitted('open-build')).toHaveLength(1)
+  })
+
+  it('no longer renders the build catalog inline (moved to BuildDialog)', () => {
+    const wrapper = mount(ConstructionQueuePanel, {
+      props: { queue: [], cancelingIds: new Set<string>() },
+    })
+    expect(wrapper.find('[data-testid="build-card-smelter"]').exists()).toBe(false)
   })
 })
