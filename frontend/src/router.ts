@@ -14,6 +14,7 @@ import OutpostView from './views/OutpostView.vue'
 import OutpostFacilityView from './views/OutpostFacilityView.vue'
 import PlanetView from './views/PlanetView.vue'
 import SurfaceView from './views/SurfaceView.vue'
+import ColoniesListView from './views/ColoniesListView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -23,6 +24,7 @@ const router = createRouter({
     { path: '/planet', component: PlanetView, name: 'planet' },
     { path: '/surface/:bodyId', component: SurfaceView, name: 'surface' },
     { path: '/new-game', component: NewGameView, name: 'new-game' },
+    { path: '/colonies', component: ColoniesListView, name: 'colonies' },
     { path: '/colony/:colonyId?', component: ColonyView, name: 'colony' },
     {
       path: '/colony/:colonyId/facility/:buildingType',

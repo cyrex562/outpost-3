@@ -88,4 +88,14 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   const after = await win.boundingBox()
   expect(after!.x).toBeGreaterThan(before!.x)
   expect(after!.y).toBeGreaterThan(before!.y)
+
+  // ── UI-rework PR7: the "Colonies" nav lists founded colonies; clicking a
+  // card opens that colony's dashboard.
+  await page.getByRole('link', { name: 'Colonies', exact: true }).click()
+  await expect(page).toHaveURL(/#\/colonies/)
+  const card = page.locator('[data-testid^="colony-card-"]').first()
+  await expect(card).toBeVisible()
+  await card.click()
+  await expect(page).toHaveURL(/#\/colony\//)
+  await expect(page.locator('[data-testid^="colony-detail-"]')).toBeVisible({ timeout: 15_000 })
 })
