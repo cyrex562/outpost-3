@@ -1,7 +1,11 @@
 <script setup lang="ts">
 /**
- * Colony population panel: headcount, growth trend sparkline, stability
- * bar, and available labour. Pure display — no commands originate here.
+ * Vital statistics panel (UI-rework PR4) — the colony's at-a-glance vitals in
+ * a panel of their own: headcount + growth-trend sparkline, stability bar,
+ * available labour, and build-slot usage. Pure display; no commands
+ * originate here. (Evolved from the former PopulationPanel, which this
+ * replaces, folding in the build-slot summary that used to live inside
+ * BuildingsPanel.)
  */
 
 const props = defineProps<{
@@ -10,6 +14,10 @@ const props = defineProps<{
   availableLabour: number
   /** Recent population samples, oldest first (indicative trend only). */
   populationTrend: number[]
+  /** Build slots currently reserved by buildings / in-flight projects. */
+  slotsUsed: number
+  /** Total build-slot capacity for the colony. */
+  slotCapacity: number
 }>()
 
 function stabilityClass(stability: number): string {
@@ -42,8 +50,8 @@ function sparklinePath(values: number[]): string {
 </script>
 
 <template>
-  <div class="panel" data-testid="population-panel">
-    <h4 class="panel-title">Population</h4>
+  <div class="panel" data-testid="vital-stats-panel">
+    <h4 class="panel-title">Vital Statistics</h4>
 
     <div class="stat-row" data-testid="population-section">
       <div class="stat-block">
@@ -97,6 +105,10 @@ function sparklinePath(values: number[]): string {
       <div class="stat-block">
         <span class="stat-label">Labour</span>
         <span class="stat-value" data-testid="labour-available">{{ props.availableLabour }}</span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-label">Build slots</span>
+        <span class="stat-value" data-testid="build-slots">{{ props.slotsUsed }} / {{ props.slotCapacity }}</span>
       </div>
     </div>
   </div>

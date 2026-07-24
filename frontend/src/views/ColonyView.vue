@@ -18,7 +18,7 @@ import type { SplitpanesResizedPayload } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
-import PopulationPanel from '@/components/PopulationPanel.vue'
+import VitalStatsPanel from '@/components/VitalStatsPanel.vue'
 import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
 import BuildingsPanel from '@/components/BuildingsPanel.vue'
 import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
@@ -231,37 +231,50 @@ function openBuildingDetails(buildingType: string): void {
 // ─── Panel layout persistence ───────────────────────────────────────────────────
 
 interface PersistedLayout {
-  /** [main-column %, alerts %] */
+  /** [left-column %, center-column %, alerts-column %] */
   outer: number[]
-  /** [population %, commodities %, buildings %, construction-queue %] */
+  /** left column vertical split: [vital-stats %, commodities %] */
   left: number[]
+  /** center column vertical split: [buildings %, construction-queue %] */
+  center: number[]
 }
 
-const STORAGE_KEY = 'outpost3.colony-view.layout'
-const DEFAULT_OUTER = [70, 30]
-const DEFAULT_LEFT = [22, 22, 28, 28]
+// Bumped to `.v2` because the split shape changed from 2+4 panes to the
+// 3-column (3 + 2 + 2) arrangement (UI-rework PR4); a stale v1 entry would
+// have the wrong number of sizes.
+const STORAGE_KEY = 'outpost3.colony-view.layout.v2'
+const DEFAULT_OUTER = [30, 45, 25]
+const DEFAULT_LEFT = [45, 55]
+const DEFAULT_CENTER = [45, 55]
 
 function loadPersistedLayout(): PersistedLayout {
+  const fallback = { outer: DEFAULT_OUTER, left: DEFAULT_LEFT, center: DEFAULT_CENTER }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { outer: DEFAULT_OUTER, left: DEFAULT_LEFT }
+    if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<PersistedLayout>
-    const outer = Array.isArray(p.outer) && p.outer.length === 2 ? p.outer : DEFAULT_OUTER
-    const left = Array.isArray(p.left) && p.left.length === 4 ? p.left : DEFAULT_LEFT
-    return { outer, left }
+    const outer = Array.isArray(p.outer) && p.outer.length === 3 ? p.outer : DEFAULT_OUTER
+    const left = Array.isArray(p.left) && p.left.length === 2 ? p.left : DEFAULT_LEFT
+    const center = Array.isArray(p.center) && p.center.length === 2 ? p.center : DEFAULT_CENTER
+    return { outer, left, center }
   } catch {
     // corrupt entry — fall back to defaults
-    return { outer: DEFAULT_OUTER, left: DEFAULT_LEFT }
+    return fallback
   }
 }
 
 const persistedLayout = loadPersistedLayout()
 const outerSizes = ref<number[]>(persistedLayout.outer)
 const leftSizes = ref<number[]>(persistedLayout.left)
+const centerSizes = ref<number[]>(persistedLayout.center)
 
 function savePersistedLayout(): void {
   try {
-    const payload: PersistedLayout = { outer: outerSizes.value, left: leftSizes.value }
+    const payload: PersistedLayout = {
+      outer: outerSizes.value,
+      left: leftSizes.value,
+      center: centerSizes.value,
+    }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // storage full or blocked — non-fatal
@@ -275,6 +288,11 @@ function onOuterResized(payload: SplitpanesResizedPayload): void {
 
 function onLeftResized(payload: SplitpanesResizedPayload): void {
   leftSizes.value = payload.panes.map((p) => p.size)
+  savePersistedLayout()
+}
+
+function onCenterResized(payload: SplitpanesResizedPayload): void {
+  centerSizes.value = payload.panes.map((p) => p.size)
   savePersistedLayout()
 }
 </script>
@@ -302,20 +320,29 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
 
       <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
         <Splitpanes class="default-theme colony-splitpanes" @resized="onOuterResized">
-          <Pane :size="outerSizes[0]" min-size="40">
+          <!-- Left column: vital statistics over the commodity stockpile. -->
+          <Pane :size="outerSizes[0]" min-size="15">
             <Splitpanes horizontal @resized="onLeftResized">
               <Pane :size="leftSizes[0]" min-size="10">
-                <PopulationPanel
+                <VitalStatsPanel
                   :population="selectedColony.population"
                   :stability="selectedColony.stability"
                   :available-labour="selectedColony.available_labour"
                   :population-trend="populationTrend"
+                  :slots-used="screen?.slots_used ?? 0"
+                  :slot-capacity="screen?.slot_capacity ?? 0"
                 />
               </Pane>
               <Pane :size="leftSizes[1]" min-size="10">
                 <CommoditiesPanel :stockpile="screen ? screen.stockpile : null" />
               </Pane>
-              <Pane :size="leftSizes[2]" min-size="10">
+            </Splitpanes>
+          </Pane>
+
+          <!-- Center column: the buildings list over the construction queue. -->
+          <Pane :size="outerSizes[1]" min-size="20">
+            <Splitpanes horizontal @resized="onCenterResized">
+              <Pane :size="centerSizes[0]" min-size="10">
                 <BuildingsPanel
                   :buildings="screen ? screen.buildings : null"
                   :slots-used="screen?.slots_used ?? 0"
@@ -326,7 +353,7 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
                   @view-details="openBuildingDetails"
                 />
               </Pane>
-              <Pane :size="leftSizes[3]" min-size="10">
+              <Pane :size="centerSizes[1]" min-size="10">
                 <ConstructionQueuePanel
                   :queue="screen ? screen.construction_queue : null"
                   :catalog="buildingCatalog"
@@ -340,7 +367,9 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
               </Pane>
             </Splitpanes>
           </Pane>
-          <Pane :size="outerSizes[1]" min-size="15">
+
+          <!-- Right column: alerts + event log. -->
+          <Pane :size="outerSizes[2]" min-size="12">
             <AlertsPanel
               :notifications="worldStore.notifications"
               :event-log="worldStore.eventLog"
@@ -354,7 +383,10 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
 </template>
 
 <style scoped>
-.colony-view { width: 100%; }
+/* Fill the shell's main region (UI-rework PR4): a flex column whose panel
+   area (`.panel-layout`) grows to take all remaining height, so the colony
+   dashboard fills the screen without a fixed viewport-height guess. */
+.colony-view { width: 100%; height: 100%; display: flex; flex-direction: column; }
 
 .empty-state { color: #666; font-style: italic; margin: 1rem 0; }
 
@@ -383,8 +415,8 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
 .btn-map:hover { background: #1a1a2a; border-color: #558; }
 
 .panel-layout {
-  height: 70vh;
-  min-height: 420px;
+  flex: 1;
+  min-height: 320px;
   border: 1px solid #223;
   border-radius: 4px;
   overflow: hidden;
