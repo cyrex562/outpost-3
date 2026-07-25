@@ -52,6 +52,10 @@ pub struct ColonyScreenData {
     /// is no gameplay consequence attached yet (see issue #305's open
     /// questions).
     pub labour_unemployed: f32,
+    /// Colony-local resources produced this sol — power, housing, research
+    /// (issue #304). Never appears in [`Self::stockpile`], which is tradeable
+    /// cargo only.
+    pub resources: Vec<ResourceRow>,
     /// All operational buildings with their current labour assignments.
     pub buildings: Vec<BuildingRow>,
     /// Stockpile rows — one per commodity that has ever had a non-zero amount.
@@ -113,6 +117,25 @@ pub struct StockpileRow {
     pub capacity: Option<f64>,
     /// Net change last turn (positive = production surplus, negative = deficit).
     pub net_per_turn: f64,
+}
+
+/// A single colony-local resource row (issue #304).
+///
+/// Distinct from [`StockpileRow`] because these aren't stock: there is no
+/// capacity and no cross-turn delta, since the amount is this sol's throughput
+/// (or standing capacity) and is cleared before the next sol's production.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceRow {
+    /// Resource identifier (content-pack key).
+    pub resource_id: String,
+    /// Display name from the content pack.
+    pub name: String,
+    /// Amount produced/available this sol.
+    pub amount: f64,
+    /// `"flow"` (surplus is lost) or `"capacity"` (standing, re-established).
+    pub kind: String,
+    /// Unit label for display (`"MW"`, `"slots"`, `"RP"`).
+    pub unit: String,
 }
 
 /// A single in-progress construction project row.
@@ -485,6 +508,13 @@ mod tests {
                 scale: 1.0,
                 shortfall_reason: None,
                 always_on: false,
+            }],
+            resources: vec![ResourceRow {
+                resource_id: "power".into(),
+                name: "Power".into(),
+                amount: 24.0,
+                kind: "flow".into(),
+                unit: "MW".into(),
             }],
             stockpile: vec![StockpileRow {
                 commodity_id: "food".to_string(),

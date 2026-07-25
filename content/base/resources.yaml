@@ -1,0 +1,56 @@
+# Colony-local resources (issue #304).
+#
+# These are NOT commodities. A commodity is cargo: it has weight, a trade value,
+# and can be loaded onto a hauler and shipped between colonies. The entries here
+# are produced and consumed in place, and the engine makes that structural — they
+# live in `Colony.resources` (ColonyResourcePool), and the trade pipeline is only
+# ever handed `Colony.pool`, so there is no code path that could ship them.
+#
+# Nothing here carries across sols: `ColonyResourcePool::clear()` runs at the end
+# of every colony sol. So an amount shown against one of these is *this sol's*
+# throughput or standing capacity, never an accumulated bank. That is a
+# deliberate behaviour change — as ordinary commodities, `power` and `housing`
+# both accumulated without bound (power netted a surplus every sol and banked it
+# forever; housing is a capacity check that consumes nothing, so every sol added
+# another habitat's worth of slots permanently).
+#
+# `kind` distinguishes what the number means:
+#   flow     — throughput this sol; surplus is lost.
+#   capacity — a standing capability measured against demand, re-established
+#              each sol by the buildings that provide it.
+
+- id: power
+  name: Power
+  description: >
+    Electricity routed to habitat life-support systems, drawn per capita each
+    sol. Distinct from a building's `power_delta`, which feeds the industrial
+    grid ratio in colony/production.rs — that is an instantaneous supply/demand
+    check, this is the population's household draw.
+
+    Colony-local: power does not cross colony boundaries. Transmission over the
+    existing road/rail/pipeline infrastructure edges is plausible future work
+    (see the follow-up issue), which is why this is authored as data rather
+    than hard-coded.
+  kind: flow
+  unit: MW
+
+- id: housing
+  name: Housing Capacity
+  description: >
+    Livable space. Not consumed — the colony needs to hold at least one unit
+    per colonist, so this is a capacity check rather than a draw (see
+    needs.rs's `NeedScaling::Housing`). Habitats re-establish their full
+    capacity every sol.
+  kind: capacity
+  unit: slots
+
+- id: research
+  name: Research
+  description: >
+    Scientific output. Produced by labs and by colony_hq's administrative
+    trickle (issue #310), then drained into the system-wide research pool at
+    the end of each sol and spent on technologies. Never stockpiled at the
+    colony, which is why it is a flow rather than a commodity with a
+    warehouse.
+  kind: flow
+  unit: RP

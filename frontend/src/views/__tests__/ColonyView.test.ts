@@ -131,6 +131,9 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
       labour_demanded: 4,
       labour_employed: 4,
       labour_unemployed: 1,
+      resources: [
+        { resource_id: 'power', name: 'Power', amount: 24, kind: 'flow', unit: 'MW' },
+      ],
       buildings: [
         {
           building_type: 'colony_hq',

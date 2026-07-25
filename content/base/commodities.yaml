@@ -266,19 +266,6 @@
   base_value: 20.0
   tradeable: true
 
-- id: research
-  name: Research
-  description: >
-    Abstract unit of scientific output produced by research labs.
-    Pooled system-wide and spent to unlock technologies.
-    No weight, no storage cap — a virtual flow commodity.
-  category: virtual
-  phase: solid
-  base_value: 0.0
-  tradeable: false
-  tier: advanced
-  weight: 0.0
-
 - id: oxygen
   name: Oxygen
   description: >
@@ -289,29 +276,6 @@
   base_value: 6.0
   tradeable: false
   weight: 0.2
-
-- id: housing
-  name: Housing Capacity
-  description: >
-    Abstract unit of livable space. Not consumed — the colony pool just
-    needs to hold at least one unit per colonist (issue #166).
-  category: virtual
-  phase: solid
-  base_value: 0.0
-  tradeable: false
-  weight: 0.0
-
-- id: power
-  name: Power
-  description: >
-    Electricity routed to habitat life-support systems. Distinct from a
-    building's power_delta (which feeds the industrial grid ratio) — this
-    is the population's per-capita household draw (issue #166).
-  category: energy
-  phase: solid
-  base_value: 0.0
-  tradeable: false
-  weight: 0.0
 
 - id: components
   name: Components

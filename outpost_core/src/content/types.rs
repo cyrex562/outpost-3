@@ -74,6 +74,48 @@ fn default_weight() -> f64 {
     1.0
 }
 
+/// How a [`ResourceDef`] behaves over time.
+///
+/// Both kinds are cleared at the end of every colony sol — a colony resource
+/// never carries over. The distinction is what the number *means* to a reader:
+/// a `Flow` is throughput that turn, a `Capacity` is a standing capability the
+/// colony's buildings re-establish each turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceKind {
+    /// Produced and consumed within a single sol; any surplus is lost.
+    #[default]
+    Flow,
+    /// A standing capability measured against demand rather than drawn down
+    /// (housing slots vs population). Re-established each sol by its buildings.
+    Capacity,
+}
+
+/// A colony-local resource authored in a content pack (issue #304).
+///
+/// Distinct from [`CommodityDef`] because these are **not tradeable**: they are
+/// produced and consumed in place and never enter a hauler, a trade route, or
+/// the market. That separation is structural — resources live in
+/// [`crate::colony::ColonyResourcePool`], and the trade pipeline is only ever
+/// handed the commodity pool, so there is no flag for a caller to forget to
+/// check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceDef {
+    /// Unique identifier, in the same namespace as commodity ids.
+    pub id: String,
+    /// Human-readable name.
+    pub name: String,
+    /// Short description shown to players.
+    #[serde(default)]
+    pub description: String,
+    /// Whether this is per-sol throughput or a standing capacity.
+    #[serde(default)]
+    pub kind: ResourceKind,
+    /// Unit label for display (e.g. `"MW"`, `"slots"`, `"RP"`).
+    #[serde(default)]
+    pub unit: String,
+}
+
 impl Phase {
     fn solid_default() -> Self {
         Phase::Solid

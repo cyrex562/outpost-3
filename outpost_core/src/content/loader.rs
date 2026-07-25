@@ -9,8 +9,8 @@ use super::{
     error::ContentError,
     registry::ContentRegistry,
     types::{
-        BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef, StarSystemDef,
-        SupplyPackage,
+        BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef, ResourceDef,
+        StarSystemDef, SupplyPackage,
     },
 };
 use crate::expedition::AnomalyDef;
@@ -46,8 +46,11 @@ impl PackLoader {
             .ok_or(ContentError::MissingManifest)?;
 
         // ── 2. Parse typed tables ─────────────────────────────────────────
-        let commodities =
-            collect_table::<CommodityDef>(files, &["commodities.yaml", "resources.yaml"])?;
+        let commodities = collect_table::<CommodityDef>(files, &["commodities.yaml"])?;
+        // Colony-local resources (issue #304) are a separate table, not more
+        // commodities. `resources.yaml` used to be an alias for another
+        // commodities file; it now has its own type.
+        let resources = collect_table::<ResourceDef>(files, &["resources.yaml"])?;
         let recipes = collect_table::<RecipeDef>(files, &["recipes.yaml"])?;
         let buildings = collect_table::<BuildingDef>(files, &["buildings.yaml"])?;
         let default_directives =
@@ -57,13 +60,34 @@ impl PackLoader {
         let anomalies = collect_table::<AnomalyDef>(files, &["anomalies.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
+        // An id must be declared exactly once, as either a commodity or a
+        // colony resource. Declaring it as both would make pool dispatch
+        // ambiguous, so that's a load error rather than a silent precedence
+        // rule (issue #304).
+        for id in commodities.keys() {
+            if resources.contains_key(id) {
+                return Err(ContentError::DuplicateId {
+                    file: "resources.yaml".to_string(),
+                    id: id.clone(),
+                    prior_file: "commodities.yaml".to_string(),
+                });
+            }
+        }
+
         let commodity_ids: std::collections::HashSet<&str> =
             commodities.values().map(|c| c.id.as_str()).collect();
+        // Recipes may name either kind: a power plant outputs the `power`
+        // resource, a smelter outputs a commodity.
+        let producible_ids: std::collections::HashSet<&str> = commodity_ids
+            .iter()
+            .copied()
+            .chain(resources.values().map(|r| r.id.as_str()))
+            .collect();
 
         for recipe in recipes.values() {
             let all_refs = recipe.inputs.iter().chain(recipe.outputs.iter());
             for ing in all_refs {
-                if !commodity_ids.contains(ing.id.as_str()) {
+                if !producible_ids.contains(ing.id.as_str()) {
                     return Err(ContentError::UnknownCommodityRef {
                         file: "recipes.yaml".to_string(),
                         id: recipe.id.clone(),
@@ -73,6 +97,9 @@ impl PackLoader {
             }
         }
 
+        // Supply packages are physically shipped to a new colony, so unlike
+        // recipes they may only name tradeable commodities — you can't load
+        // `power` onto a lander.
         for pkg in supply_packages.values() {
             for ing in &pkg.commodities {
                 if !commodity_ids.contains(ing.id.as_str()) {
@@ -117,6 +144,7 @@ impl PackLoader {
         Ok(ContentRegistry {
             manifest,
             commodities,
+            resources,
             recipes,
             buildings,
             orbital_blueprints: std::collections::HashMap::new(),
@@ -187,6 +215,12 @@ pub(super) trait HasId {
 }
 
 impl HasId for CommodityDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl HasId for ResourceDef {
     fn id(&self) -> &str {
         &self.id
     }

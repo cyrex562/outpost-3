@@ -33,7 +33,7 @@
 use crate::content::types::Ingredient;
 use crate::content::{BuildingCategory, ContentRegistry, RecipeDef};
 
-use super::pool::ColonyPool;
+use super::stores::ColonyStores;
 
 // ─── Power Grid ──────────────────────────────────────────────────────────────
 
@@ -227,18 +227,18 @@ fn tech_bonus_category_key(category: crate::system::YieldCategory) -> &'static s
 ///
 /// # Arguments
 ///
-/// * `pool`            — mutable colony stockpile (modified in-place)
+/// * `stores`          — mutable colony stores, commodity + resource (modified in-place)
 /// * `buildings`       — slice of `(building_type, slot_cost)` pairs for placed buildings
 /// * `labor_available` — labour units available this turn (from `PopulationPool::available_labor`)
 /// * `registry`        — content registry for looking up `BuildingDef` and `RecipeDef`
 pub fn process_production(
-    pool: &mut ColonyPool,
+    stores: &mut ColonyStores<'_>,
     buildings: &[(String, u32)],
     labor_available: f32,
     registry: &ContentRegistry,
 ) -> ProductionStepOutcome {
     process_production_scaled(
-        pool,
+        stores,
         buildings,
         labor_available,
         registry,
@@ -305,7 +305,7 @@ pub fn process_production(
     clippy::too_many_lines
 )]
 pub fn process_production_scaled(
-    pool: &mut ColonyPool,
+    stores: &mut ColonyStores<'_>,
     buildings: &[(String, u32)],
     labor_available: f32,
     registry: &ContentRegistry,
@@ -337,7 +337,7 @@ pub fn process_production_scaled(
     // Pass A: compute scales based on the *start-of-turn* pool state so that
     //         mines and other producers don't inflate inputs for downstream
     //         buildings in the same turn.
-    // Pass B: apply all scaled changes to the pool.
+    // Pass B: apply all scaled changes to the stores.
     //
     // This avoids order-dependency and matches the C# "snapshot then apply"
     // behaviour described in the behavioural spec.
@@ -368,7 +368,7 @@ pub fn process_production_scaled(
         // concurrent recipe's inputs + maintenance) — see this module's doc
         // comment on why a multi-function building shares one scale.
         let (input_ratio, tight_commodity, tight_is_maintenance) = compute_effective_input_ratio(
-            pool,
+            stores,
             recipe,
             &concurrent_recipes,
             if has_maintenance {
@@ -473,7 +473,7 @@ pub fn process_production_scaled(
                 .chain(p.concurrent_recipes.iter().copied());
             for recipe in running_recipes {
                 for ingredient in &recipe.inputs {
-                    pool.withdraw(&ingredient.id, ingredient.quantity * p.scale);
+                    stores.withdraw(&ingredient.id, ingredient.quantity * p.scale);
                 }
                 for ingredient in &recipe.outputs {
                     let commodity_category = registry
@@ -492,7 +492,7 @@ pub fn process_production_scaled(
                         modifier_accumulator,
                         difficulty_scalar,
                     ));
-                    pool.deposit(
+                    stores.deposit(
                         &ingredient.id,
                         ingredient.quantity
                             * p.scale
@@ -503,7 +503,7 @@ pub fn process_production_scaled(
                 }
             }
             for ingredient in p.maintenance {
-                pool.withdraw(
+                stores.withdraw(
                     &ingredient.id,
                     ingredient.quantity * p.maintenance_multiplier * p.scale,
                 );
@@ -638,7 +638,7 @@ fn compute_deposit_ratio(
 /// exclusively in the maintenance list — this drives the `MaintenanceShort`
 /// vs. `InputShort` attribution.
 fn compute_effective_input_ratio(
-    pool: &ColonyPool,
+    stores: &ColonyStores<'_>,
     recipe: Option<&RecipeDef>,
     concurrent: &[&RecipeDef],
     maintenance: &[Ingredient],
@@ -682,7 +682,7 @@ fn compute_effective_input_ratio(
     let mut tight_is_maintenance = false;
 
     for (id, qty, has_recipe_demand) in &demands {
-        let available = pool.amount(id);
+        let available = stores.amount(id);
         let r = (available / *qty).min(1.0);
         if r < ratio {
             ratio = r;
@@ -799,8 +799,71 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::colony::{ColonyPool, ColonyResourcePool};
     use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
     use crate::content::ContentRegistry;
+
+    // ── Bare-pool test shims (issue #304) ────────────────────────────────────
+    //
+    // These deliberately **shadow** the module's `process_production` /
+    // `process_production_scaled`, which now take a `ColonyStores` view over a
+    // colony's commodity pool *and* its resource pool.
+    //
+    // Every test below exercises a commodity chain against a registry it builds
+    // itself, and none of those registries declare a colony resource — so a
+    // throwaway resource pool is provably equivalent to the real stores for
+    // them, and keeping the old call shape avoids rewriting ~35 assertions that
+    // have nothing to do with this change. Tests that *do* care about resource
+    // routing call `super::process_production_scaled` explicitly.
+
+    fn process_production(
+        pool: &mut ColonyPool,
+        buildings: &[(String, u32)],
+        labor_available: f32,
+        registry: &ContentRegistry,
+    ) -> ProductionStepOutcome {
+        let mut resources = ColonyResourcePool::new();
+        super::process_production(
+            &mut ColonyStores::new(pool, &mut resources, registry),
+            buildings,
+            labor_available,
+            registry,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_production_scaled(
+        pool: &mut ColonyPool,
+        buildings: &[(String, u32)],
+        labor_available: f32,
+        registry: &ContentRegistry,
+        power_scalar: f32,
+        maintenance_scalar: f32,
+        maintenance_enabled: bool,
+        productivity_multiplier: f32,
+        active_recipes: &std::collections::HashMap<String, String>,
+        category_modifiers: &[crate::system::BodyModifier],
+        deposit_richness: Option<&std::collections::HashMap<String, f32>>,
+        modifier_accumulator: &crate::modifier::ModifierAccumulator,
+        difficulty_scalar: &crate::modifier::DifficultyScalar,
+    ) -> ProductionStepOutcome {
+        let mut resources = ColonyResourcePool::new();
+        super::process_production_scaled(
+            &mut ColonyStores::new(pool, &mut resources, registry),
+            buildings,
+            labor_available,
+            registry,
+            power_scalar,
+            maintenance_scalar,
+            maintenance_enabled,
+            productivity_multiplier,
+            active_recipes,
+            category_modifiers,
+            deposit_richness,
+            modifier_accumulator,
+            difficulty_scalar,
+        )
+    }
 
     // ── Registry builders ────────────────────────────────────────────────────
 

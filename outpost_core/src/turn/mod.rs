@@ -563,11 +563,38 @@ impl TurnProcessor {
         }
 
         // ── Auto trade flow ───────────────────────────────────────────────
-        // Collect all commodity ids currently present in any colony pool.
+        // Collect the shippable ids present in any colony pool.
+        //
+        // Colony-local resources can't appear here at all: they live in
+        // `Colony.resources`, and only `Colony.pool` is iterated (issue #304).
+        // That is the structural half of the guarantee — there is no flag for a
+        // future caller to forget.
+        //
+        // The `tradeable` filter is the other half, for commodities that are
+        // real cargo in every other respect but authored as non-shippable
+        // (`oxygen` today). Before this, `CommodityDef::tradeable` was authored
+        // on all 45 commodities and read by absolutely nothing, so every one of
+        // them flowed over trade routes regardless.
         let mut commodity_set = std::collections::HashSet::new();
         for colony in &state.colonies {
             for id in colony.pool.commodity_ids() {
-                commodity_set.insert(id.to_owned());
+                // Must be a *declared, tradeable* commodity. An id the pack
+                // doesn't declare as a commodity is either a resource that
+                // leaked into this pool or a stale entry from a pre-#304 save;
+                // shipping either would be wrong, so unknown means "don't
+                // trade" rather than "assume it's fine".
+                //
+                // With no registry loaded there is nothing to validate against
+                // and no content-driven trade to run, so everything present is
+                // allowed — that's the bare-`GameState` path the older turn
+                // tests exercise.
+                let shippable = state
+                    .registry
+                    .as_ref()
+                    .is_none_or(|reg| reg.commodity(id).is_some_and(|def| def.tradeable));
+                if shippable {
+                    commodity_set.insert(id.to_owned());
+                }
             }
         }
         if !commodity_set.is_empty() && !state.trade_network.routes.is_empty() {
@@ -1132,6 +1159,147 @@ mod tests {
         assert!(
             outcome.hazard_outcomes.is_empty(),
             "hazard rolling should be skipped when config is None"
+        );
+    }
+    // ── Trade excludes non-shippable things (issue #304) ─────────────────────
+
+    /// The auto trade pass must move tradeable commodities and nothing else.
+    ///
+    /// Two guarantees are checked at once, because they are enforced by
+    /// different mechanisms:
+    ///
+    /// 1. **Colony resources are excluded structurally.** `power` lives in
+    ///    `Colony.resources`, and the trade pass only iterates `Colony.pool`,
+    ///    so no flag has to be checked — there is no code path.
+    /// 2. **Non-tradeable commodities are excluded by their `tradeable` flag.**
+    ///    `oxygen` is real cargo in every other respect but authored
+    ///    unshippable. Before #304, `CommodityDef::tradeable` was authored on
+    ///    every commodity and read by nothing, so it moved anyway.
+    #[test]
+    fn auto_trade_moves_tradeable_commodities_only() {
+        use crate::content::types::{CommodityDef, Phase, ResourceDef, ResourceKind};
+        use crate::content::{CommodityTier, ContentRegistry};
+        use crate::trade::TradeRoute;
+
+        fn commodity(id: &str, tradeable: bool) -> CommodityDef {
+            CommodityDef {
+                id: id.into(),
+                name: id.into(),
+                description: String::new(),
+                category: "consumable".into(),
+                phase: Phase::Solid,
+                base_value: 1.0,
+                tradeable,
+                tier: CommodityTier::default(),
+                weight: 1.0,
+            }
+        }
+
+        let mut registry = ContentRegistry::default();
+        registry.insert_commodity(commodity("water", true));
+        registry.insert_commodity(commodity("oxygen", false));
+        registry.insert_resource(ResourceDef {
+            id: "power".into(),
+            name: "Power".into(),
+            description: String::new(),
+            kind: ResourceKind::Flow,
+            unit: "MW".into(),
+        });
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Rich"), 100);
+        state.add_colony(Colony::new("Poor"), 100);
+        state.registry = Some(registry);
+
+        // Rich has a surplus of all three; Poor has none.
+        state.colonies[0].pool.deposit("water", 100.0);
+        state.colonies[0].pool.deposit("oxygen", 100.0);
+        state.colonies[0].resources.deposit("power", 100.0);
+
+        let (rich, poor) = (state.colonies[0].id, state.colonies[1].id);
+        state
+            .trade_network
+            .add_route(TradeRoute::new(rich, poor, 50.0));
+
+        // Run enough sols to trigger at least one strategic month (trade runs
+        // on the strategic pass, not every sol).
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        assert!(
+            state.colonies[1].pool.amount("water") > 0.0,
+            "water is tradeable and should have flowed to the deficit colony"
+        );
+        assert_eq!(
+            state.colonies[1].pool.amount("oxygen"),
+            0.0,
+            "oxygen is authored tradeable: false and must not flow"
+        );
+        assert_eq!(
+            state.colonies[1].resources.amount("power"),
+            0.0,
+            "power is a colony resource and is not reachable from trade at all"
+        );
+        assert_eq!(
+            state.colonies[1].pool.amount("power"),
+            0.0,
+            "power must not appear in the receiving colony's commodity pool either"
+        );
+    }
+    /// A save written before issue #304 has `power` sitting in the *commodity*
+    /// pool, because that is where it used to live. Production never tops it up
+    /// again, but the entry is still there — and it must not become shippable
+    /// cargo just because the pack no longer declares `power` as a commodity.
+    #[test]
+    fn a_stale_pre_resource_pool_entry_is_not_tradeable() {
+        use crate::content::types::{CommodityDef, Phase, ResourceDef, ResourceKind};
+        use crate::content::{CommodityTier, ContentRegistry};
+        use crate::trade::TradeRoute;
+
+        let mut registry = ContentRegistry::default();
+        registry.insert_commodity(CommodityDef {
+            id: "water".into(),
+            name: "Water".into(),
+            description: String::new(),
+            category: "consumable".into(),
+            phase: Phase::Liquid,
+            base_value: 5.0,
+            tradeable: true,
+            tier: CommodityTier::default(),
+            weight: 1.0,
+        });
+        registry.insert_resource(ResourceDef {
+            id: "power".into(),
+            name: "Power".into(),
+            description: String::new(),
+            kind: ResourceKind::Flow,
+            unit: "MW".into(),
+        });
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Legacy"), 100);
+        state.add_colony(Colony::new("Neighbour"), 100);
+        state.registry = Some(registry);
+
+        // Simulate the loaded save: power in the commodity pool, not resources.
+        state.colonies[0].pool.deposit("power", 500.0);
+        state.colonies[0].pool.deposit("water", 100.0);
+
+        let (a, b) = (state.colonies[0].id, state.colonies[1].id);
+        state.trade_network.add_route(TradeRoute::new(a, b, 50.0));
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        assert!(
+            state.colonies[1].pool.amount("water") > 0.0,
+            "the tradeable commodity should still flow"
+        );
+        assert_eq!(
+            state.colonies[1].pool.amount("power"),
+            0.0,
+            "a stale commodity-pool `power` entry must not be shipped — `power` \
+             is a colony resource now, so it is not a declared commodity"
         );
     }
 }

@@ -77,8 +77,14 @@ pub struct Outpost {
     pub parent_colony_id: ColonyId,
     /// The system body this outpost is anchored to.
     pub body_id: BodyId,
-    /// Pooled commodity stockpile.
+    /// Pooled **tradeable** commodity stockpile.
     pub pool: ColonyPool,
+    /// Colony-local resources produced and consumed in place this sol
+    /// (issue #304). Reset every sol, like a colony's — an outpost runs the
+    /// same production pipeline, so it needs the same resource store for its
+    /// buildings' `power`/`research` outputs to land in.
+    #[serde(default)]
+    pub resources: crate::colony::ColonyResourcePool,
     /// Completed buildings that are operational.
     pub buildings: Vec<PlacedBuilding>,
     /// In-progress construction queue (reuses the colony queue type
@@ -106,6 +112,7 @@ impl Outpost {
             parent_colony_id,
             body_id,
             pool: ColonyPool::new(),
+            resources: crate::colony::ColonyResourcePool::new(),
             buildings: Vec::new(),
             build_queue: ConstructionQueue::new(),
             slot_capacity: OUTPOST_BASE_SLOT_CAPACITY,

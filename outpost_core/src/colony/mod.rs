@@ -13,6 +13,8 @@
 pub mod building;
 pub mod pool;
 pub mod production;
+pub mod resource_pool;
+pub mod stores;
 
 pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
@@ -20,6 +22,8 @@ pub use production::{
     process_production, process_production_scaled, BuildingProductionResult, PowerGrid,
     ProductionShortfall, ProductionStepOutcome, ShortfallReason,
 };
+pub use resource_pool::ColonyResourcePool;
+pub use stores::ColonyStores;
 
 /// Unique identifier for a colony.
 pub type ColonyId = uuid::Uuid;
@@ -34,8 +38,21 @@ pub struct Colony {
     pub id: ColonyId,
     /// Human-readable colony name.
     pub name: String,
-    /// Pooled commodity stockpile for this colony.
+    /// Pooled **tradeable** commodity stockpile for this colony.
+    ///
+    /// Colony-local resources (power, housing, research) live in
+    /// [`Self::resources`] instead — see issue #304. Trade, haulers, and supply
+    /// packages only ever see this pool, which is what makes resources
+    /// structurally unshippable.
     pub pool: ColonyPool,
+    /// Colony-local resources produced and consumed in place this sol.
+    ///
+    /// Reset at the end of every colony sol, so it always reports current
+    /// throughput rather than an accumulated total. `#[serde(default)]` so
+    /// pre-#304 saves load: the field starts empty and is repopulated by the
+    /// next production pass.
+    #[serde(default)]
+    pub resources: ColonyResourcePool,
     /// Completed buildings that are operational.
     pub buildings: Vec<PlacedBuilding>,
     /// In-progress construction queue.
@@ -115,6 +132,7 @@ impl Colony {
             id: uuid::Uuid::new_v4(),
             name: name.into(),
             pool: ColonyPool::new(),
+            resources: ColonyResourcePool::new(),
             buildings: Vec::new(),
             build_queue: ConstructionQueue::new(),
             slot_capacity: BASE_SLOT_CAPACITY,
