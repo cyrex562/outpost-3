@@ -6,11 +6,24 @@
 //!
 //! Goods flow automatically once a [`TradeRoute`] exists between two colonies.
 //! Each strategic turn [`run_trade_flow`] is called with the full
-//! [`TradeNetwork`] and all colony commodity pools.  It computes each colony's
-//! *surplus* (pool amount above the configured target) for every commodity and
-//! ships it toward colonies in *deficit* (below their target) over every
-//! connected route, subject to the route's `throughput_cap` per commodity per
-//! turn.
+//! [`TradeNetwork`], all colony commodity pools, and a per-colony **need
+//! reserve**. It computes each colony's *surplus* — the amount held **above**
+//! its reserve — for every commodity and ships it toward colonies whose own
+//! surplus is lower, over every connected route, subject to the route's
+//! `throughput_cap` per commodity per turn.
+//!
+//! # Only surpluses are tradeable
+//!
+//! Several commodities are also survival consumables: `water`, `oxygen`,
+//! `food_ration`. They are genuine cargo — shipping water to a dry colony is
+//! the logistics problem the network exists for — but a colony must never
+//! export the stock its own population is about to consume. The reserve is what
+//! enforces that: everything at or below it is invisible to trade, so a colony
+//! can be a net exporter of water and still never starve itself.
+//!
+//! This is distinct from colony *resources* (`power`, `housing`, `research`),
+//! which are not tradeable in any quantity and don't live in a `ColonyPool` at
+//! all — see `colony::resource_pool` (issue #304).
 //!
 //! A [`TradeOverride`] attached to a colony can suppress auto-flow for a
 //! specific commodity (by setting `suppress_auto = true`) or clamp the flow
@@ -239,16 +252,31 @@ pub trait TradePool {
 ///
 /// The `colonies` slice must be ordered so that `colony_index(id)` returns the
 /// correct index into `pools`.
-pub fn run_trade_flow<P: TradePool>(
+pub fn run_trade_flow<P: TradePool, S: std::hash::BuildHasher>(
     network: &TradeNetwork,
     colony_ids: &[ColonyId],
     pools: &mut [P],
     commodities: &[String],
+    reserves: &[HashMap<String, f64, S>],
 ) -> TradeFlowResult {
     let mut result = TradeFlowResult::default();
 
     // Helper: find index of a colony in the slice.
     let find = |id: ColonyId| colony_ids.iter().position(|&c| c == id);
+
+    // Stock this colony must keep for its own consumption; everything above it
+    // is the tradeable surplus. A colony with no entry reserves nothing, which
+    // is correct for commodities no need consumes (ores, components).
+    let reserve = |idx: usize, commodity: &str| -> f64 {
+        reserves
+            .get(idx)
+            .and_then(|r| r.get(commodity))
+            .copied()
+            .unwrap_or(0.0)
+    };
+    let surplus_of = |pools: &[P], idx: usize, commodity: &str| -> f64 {
+        (pools[idx].amount(commodity) - reserve(idx, commodity)).max(0.0)
+    };
 
     for route in &network.routes {
         if route.throughput_cap <= 0.0 {
@@ -272,33 +300,39 @@ pub fn run_trade_flow<P: TradePool>(
                 continue;
             }
 
-            let amount_a = pools[idx_a].amount(commodity);
-            let amount_b = pools[idx_b].amount(commodity);
+            // Compare *surpluses*, not raw stock. A colony sitting on exactly
+            // its own need reserve has nothing to offer even if a neighbour has
+            // none at all, and a colony below its reserve looks maximally
+            // needy — which is what should pull imports in.
+            let surplus_a = surplus_of(pools, idx_a, commodity);
+            let surplus_b = surplus_of(pools, idx_b, commodity);
 
             // Only flow if there is a meaningful imbalance.
-            if (amount_a - amount_b).abs() < f64::EPSILON {
+            if (surplus_a - surplus_b).abs() < f64::EPSILON {
                 continue;
             }
 
-            // Determine direction: flow from whichever side has more.
-            let (from_idx, to_idx, from_id, to_id) = if amount_a > amount_b {
+            // Determine direction: flow from whichever side has more to spare.
+            let (from_idx, to_idx, from_id, to_id) = if surplus_a > surplus_b {
                 (idx_a, idx_b, route.colony_a, route.colony_b)
             } else {
                 (idx_b, idx_a, route.colony_b, route.colony_a)
             };
 
-            let surplus = pools[from_idx].amount(commodity);
-            let deficit_gap = (pools[to_idx].amount(commodity) - surplus).abs();
+            let surplus = surplus_of(pools, from_idx, commodity);
+            let to_surplus = surplus_of(pools, to_idx, commodity);
+            let deficit_gap = (to_surplus - surplus).abs();
 
             // How much can we actually move?
-            // Capped by: route throughput, available surplus, and any override cap.
+            // Capped by: route throughput, exportable surplus (never the
+            // reserve), and any override cap.
             let mut cap = route
                 .throughput_cap
                 .min(surplus)
                 .min(deficit_gap / 2.0 + surplus / 2.0);
 
-            // If both values are positive, transfer half the difference to equalise.
-            let transfer_ideal = (surplus - pools[to_idx].amount(commodity)) / 2.0;
+            // Equalise the two surpluses, not the two stock levels.
+            let transfer_ideal = (surplus - to_surplus) / 2.0;
             cap = cap.min(transfer_ideal);
 
             // Apply the most restrictive per-colony cap from either side.
@@ -336,6 +370,24 @@ pub fn run_trade_flow<P: TradePool>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run the flow pass with no need reserve — every colony is free to export
+    /// everything it holds.
+    ///
+    /// Shadows [`run_trade_flow`] so the pre-reserve tests below keep reading as
+    /// they did: they cover route capacity, direction, and override handling,
+    /// none of which the reserve changes. Reserve behaviour has its own tests at
+    /// the end of this module.
+    fn run_trade_flow<P: TradePool>(
+        network: &TradeNetwork,
+        colony_ids: &[ColonyId],
+        pools: &mut [P],
+        commodities: &[String],
+    ) -> TradeFlowResult {
+        // Empty slice needs a concrete hasher for `S` to be inferable.
+        let no_reserves: [HashMap<String, f64>; 0] = [];
+        super::run_trade_flow(network, colony_ids, pools, commodities, &no_reserves)
+    }
 
     // Minimal stub pool for tests.
     #[derive(Default, Clone)]
@@ -542,6 +594,145 @@ mod tests {
         assert!(
             result.transfers.is_empty(),
             "no transfer after route removal"
+        );
+    }
+    // ── Need reserve: only surpluses are tradeable ────────────────────────────
+
+    fn reserve(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect()
+    }
+
+    /// A colony must not export the water its own colonists are about to drink.
+    ///
+    /// Before the reserve existed, the flow pass equalised raw stock: a colony
+    /// holding exactly enough water for its population would ship half of it to
+    /// a neighbour with none, and starve itself.
+    #[test]
+    fn stock_at_or_below_the_reserve_is_never_exported() {
+        let a = colony_id();
+        let b = colony_id();
+        let mut net = TradeNetwork::new();
+        net.add_route(TradeRoute::new(a, b, 100.0));
+
+        let mut pa = StubPool::default();
+        pa.deposit("water", 150.0);
+        let pb = StubPool::default();
+        let mut pools = vec![pa, pb];
+
+        // Colony A needs all 150 for itself; B has no population, no reserve.
+        let reserves = vec![reserve(&[("water", 150.0)]), HashMap::new()];
+
+        let result =
+            super::run_trade_flow(&net, &[a, b], &mut pools, &["water".to_string()], &reserves);
+
+        assert!(
+            result.transfers.is_empty(),
+            "nothing should move: A's entire stock is its own reserve, got {:?}",
+            result.transfers
+        );
+        assert!((pools[0].amount("water") - 150.0).abs() < f64::EPSILON);
+        assert_eq!(pools[1].amount("water"), 0.0);
+    }
+
+    /// The surplus above the reserve *is* tradeable — this is cargo, after all.
+    #[test]
+    fn only_the_amount_above_the_reserve_is_offered_to_trade() {
+        let a = colony_id();
+        let b = colony_id();
+        let mut net = TradeNetwork::new();
+        net.add_route(TradeRoute::new(a, b, 100.0));
+
+        let mut pa = StubPool::default();
+        pa.deposit("water", 250.0);
+        let pb = StubPool::default();
+        let mut pools = vec![pa, pb];
+
+        // A reserves 150, so 100 is exportable; B reserves nothing.
+        let reserves = vec![reserve(&[("water", 150.0)]), HashMap::new()];
+
+        super::run_trade_flow(&net, &[a, b], &mut pools, &["water".to_string()], &reserves);
+
+        let moved = pools[1].amount("water");
+        assert!(moved > 0.0, "the 100-unit surplus should be tradeable");
+        assert!(
+            moved <= 100.0 + f64::EPSILON,
+            "never more than the surplus: moved {moved}, surplus was 100"
+        );
+        assert!(
+            pools[0].amount("water") >= 150.0 - f64::EPSILON,
+            "the exporter must still hold its full reserve, has {}",
+            pools[0].amount("water")
+        );
+    }
+
+    /// A colony *below* its reserve is the neediest party and should pull
+    /// imports, even from a colony that also has a reserve of its own.
+    #[test]
+    fn a_colony_below_its_reserve_receives_from_a_colony_in_surplus() {
+        let a = colony_id();
+        let b = colony_id();
+        let mut net = TradeNetwork::new();
+        net.add_route(TradeRoute::new(a, b, 100.0));
+
+        let mut pa = StubPool::default();
+        pa.deposit("food_ration", 300.0);
+        let mut pb = StubPool::default();
+        pb.deposit("food_ration", 10.0);
+        let mut pools = vec![pa, pb];
+
+        // Both need 100; A has 200 spare, B is 90 short.
+        let reserves = vec![
+            reserve(&[("food_ration", 100.0)]),
+            reserve(&[("food_ration", 100.0)]),
+        ];
+
+        super::run_trade_flow(
+            &net,
+            &[a, b],
+            &mut pools,
+            &["food_ration".to_string()],
+            &reserves,
+        );
+
+        assert!(
+            pools[1].amount("food_ration") > 10.0,
+            "the short colony should have received food, has {}",
+            pools[1].amount("food_ration")
+        );
+        assert!(
+            pools[0].amount("food_ration") >= 100.0 - f64::EPSILON,
+            "the exporter keeps its own reserve, has {}",
+            pools[0].amount("food_ration")
+        );
+    }
+
+    /// Commodities no need consumes have no reserve entry, so they trade freely.
+    #[test]
+    fn a_commodity_with_no_reserve_entry_trades_in_full() {
+        let a = colony_id();
+        let b = colony_id();
+        let mut net = TradeNetwork::new();
+        net.add_route(TradeRoute::new(a, b, 100.0));
+
+        let mut pa = StubPool::default();
+        pa.deposit("structural_ore", 80.0);
+        let pb = StubPool::default();
+        let mut pools = vec![pa, pb];
+
+        // Reserve map covers water only — ore isn't a survival need.
+        let reserves = vec![reserve(&[("water", 500.0)]), HashMap::new()];
+
+        super::run_trade_flow(
+            &net,
+            &[a, b],
+            &mut pools,
+            &["structural_ore".to_string()],
+            &reserves,
+        );
+
+        assert!(
+            pools[1].amount("structural_ore") > 0.0,
+            "ore has no need reserve and should flow"
         );
     }
 }

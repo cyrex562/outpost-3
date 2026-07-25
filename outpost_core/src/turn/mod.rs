@@ -42,6 +42,18 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Default number of colony-sols that constitute one strategic-month.
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
 
+/// Sols of its own consumption a colony holds back from trade.
+///
+/// Commodities like `water`, `oxygen`, and `food_ration` are tradeable cargo
+/// *and* survival consumables, so only the stock above this reserve is offered
+/// to the auto-trade pass — a colony must not export what its population is
+/// about to eat, drink, or breathe.
+///
+/// Trade runs on the strategic pass, so the reserve needs to cover the sols
+/// until the next one could rebalance; a month's cadence with a handful of sols
+/// of headroom is the intent. Balance dial — expect the harness to retune it.
+pub const TRADE_RESERVE_SOLS: u32 = 10;
+
 /// Identifies which turn cadence is being processed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TurnCadence {
@@ -535,6 +547,43 @@ impl TurnProcessor {
     }
 
     /// Strategic-month sub-pipeline.
+    /// Per-colony stock that must be held back from trade for local needs.
+    ///
+    /// `water`, `oxygen`, and `food_ration` are tradeable cargo *and* survival
+    /// consumables. Without a reserve, the flow pass — which equalises stock
+    /// between route endpoints — happily ships away the water a colony's own
+    /// colonists are about to drink. Commodities no need consumes (ores,
+    /// components) get no entry here and so reserve nothing, trading freely.
+    ///
+    /// Housing is skipped: it's a colony *resource* now, not pool stock, so it
+    /// is never reachable from trade in the first place (issue #304).
+    ///
+    /// Returns an empty vec when no needs config is loaded — nothing is
+    /// consumed, so nothing needs holding back.
+    fn compute_need_reserves(state: &GameState) -> Vec<std::collections::HashMap<String, f64>> {
+        let Some(config) = state.needs_config.as_ref() else {
+            return Vec::new();
+        };
+        state
+            .populations
+            .iter()
+            .map(|pop| {
+                let population = f64::from(pop.count);
+                config
+                    .needs
+                    .iter()
+                    .filter(|need| !matches!(need.scaling, crate::needs::NeedScaling::Housing))
+                    .map(|need| {
+                        (
+                            need.commodity_id.clone(),
+                            need.required_amount(population) * f64::from(TRADE_RESERVE_SOLS),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     ///
     /// Returns `(completed_tech_ids, cargo_delivery_records)`.
     fn run_strategic_month_pipeline(
@@ -602,11 +651,14 @@ impl TurnProcessor {
             let colony_ids: Vec<ColonyId> = state.colonies.iter().map(|c| c.id).collect();
             let mut pools: Vec<_> = state.colonies.iter().map(|c| c.pool.clone()).collect();
 
+            let reserves = Self::compute_need_reserves(state);
+
             crate::trade::run_trade_flow(
                 &state.trade_network,
                 &colony_ids,
                 &mut pools,
                 &commodities,
+                &reserves,
             );
 
             // Write mutated pools back.
@@ -1300,6 +1352,65 @@ mod tests {
             0.0,
             "a stale commodity-pool `power` entry must not be shipped — `power` \
              is a colony resource now, so it is not a declared commodity"
+        );
+    }
+    /// End-to-end: the reserve is actually wired into the strategic pass.
+    ///
+    /// The unit tests above drive `run_trade_flow` directly. This one goes
+    /// through `TurnProcessor::advance` with a real `NeedsConfig`, so it also
+    /// proves the reserve map is built from the config and populations rather
+    /// than being computed and dropped.
+    #[test]
+    fn a_colony_does_not_trade_away_the_water_its_population_needs() {
+        use crate::content::types::{CommodityDef, Phase};
+        use crate::content::{CommodityTier, ContentRegistry};
+        use crate::needs::{NeedDef, NeedScaling, NeedsConfig};
+        use crate::trade::TradeRoute;
+
+        let mut registry = ContentRegistry::default();
+        registry.insert_commodity(CommodityDef {
+            id: "water".into(),
+            name: "Water".into(),
+            description: String::new(),
+            category: "consumable".into(),
+            phase: Phase::Liquid,
+            base_value: 5.0,
+            tradeable: true,
+            tier: CommodityTier::default(),
+            weight: 1.0,
+        });
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Wet"), 100);
+        state.add_colony(Colony::new("Dry"), 100);
+        state.registry = Some(registry);
+
+        let mut config = NeedsConfig::default_survival();
+        config.needs = vec![NeedDef {
+            commodity_id: "water".into(),
+            scaling: NeedScaling::PerCapita { rate: 0.15 },
+            weight: 1.0,
+        }];
+        state.needs_config = Some(config);
+
+        // 100 colonists × 0.15/sol × TRADE_RESERVE_SOLS = the reserve. Hold
+        // exactly that much and nothing is spare.
+        let reserve = 100.0 * 0.15 * f64::from(TRADE_RESERVE_SOLS);
+        state.colonies[0].pool.deposit("water", reserve);
+
+        let (a, b) = (state.colonies[0].id, state.colonies[1].id);
+        state.trade_network.add_route(TradeRoute::new(a, b, 500.0));
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+
+        // Needs consumption during the sol will have drawn some water down, so
+        // assert on what did *not* move rather than an exact remaining figure.
+        assert_eq!(
+            state.colonies[1].pool.amount("water"),
+            0.0,
+            "the water-rich colony held only its own reserve, so it must not \
+             have exported any — it would have starved itself"
         );
     }
 }

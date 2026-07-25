@@ -271,10 +271,16 @@
   description: >
     Breathable atmosphere stock, harvested or scrubbed for the colony's
     life-support system. Consumed per capita each sol (issue #166).
+
+    A survival consumable that is nonetheless real cargo — it has weight and
+    a trade value, and shipping it to a colony that can't scrub its own is a
+    legitimate logistics problem, exactly like water and food. Only the
+    colony's *surplus* is offered to trade; the reserve its own population
+    needs is held back (see trade.rs's need-reserve pass).
   category: consumable
   phase: gas
   base_value: 6.0
-  tradeable: false
+  tradeable: true
   weight: 0.2
 
 - id: components
