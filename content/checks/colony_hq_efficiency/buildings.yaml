@@ -1,10 +1,31 @@
 # Buildings used in the colony_hq efficiency balance check — mirroring
 # content/base/buildings.yaml's colony_hq, plus a synthetic population sink
 # (see pack.yaml).
+#
+# The cost fields (power_delta / worker_slots / slot_cost / construction_turns /
+# construction_cost) mirror content/base exactly, same discipline as recipes.yaml
+# mirrors the hq_* rates. They matter since issue #272 gap 5: the harness now
+# reports a COLONY FOOTPRINT, and this bundle's footprint is one half of the
+# consolidated-vs-standalone comparison (the other half is
+# content/checks/standalone_trio/). Leaving them at their defaults would make
+# that comparison meaningless.
 - id: colony_hq
   name: Colony HQ
   category: services
+  power_delta: -13.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 37.0
 
+# Synthetic consumption sink, not a real building. `slot_cost: 0` and no cost or
+# power of its own, so it contributes nothing to the footprint — otherwise it
+# would show up as a phantom build slot the player never pays for.
 - id: colonist_life_support
   name: Colonist Life Support (population sink)
   category: other
+  slot_cost: 0
+  construction_turns: 0

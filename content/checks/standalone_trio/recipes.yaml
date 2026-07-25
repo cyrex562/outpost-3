@@ -1,0 +1,61 @@
+# Rates mirror content/base/recipes.yaml exactly. Same discipline as
+# colony_hq_efficiency/recipes.yaml — a drifted rate here would invalidate the
+# comparison the bundle exists for.
+- id: generate_power_solar_mk1
+  name: Generate Power (Solar Mk1)
+  building: solar_array_mk1
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+
+- id: pump_water
+  name: Pump Water
+  building: water_well
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: water
+      quantity: 24.0
+
+- id: scrub_oxygen
+  name: Scrub Oxygen
+  building: life_support_module
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: oxygen
+      quantity: 7.0
+
+# Note the water input: unlike colony_hq's `hq_conduct_research` (which takes no
+# inputs precisely so it can't compete with `hq_pump_water` for the HQ's own
+# output), the standalone lab drinks 1 water/sol. That is why this bundle's water
+# margin is +8 where colony_hq_efficiency's is +9, despite identical pumping.
+- id: conduct_research
+  name: Conduct Research
+  building: research_lab
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 1.0
+  outputs:
+    - id: research
+      quantity: 5.0
+
+# Synthetic sink: a 100-colonist population's per-capita draw from
+# outpost_core::needs::NeedsConfig::default_survival() (water 0.15, oxygen 0.05,
+# power 0.2 per colonist per sol). Identical to colony_hq_efficiency's, so the
+# demand side matches by construction.
+- id: colonist_consumption
+  name: Colonist Consumption (100 colonists)
+  building: colonist_life_support
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 15.0
+    - id: oxygen
+      quantity: 5.0
+    - id: power
+      quantity: 20.0
+  outputs: []

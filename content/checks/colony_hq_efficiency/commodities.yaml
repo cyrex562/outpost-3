@@ -14,6 +14,14 @@
   category: energy
   base_value: 0.0
 
+# Referenced only by colony_hq's `construction_cost`, so it never appears in a
+# net-rate row — but the loader validates construction-cost commodity refs, and
+# the footprint (issue #272 gap 5) reports the metal bill.
+- id: structural_metal
+  name: Structural Metal
+  category: metal
+  base_value: 25.0
+
 # Virtual research flow (issue #310). No weight, no cap, not tradeable — the
 # real engine drains it from the colony pool into the system-wide research pool
 # each turn (outpost_core/src/lib.rs "Research aggregation"), so a positive net

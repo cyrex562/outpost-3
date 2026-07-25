@@ -1,0 +1,29 @@
+id: standalone-trio-check
+name: Standalone Buildings vs Consolidated HQ — Cost Comparison
+version: '0.1.0'
+description: >
+  The other half of issue #272 gap 5's measurement. Covers the same four
+  functions colony_hq does — power, water, oxygen, research — for 100 colonists,
+  but with the four standalone buildings it consolidates: solar_array_mk1,
+  water_well, life_support_module, and research_lab.
+
+  This bundle exists to be *compared* with content/checks/colony_hq_efficiency/,
+  not read alone. Both close the same commodities for the same population; what
+  differs is the COLONY FOOTPRINT the harness now prints (issue #272 gap 5 added
+  it because the commodity-flow calculator reads only recipe flows, so the cost
+  side of a consolidation trade-off was previously unmeasurable).
+
+  Gap 5 asks "is 1-slot-for-3-functions actually well-balanced against the
+  standalones staying separate?". Run both bundles and diff the footprints; the
+  answer is recorded in docs/DESIGN.md §5's authoring guide. It is not the neutral
+  trade DESIGN.md's narrative implied.
+
+  All four buildings here are tech-gated in the real pack (basic_power,
+  resource_extraction, basic_power, basic_construction respectively) while
+  colony_hq is not — the harness has no concept of tech gating, so that asymmetry
+  has to be read off the content rather than measured here. It counts *against*
+  the standalones on top of everything the footprint shows.
+
+  Population per-capita consumption uses the same synthetic sink pattern as
+  colony_hq_efficiency (water 0.15, oxygen 0.05, power 0.2 per colonist per sol),
+  so the demand side is identical between the two bundles by construction.
