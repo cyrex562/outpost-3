@@ -55,11 +55,38 @@ pub struct BuildingRow {
     /// Content-pack key for the building type.
     pub building_type: String,
     /// Labour units currently assigned to this building.
+    ///
+    /// **Always `0` today**: per-building labour assignment has no backing
+    /// state — `PlacedBuilding` stores no labour, and `Command::AssignLabour`
+    /// validates and emits an event without persisting anything. Production is
+    /// gated by a *colony-wide* labour ratio instead
+    /// (`colony::production`), so this must not be used to infer whether a
+    /// building is working — read [`Self::scale`] for that. Real per-building
+    /// assignment arrives with automatic labour assignment (issue #307).
     pub labour_assigned: u32,
     /// Number of build slots consumed by this building.
     pub slot_cost: u32,
     /// Whether the building ran at full capacity last turn.
     pub full_capacity: bool,
+    /// Scale the building actually produced at last turn, in `[0.0, 1.0]`.
+    ///
+    /// `0.0` means it genuinely produced nothing; `1.0` means full output.
+    /// Sourced from `Colony::last_production`, so this is the authoritative
+    /// "is it working?" signal (issue #303 — the colony screen used to infer
+    /// status from the always-zero [`Self::labour_assigned`] and therefore
+    /// reported *every* building as idle).
+    pub scale: f64,
+    /// Why the building fell short of full output last turn, if it did — a
+    /// short human-readable reason (e.g. `"input short: water"`).
+    pub shortfall_reason: Option<String>,
+    /// Whether this building only has always-on ([`concurrent`]) recipes and
+    /// therefore has no recipe for the player to choose.
+    ///
+    /// Lets the UI say so explicitly rather than showing an empty picker —
+    /// `colony_hq` is the motivating case (issue #303).
+    ///
+    /// [`concurrent`]: crate::content::types::RecipeDef::concurrent
+    pub always_on: bool,
 }
 
 /// A single commodity row in the stockpile table.
@@ -439,6 +466,9 @@ mod tests {
                 labour_assigned: 10,
                 slot_cost: 1,
                 full_capacity: true,
+                scale: 1.0,
+                shortfall_reason: None,
+                always_on: false,
             }],
             stockpile: vec![StockpileRow {
                 commodity_id: "food".to_string(),

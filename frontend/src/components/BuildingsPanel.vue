@@ -2,10 +2,13 @@
 /**
  * Active buildings + labour assignment panel.
  *
- * Building status (running / idle / partial) is derived client-side from
- * `labour_assigned` + `full_capacity` — the wire type doesn't carry an
- * explicit status enum, and deriving here avoids a backend change for a
- * purely presentational label (issue #169).
+ * Status comes from the building's **actual production last turn** (`scale`,
+ * with `shortfall_reason` explaining any shortfall) — issue #303. It used to
+ * be derived from `labour_assigned === 0`, but per-building labour assignment
+ * has no backing state (it's always 0; production is gated by a colony-wide
+ * labour ratio), so *every* building reported as "Idle" regardless of what it
+ * was doing. Buildings whose recipes are all always-on carry `always_on` so
+ * the absent recipe picker can be explained rather than looking broken.
  */
 
 import { ref } from 'vue'
@@ -33,12 +36,26 @@ function labourForBuilding(buildingType: string, current: number): number {
 }
 
 function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' {
-  if (b.labour_assigned === 0) return 'idle'
-  return b.full_capacity ? 'running' : 'partial'
+  if (b.full_capacity) return 'running'
+  // Anything above zero produced *something* last turn — only a genuine zero
+  // is idle.
+  return b.scale > 0 ? 'partial' : 'idle'
 }
 
 function statusLabel(status: 'idle' | 'running' | 'partial'): string {
   return { idle: 'Idle', running: 'Running', partial: 'Partial' }[status]
+}
+
+/**
+ * Tooltip/aside text explaining a non-running status — the engine's shortfall
+ * reason when it has one, so "Partial" and "Idle" say *why*.
+ */
+function statusDetail(b: BuildingRow): string {
+  if (b.full_capacity) return 'Running at full output'
+  if (b.shortfall_reason) {
+    return `${(b.scale * 100).toFixed(0)}% output — ${b.shortfall_reason}`
+  }
+  return b.scale > 0 ? `${(b.scale * 100).toFixed(0)}% output` : 'Produced nothing last turn'
 }
 
 function assignLabour(buildingType: string): void {
@@ -71,9 +88,21 @@ function assignLabour(buildingType: string): void {
           class="building-status"
           :class="`status-${buildingStatus(b)}`"
           :data-testid="`building-status-${b.building_type}`"
+          :title="statusDetail(b)"
         >
           {{ statusLabel(buildingStatus(b)) }}
         </span>
+        <span
+          v-if="b.shortfall_reason && !b.full_capacity"
+          class="building-reason"
+          :data-testid="`building-reason-${b.building_type}`"
+        >{{ b.shortfall_reason }}</span>
+        <span
+          v-if="b.always_on"
+          class="building-badge"
+          :data-testid="`building-always-on-${b.building_type}`"
+          title="This facility runs always-on recipes — there is no recipe to choose."
+        >always-on</span>
         <span class="building-meta">{{ b.slot_cost }} slot{{ b.slot_cost !== 1 ? 's' : '' }}</span>
         <div class="labour-controls">
           <input
@@ -142,6 +171,17 @@ function assignLabour(buildingType: string): void {
 .status-running { color: #6adba5; }
 .status-partial { color: #eab764; }
 .status-idle    { color: #778; }
+
+.building-reason { color: #a86; font-size: 0.7rem; font-style: italic; }
+.building-badge {
+  border: 1px solid #475;
+  border-radius: 2px;
+  color: #8a8;
+  font-size: 0.64rem;
+  padding: 0.02rem 0.28rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
 .labour-controls { display: flex; align-items: center; gap: 0.3rem; }
 .labour-input {

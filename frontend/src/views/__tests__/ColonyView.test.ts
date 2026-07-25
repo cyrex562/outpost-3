@@ -128,7 +128,17 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
       slot_capacity: 5,
       labour_available: 5,
       labour_total: 10,
-      buildings: [{ building_type: 'colony_hq', labour_assigned: 0, slot_cost: 1, full_capacity: true }],
+      buildings: [
+        {
+          building_type: 'colony_hq',
+          labour_assigned: 0,
+          slot_cost: 1,
+          full_capacity: true,
+          scale: 1.0,
+          shortfall_reason: null,
+          always_on: true,
+        },
+      ],
       stockpile: [],
       construction_queue: [],
       manual_override: false,

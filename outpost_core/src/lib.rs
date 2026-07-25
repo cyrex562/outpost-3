@@ -4731,14 +4731,29 @@ impl GameEngine {
                 let idx = self.find_colony_index(*colony_id)?;
                 let c = &self.state.colonies[idx];
                 let p = &self.state.populations[idx];
+                // Report real production status per building from last turn's
+                // result rather than the hardcoded stubs this used to emit
+                // (issue #303: `full_capacity: true` and `labour_assigned: 0`
+                // were placeholders, and the UI inferred "idle" from the
+                // always-zero labour, so every building read as idle).
                 let buildings = c
                     .buildings
                     .iter()
-                    .map(|b| ui::BuildingRow {
-                        building_type: b.building_type.clone(),
-                        labour_assigned: 0,
-                        slot_cost: b.slot_cost,
-                        full_capacity: true,
+                    .map(|b| {
+                        let result = c.last_production.get(&b.building_type);
+                        let scale = result.map_or(0.0, |r| r.scale);
+                        let shortfall_reason = result
+                            .and_then(|r| r.shortfalls.first())
+                            .map(|s| describe_shortfall(&s.reason));
+                        ui::BuildingRow {
+                            building_type: b.building_type.clone(),
+                            labour_assigned: 0,
+                            slot_cost: b.slot_cost,
+                            full_capacity: scale >= 1.0 - 1e-9,
+                            scale,
+                            shortfall_reason,
+                            always_on: self.building_is_always_on(&b.building_type),
+                        }
                     })
                     .collect();
                 let stockpile = c
@@ -5462,6 +5477,45 @@ impl GameEngine {
                 directive::Directive::new(colony_id, def.predicate, action, def.priority);
             self.state.directive_store.set_directive(directive);
         }
+    }
+}
+
+impl GameEngine {
+    /// Whether `building_type` has *only* always-on
+    /// ([`concurrent`](content::types::RecipeDef::concurrent)) recipes, and so
+    /// offers the player no recipe to choose.
+    ///
+    /// Lets the colony screen say "always-on" instead of presenting an empty
+    /// recipe picker (issue #303 — `colony_hq` is the motivating case). Returns
+    /// `false` when no content registry is loaded, or when the building has at
+    /// least one pick-one recipe (or none at all).
+    fn building_is_always_on(&self, building_type: &str) -> bool {
+        let Some(registry) = self.state.registry.as_ref() else {
+            return false;
+        };
+        let mut any = false;
+        let mut all_concurrent = true;
+        for recipe in registry.recipes().filter(|r| r.building == building_type) {
+            any = true;
+            if !recipe.concurrent {
+                all_concurrent = false;
+            }
+        }
+        any && all_concurrent
+    }
+}
+
+/// Render a [`colony::production::ShortfallReason`] as a short human-readable
+/// phrase for the colony screen (issue #303 — a building that fell short
+/// should say *why* rather than just reading as idle).
+fn describe_shortfall(reason: &colony::production::ShortfallReason) -> String {
+    use colony::production::ShortfallReason as R;
+    match reason {
+        R::InputShort { commodity_id } => format!("input short: {commodity_id}"),
+        R::PowerBrownout => "power brownout".to_string(),
+        R::LaborShort => "labour short".to_string(),
+        R::MaintenanceShort { commodity_id } => format!("maintenance short: {commodity_id}"),
+        R::DepositShort { commodity_id } => format!("deposit short: {commodity_id}"),
     }
 }
 
@@ -9248,6 +9302,126 @@ mod tests {
             .map(|r| r.recipe_id.as_str())
             .collect();
         assert_eq!(concurrent_ids, vec!["hq_power", "hq_water"]);
+    }
+
+    /// The colony screen must report each building's *real* production status
+    /// (issue #303). It used to emit hardcoded stubs — `full_capacity: true`
+    /// and `labour_assigned: 0` — and the UI inferred "idle" from that
+    /// always-zero labour, so **every** building displayed as idle no matter
+    /// what it was doing. `colony_hq` was the reported case: idle, a free
+    /// slot, and no selectable recipe (the last being correct, since all its
+    /// recipes are always-on).
+    #[test]
+    fn colony_screen_reports_real_production_status_and_flags_always_on_buildings() {
+        use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+
+        let mut registry = engine.state.registry.clone().unwrap();
+        registry.insert_building(BuildingDef {
+            id: "hq".into(),
+            name: "HQ".into(),
+            description: String::new(),
+            category: BuildingCategory::Services,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        // Only always-on recipes — so there is no recipe to pick.
+        for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
+            registry.insert_recipe(RecipeDef {
+                id: id.into(),
+                name: id.into(),
+                building: "hq".into(),
+                inputs: vec![],
+                outputs: vec![Ingredient {
+                    id: commodity.into(),
+                    quantity: 1.0,
+                }],
+                cycle_sols: 1,
+                power_draw: 0.0,
+                concurrent: true,
+            });
+        }
+        engine.state.registry = Some(registry);
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("hq", 1));
+        // Stand in for last turn's result: the building ran at 60% and was
+        // short on water.
+        engine.state.colonies[idx].last_production.insert(
+            "hq".to_string(),
+            colony::BuildingProductionResult {
+                building_type: "hq".to_string(),
+                recipe_id: String::new(),
+                concurrent_recipe_ids: vec!["hq_power".into(), "hq_water".into()],
+                scale: 0.6,
+                shortfalls: vec![colony::production::ProductionShortfall {
+                    reason: colony::production::ShortfallReason::InputShort {
+                        commodity_id: "water".into(),
+                    },
+                    effective_scale: 0.6,
+                }],
+            },
+        );
+
+        let QueryResult::ColonyScreen(screen) =
+            engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+        else {
+            panic!("expected ColonyScreen")
+        };
+        let hq = screen
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "hq")
+            .expect("hq row present");
+
+        // Real scale, not the old hardcoded `full_capacity: true`.
+        assert!((hq.scale - 0.6).abs() < 1e-9);
+        assert!(!hq.full_capacity);
+        assert_eq!(
+            hq.shortfall_reason.as_deref(),
+            Some("input short: water"),
+            "a building that fell short should say why"
+        );
+        // Flagged so the UI can explain the absent recipe picker.
+        assert!(hq.always_on);
+    }
+
+    /// A building with no recorded production reads as genuinely idle (scale
+    /// 0.0), and an ordinary pick-one building is not flagged always-on.
+    #[test]
+    fn colony_screen_reports_zero_scale_for_a_building_that_did_not_run() {
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("research_lab", 1));
+        engine.state.colonies[idx].last_production.clear();
+
+        let QueryResult::ColonyScreen(screen) =
+            engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+        else {
+            panic!("expected ColonyScreen")
+        };
+        let row = screen
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .expect("row present");
+        assert!(row.scale.abs() < 1e-9, "no production recorded => idle");
+        assert!(!row.full_capacity);
+        assert!(row.shortfall_reason.is_none());
+        assert!(!row.always_on, "a pick-one building is not always-on");
     }
 
     /// Query::BuildingDetail errors on an unknown building type.
