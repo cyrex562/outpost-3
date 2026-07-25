@@ -1435,6 +1435,17 @@ pub struct BeltProfileWire {
     pub zones: Vec<BeltZoneWire>,
 }
 
+/// Return the generated star system's display name.
+///
+/// Mirrors `outpost_web`'s `GET /api/system-name`. Empty for a system that
+/// predates seed-derived naming; the caller falls back to a generic label.
+#[tauri::command]
+pub fn get_system_name(engine_state: State<'_, EngineState>) -> CmdResult<String> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    Ok(engine.state.system_state.node_map.system_name.clone())
+}
+
 /// Return the current list of system bodies with rendering hints.
 #[tauri::command]
 pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<SystemBodyWire>> {

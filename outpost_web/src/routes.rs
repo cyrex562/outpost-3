@@ -36,6 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/planet-map", get(query_routes::get_planet_map))
         .route("/api/body-surface/:id", get(query_routes::get_body_surface))
         .route("/api/system-bodies", get(query_routes::get_system_bodies))
+        .route("/api/system-name", get(query_routes::get_system_name))
         .route("/api/outposts", get(query_routes::list_outposts))
         .route(
             "/api/outpost-targets/:colony_id",

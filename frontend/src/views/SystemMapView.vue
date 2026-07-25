@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSystemBodies, type SystemBody } from '@/services/tauriBridge'
+import { getSystemBodies, getSystemName, type SystemBody } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
 
 const route = useRoute()
@@ -12,9 +12,22 @@ const bodies = ref<SystemBody[]>([])
 const selected = ref<SystemBody | null>(null)
 const error = ref<string | null>(null)
 
+/** Generated system name (e.g. "Vega"); empty until loaded / for old saves. */
+const systemName = ref('')
+
+/** Heading label — falls back to a generic title when the name is unknown. */
+const systemTitle = computed(() =>
+  systemName.value ? `${systemName.value} System` : 'Star System',
+)
+
+/** Star label in the map — the system's name, uppercased. */
+const starLabel = computed(() => (systemName.value || 'star').toUpperCase())
+
 onMounted(async () => {
   try {
     bodies.value = await getSystemBodies()
+    // Non-fatal: a missing/failed name just leaves the generic heading.
+    systemName.value = await getSystemName().catch(() => '')
     // After the body list arrives, fit the viewBox to the data if the user
     // hasn't already customised it (persisted state overrides fit-all).
     if (!persistedLoaded.value) resetView()
@@ -507,7 +520,7 @@ function viewSurface(body: SystemBody): void {
 <template>
   <div class="system-view" data-testid="system-map">
     <div class="toolbar">
-      <h2>Kepler System</h2>
+      <h2 data-testid="system-title">{{ systemTitle }}</h2>
       <div class="clock">
         Sol {{ worldStore.sol }} · Month {{ worldStore.month }}
       </div>
@@ -550,8 +563,9 @@ function viewSurface(body: SystemBody): void {
             :font-size="labelFontSize"
             font-family="monospace"
             class="body-label"
+            data-testid="star-label"
           >
-            KEPLER
+            {{ starLabel }}
           </text>
 
           <!-- Orbit tracks (star-centered, non-moon bodies) -->

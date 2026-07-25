@@ -469,6 +469,21 @@ pub struct BeltProfileWire {
     pub zones: Vec<BeltZoneWire>,
 }
 
+/// `GET /api/system-name` — the generated star system's display name.
+///
+/// Its own tiny route rather than a field on `/api/system-bodies` so that
+/// endpoint's array shape stays unchanged. Empty for a system that predates
+/// seed-derived naming; callers fall back to a generic label.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_system_name(State(state): State<AppState>) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    let name = engine.state.system_state.node_map.system_name.clone();
+    Json(json!({ "name": name }))
+}
+
 /// `GET /api/system-bodies` — every body in the system, with rendering hints.
 ///
 /// Mirrors `outpost_tauri::commands::get_system_bodies` against the shared

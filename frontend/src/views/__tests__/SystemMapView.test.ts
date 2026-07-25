@@ -11,10 +11,12 @@ vi.mock('vue-router', () => ({
 }))
 
 const getSystemBodies = vi.fn<[], Promise<SystemBody[]>>()
+const getSystemName = vi.fn<[], Promise<string>>()
 
 vi.mock('@/services/tauriBridge', () => ({
   isTauri: false,
   getSystemBodies: () => getSystemBodies(),
+  getSystemName: () => getSystemName(),
 }))
 
 function makeBody(overrides: Partial<SystemBody>): SystemBody {
@@ -60,6 +62,8 @@ describe('SystemMapView (system fixes B1: moons orbit their parent)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     getSystemBodies.mockReset()
+    getSystemName.mockReset()
+    getSystemName.mockResolvedValue('Vega')
     window.localStorage.clear()
   })
 
@@ -172,10 +176,53 @@ describe('SystemMapView (system fixes B1: moons orbit their parent)', () => {
   })
 })
 
+describe('SystemMapView (#301: system + star name come from the engine)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getSystemBodies.mockReset()
+    getSystemName.mockReset()
+    getSystemName.mockResolvedValue('Vega')
+    window.localStorage.clear()
+  })
+
+  it('labels the heading and the star from the generated system name', async () => {
+    getSystemBodies.mockResolvedValueOnce([makeBody({ id: 'planet-1', name: 'Vega-1' })])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="system-title"]').text()).toBe('Vega System')
+    expect(wrapper.get('[data-testid="star-label"]').text()).toBe('VEGA')
+    // The old hardcoded label is gone.
+    expect(wrapper.text()).not.toContain('Kepler')
+  })
+
+  it('falls back to a generic label when the engine has no system name', async () => {
+    getSystemName.mockResolvedValue('')
+    getSystemBodies.mockResolvedValueOnce([makeBody({ id: 'planet-1' })])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="system-title"]').text()).toBe('Star System')
+    expect(wrapper.get('[data-testid="star-label"]').text()).toBe('STAR')
+  })
+
+  it('still renders the map when the system-name lookup fails', async () => {
+    getSystemName.mockRejectedValue(new Error('boom'))
+    getSystemBodies.mockResolvedValueOnce([makeBody({ id: 'planet-1' })])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="system-title"]').text()).toBe('Star System')
+    expect(wrapper.find('[data-testid="body-node-planet-1"]').exists()).toBe(true)
+  })
+})
+
 describe('SystemMapView (map/nav plan: view body surface)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     getSystemBodies.mockReset()
+    getSystemName.mockReset()
+    getSystemName.mockResolvedValue('Vega')
     routerPush.mockReset()
     window.localStorage.clear()
   })
