@@ -1633,12 +1633,15 @@ mod tests {
 
     /// Real-engine proof that `colony_hq` — the consolidated multi-function
     /// starter building (playtest feedback: "multi-function starter
-    /// buildings") — actually runs all three of its `concurrent: true`
-    /// recipes (power, water, oxygen) simultaneously every turn against the
-    /// real content pack, matching the combined output of building
-    /// solar_array_mk1 + water_well + life_support_module standalone.
+    /// buildings") — actually runs all four of its `concurrent: true`
+    /// recipes (power, water, oxygen, research) simultaneously every turn
+    /// against the real content pack. The first three match the combined
+    /// output of building solar_array_mk1 + water_well +
+    /// life_support_module standalone; the fourth is the administrative
+    /// research trickle from issue #310, which this test follows all the way
+    /// into the system-wide research pool the tech tree spends from.
     #[test]
-    fn colony_hq_runs_all_three_concurrent_recipes_from_real_pack() {
+    fn colony_hq_runs_all_concurrent_recipes_from_real_pack() {
         use outpost_core::colony::PlacedBuilding;
         use outpost_core::{Command, Event, GameEngine};
 
@@ -1689,6 +1692,21 @@ mod tests {
             "colony_hq should produce oxygen (hq_scrub_oxygen)"
         );
 
+        // Research (issue #310) is checked at the system pool rather than the
+        // colony pool: `AdvanceColonySol`'s research-aggregation step drains
+        // every colony's `research` into `state.research_pool`, so a non-zero
+        // total here proves the HQ's trickle reaches what the tech tree
+        // actually spends — not merely that a recipe fired.
+        assert!(
+            engine.state.research_pool.total() > 0.0,
+            "colony_hq's administrative trickle (hq_conduct_research) should \
+             reach the system-wide research pool"
+        );
+        assert!(
+            engine.state.colonies[idx].pool.amount("research") < 1e-6,
+            "research should be drained out of the colony pool, not stockpiled"
+        );
+
         let hq_result = engine.state.colonies[idx]
             .last_production
             .get("colony_hq")
@@ -1697,8 +1715,13 @@ mod tests {
         ids.sort();
         assert_eq!(
             ids,
-            vec!["hq_generate_power", "hq_pump_water", "hq_scrub_oxygen"],
-            "all three concurrent recipes should have run"
+            vec![
+                "hq_conduct_research",
+                "hq_generate_power",
+                "hq_pump_water",
+                "hq_scrub_oxygen"
+            ],
+            "all four concurrent recipes should have run"
         );
     }
 

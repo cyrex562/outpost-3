@@ -12,15 +12,19 @@ description: >
   food_ration, since colony_hq doesn't produce food — see hydroponic_bay
   for that function, unaffected by this consolidation).
 
-  colony_hq's three recipes (hq_generate_power, hq_pump_water,
-  hq_scrub_oxygen) are all `concurrent: true` — the real engine
-  (outpost_core::colony::production) runs them simultaneously against ONE
-  building instance sharing a single scale factor. This static balance
-  calculator has no concept of `concurrent` recipes or shared per-instance
-  scale, so it's approximated here as three separate BuildingInstance
-  entries all naming `colony_hq` as their `building_id` (one per recipe) —
-  equivalent at full production (no shortfall), which is what this
-  steady-state closure check verifies. The real shared-scale behavior
-  (a shortfall throttling all three outputs together) is proven instead by
+  It also pins colony_hq's 1 RP/sol administrative research trickle (issue
+  #310) — the colony's only route to its first tech, since both buildings
+  that output `research` are themselves tech-gated.
+
+  colony_hq's four recipes (hq_generate_power, hq_pump_water,
+  hq_scrub_oxygen, hq_conduct_research) are all `concurrent: true` — the
+  real engine (outpost_core::colony::production) runs them simultaneously
+  against ONE building instance sharing a single scale factor. This static
+  balance calculator has no concept of `concurrent` recipes or shared
+  per-instance scale, so it's approximated here as four separate
+  BuildingInstance entries all naming `colony_hq` as their `building_id`
+  (one per recipe) — equivalent at full production (no shortfall), which is
+  what this steady-state closure check verifies. The real shared-scale
+  behavior (a shortfall throttling every output together) is proven instead by
   outpost_web::ws::tests::colony_hq_runs_all_three_concurrent_recipes_from_real_pack,
   which exercises the actual production.rs code path.

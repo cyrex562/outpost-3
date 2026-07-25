@@ -23,3 +23,11 @@
   name: Power
   category: energy
   base_value: 0.0
+
+# Virtual research flow (issue #310) — colony_hq's administrative trickle. The
+# real engine drains it from the colony pool into the system-wide research pool
+# each turn (outpost_core/src/lib.rs "Research aggregation").
+- id: research
+  name: Research
+  category: virtual
+  base_value: 0.0

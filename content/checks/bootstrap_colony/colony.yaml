@@ -1,6 +1,6 @@
 # Colony configuration for the bootstrap-colony balance check.
 #
-# colony_hq (3 BuildingInstance entries — one per concurrent recipe, see
+# colony_hq (4 BuildingInstance entries — one per concurrent recipe, see
 # pack.yaml's approximation note) + greenhouse_dome, using just 2 of the 8
 # available starter buildings, plus the synthetic 100-colonist consumption
 # sink. No imports — everything must be produced on-site.
@@ -11,6 +11,8 @@ buildings:
     recipe_id: hq_pump_water
   - building_id: colony_hq
     recipe_id: hq_scrub_oxygen
+  - building_id: colony_hq
+    recipe_id: hq_conduct_research
   - building_id: greenhouse_dome
     recipe_id: grow_rations_dome
   - building_id: colonist_life_support

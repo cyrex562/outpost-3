@@ -7,6 +7,8 @@
 #                starter-set consumer                        = +3/sol
 #   oxygen:      7 produced − 5 colonists                   = +2/sol
 #   power:      24 produced − 20 colonists                  = +4/sol
+#   research:    1 produced (colony_hq admin trickle), no
+#                consumer in this bundle                     = +1/sol
 #
 # No overall-verdict assertion: every net is comfortably positive by design
 # (a healthy starter margin, not a tight bottleneck), so the calculator
@@ -38,3 +40,13 @@
   expect: closed
   min_net: 2.0
   label: power-surplus-at-least-2-per-sol
+
+# The starter colony makes real tech progress on day one (issue #310): before
+# this, no starter building produced `research` at all and both buildings that
+# do are tech-gated, so a fresh colony could never reach its first tech except
+# by a lucky survey-expedition anomaly. `min_net` is the assertion that matters
+# — the chain is trivially closed since nothing here consumes research.
+- commodity: research
+  expect: closed
+  min_net: 1.0
+  label: research-trickle-at-least-1-per-sol

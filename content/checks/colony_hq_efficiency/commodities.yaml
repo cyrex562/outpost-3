@@ -13,3 +13,12 @@
   name: Power
   category: energy
   base_value: 0.0
+
+# Virtual research flow (issue #310). No weight, no cap, not tradeable — the
+# real engine drains it from the colony pool into the system-wide research pool
+# each turn (outpost_core/src/lib.rs "Research aggregation"), so a positive net
+# here means real tech progress.
+- id: research
+  name: Research
+  category: virtual
+  base_value: 0.0

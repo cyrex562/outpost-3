@@ -4,6 +4,7 @@
 #   water:  24 produced − 15 colonists = +9/sol
 #   oxygen:  7 produced −  5 colonists = +2/sol
 #   power:  24 produced − 20 colonists = +4/sol
+#   research: 1 produced − 0 consumed = +1/sol (issue #310)
 #
 # Matches content/checks/bootstrap_colony/'s water/oxygen/power margins
 # exactly (colony_hq's recipes are identical rates to the 3 standalone
@@ -23,3 +24,12 @@
   expect: closed
   min_net: 2.0
   label: power-surplus-at-least-2-per-sol
+
+# Research trickle (issue #310). Nothing in this bundle consumes research, so
+# the chain is trivially `closed` at +1/sol; the real engine drains that surplus
+# into the system-wide pool each turn. The point of the assertion is `min_net` —
+# it stops a future edit from silently zeroing the only pre-lab research source.
+- commodity: research
+  expect: closed
+  min_net: 1.0
+  label: research-trickle-at-least-1-per-sol

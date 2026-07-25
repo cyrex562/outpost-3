@@ -33,7 +33,9 @@
     extraction, and oxygen scrubbing simultaneously — the same three
     functions as solar_array_mk1 + water_well + life_support_module
     combined, in one build slot instead of three (playtest feedback:
-    "multi-function starter buildings"). See recipes.yaml's hq_* recipes,
+    "multi-function starter buildings") — plus a 1 RP/sol administrative
+    research trickle, the colony's only route to its first tech before a
+    research_lab exists (issue #310). See recipes.yaml's hq_* recipes,
     all `concurrent: true` — they always run together, sharing this
     building's power/labor/input scale each turn (see
     outpost_core/src/colony/production.rs's module doc comment).
