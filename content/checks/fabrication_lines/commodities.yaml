@@ -1,0 +1,15 @@
+# Commodities for the fabrication-lines check.
+- id: structural_ore
+  name: Structural Ore
+  category: metallic_ore
+  base_value: 10.0
+
+- id: structural_metal
+  name: Structural Metal
+  category: metal
+  base_value: 25.0
+
+- id: components
+  name: Components
+  category: component
+  base_value: 60.0

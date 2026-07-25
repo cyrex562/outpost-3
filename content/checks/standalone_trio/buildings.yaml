@@ -1,0 +1,68 @@
+# The four standalone buildings colony_hq consolidates. Every field mirrors
+# content/base/buildings.yaml exactly — this bundle's whole purpose is to measure
+# their real combined cost against colony_hq's, so a drifted number here would
+# quietly invalidate the comparison.
+#
+# `tech_prerequisite` is carried through for the record even though the harness
+# ignores it: all four are gated in the real pack while colony_hq is not, which is
+# part of gap 5's answer and would be invisible if it were dropped here.
+- id: solar_array_mk1
+  name: Solar Array Mk1
+  category: power
+  power_delta: -20.0
+  worker_slots: 0
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_power
+  construction_cost:
+    - id: structural_metal
+      quantity: 12.0
+
+- id: water_well
+  name: Water Well
+  category: extraction
+  power_delta: 4.0
+  worker_slots: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: resource_extraction
+  construction_cost:
+    - id: structural_metal
+      quantity: 10.0
+
+- id: life_support_module
+  name: Life Support Module
+  category: life_support
+  power_delta: 3.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_power
+  construction_cost:
+    - id: structural_metal
+      quantity: 15.0
+
+# The fourth function. colony_hq's `hq_conduct_research` trickle (issue #310) has
+# no standalone equivalent below research_lab, so matching colony_hq's *output
+# set* requires this building — and it is the deepest tech gate of the four.
+- id: research_lab
+  name: Research Lab
+  category: research
+  power_delta: 8.0
+  worker_slots: 3
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 30.0
+
+# Synthetic consumption sink, not a real building — see
+# colony_hq_efficiency/buildings.yaml. Contributes nothing to the footprint.
+- id: colonist_life_support
+  name: Colonist Life Support (population sink)
+  category: other
+  slot_cost: 0
+  construction_turns: 0

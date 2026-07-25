@@ -127,12 +127,30 @@ When a Phase 3 issue is complete, create a bundle at `content/checks/<name>/`:
 
 ```
 content/checks/<name>/
-  pack/          ← minimal content pack (commodities + recipes for this test)
-  config.yaml    ← which buildings the colony has
-  assertions.yaml ← what the balance calculator should report
+  pack.yaml         ← pack manifest (id, name, version, description)
+  commodities.yaml  ← commodities this test needs
+  buildings.yaml    ← buildings this test needs
+  recipes.yaml      ← recipes this test needs
+  colony.yaml       ← which buildings the colony has, and any imports
+  assertions.yaml   ← what the balance calculator should report
 ```
 
+(Flat files, not a `pack/` subdirectory, and `colony.yaml` rather than `config.yaml` — see `cmd_check` in `outpost_harness/src/main.rs` for the authoritative list.)
+
 The harness automatically runs `outpost_harness check content/checks/` on Phase 3+ issues.
+
+### Two things a bundle reports
+
+`check` prints two blocks:
+
+- **ASSERTION CHECK RESULTS** — per-commodity net rates against the bundle's `assertions.yaml`. This is what passes or fails the bundle, and what sets the exit code.
+- **COLONY FOOTPRINT** — what the configuration *costs*: build slots, worker slots, summed `power_delta` (negative in the data means a net producer; the block prints it the way round a reader expects), longest single build time, and the total construction bill by commodity. Informational only, never asserted.
+
+The footprint exists because `BalanceCalculator` reads recipe flows and **nothing else** — not `power_delta`, not `worker_slots`, not `slot_cost`, not `maintenance`. That makes it excellent at "does this chain close?" and blind to "at what price?", which is a whole class of balance question. Issue #272 gap 5 — is one consolidated building in one build slot well-tuned against three standalone buildings in three? — is entirely about price, and could not be answered at all before this block existed.
+
+It is deliberately not assertable. A cost figure is only meaningful *relative to an alternative*, so the way to use it is to author two bundles covering the same functions and diff their footprints; `content/checks/colony_hq_efficiency/` and `content/checks/standalone_trio/` are that pair. A `min_net`-style threshold on a slot count would be a number invented from nothing.
+
+**If you want a bundle's footprint to mean anything, author the cost fields in its local `buildings.yaml`.** They all have `#[serde(default)]`, so a bundle that omits them reports zero power, zero workers, and one slot per building regardless of the real content — silently, and the assertions still pass. Bundles whose purpose is commodity closure can leave them out; bundles used for cost comparison must mirror `content/base` exactly, and should say so in a comment, because a drifted number there invalidates the comparison without failing anything.
 
 ## Failure Modes
 

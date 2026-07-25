@@ -1,0 +1,24 @@
+# The four standalone buildings that together cover colony_hq's full output set
+# (power, water, oxygen, research), plus the same synthetic 100-colonist sink as
+# content/checks/colony_hq_efficiency/.
+#
+# Comparison target: that bundle's ONE colony_hq. Same demand, same outputs
+# (bar the research rate), different footprint — which is the whole point.
+#
+# Dropping the research_lab entry gives the exact trio colony_hq claims to
+# replace: 3 slots, 37 structural_metal, 2 worker slots, 13 net power. Identical
+# cost to colony_hq's 1 slot / 37 metal / 2 workers / 13 power, for identical
+# non-research output. Worth doing by hand if you want to see that directly.
+buildings:
+  - building_id: solar_array_mk1
+    recipe_id: generate_power_solar_mk1
+  - building_id: water_well
+    recipe_id: pump_water
+  - building_id: life_support_module
+    recipe_id: scrub_oxygen
+  - building_id: research_lab
+    recipe_id: conduct_research
+  - building_id: colonist_life_support
+    recipe_id: colonist_consumption
+
+imports: []

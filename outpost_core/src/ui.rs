@@ -218,9 +218,36 @@ pub struct BuildingDetailData {
     /// concurrent recipes (e.g. `colony_hq`) has `recipe: None` here but a
     /// non-empty `concurrent_recipes`.
     pub concurrent_recipes: Vec<RecipeRow>,
+    /// The building's production lines (issue #272) — the authoritative view of
+    /// what it runs and what the player may change.
+    ///
+    /// Prefer this over [`Self::available_recipes`] for a picker. That field is
+    /// a flat list of every selectable recipe, which is only correct for a
+    /// single-line building: for a multi-line one it presents recipes from
+    /// *different* lines as if they were alternatives to each other, when in
+    /// fact all of them run. `fabrication_complex` is the shipped example —
+    /// its foundry and machine shop are separate lines, not a choice.
+    ///
+    /// Both older fields are kept so pre-#272 consumers keep working.
+    #[serde(default)]
+    pub lines: Vec<RecipeLineRow>,
     /// Outcome of the building's most recent production attempt, if it has
     /// run at least once since the colony was founded.
     pub last_run: Option<BuildingRunRow>,
+}
+
+/// One production line on a building, shaped for a picker (issue #272).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecipeLineRow {
+    /// Authored line name; `None` is the building's default line.
+    pub line: Option<String>,
+    /// `true` when this line always runs and offers no choice.
+    pub always_on: bool,
+    /// Recipe currently running on this line.
+    pub selected_recipe_id: String,
+    /// Every recipe on this line, in id order. Length 1 means no real choice,
+    /// so a picker should render it as a label rather than a dropdown.
+    pub alternatives: Vec<RecipeRow>,
 }
 
 /// A commodity id + quantity pair (construction cost, maintenance draw, or

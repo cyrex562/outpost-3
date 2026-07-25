@@ -1,0 +1,20 @@
+# Mirrors content/base/buildings.yaml's fabrication_complex, plus a synthetic
+# ore feed so the foundry line has something to consume.
+- id: fabrication_complex
+  name: Fabrication Complex
+  category: processing
+  power_delta: -2.0
+  worker_slots: 2
+  labor_required: 2
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+
+# Synthetic feed, not a real building — contributes nothing to the footprint.
+- id: ore_feed
+  name: Ore Feed (synthetic)
+  category: other
+  slot_cost: 0
+  construction_turns: 0

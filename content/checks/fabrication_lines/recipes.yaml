@@ -1,0 +1,36 @@
+# Rates mirror content/base/recipes.yaml exactly. The `line` values are the
+# point of this bundle: two lines means both run, every sol.
+- id: foundry_smelt_ore
+  name: Smelt Ore (Foundry)
+  building: fabrication_complex
+  line: foundry
+  cycle_sols: 1
+  inputs:
+    - id: structural_ore
+      quantity: 5.0
+  outputs:
+    - id: structural_metal
+      quantity: 4.0
+
+- id: machine_shop_fabricate_components
+  name: Fabricate Components (Machine Shop)
+  building: fabrication_complex
+  line: machine_shop
+  cycle_sols: 2
+  inputs:
+    - id: structural_metal
+      quantity: 3.0
+  outputs:
+    - id: components
+      quantity: 2.0
+
+# Feeds the foundry at exactly the rate it consumes, so the ore row is closed
+# and the interesting numbers are metal and components.
+- id: supply_ore
+  name: Supply Ore (synthetic)
+  building: ore_feed
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: structural_ore
+      quantity: 5.0

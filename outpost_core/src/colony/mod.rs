@@ -19,9 +19,9 @@ pub mod stores;
 pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{
-    building_io_summary, process_production, process_production_scaled, BuildingIoSummary,
-    BuildingProductionResult, PowerGrid, ProductionShortfall, ProductionStepOutcome,
-    ShortfallReason,
+    building_io_summary, line_selection_key, lines_for_building, process_production,
+    process_production_scaled, BuildingIoSummary, BuildingProductionResult, LineProductionResult,
+    PowerGrid, ProductionShortfall, ProductionStepOutcome, RecipeLine, ShortfallReason,
 };
 pub use resource_pool::ColonyResourcePool;
 pub use stores::ColonyStores;

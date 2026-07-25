@@ -34,6 +34,7 @@
 //!     cycle_sols: 1,
 //!     power_draw: 0.0,
 //!     concurrent: false,
+//!     line: None,
 //! };
 //! let buildings = vec![BuildingInstance {
 //!     building: mine_def,
@@ -132,6 +133,41 @@ pub struct BalanceReport {
     pub commodities: Vec<CommodityBalance>,
     /// Overall classification of the configuration.
     pub verdict: BalanceVerdict,
+    /// What this configuration *costs* to stand up and run (issue #272 gap 5).
+    pub footprint: ColonyFootprint,
+}
+
+/// The cost side of a building configuration (issue #272 gap 5).
+///
+/// The rest of [`BalanceReport`] answers "does the commodity chain close?".
+/// This answers "at what price?" — and without it a whole class of balance
+/// question is unanswerable. #272 gap 5 asks whether one consolidated building
+/// covering three functions in **one build slot** is well-tuned against three
+/// standalone buildings covering the same functions in three; that is entirely a
+/// question about slots, construction cost, labour, and power, none of which the
+/// commodity-flow calculation reads.
+///
+/// Summed straight from each instance's [`BuildingDef`], so it is unaffected by
+/// whether a building's recipes are `concurrent`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ColonyFootprint {
+    /// Build slots consumed in total.
+    pub slot_cost: u32,
+    /// Worker slots the configuration asks for — jobs offered, not jobs filled.
+    pub worker_slots: u32,
+    /// Summed `power_delta`. **Negative is a net producer**, matching
+    /// [`BuildingDef::power_delta`]'s sign convention.
+    pub power_delta: f64,
+    /// Longest single `construction_turns` among the buildings.
+    ///
+    /// Not the sum: build order is the player's choice and nothing here says
+    /// they must be sequential, so the sum would overstate. The max is the floor
+    /// on how long the configuration takes to stand up.
+    pub longest_build_turns: u32,
+    /// Total one-off construction cost by commodity, sorted by id.
+    pub construction_cost: Vec<(String, f64)>,
+    /// Number of buildings in the configuration.
+    pub building_count: usize,
 }
 
 impl BalanceReport {
@@ -194,6 +230,27 @@ impl BalanceCalculator {
             }
         }
 
+        // ── Cost side (issue #272 gap 5) ─────────────────────────────────────
+        let mut footprint = ColonyFootprint {
+            building_count: buildings.len(),
+            ..ColonyFootprint::default()
+        };
+        let mut costs: HashMap<String, f64> = HashMap::new();
+        for inst in buildings {
+            let def = &inst.building;
+            footprint.slot_cost += def.slot_cost;
+            footprint.worker_slots += def.worker_slots;
+            footprint.power_delta += def.power_delta;
+            footprint.longest_build_turns =
+                footprint.longest_build_turns.max(def.construction_turns);
+            for ingredient in &def.construction_cost {
+                *costs.entry(ingredient.id.clone()).or_default() += ingredient.quantity;
+            }
+        }
+        let mut construction_cost: Vec<(String, f64)> = costs.into_iter().collect();
+        construction_cost.sort_by(|a, b| a.0.cmp(&b.0));
+        footprint.construction_cost = construction_cost;
+
         // ── Build per-commodity balance rows ─────────────────────────────────
         let mut all_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         all_ids.extend(production.keys().cloned());
@@ -222,6 +279,7 @@ impl BalanceCalculator {
         BalanceReport {
             commodities,
             verdict,
+            footprint,
         }
     }
 
@@ -317,6 +375,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         }
     }
 
@@ -417,6 +476,108 @@ mod tests {
                 y.net_rate
             );
         }
+
+        // ...but the *footprint* is not equivalent, and that is the whole reason
+        // the old workaround was misleading despite being numerically exact
+        // (issue #272 gaps 1 and 5). Two co-located instances bill two build
+        // slots for a building that occupies one.
+        assert_eq!(a.footprint.building_count, 1);
+        assert_eq!(b.footprint.building_count, 2);
+        assert_eq!(
+            a.footprint.slot_cost * 2,
+            b.footprint.slot_cost,
+            "faking one building as two must cost twice the slots — if these ever \
+             match, the footprint has stopped measuring anything"
+        );
+    }
+
+    // ── Cost side / footprint (issue #272 gap 5) ──────────────────────────
+
+    /// The instrument gap 5 needs: the commodity chain says nothing about price,
+    /// so the footprint has to. Sums slots, workers, power, and the metal bill.
+    #[test]
+    fn footprint_sums_the_cost_of_every_building() {
+        fn costed(
+            id: &str,
+            slot_cost: u32,
+            worker_slots: u32,
+            power_delta: f64,
+            turns: u32,
+            metal: f64,
+        ) -> BuildingInstance {
+            let mut building = make_building(id);
+            building.slot_cost = slot_cost;
+            building.worker_slots = worker_slots;
+            building.power_delta = power_delta;
+            building.construction_turns = turns;
+            building.construction_cost = vec![crate::content::types::Ingredient {
+                id: "structural_metal".into(),
+                quantity: metal,
+            }];
+            BuildingInstance {
+                building,
+                recipe: None,
+                concurrent_recipes: vec![],
+            }
+        }
+
+        // The real trio colony_hq replaces, per content/base/buildings.yaml.
+        let buildings = vec![
+            costed("solar_array_mk1", 1, 0, -20.0, 2, 12.0),
+            costed("water_well", 1, 1, 4.0, 2, 10.0),
+            costed("life_support_module", 1, 1, 3.0, 2, 15.0),
+        ];
+        let f = BalanceCalculator::compute(&buildings, &[]).footprint;
+
+        assert_eq!(f.building_count, 3);
+        assert_eq!(f.slot_cost, 3);
+        assert_eq!(f.worker_slots, 2);
+        // -20 + 4 + 3: a net producer of 13, matching `colony_hq`'s own -13.
+        assert!(
+            (f.power_delta - -13.0).abs() < 1e-9,
+            "power was {}",
+            f.power_delta
+        );
+        assert_eq!(
+            f.construction_cost,
+            vec![("structural_metal".to_string(), 37.0)],
+            "12 + 10 + 15 — the same 37 metal colony_hq costs"
+        );
+    }
+
+    /// Build turns are the *max*, not the sum: nothing forces a player to build
+    /// sequentially, so summing would overstate how long a configuration takes.
+    #[test]
+    fn footprint_reports_the_longest_build_not_the_total() {
+        let mut slow = make_building("slow");
+        slow.construction_turns = 4;
+        let mut quick = make_building("quick");
+        quick.construction_turns = 2;
+
+        let buildings = vec![
+            BuildingInstance {
+                building: slow,
+                recipe: None,
+                concurrent_recipes: vec![],
+            },
+            BuildingInstance {
+                building: quick,
+                recipe: None,
+                concurrent_recipes: vec![],
+            },
+        ];
+        let f = BalanceCalculator::compute(&buildings, &[]).footprint;
+        assert_eq!(f.longest_build_turns, 4, "max, not 6");
+    }
+
+    /// An empty configuration has a zero footprint rather than a panic or a
+    /// nonsense max.
+    #[test]
+    fn footprint_of_no_buildings_is_zero() {
+        let f = BalanceCalculator::compute(&[], &[]).footprint;
+        assert_eq!(f, ColonyFootprint::default());
+        assert_eq!(f.longest_build_turns, 0);
+        assert!(f.construction_cost.is_empty());
     }
 
     // ── Case 1: Closed ───────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ function makeDetail(): BuildingDetail {
     recipe: null,
     available_recipes: [],
     concurrent_recipes: [],
+    lines: [],
     last_run: null,
   }
 }

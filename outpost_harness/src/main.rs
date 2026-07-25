@@ -31,7 +31,7 @@
 use std::process;
 
 use outpost_core::balance::{
-    BalanceCalculator, BalanceReport, BalanceVerdict, BuildingInstance, Flow,
+    BalanceCalculator, BalanceReport, BalanceVerdict, BuildingInstance, ColonyFootprint, Flow,
 };
 use outpost_core::content::loader::{PackLoader, RawFile};
 use outpost_core::content::registry::ContentRegistry;
@@ -308,17 +308,30 @@ fn check_subcommand(args: &[String]) -> Result<i32, String> {
     let all_passed = results.iter().all(|r| r.passed);
 
     if json_mode {
-        print_check_json(&results)?;
+        print_check_json(&results, &report.footprint)?;
     } else {
         print_check_human(&results, all_passed);
+        print_footprint(&report.footprint);
     }
 
     Ok(i32::from(!all_passed))
 }
 
-/// Print check results as JSON array.
-fn print_check_json(results: &[AssertionResult]) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(results)
+/// Print check results as JSON, alongside the configuration's cost side.
+///
+/// Shape changed in issue #272 from a bare array to
+/// `{ "assertions": [...], "footprint": {...} }` — the footprint has no natural
+/// home in an array of assertion results, and a machine consumer comparing two
+/// bundles' costs needs it.
+fn print_check_json(
+    results: &[AssertionResult],
+    footprint: &ColonyFootprint,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "assertions": results,
+        "footprint": footprint,
+    });
+    let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("failed to serialize results: {e}"))?;
     println!("{json}");
     Ok(())
@@ -344,6 +357,41 @@ fn print_check_human(results: &[AssertionResult], all_passed: bool) {
         )
     };
     println!("{summary}");
+    println!("╚══════════════════════════════════════════════════════════════╝");
+}
+
+/// Print the configuration's cost side (issue #272 gap 5).
+///
+/// The assertion results answer "does the chain close?"; this answers "at what
+/// price?". Printed unconditionally rather than assertion-gated because the
+/// consolidation question it exists to inform is a *comparison* between bundles
+/// — there is no single threshold to assert against.
+fn print_footprint(footprint: &ColonyFootprint) {
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    COLONY FOOTPRINT                         ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!(
+        "  buildings: {}   build slots: {}   worker slots: {}",
+        footprint.building_count, footprint.slot_cost, footprint.worker_slots
+    );
+    // `power_delta` is negative for producers, so flip the sign for a reader.
+    let net_power = -footprint.power_delta;
+    let sense = if net_power >= 0.0 { "surplus" } else { "draw" };
+    println!(
+        "  power: {:.1} {sense}   slowest build: {} sols",
+        net_power.abs(),
+        footprint.longest_build_turns
+    );
+    if footprint.construction_cost.is_empty() {
+        println!("  construction cost: none");
+    } else {
+        let costs: Vec<String> = footprint
+            .construction_cost
+            .iter()
+            .map(|(id, qty)| format!("{qty:.0} {id}"))
+            .collect();
+        println!("  construction cost: {}", costs.join(", "));
+    }
     println!("╚══════════════════════════════════════════════════════════════╝");
 }
 
@@ -416,29 +464,45 @@ fn resolve_instances(
             .ok_or_else(|| format!("unknown building id: {}", entry.building_id))?
             .clone();
 
-        let recipe = if let Some(ref rid) = entry.recipe_id {
+        // Which recipes actually run comes from the pack's production lines, not
+        // the bundle (issue #272): a building runs one recipe per line, and
+        // asking an author to list them would just be a way to get them wrong.
+        // An explicit `recipe_id` is a *selection* — it picks that recipe on its
+        // own line and leaves the building's other lines at their defaults,
+        // exactly like `Command::SetActiveRecipe` does in the engine.
+        let mut selection: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Some(ref rid) = entry.recipe_id {
             let r = registry
                 .recipe(rid)
-                .ok_or_else(|| format!("unknown recipe id: {rid}"))?
-                .clone();
-            Some(r)
-        } else {
-            None
-        };
+                .ok_or_else(|| format!("unknown recipe id: {rid}"))?;
+            if r.building != entry.building_id {
+                return Err(format!(
+                    "recipe '{rid}' belongs to building '{}', not '{}'",
+                    r.building, entry.building_id
+                ));
+            }
+            selection.insert(
+                outpost_core::colony::line_selection_key(&entry.building_id, r.line.as_deref()),
+                rid.clone(),
+            );
+        }
 
-        // Always-on recipes for this building type come from the pack, not the
-        // bundle: they run unconditionally, so asking an author to list them
-        // would just be a way to get them wrong (issue #272).
-        let concurrent_recipes: Vec<_> = {
-            let mut found: Vec<_> = registry
-                .recipes()
-                .filter(|r| r.building == entry.building_id && r.concurrent)
-                .cloned()
-                .collect();
-            // `ContentRegistry` iterates a HashMap, so sort for determinism.
-            found.sort_by(|a, b| a.id.cmp(&b.id));
-            found
-        };
+        let lines =
+            outpost_core::colony::lines_for_building(&entry.building_id, &selection, registry);
+
+        // `BalanceCalculator` sums `recipe` with `concurrent_recipes`, so the
+        // split between them doesn't affect the numbers — the default line goes
+        // in `recipe` purely so the shape still reads naturally.
+        let mut recipe = None;
+        let mut concurrent_recipes = Vec::new();
+        for line in lines {
+            if line.line.is_none() && !line.always_on && recipe.is_none() {
+                recipe = Some(line.selected.clone());
+            } else {
+                concurrent_recipes.push(line.selected.clone());
+            }
+        }
 
         instances.push(BuildingInstance {
             building,

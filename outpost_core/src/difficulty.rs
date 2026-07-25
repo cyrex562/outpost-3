@@ -720,6 +720,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 50.0,
             concurrent: false,
+            line: None,
         };
 
         let mut reg = ContentRegistry::default();

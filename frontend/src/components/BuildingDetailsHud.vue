@@ -19,7 +19,7 @@
  * current state.
  */
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   getBuildingDetail,
   setActiveRecipe,
@@ -49,6 +49,23 @@ const detail = ref<BuildingDetail | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const switching = ref(false)
+
+/**
+ * The building's lines, absent-safe. `lines` is `#[serde(default)]` on the Rust
+ * side, so a host on an older build can omit it; an empty list falls back to the
+ * pre-#272 flat recipe sections below rather than rendering nothing.
+ */
+const lineRows = computed(() => detail.value?.lines ?? [])
+
+/**
+ * Heading for a production line. The default line has no authored name, so it
+ * is just "Recipe" — which is what a single-line building has always shown.
+ */
+function lineTitle(l: { line: string | null; selected_recipe_id: string; alternatives: { recipe_id: string; name: string }[] }): string {
+  const selected = l.alternatives.find((r) => r.recipe_id === l.selected_recipe_id)
+  const name = selected?.name ?? l.selected_recipe_id
+  return l.line === null ? `Recipe: ${name}` : `${l.line}: ${name}`
+}
 
 async function load(): Promise<void> {
   if (!props.ownerId || !props.buildingType) {
@@ -166,64 +183,141 @@ function onBackdropClick(): void {
         </section>
         <p v-else class="hint">No production data yet — this building hasn't run a sol.</p>
 
-        <section v-if="detail.recipe" class="section" data-testid="recipe-section">
-          <h5>Recipe: {{ detail.recipe.name }}</h5>
-          <div v-if="detail.available_recipes.length > 1" class="recipe-selector" data-testid="recipe-selector">
-            <label class="hint" for="recipe-select">Switch recipe:</label>
+        <!--
+          One section per production line (issue #272). The old flat
+          `available_recipes` dropdown is wrong for a multi-line building: it
+          lists recipes from *different* lines as if they were alternatives,
+          when in fact every line runs. `fabrication_complex` is the shipped
+          example — its foundry and machine shop both run.
+        -->
+        <section
+          v-for="(l, li) in lineRows"
+          :key="l.line ?? '__default__'"
+          class="section"
+          :data-testid="`line-section-${l.line ?? 'default'}`"
+        >
+          <h5>
+            {{ lineTitle(l) }}
+            <span v-if="l.always_on" class="line-badge" data-testid="line-always-on">always-on</span>
+          </h5>
+
+          <div
+            v-if="l.alternatives.length > 1"
+            class="recipe-selector"
+            :data-testid="`line-selector-${l.line ?? 'default'}`"
+          >
+            <label class="hint" :for="`line-select-${li}`">Switch recipe:</label>
             <select
-              id="recipe-select"
+              :id="`line-select-${li}`"
               class="recipe-select"
-              data-testid="recipe-select"
-              :value="detail.recipe.recipe_id"
+              :data-testid="`line-select-${l.line ?? 'default'}`"
+              :value="l.selected_recipe_id"
               :disabled="switching"
               @change="switchRecipe(($event.target as HTMLSelectElement).value)"
             >
-              <option v-for="r in detail.available_recipes" :key="r.recipe_id" :value="r.recipe_id">
+              <option v-for="r in l.alternatives" :key="r.recipe_id" :value="r.recipe_id">
                 {{ r.name }}
               </option>
             </select>
           </div>
-          <p class="flow-row">
-            <span class="flow-label">In:</span>
-            <span v-for="i in detail.recipe.inputs" :key="i.commodity_id" class="flow-item">
-              {{ i.commodity_id }} ×{{ i.quantity }}
-            </span>
-            <span v-if="detail.recipe.inputs.length === 0" class="hint">none</span>
-          </p>
-          <p class="flow-row">
-            <span class="flow-label">Out:</span>
-            <span v-for="i in detail.recipe.outputs" :key="i.commodity_id" class="flow-item">
-              {{ i.commodity_id }} ×{{ i.quantity }}
-            </span>
-          </p>
-          <p class="flow-row">Cycle: {{ detail.recipe.cycle_sols }} sol{{ detail.recipe.cycle_sols !== 1 ? 's' : '' }}</p>
+
+          <template v-for="r in l.alternatives" :key="r.recipe_id">
+            <template v-if="r.recipe_id === l.selected_recipe_id">
+              <p class="flow-row">
+                <span class="flow-label">In:</span>
+                <span v-for="i in r.inputs" :key="i.commodity_id" class="flow-item">
+                  {{ i.commodity_id }} ×{{ i.quantity }}
+                </span>
+                <span v-if="r.inputs.length === 0" class="hint">none</span>
+              </p>
+              <p class="flow-row">
+                <span class="flow-label">Out:</span>
+                <span v-for="i in r.outputs" :key="i.commodity_id" class="flow-item">
+                  {{ i.commodity_id }} ×{{ i.quantity }}
+                </span>
+              </p>
+              <p class="flow-row">
+                Cycle: {{ r.cycle_sols }} sol{{ r.cycle_sols !== 1 ? 's' : '' }}
+              </p>
+            </template>
+          </template>
         </section>
 
-        <section
-          v-if="detail.concurrent_recipes.length > 0"
-          class="section"
-          data-testid="concurrent-recipes-section"
-        >
-          <h5>Always-on recipes</h5>
-          <div v-for="r in detail.concurrent_recipes" :key="r.recipe_id" class="concurrent-recipe">
-            <p class="flow-row concurrent-recipe-name">{{ r.name }}</p>
+        <p v-if="lineRows.length > 1" class="hint" data-testid="lines-explainer">
+          These lines run at the same time and throttle independently — a
+          shortage on one does not stop the others.
+        </p>
+
+
+        <!--
+          Fallback for a payload with no `lines` (issue #272). The field is
+          `#[serde(default)]` on the Rust side, so a host on an older build can
+          legitimately omit it — and rendering nothing at all would be a worse
+          regression than the flat picker this replaced.
+        -->
+        <template v-if="lineRows.length === 0">
+          <section v-if="detail.recipe" class="section" data-testid="recipe-section">
+            <h5>Recipe: {{ detail.recipe.name }}</h5>
+            <div v-if="detail.available_recipes.length > 1" class="recipe-selector" data-testid="recipe-selector">
+              <label class="hint" for="recipe-select">Switch recipe:</label>
+              <select
+                id="recipe-select"
+                class="recipe-select"
+                data-testid="recipe-select"
+                :value="detail.recipe.recipe_id"
+                :disabled="switching"
+                @change="switchRecipe(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="r in detail.available_recipes" :key="r.recipe_id" :value="r.recipe_id">
+                  {{ r.name }}
+                </option>
+              </select>
+            </div>
             <p class="flow-row">
               <span class="flow-label">In:</span>
-              <span v-for="i in r.inputs" :key="i.commodity_id" class="flow-item">
+              <span v-for="i in detail.recipe.inputs" :key="i.commodity_id" class="flow-item">
                 {{ i.commodity_id }} ×{{ i.quantity }}
               </span>
-              <span v-if="r.inputs.length === 0" class="hint">none</span>
+              <span v-if="detail.recipe.inputs.length === 0" class="hint">none</span>
             </p>
             <p class="flow-row">
               <span class="flow-label">Out:</span>
-              <span v-for="i in r.outputs" :key="i.commodity_id" class="flow-item">
+              <span v-for="i in detail.recipe.outputs" :key="i.commodity_id" class="flow-item">
                 {{ i.commodity_id }} ×{{ i.quantity }}
               </span>
             </p>
-          </div>
-        </section>
+            <p class="flow-row">Cycle: {{ detail.recipe.cycle_sols }} sol{{ detail.recipe.cycle_sols !== 1 ? 's' : '' }}</p>
+          </section>
 
-        <p v-if="!detail.recipe && detail.concurrent_recipes.length === 0" class="hint">
+          <section
+            v-if="detail.concurrent_recipes.length > 0"
+            class="section"
+            data-testid="concurrent-recipes-section"
+          >
+            <h5>Always-on recipes</h5>
+            <div v-for="r in detail.concurrent_recipes" :key="r.recipe_id" class="concurrent-recipe">
+              <p class="flow-row concurrent-recipe-name">{{ r.name }}</p>
+              <p class="flow-row">
+                <span class="flow-label">In:</span>
+                <span v-for="i in r.inputs" :key="i.commodity_id" class="flow-item">
+                  {{ i.commodity_id }} ×{{ i.quantity }}
+                </span>
+                <span v-if="r.inputs.length === 0" class="hint">none</span>
+              </p>
+              <p class="flow-row">
+                <span class="flow-label">Out:</span>
+                <span v-for="i in r.outputs" :key="i.commodity_id" class="flow-item">
+                  {{ i.commodity_id }} ×{{ i.quantity }}
+                </span>
+              </p>
+            </div>
+          </section>
+        </template>
+
+        <p
+          v-if="lineRows.length === 0 && !detail.recipe && detail.concurrent_recipes.length === 0"
+          class="hint"
+        >
           No recipe (storage/habitat building).
         </p>
 

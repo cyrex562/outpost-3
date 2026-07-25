@@ -1,0 +1,27 @@
+# Commodities used in the standalone-trio comparison check. Identical to
+# content/checks/colony_hq_efficiency/commodities.yaml — the two bundles must
+# agree on the demand side for their footprints to be comparable.
+- id: water
+  name: Water
+  category: consumable
+  base_value: 5.0
+
+- id: oxygen
+  name: Oxygen
+  category: consumable
+  base_value: 6.0
+
+- id: power
+  name: Power
+  category: energy
+  base_value: 0.0
+
+- id: structural_metal
+  name: Structural Metal
+  category: metal
+  base_value: 25.0
+
+- id: research
+  name: Research
+  category: virtual
+  base_value: 0.0

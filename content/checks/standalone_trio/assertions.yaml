@@ -1,0 +1,43 @@
+# Assertions for the standalone-vs-consolidated comparison check.
+#
+# Expected net rates at population 100 with all four standalone buildings:
+#   water:    24 pumped − 1 (research_lab) − 15 colonists = +8/sol
+#   oxygen:    7 scrubbed −  5 colonists                  = +2/sol
+#   power:    24 generated − 20 colonists                 = +4/sol
+#   research:  5 produced −  0 consumed                   = +5/sol
+#
+# Compare with content/checks/colony_hq_efficiency/ (+9 / +2 / +4 / +1). The
+# supply side is deliberately near-identical; the interesting difference is the
+# COLONY FOOTPRINT the harness prints, and the two ways these diverge on output:
+#
+#   - water is 1/sol *worse* here, because the standalone lab drinks water and
+#     colony_hq's research trickle deliberately does not;
+#   - research is 4/sol *better* here, because research_lab is a real lab and
+#     colony_hq's trickle is one fifth of it by design (issue #310).
+#
+# So this is a genuine trade at four buildings, not strict dominance. It becomes
+# dominance at three — see colony.yaml's note.
+#
+# The thresholds are set at the exact expected values rather than loose floors:
+# this bundle exists to pin a comparison, so a rate drifting *up* would silently
+# change the answer just as much as one drifting down.
+
+- commodity: water
+  expect: closed
+  min_net: 8.0
+  label: water-surplus-8-per-sol-one-less-than-consolidated
+
+- commodity: oxygen
+  expect: closed
+  min_net: 2.0
+  label: oxygen-surplus-2-per-sol-same-as-consolidated
+
+- commodity: power
+  expect: closed
+  min_net: 4.0
+  label: power-surplus-4-per-sol-same-as-consolidated
+
+- commodity: research
+  expect: closed
+  min_net: 5.0
+  label: research-5-per-sol-five-times-the-hq-trickle
