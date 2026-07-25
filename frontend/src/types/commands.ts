@@ -5,8 +5,20 @@
  * channel as `{ type: "command", seq: N, command: Command }`.
  */
 
+/**
+ * Interrupt severity tiers, lowest to highest (issue #332). Used as the
+ * fast-forward halt threshold: a run stops on the first interrupt at or above
+ * the chosen tier.
+ */
+export type InterruptTier = 'ambient' | 'notable' | 'urgent' | 'blocking'
+
 export type Command =
   | { kind: 'advance_sol' }
+  /**
+   * Advance up to `max_sols` sols in one call, halting early on the first
+   * interrupt at or above `threshold` (issue #332).
+   */
+  | { kind: 'fast_forward'; max_sols: number; threshold: InterruptTier }
   | { kind: 'found_colony'; name: string; starting_population: number }
   | {
       kind: 'queue_construction'

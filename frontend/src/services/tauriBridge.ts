@@ -5,7 +5,7 @@
  * to HTTP + WebSocket.
  */
 
-import type { Command } from '@/types/commands'
+import type { Command, InterruptTier } from '@/types/commands'
 import type { GameEvent } from '@/types/gameEvents'
 
 const globalWindow = typeof window === 'undefined' ? null : (window as unknown as { __TAURI_INTERNALS__?: unknown })
@@ -272,6 +272,34 @@ export interface TechNode {
 export async function getTechTree(): Promise<TechNode[]> {
   if (!isTauri) return fetchJson<TechNode[]>('/api/tech-tree')
   return invoke<TechNode[]>('get_tech_tree')
+}
+
+/** One accumulated interrupt from a fast-forward run (issue #332). */
+export interface DigestItem {
+  tier: InterruptTier
+  message: string
+  colony_id: string | null
+  acknowledged: boolean
+}
+
+/** The return-from-fast-forward triage payload (issue #332). */
+export interface InterruptDigest {
+  stopped_at_sol: number
+  sols_requested: number
+  halting_message: string | null
+  halting_tier: InterruptTier | null
+  items: DigestItem[]
+}
+
+/**
+ * Read what happened during the last fast-forward run.
+ *
+ * The `fast_forward` command reports only that a run ended and why; the
+ * accumulated below-threshold interrupts live here.
+ */
+export async function getInterruptDigest(): Promise<InterruptDigest> {
+  if (!isTauri) return fetchJson<InterruptDigest>('/api/interrupt-digest')
+  return invoke<InterruptDigest>('get_interrupt_digest')
 }
 
 export interface ColonizeTarget {

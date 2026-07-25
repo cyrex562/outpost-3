@@ -58,12 +58,15 @@ pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
 /// to the auto-trade pass — a colony must not export what its population is
 /// about to eat, drink, or breathe.
 ///
-/// Sized when trade ran once per 30 sols and the reserve had to bridge that
-/// whole gap (#331). Trade rebalances every sol now (#332), so this is far more
-/// conservative than it needs to be and can very likely come down — left alone
-/// here so the cadence change lands without a simultaneous balance change.
-/// Balance dial; expect the harness to retune it.
-pub const TRADE_RESERVE_SOLS: u32 = 10;
+/// Originally 10 sols, sized when trade ran once per 30 sols and the reserve had
+/// to bridge that whole gap (#331). Since trade rebalances every sol and cargo is
+/// dispatched as convoys (#332), the reserve's only remaining job is covering the
+/// round trip if a colony exports and then needs the stock back — a few sols of
+/// consumption, not most of a month.
+///
+/// Kept comfortably above the default one-sol convoy transit so a long route
+/// still has slack. Balance dial; expect the harness to retune it.
+pub const TRADE_RESERVE_SOLS: u32 = 3;
 
 /// A record of one completed turn produced by [`TurnProcessor::advance`].
 #[derive(Debug, Clone)]
@@ -76,8 +79,39 @@ pub struct TurnOutcome {
     pub completed_techs: Vec<String>,
     /// Cargo deliveries that arrived this sol.
     pub cargo_delivered: Vec<CargoDeliveryRecord>,
+    /// Inter-colony trade convoys that landed this sol (issue #332).
+    pub convoy_arrivals: Vec<TradeConvoyArrival>,
     /// Environmental hazard outcomes rolled this colony-sol (empty when no hazards triggered).
     pub hazard_outcomes: Vec<crate::hazard::HazardOutcome>,
+}
+
+/// What [`TurnProcessor::run_systemwide_pipeline`] produced this sol.
+///
+/// A struct rather than a tuple: the pipeline now reports three independent
+/// kinds of outcome, and positional returns stop being readable at that point.
+#[derive(Debug, Clone, Default)]
+struct SystemwideOutcome {
+    /// Tech IDs completed by this sol's research application.
+    completed_techs: Vec<String>,
+    /// Interplanetary cargo shipments that landed.
+    cargo_delivered: Vec<CargoDeliveryRecord>,
+    /// Inter-colony trade convoys that landed.
+    convoy_arrivals: Vec<TradeConvoyArrival>,
+}
+
+/// A record of one inter-colony trade convoy landing at its destination.
+#[derive(Debug, Clone)]
+pub struct TradeConvoyArrival {
+    /// Convoy that arrived.
+    pub convoy_id: uuid::Uuid,
+    /// Colony that dispatched the cargo.
+    pub from_colony: ColonyId,
+    /// Colony that received it.
+    pub to_colony: ColonyId,
+    /// Commodity deposited.
+    pub commodity_id: String,
+    /// Amount deposited.
+    pub amount: f64,
 }
 
 /// A record of one commodity quantity delivered to a colony pool.
@@ -400,13 +434,14 @@ impl TurnProcessor {
         // clock — nothing branches on it.
         state.month = state.sol / self.sols_per_month;
         let hazard_outcomes = self.run_colony_sol_pipeline(state);
-        let (completed_techs, cargo_delivered) = Self::run_systemwide_pipeline(state);
+        let pipeline = Self::run_systemwide_pipeline(state);
 
         TurnOutcome {
             sol: state.sol,
             month: state.month,
-            completed_techs,
-            cargo_delivered,
+            completed_techs: pipeline.completed_techs,
+            cargo_delivered: pipeline.cargo_delivered,
+            convoy_arrivals: pipeline.convoy_arrivals,
             hazard_outcomes,
         }
     }
@@ -605,8 +640,8 @@ impl TurnProcessor {
     /// that is balance-neutral for research and shipments, and deliberate for
     /// trade.
     ///
-    /// Returns `(completed_tech_ids, cargo_delivery_records)`.
-    fn run_systemwide_pipeline(state: &mut GameState) -> (Vec<String>, Vec<CargoDeliveryRecord>) {
+    /// Returns everything downstream needs to emit events for.
+    fn run_systemwide_pipeline(state: &mut GameState) -> SystemwideOutcome {
         let mut completed_techs = Vec::new();
 
         // Drain research pool into tech progress if a registry is loaded.
@@ -627,6 +662,39 @@ impl TurnProcessor {
                 Self::apply_tech_effects(state, effects);
             }
             completed_techs = result.completed;
+        }
+
+        // ── Trade convoy arrivals ─────────────────────────────────────────
+        // Deliberately *before* this sol's dispatch pass, for two reasons:
+        //
+        // - A convoy dispatched this sol must get a full sol of travel. If
+        //   arrivals ran afterwards, the default one-sol route would be
+        //   decremented to zero and delivered in the same sol it was sent —
+        //   the instant teleport convoys exist to replace.
+        // - Landing first means the dispatch pass sees the freshly-credited
+        //   stock, so a colony can forward on what it just received.
+        //
+        // Unconditional, not inside the dispatch branch below: convoys already
+        // in flight must still land when every route has been removed, or on a
+        // sol with nothing new to send.
+        let arrived = state.trade_network.advance_convoys();
+        let mut convoy_arrivals: Vec<TradeConvoyArrival> = Vec::new();
+        for convoy in arrived {
+            let Some(colony) = state.colonies.iter_mut().find(|c| c.id == convoy.to_colony) else {
+                // Destination gone (decommissioned, or promoted to something
+                // else) while the cargo was travelling. The goods are lost
+                // rather than returned to sender: a return trip would need a
+                // second convoy and an origin that may equally be gone.
+                continue;
+            };
+            colony.pool.deposit(&convoy.commodity_id, convoy.amount);
+            convoy_arrivals.push(TradeConvoyArrival {
+                convoy_id: convoy.id,
+                from_colony: convoy.from_colony,
+                to_colony: convoy.to_colony,
+                commodity_id: convoy.commodity_id,
+                amount: convoy.amount,
+            });
         }
 
         // ── Auto trade flow ───────────────────────────────────────────────
@@ -671,7 +739,7 @@ impl TurnProcessor {
 
             let reserves = Self::compute_need_reserves(state);
 
-            crate::trade::run_trade_flow(
+            let flow = crate::trade::run_trade_flow(
                 &state.trade_network,
                 &colony_ids,
                 &mut pools,
@@ -683,6 +751,11 @@ impl TurnProcessor {
             for (colony, new_pool) in state.colonies.iter_mut().zip(pools) {
                 colony.pool = new_pool;
             }
+
+            // The dispatched cargo has already been debited from the senders'
+            // pools and exists nowhere else — dropping it here would destroy
+            // goods (issue #332).
+            state.trade_network.convoys.extend(flow.dispatched);
         }
 
         // ── Cargo shipment delivery ───────────────────────────────────────
@@ -728,7 +801,11 @@ impl TurnProcessor {
             }
         }
 
-        (completed_techs, delivery_records)
+        SystemwideOutcome {
+            completed_techs,
+            cargo_delivered: delivery_records,
+            convoy_arrivals,
+        }
     }
 }
 
@@ -1298,9 +1375,10 @@ mod tests {
             .trade_network
             .add_route(TradeRoute::new(rich, poor, 50.0));
 
-        // Run enough sols to trigger at least one strategic month (trade runs
-        // on the strategic pass, not every sol).
+        // Two sols: the first dispatches the convoy, the second lands it
+        // (issue #332 — trade is no longer instantaneous).
         let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
         proc.advance(&mut state);
 
         assert!(
@@ -1365,7 +1443,9 @@ mod tests {
         let (a, b) = (state.colonies[0].id, state.colonies[1].id);
         state.trade_network.add_route(TradeRoute::new(a, b, 50.0));
 
+        // Two sols: dispatch, then arrival (issue #332).
         let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
         proc.advance(&mut state);
 
         assert!(
@@ -1507,11 +1587,18 @@ mod tests {
 
         let mut proc = TurnProcessor::with_cadence(0, 30);
         let out = proc.advance(&mut state);
-
         assert_eq!(out.month, 0, "sol 1 is not a month boundary");
         assert!(
+            !state.trade_network.convoys.is_empty(),
+            "the dispatch pass must run on an ordinary sol, not wait 30 of them"
+        );
+
+        // Sol 2, still inside the same month, lands it.
+        let out = proc.advance(&mut state);
+        assert_eq!(out.month, 0, "sol 2 is not a month boundary either");
+        assert!(
             state.colonies[1].pool.amount("structural_ore") > 0.0,
-            "trade must run on an ordinary sol, not wait 30 of them"
+            "the convoy must arrive on an ordinary sol too"
         );
     }
 }
