@@ -26,5 +26,5 @@ description: >
   (one per recipe) — equivalent at full production (no shortfall), which is
   what this steady-state closure check verifies. The real shared-scale
   behavior (a shortfall throttling every output together) is proven instead by
-  outpost_web::ws::tests::colony_hq_runs_all_three_concurrent_recipes_from_real_pack,
+  outpost_web::ws::tests::colony_hq_runs_all_concurrent_recipes_from_real_pack,
   which exercises the actual production.rs code path.

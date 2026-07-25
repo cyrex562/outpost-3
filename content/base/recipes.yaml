@@ -122,12 +122,12 @@
 #
 # 1 RP/sol is deliberately one fifth of research_lab's conduct_research (5
 # RP/sol): basic_construction's 100 RP lands in ~100 sols on HQ alone versus
-# ~17 with one lab, so labs stay clearly worth building. No inputs — this
-# represents administrative survey overhead paid for by the HQ's existing
-# power draw and worker slots, and it is still scaled by the building's
-# labour/power availability like every other recipe. Notably it takes no
-# water, so it can't compete with hq_pump_water the way research_lab's
-# 1.0-water input would.
+# ~17 with one lab, so labs stay clearly worth building. No inputs and no
+# power_draw of its own — like the other three hq_* recipes, it rides the
+# building's `power_delta: -13.0` and worker slots, so it is still throttled
+# by the HQ's shared scale rather than being unconditionally free. Notably it
+# takes no water, so it can't compete with hq_pump_water the way
+# research_lab's 1.0-water input would.
 - id: hq_conduct_research
   name: Baseline Research (Colony HQ)
   building: colony_hq
