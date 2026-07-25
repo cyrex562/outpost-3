@@ -227,6 +227,22 @@ export async function getSystemBodies(): Promise<SystemBody[]> {
   return invoke<SystemBody[]>('get_system_bodies')
 }
 
+/**
+ * The generated star system's display name (e.g. `"Vega"`), used to label the
+ * system map and its star. Returns `''` for a system that predates
+ * seed-derived naming — callers fall back to a generic label.
+ *
+ * The REST route wraps the name in an object (`{ name }`) per convention while
+ * the Tauri command returns the bare string, so the shapes are normalized here.
+ */
+export async function getSystemName(): Promise<string> {
+  if (!isTauri) {
+    const res = await fetchJson<{ name: string }>('/api/system-name')
+    return res.name ?? ''
+  }
+  return invoke<string>('get_system_name')
+}
+
 /** Mirrors `outpost_core::tech::TechEffect` (`#[serde(tag = "type", rename_all = "snake_case")]`). */
 export type TechEffect =
   | { type: 'unlock_building'; building_id: string }
