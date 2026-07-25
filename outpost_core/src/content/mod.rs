@@ -28,7 +28,7 @@ pub use loader::PackLoader;
 pub use registry::ContentRegistry;
 pub use types::{
     BuildingCategory, BuildingDef, CommodityDef, CommodityTier, DefaultAction, DefaultDirectiveDef,
-    Ingredient, Phase, RecipeDef,
+    Ingredient, Phase, RecipeDef, ResourceDef, ResourceKind,
 };
 
 #[cfg(test)]

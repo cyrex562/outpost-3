@@ -363,6 +363,8 @@ fn load_pack(pack_dir: &str) -> Result<ContentRegistry, String> {
     let file_names = [
         "pack.yaml",
         "commodities.yaml",
+        // Colony-local resources — a separate table since issue #304.
+        "resources.yaml",
         "buildings.yaml",
         "recipes.yaml",
     ];

@@ -692,6 +692,8 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
     let file_names = [
         "pack.yaml",
         "commodities.yaml",
+        // Colony-local resources — a separate table since issue #304.
+        "resources.yaml",
         "buildings.yaml",
         "recipes.yaml",
         "default_directives.yaml",
@@ -1616,7 +1618,7 @@ mod tests {
         // No fusion_fuel seeded — the reactor should produce zero power.
         engine.apply(&Command::AdvanceColonySol).unwrap();
         assert_eq!(
-            engine.state.colonies[idx].pool.amount("power"),
+            engine.state.colonies[idx].resources.amount("power"),
             0.0,
             "fusion_reactor_prototype should no longer produce power for free"
         );
@@ -1626,7 +1628,7 @@ mod tests {
             .deposit("fusion_fuel", 100.0);
         engine.apply(&Command::AdvanceColonySol).unwrap();
         assert!(
-            engine.state.colonies[idx].pool.amount("power") > 0.0,
+            engine.state.colonies[idx].resources.amount("power") > 0.0,
             "fusion_reactor_prototype should produce power once fusion_fuel is available"
         );
     }
@@ -1679,8 +1681,10 @@ mod tests {
         engine.apply(&Command::AdvanceColonySol).unwrap();
 
         let pool = &engine.state.colonies[idx].pool;
+        // `power` is a colony resource, not cargo, so it lives in `resources`
+        // rather than the commodity pool (issue #304).
         assert!(
-            pool.amount("power") > 0.0,
+            engine.state.colonies[idx].resources.amount("power") > 0.0,
             "colony_hq should produce power (hq_generate_power)"
         );
         assert!(
@@ -1703,7 +1707,7 @@ mod tests {
              reach the system-wide research pool"
         );
         assert!(
-            engine.state.colonies[idx].pool.amount("research") < 1e-6,
+            engine.state.colonies[idx].resources.amount("research") < 1e-6,
             "research should be drained out of the colony pool, not stockpiled"
         );
 
@@ -1858,7 +1862,7 @@ mod tests {
 
         // No nuclear_fuel seeded — the reactor should produce nothing.
         engine.apply(&Command::AdvanceColonySol).unwrap();
-        assert_eq!(engine.state.colonies[idx].pool.amount("power"), 0.0);
+        assert_eq!(engine.state.colonies[idx].resources.amount("power"), 0.0);
         assert_eq!(
             engine.state.colonies[idx].pool.amount("radioactive_waste"),
             0.0
@@ -1869,7 +1873,7 @@ mod tests {
             .deposit("nuclear_fuel", 100.0);
         engine.apply(&Command::AdvanceColonySol).unwrap();
         assert!(
-            engine.state.colonies[idx].pool.amount("power") > 0.0,
+            engine.state.colonies[idx].resources.amount("power") > 0.0,
             "fission_reactor should produce power once nuclear_fuel is available"
         );
         assert!(
@@ -2412,5 +2416,166 @@ mod tests {
             has_needs_resolved,
             "expected NeedsResolved event after sol advance, got: {result:?}"
         );
+    }
+    /// Colony resources are per-sol, not stockpiled (issue #304).
+    ///
+    /// Before resources existed, `power` and `housing` were ordinary
+    /// commodities and both accumulated without bound: power netted a surplus
+    /// every sol and banked it forever, and housing — a capacity check that
+    /// consumes nothing — gained a whole habitat's worth every sol, so the
+    /// housing need became trivially satisfied after a few turns. This pins the
+    /// steady state that replaced it, and that neither leaks into the tradeable
+    /// commodity pool.
+    #[test]
+    fn colony_resources_hold_steady_each_sol_instead_of_accumulating() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let registry =
+            load_content_pack_from_dir(&root.join("content").join("base")).expect("pack loads");
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Steady".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let cid = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == cid)
+            .unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("habitat_pod", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("colony_hq", 2));
+
+        let mut first: Option<(f64, f64)> = None;
+        for sol in 1..=8 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            let c = &engine.state.colonies[idx];
+            let housing = c.resources.amount("housing");
+            let power = c.resources.amount("power");
+
+            assert!(power > 0.0, "sol {sol}: colony_hq should have made power");
+            assert!(housing > 0.0, "sol {sol}: habitat_pod should offer housing");
+
+            match first {
+                None => first = Some((housing, power)),
+                Some((h0, p0)) => {
+                    assert!(
+                        (housing - h0).abs() < 1e-6,
+                        "sol {sol}: housing drifted from {h0} to {housing} — capacity is \
+                         re-established each sol, it must not accumulate"
+                    );
+                    assert!(
+                        (power - p0).abs() < 1e-6,
+                        "sol {sol}: power drifted from {p0} to {power} — unused power is \
+                         lost each sol, it must not bank"
+                    );
+                }
+            }
+
+            // And none of it leaked into the tradeable pool, where trade could
+            // have shipped it.
+            for id in ["power", "housing", "research"] {
+                assert_eq!(
+                    c.pool.amount(id),
+                    0.0,
+                    "sol {sol}: {id} must not appear in the commodity pool"
+                );
+            }
+        }
+
+        // Research is the exception that proves the drain works: it leaves the
+        // colony each sol and banks in the system-wide pool the tech tree spends.
+        assert!(
+            (engine.state.research_pool.total() - 8.0).abs() < 1e-4,
+            "8 sols of colony_hq's 1 RP/sol trickle should have banked 8 RP, got {}",
+            engine.state.research_pool.total()
+        );
+    }
+    /// Housing must reach the migration model through the real content pack.
+    ///
+    /// Regression test for a bug this refactor introduced and a reviewer caught:
+    /// production began depositing `housing` into `Colony.resources`, but four
+    /// call sites in the migration/attractiveness path still read
+    /// `colony.pool.amount("housing")`. That is permanently `0.0` once the pack
+    /// is loaded, so the housing term of every colony's attractiveness score
+    /// silently evaluated to zero and arrival overcrowding penalties stopped
+    /// firing entirely.
+    ///
+    /// The whole class of bug was invisible because every migration test builds
+    /// a bare `GameEngine` with **no registry**, deposits `housing` into the
+    /// commodity pool by hand, and therefore exercises the pre-#304 path. This
+    /// test loads `content/base` so the registry-driven dispatch is real.
+    #[test]
+    fn housing_reaches_the_migration_model_with_the_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let registry =
+            load_content_pack_from_dir(&root.join("content").join("base")).expect("pack loads");
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Housed".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == *colony_id)
+            .unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("habitat_pod", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("colony_hq", 2));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        // The habitat's capacity landed in the resource store, not the pool.
+        assert!(
+            engine.state.colonies[idx].resources.amount("housing") > 0.0,
+            "habitat_pod should have established housing capacity"
+        );
+        assert_eq!(
+            engine.state.colonies[idx].pool.amount("housing"),
+            0.0,
+            "housing is a colony resource, not commodity stock"
+        );
+
+        // And the migration path can see it: `RunAutoMigration` reads housing to
+        // compute attractiveness. Before the fix this read the commodity pool
+        // and so saw 0.0 no matter how many habitats the colony had.
+        engine
+            .apply(&Command::RunAutoMigration)
+            .expect("auto migration should run against the real pack");
     }
 }

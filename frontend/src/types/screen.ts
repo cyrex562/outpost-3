@@ -25,7 +25,12 @@ export interface BuildingRow {
   always_on: boolean
 }
 
-/** A single commodity row in the stockpile table. */
+/**
+ * A single **tradeable** commodity row in the stockpile table.
+ *
+ * Since issue #304 this never includes power, housing, or research — those are
+ * colony resources (see `ResourceRow`) and are structurally unshippable.
+ */
 export interface StockpileRow {
   /** Content-pack commodity identifier. */
   commodity_id: string
@@ -35,6 +40,25 @@ export interface StockpileRow {
   capacity: number | null
   /** Net change last turn (positive = surplus, negative = deficit). */
   net_per_turn: number
+}
+
+/**
+ * A colony-local resource row (issue #304).
+ *
+ * Not a commodity: these are produced and consumed in place and can never be
+ * traded or shipped. There is no capacity or net/turn because the amount is
+ * this sol's throughput (or standing capacity), cleared before the next sol.
+ */
+export interface ResourceRow {
+  resource_id: string
+  /** Display name from the content pack. */
+  name: string
+  /** Amount produced/available this sol. */
+  amount: number
+  /** `'flow'` = surplus is lost each sol; `'capacity'` = standing capability. */
+  kind: 'flow' | 'capacity' | string
+  /** Unit label for display (`'MW'`, `'slots'`, `'RP'`). */
+  unit: string
 }
 
 /** A single in-progress construction project. */
@@ -62,6 +86,11 @@ export interface ColonyScreenData {
   labour_employed: number
   /** Workforce with no job to go to: available - employed. */
   labour_unemployed: number
+  /**
+   * Colony-local resources this sol (issue #304). Disjoint from `stockpile`,
+   * which is tradeable cargo only.
+   */
+  resources: ResourceRow[]
   buildings: BuildingRow[]
   stockpile: StockpileRow[]
   construction_queue: ConstructionQueueRow[]

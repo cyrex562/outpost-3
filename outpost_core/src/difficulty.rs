@@ -605,8 +605,25 @@ mod tests {
 
         let mut pool_brutal = pool_normal.clone();
 
-        let report_normal = apply_needs_check_scaled(&mut pool_normal, 100.0, &cfg, 1.0);
-        let report_brutal = apply_needs_check_scaled(&mut pool_brutal, 100.0, &cfg, 1.30);
+        // This test's `cfg` names `power`/`housing` but its registry is empty,
+        // so `ColonyStores` routes every need to the commodity pool the deposits
+        // above filled — the pre-#304 shape, which is what the scalar
+        // comparison here is about.
+        let reg = crate::content::ContentRegistry::default();
+        let mut res_normal = crate::colony::ColonyResourcePool::new();
+        let mut res_brutal = crate::colony::ColonyResourcePool::new();
+        let report_normal = apply_needs_check_scaled(
+            &mut crate::colony::ColonyStores::new(&mut pool_normal, &mut res_normal, &reg),
+            100.0,
+            &cfg,
+            1.0,
+        );
+        let report_brutal = apply_needs_check_scaled(
+            &mut crate::colony::ColonyStores::new(&mut pool_brutal, &mut res_brutal, &reg),
+            100.0,
+            &cfg,
+            1.30,
+        );
 
         // Brutal consumption scalar must have drawn more food.
         let food_normal = report_normal
@@ -714,8 +731,10 @@ mod tests {
         pool_normal.deposit("ore", 100.0);
         let mut pool_hard = pool_normal.clone();
 
+        let mut res_normal = crate::colony::ColonyResourcePool::new();
+        let mut res_hard = crate::colony::ColonyResourcePool::new();
         let normal = process_production_scaled(
-            &mut pool_normal,
+            &mut crate::colony::ColonyStores::new(&mut pool_normal, &mut res_normal, &reg),
             &placed,
             10.0,
             &reg,
@@ -730,7 +749,7 @@ mod tests {
             &crate::modifier::DifficultyScalar::new(),
         );
         let hard = process_production_scaled(
-            &mut pool_hard,
+            &mut crate::colony::ColonyStores::new(&mut pool_hard, &mut res_hard, &reg),
             &placed,
             10.0,
             &reg,

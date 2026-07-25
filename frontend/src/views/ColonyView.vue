@@ -20,6 +20,7 @@ import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
 import VitalStatsPanel from '@/components/VitalStatsPanel.vue'
 import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
+import UtilitiesPanel from '@/components/UtilitiesPanel.vue'
 import BuildingsPanel from '@/components/BuildingsPanel.vue'
 import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
 import BuildDialog from '@/components/BuildDialog.vue'
@@ -252,11 +253,13 @@ interface PersistedLayout {
 }
 
 // Bumped to `.v2` because the split shape changed from 2+4 panes to the
-// 3-column (3 + 2 + 2) arrangement (UI-rework PR4); a stale v1 entry would
-// have the wrong number of sizes.
-const STORAGE_KEY = 'outpost3.colony-view.layout.v2'
+// 3-column (3 + 2 + 2) arrangement (UI-rework PR4); a stale entry would have
+// the wrong number of sizes. Bumped to v3 when the left column gained a third
+// pane for the utilities panel (issue #304) — a persisted v2 entry has only two
+// left sizes and would leave the new pane unsized.
+const STORAGE_KEY = 'outpost3.colony-view.layout.v3'
 const DEFAULT_OUTER = [30, 45, 25]
-const DEFAULT_LEFT = [45, 55]
+const DEFAULT_LEFT = [34, 26, 40]
 const DEFAULT_CENTER = [45, 55]
 
 function loadPersistedLayout(): PersistedLayout {
@@ -266,7 +269,7 @@ function loadPersistedLayout(): PersistedLayout {
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<PersistedLayout>
     const outer = Array.isArray(p.outer) && p.outer.length === 3 ? p.outer : DEFAULT_OUTER
-    const left = Array.isArray(p.left) && p.left.length === 2 ? p.left : DEFAULT_LEFT
+    const left = Array.isArray(p.left) && p.left.length === 3 ? p.left : DEFAULT_LEFT
     const center = Array.isArray(p.center) && p.center.length === 2 ? p.center : DEFAULT_CENTER
     return { outer, left, center }
   } catch {
@@ -347,7 +350,13 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                   :labour-unemployed="screen?.labour_unemployed ?? 0"
                 />
               </Pane>
+              <!-- Utilities sit between vitals and commodities (issue #304):
+                   power/housing/research are colony-local and unshippable, so
+                   they must not read as stock a hauler could collect. -->
               <Pane :size="leftSizes[1]" min-size="10">
+                <UtilitiesPanel :resources="screen ? screen.resources : null" />
+              </Pane>
+              <Pane :size="leftSizes[2]" min-size="10">
                 <CommoditiesPanel :stockpile="screen ? screen.stockpile : null" />
               </Pane>
             </Splitpanes>

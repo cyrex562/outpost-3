@@ -12,7 +12,7 @@
 //! - `stability >= growth_threshold` + housing available → population grows.
 //! - `stability < decline_threshold` → growth stalls, then population loss.
 
-use crate::colony::ColonyPool;
+use crate::colony::ColonyStores;
 
 // ─── Need definitions ─────────────────────────────────────────────────────────
 
@@ -212,10 +212,16 @@ pub fn stability_delta_from_satisfaction(
     gain - loss
 }
 
-/// Apply the per-turn needs check to `pool`, consuming commodities and returning a [`NeedsReport`].
+/// Apply the per-turn needs check to `stores`, consuming what is needed and
+/// returning a [`NeedsReport`].
+///
+/// A need may name either a tradeable commodity (`food_ration`, `water`) or a
+/// colony-local resource (`power`, `housing`) — [`ColonyStores`] routes each to
+/// the store that owns it (issue #304), so needs authoring doesn't have to care
+/// which kind an id is.
 ///
 /// Housing needs are **not** consumed — they are a capacity check only.
-/// For per-capita needs the pool is drawn down by `required`; if the pool
+/// For per-capita needs the store is drawn down by `required`; if it
 /// cannot cover the full demand, only the available amount is consumed and the
 /// satisfaction ratio reflects the shortfall.
 ///
@@ -223,11 +229,11 @@ pub fn stability_delta_from_satisfaction(
 /// the population's `stability` field to `[0.0, 1.0]`.
 #[must_use]
 pub fn apply_needs_check(
-    pool: &mut ColonyPool,
+    stores: &mut ColonyStores<'_>,
     population: f64,
     config: &NeedsConfig,
 ) -> NeedsReport {
-    apply_needs_check_scaled(pool, population, config, 1.0)
+    apply_needs_check_scaled(stores, population, config, 1.0)
 }
 
 /// Same as [`apply_needs_check`] but multiplies per-capita draws by
@@ -235,7 +241,7 @@ pub fn apply_needs_check(
 /// #161). Housing requirements are unaffected.
 #[must_use]
 pub fn apply_needs_check_scaled(
-    pool: &mut ColonyPool,
+    stores: &mut ColonyStores<'_>,
     population: f64,
     config: &NeedsConfig,
     consumption_scalar: f32,
@@ -255,14 +261,14 @@ pub fn apply_needs_check_scaled(
         } else {
             match &def.scaling {
                 NeedScaling::PerCapita { .. } => {
-                    let consumed = pool.withdraw(&def.commodity_id, required);
+                    let consumed = stores.withdraw(&def.commodity_id, required);
                     #[allow(clippy::cast_possible_truncation)]
                     let sat = (consumed / required).clamp(0.0, 1.0) as f32;
                     (consumed, sat)
                 }
                 NeedScaling::Housing => {
                     // Housing is a capacity check — nothing consumed.
-                    let capacity = pool.amount(&def.commodity_id);
+                    let capacity = stores.amount(&def.commodity_id);
                     #[allow(clippy::cast_possible_truncation)]
                     let sat = (capacity / required).clamp(0.0, 1.0) as f32;
                     (0.0, sat)
@@ -331,7 +337,44 @@ pub fn apply_population_dynamics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::colony::ColonyPool;
+    use crate::colony::{ColonyPool, ColonyResourcePool, ColonyStores};
+    use crate::content::ContentRegistry;
+
+    // ── Bare-pool test shims (issue #304) ────────────────────────────────────
+    //
+    // These shadow the module's `apply_needs_check` / `apply_needs_check_scaled`,
+    // which now take a `ColonyStores` view spanning a colony's commodity pool
+    // and its resource pool.
+    //
+    // The tests below build their pools directly and assert on satisfaction
+    // maths, not on which store an id lives in. Routing every id to the
+    // commodity pool (an empty registry declares no resources) keeps them
+    // testing exactly what they did before. Store-routing itself is covered by
+    // `colony::stores` tests and by the engine-level tests in lib.rs.
+
+    fn apply_needs_check(
+        pool: &mut ColonyPool,
+        population: f64,
+        config: &NeedsConfig,
+    ) -> NeedsReport {
+        apply_needs_check_scaled(pool, population, config, 1.0)
+    }
+
+    fn apply_needs_check_scaled(
+        pool: &mut ColonyPool,
+        population: f64,
+        config: &NeedsConfig,
+        consumption_scalar: f32,
+    ) -> NeedsReport {
+        let registry = ContentRegistry::default();
+        let mut resources = ColonyResourcePool::new();
+        super::apply_needs_check_scaled(
+            &mut ColonyStores::new(pool, &mut resources, &registry),
+            population,
+            config,
+            consumption_scalar,
+        )
+    }
 
     /// Build a pool with enough food, water, oxygen, and power for `pop` colonists.
     fn full_supply_pool(pop: f64, housing_slots: f64) -> ColonyPool {

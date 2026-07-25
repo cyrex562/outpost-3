@@ -1944,6 +1944,13 @@ impl GameEngine {
                     // When stability ≤ emigration_stability_floor auto-trigger
                     // a small outflow even without an open gate.
                     if let Some(config) = self.state.needs_config.clone() {
+                        // Which store `housing` lives in is content-driven, so
+                        // resolve it once here rather than per colony (issue #304).
+                        let housing_is_resource = self
+                            .state
+                            .registry
+                            .as_ref()
+                            .is_some_and(|r| r.is_resource("housing"));
                         let colony_ids: Vec<ColonyId> =
                             self.state.colonies.iter().map(|c| c.id).collect();
                         let attractiveness: Vec<ColonyAttractiveness> = self
@@ -1953,7 +1960,9 @@ impl GameEngine {
                             .zip(self.state.populations.iter())
                             .map(|(colony, pop)| {
                                 #[allow(clippy::cast_possible_truncation)]
-                                let housing = colony.pool.amount("housing") as f32;
+                                let housing =
+                                    colony_store_amount(colony, "housing", housing_is_resource)
+                                        as f32;
                                 compute_attractiveness(
                                     colony.id,
                                     pop.stability,
@@ -2011,6 +2020,12 @@ impl GameEngine {
 
                     // ── Tick and resolve pending migrations ───────────────────
                     {
+                        // Which store `housing` lives in is content-driven (#304).
+                        let housing_is_resource = self
+                            .state
+                            .registry
+                            .as_ref()
+                            .is_some_and(|r| r.is_resource("housing"));
                         let mut arrived: Vec<PendingMigration> = Vec::new();
                         self.state.pending_migrations.retain_mut(|m| {
                             if m.tick() {
@@ -2025,7 +2040,11 @@ impl GameEngine {
                                 continue;
                             };
                             #[allow(clippy::cast_possible_truncation)]
-                            let housing = self.state.colonies[to_idx].pool.amount("housing") as f32;
+                            let housing = colony_store_amount(
+                                &self.state.colonies[to_idx],
+                                "housing",
+                                housing_is_resource,
+                            ) as f32;
                             let current_pop = self.state.populations[to_idx].count;
                             let outcome = resolve_arrival(mig, housing, current_pop);
                             self.state.populations[to_idx].count += outcome.arrived;
@@ -2097,6 +2116,19 @@ impl GameEngine {
                         .state
                         .difficulty_scalar
                         .scalar_for(&modifier::ModifiableQuantity::ResourceConsumption);
+                    // Needs may name colony resources (power, housing) as well
+                    // as tradeable commodities, so the store view needs the
+                    // registry to route each id (issue #304). A registry that
+                    // isn't loaded cannot have declared any resources, so the
+                    // empty default makes every need read the commodity pool —
+                    // exactly the pre-#304 behaviour.
+                    //
+                    // Borrowed, not cloned: CLAUDE.md calls out the per-turn
+                    // needs pipeline as a path to keep allocation-free, and
+                    // `registry` is a different field from `colonies`, so the
+                    // immutable borrow coexists with the mutable one below.
+                    let empty_registry = content::ContentRegistry::default();
+                    let needs_registry = self.state.registry.as_ref().unwrap_or(&empty_registry);
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -2105,7 +2137,11 @@ impl GameEngine {
                     {
                         let population_count = f64::from(pop.count);
                         let report = apply_needs_check_scaled(
-                            &mut colony.pool,
+                            &mut colony::ColonyStores::new(
+                                &mut colony.pool,
+                                &mut colony.resources,
+                                needs_registry,
+                            ),
                             population_count,
                             &config,
                             consumption_scalar,
@@ -2140,6 +2176,27 @@ impl GameEngine {
                             population_delta: scaled_pop_delta,
                         });
                     }
+                }
+
+                // ── Step 2b: Reset colony resources ─────────────────────────
+                // Colony-local resources are per-sol, not stockpiled (issue
+                // #304): power not drawn this sol is lost, and housing is a
+                // standing capacity its habitats re-establish rather than a
+                // stock that grows. As ordinary commodities both accumulated
+                // without bound.
+                //
+                // The clear sits *between* needs and production, which is
+                // load-bearing in both directions. Needs (Step 2) draw on what
+                // production banked last sol, so clearing any earlier would
+                // starve the colony instantly. And production (Step 3) runs
+                // after, so once the sol finishes the pool still holds this
+                // sol's figures — that is what the colony screen reports and
+                // what makes the values observable at all.
+                for colony in &mut self.state.colonies {
+                    colony.resources.clear();
+                }
+                for out in &mut self.state.outposts {
+                    out.resources.clear();
                 }
 
                 // ── Step 3: Production ──────────────────────────────────────
@@ -2188,7 +2245,11 @@ impl GameEngine {
                         colony.pool.reset_deltas();
                         let deposits = colony_deposits.get(&colony.id).and_then(Option::as_ref);
                         let prod_outcome = colony::process_production_scaled(
-                            &mut colony.pool,
+                            &mut colony::ColonyStores::new(
+                                &mut colony.pool,
+                                &mut colony.resources,
+                                registry,
+                            ),
                             &placed,
                             labor,
                             registry,
@@ -2249,7 +2310,11 @@ impl GameEngine {
                         let empty_deposits = std::collections::HashMap::new();
                         let deposits = outpost_deposits.get(&out.id).unwrap_or(&empty_deposits);
                         let prod_outcome = colony::process_production_scaled(
-                            &mut out.pool,
+                            &mut colony::ColonyStores::new(
+                                &mut out.pool,
+                                &mut out.resources,
+                                registry,
+                            ),
                             &placed,
                             outpost::OUTPOST_BASE_LABOR,
                             registry,
@@ -2282,13 +2347,15 @@ impl GameEngine {
                 }
 
                 // ── Step 4: Research aggregation ────────────────────────────
-                // Drain `research` from every colony pool into the system pool.
-                // This happens after production so that labs which ran this turn
-                // contribute their output immediately.
+                // Drain the `research` colony resource into the system pool
+                // (issue #304 moved it out of the commodity pool). This happens
+                // after production so that labs which ran this turn contribute
+                // their output immediately, and before the end-of-sol resource
+                // reset so nothing is discarded before it is banked.
                 for colony in &mut self.state.colonies {
-                    let produced = colony.pool.amount("research");
+                    let produced = colony.resources.amount("research");
                     if produced > 0.0 {
-                        colony.pool.withdraw("research", produced);
+                        colony.resources.withdraw("research", produced);
                         #[allow(clippy::cast_possible_truncation)]
                         let produced_f32 = produced as f32;
                         self.state.research_pool.deposit(produced_f32);
@@ -2296,6 +2363,21 @@ impl GameEngine {
                             colony_id: colony.id,
                             amount: produced_f32,
                         });
+                    }
+                }
+                // Outposts run the same production pipeline and have their own
+                // resource store, so a lab built at one has to be drained too —
+                // otherwise its output was silently discarded by the end-of-sol
+                // reset. `Event::ResearchProduced` carries a `colony_id`, so
+                // there is no event for outpost research to report under; the RP
+                // still reaches the pool, which is what the tech tree spends.
+                for out in &mut self.state.outposts {
+                    let produced = out.resources.amount("research");
+                    if produced > 0.0 {
+                        out.resources.withdraw("research", produced);
+                        #[allow(clippy::cast_possible_truncation)]
+                        let produced_f32 = produced as f32;
+                        self.state.research_pool.deposit(produced_f32);
                     }
                 }
 
@@ -3816,6 +3898,12 @@ impl GameEngine {
             }
 
             Command::RunAutoMigration => {
+                // Which store `housing` lives in is content-driven (issue #304).
+                let housing_is_resource = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .is_some_and(|r| r.is_resource("housing"));
                 // Compute attractiveness for every colony.
                 let attractiveness: Vec<ColonyAttractiveness> = self
                     .state
@@ -3824,7 +3912,8 @@ impl GameEngine {
                     .zip(self.state.populations.iter())
                     .map(|(colony, pop)| {
                         #[allow(clippy::cast_possible_truncation)]
-                        let housing = colony.pool.amount("housing") as f32;
+                        let housing =
+                            colony_store_amount(colony, "housing", housing_is_resource) as f32;
                         compute_attractiveness(
                             colony.id,
                             pop.stability,
@@ -3864,6 +3953,13 @@ impl GameEngine {
             Command::ResolvePendingMigrations => {
                 let mut events = Vec::new();
 
+                // Which store `housing` lives in is content-driven (issue #304).
+                let housing_is_resource = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .is_some_and(|r| r.is_resource("housing"));
+
                 // Tick all pending migrations; collect those that arrive.
                 let mut arrived = Vec::new();
                 self.state.pending_migrations.retain_mut(|m| {
@@ -3881,7 +3977,11 @@ impl GameEngine {
                     };
 
                     #[allow(clippy::cast_possible_truncation)]
-                    let housing = self.state.colonies[to_idx].pool.amount("housing") as f32;
+                    let housing = colony_store_amount(
+                        &self.state.colonies[to_idx],
+                        "housing",
+                        housing_is_resource,
+                    ) as f32;
                     let current_pop = self.state.populations[to_idx].count;
                     let outcome = resolve_arrival(mig, housing, current_pop);
 
@@ -4756,9 +4856,22 @@ impl GameEngine {
                         }
                     })
                     .collect();
+                // A save written before issue #304 has `power`/`housing`/
+                // `research` entries sitting in the commodity pool. They are
+                // never topped up again (production routes them to
+                // `Colony.resources` now), but they would otherwise linger in
+                // this panel forever as phantom stock. Filtering to ids the
+                // pack actually declares as commodities drops them, and keeps
+                // any future leak out of the tradeable view too.
                 let stockpile = c
                     .pool
                     .commodity_ids()
+                    .filter(|cid| {
+                        self.state
+                            .registry
+                            .as_ref()
+                            .is_none_or(|reg| reg.commodity(cid).is_some())
+                    })
                     .map(|cid| {
                         let cap = c.pool.capacity(cid);
                         ui::StockpileRow {
@@ -4796,6 +4909,31 @@ impl GameEngine {
                 });
                 let labour_employed = labour_demanded.min(labour_available_now);
 
+                // Colony-local resources this sol (issue #304). Sorted by id so
+                // the panel doesn't reorder between polls — HashMap iteration
+                // order isn't stable.
+                let mut resources: Vec<ui::ResourceRow> = c
+                    .resources
+                    .iter()
+                    .map(|(id, amount)| {
+                        let def = self.state.registry.as_ref().and_then(|r| r.resource(id));
+                        ui::ResourceRow {
+                            resource_id: id.to_owned(),
+                            name: def.map_or_else(|| id.to_owned(), |d| d.name.clone()),
+                            amount,
+                            kind: def.map_or_else(
+                                || "flow".to_owned(),
+                                |d| match d.kind {
+                                    content::ResourceKind::Flow => "flow".to_owned(),
+                                    content::ResourceKind::Capacity => "capacity".to_owned(),
+                                },
+                            ),
+                            unit: def.map(|d| d.unit.clone()).unwrap_or_default(),
+                        }
+                    })
+                    .collect();
+                resources.sort_by(|a, b| a.resource_id.cmp(&b.resource_id));
+
                 Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
                     colony_id: c.id,
                     name: c.name.clone(),
@@ -4813,6 +4951,7 @@ impl GameEngine {
                     labour_demanded,
                     labour_employed,
                     labour_unemployed: (labour_available_now - labour_employed).max(0.0),
+                    resources,
                     buildings,
                     stockpile,
                     construction_queue,
@@ -5524,6 +5663,25 @@ impl GameEngine {
             }
         }
         any && all_concurrent
+    }
+}
+
+/// Read `id` from whichever of a colony's two stores owns it (issue #304).
+///
+/// `id_is_resource` is hoisted by the caller (a plain `bool`, so it can be
+/// computed before a loop that holds a mutable borrow on `state.colonies`).
+///
+/// Keeping this rule in one place is load-bearing: migration and the needs
+/// pipeline must agree about where `housing` lives. When they briefly didn't —
+/// needs dispatching via the registry while migration read `resources`
+/// unconditionally — the housing term of the attractiveness score silently
+/// evaluated to zero for every colony, and arrival overcrowding penalties
+/// stopped firing altogether.
+fn colony_store_amount(colony: &colony::Colony, id: &str, id_is_resource: bool) -> f64 {
+    if id_is_resource {
+        colony.resources.amount(id)
+    } else {
+        colony.pool.amount(id)
     }
 }
 
@@ -6973,16 +7131,16 @@ mod tests {
             weight: 1.0,
         });
 
-        reg.insert_commodity(crate::content::types::CommodityDef {
+        // `research` is a colony resource, not a commodity (issue #304): the
+        // sol pipeline drains it out of `Colony.resources` into the system-wide
+        // research pool, so declaring it here as a commodity would leave the
+        // lab's output sitting in the wrong store and the drain finding nothing.
+        reg.insert_resource(crate::content::types::ResourceDef {
             id: "research".into(),
             name: "Research".into(),
             description: String::new(),
-            category: "virtual".into(),
-            phase: crate::content::types::Phase::Solid,
-            base_value: 0.0,
-            tradeable: false,
-            tier: crate::content::types::CommodityTier::Advanced,
-            weight: 0.0,
+            kind: crate::content::types::ResourceKind::Flow,
+            unit: "RP".into(),
         });
 
         reg.insert_recipe(RecipeDef {

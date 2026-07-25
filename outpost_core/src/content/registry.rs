@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::types::{
     BuildingDef, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint, PackManifest,
-    RecipeDef, StarSystemDef, SupplyPackage,
+    RecipeDef, ResourceDef, StarSystemDef, SupplyPackage,
 };
 use crate::expedition::AnomalyDef;
 
@@ -18,6 +18,10 @@ pub struct ContentRegistry {
     pub(super) manifest: PackManifest,
     /// All commodity definitions, keyed by id.
     pub(super) commodities: HashMap<String, CommodityDef>,
+    /// All colony-resource definitions, keyed by id (issue #304). Disjoint from
+    /// `commodities`: an id is either tradeable cargo or a colony-local
+    /// resource, never both.
+    pub(super) resources: HashMap<String, ResourceDef>,
     /// All recipe definitions, keyed by id.
     pub(super) recipes: HashMap<String, RecipeDef>,
     /// All building definitions, keyed by id.
@@ -39,6 +43,7 @@ impl ContentRegistry {
     pub fn merge(&mut self, other: ContentRegistry) {
         self.manifest = other.manifest;
         self.commodities.extend(other.commodities);
+        self.resources.extend(other.resources);
         self.recipes.extend(other.recipes);
         self.buildings.extend(other.buildings);
         self.orbital_blueprints.extend(other.orbital_blueprints);
@@ -58,6 +63,25 @@ impl ContentRegistry {
     #[must_use]
     pub fn commodity(&self, id: &str) -> Option<&CommodityDef> {
         self.commodities.get(id)
+    }
+
+    /// Look up a colony resource by id (issue #304).
+    #[must_use]
+    pub fn resource(&self, id: &str) -> Option<&ResourceDef> {
+        self.resources.get(id)
+    }
+
+    /// All colony resources as an iterator.
+    pub fn resources(&self) -> impl Iterator<Item = &ResourceDef> {
+        self.resources.values()
+    }
+
+    /// Whether `id` names a colony-local resource rather than a tradeable
+    /// commodity. This is the single dispatch point deciding which pool an
+    /// ingredient or need reads from.
+    #[must_use]
+    pub fn is_resource(&self, id: &str) -> bool {
+        self.resources.contains_key(id)
     }
 
     /// All commodities as an iterator.
@@ -95,6 +119,11 @@ impl ContentRegistry {
     /// Insert or replace a recipe definition (used in tests and harness tooling).
     pub fn insert_recipe(&mut self, def: RecipeDef) {
         self.recipes.insert(def.id.clone(), def);
+    }
+
+    /// Insert or replace a colony-resource definition (tests and harness tooling).
+    pub fn insert_resource(&mut self, def: super::types::ResourceDef) {
+        self.resources.insert(def.id.clone(), def);
     }
 
     /// Insert or replace a commodity definition (used in tests and harness tooling).
