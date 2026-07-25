@@ -10128,6 +10128,7 @@ mod tests {
                     },
                     effective_scale: 0.6,
                 }],
+                line_results: vec![],
             },
         );
 

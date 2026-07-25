@@ -123,9 +123,37 @@ pub struct BuildingProductionResult {
     /// working unchanged.
     #[serde(default)]
     pub concurrent_recipe_ids: Vec<String>,
-    /// Scale factor applied to all inputs and outputs, in `[0.0, 1.0]`.
+    /// Scale factor for the building as a whole, in `[0.0, 1.0]`.
+    ///
+    /// Since #272 lines throttle independently, so this is the **worst** line's
+    /// scale — a summary that still answers "is anything wrong here?" correctly
+    /// and keeps pre-#272 consumers working. Read [`Self::line_results`] for what
+    /// each line actually achieved.
     pub scale: f64,
-    /// Shortfalls that reduced the scale below 1.0, if any.
+    /// Every line's shortfalls, flattened. See [`Self::line_results`] for which
+    /// line each belongs to.
+    pub shortfalls: Vec<ProductionShortfall>,
+    /// Per-line outcome (issue #272), one entry per running production line.
+    ///
+    /// Purely additive: `#[serde(default)]` so pre-#272 saves load, and the
+    /// fields above keep their old meanings for consumers that don't know about
+    /// lines.
+    #[serde(default)]
+    pub line_results: Vec<LineProductionResult>,
+}
+
+/// What one production line achieved this turn (issue #272).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LineProductionResult {
+    /// Authored line name; `None` is the building's default line.
+    pub line: Option<String>,
+    /// `true` for a line derived from a `concurrent` recipe.
+    pub always_on: bool,
+    /// Recipe that ran on this line.
+    pub recipe_id: String,
+    /// This line's own scale, in `[0.0, 1.0]`.
+    pub scale: f64,
+    /// Shortfalls that held this line back.
     pub shortfalls: Vec<ProductionShortfall>,
 }
 
@@ -155,16 +183,24 @@ pub struct ProductionStepOutcome {
 /// Holds a building's pre-computed scale before any pool mutations occur.
 struct PendingProduction<'a> {
     building_type: &'a str,
-    recipe: Option<&'a RecipeDef>,
-    /// Every `RecipeDef::concurrent` recipe this building type has — always
-    /// runs alongside `recipe`, sharing the same `scale`. See this module's
-    /// doc comment.
-    concurrent_recipes: Vec<&'a RecipeDef>,
+    /// One entry per production line, each with its **own** scale (issue #272).
+    lines: Vec<PendingLine<'a>>,
     building_category: BuildingCategory,
     maintenance: &'a [Ingredient],
     /// Effective per-sol maintenance multiplier
     /// (`MaintenanceConsumption` scalar; `0.0` when disabled).
     maintenance_multiplier: f64,
+    /// Scale upkeep is charged at. The busiest line's scale when the building
+    /// runs anything (a building doing nothing pays nothing, as before); for a
+    /// maintenance-only building, its own affordability ratio.
+    maintenance_scale: f64,
+}
+
+/// One line's resolved recipe and its own scale for this turn (issue #272).
+struct PendingLine<'a> {
+    line: Option<String>,
+    always_on: bool,
+    recipe: &'a RecipeDef,
     scale: f64,
     shortfalls: Vec<ProductionShortfall>,
 }
@@ -353,9 +389,10 @@ pub fn process_production_scaled(
         let Some(bdef) = registry.building(building_type) else {
             continue; // unknown building type — skip
         };
-        let recipe = recipe_for_building(building_type, active_recipes, registry);
-        let concurrent_recipes = concurrent_recipes_for_building(building_type, registry);
-        let has_any_recipe = recipe.is_some() || !concurrent_recipes.is_empty();
+        // Each line throttles on its own inputs (issue #272), so a starved
+        // smelting line no longer drags the machining line beside it down.
+        let building_lines = lines_for_building(building_type, active_recipes, registry);
+        let has_any_recipe = !building_lines.is_empty();
         let has_maintenance = maintenance_enabled && !bdef.maintenance.is_empty();
 
         // Buildings with neither a recipe nor an active maintenance list stay
@@ -364,23 +401,15 @@ pub fn process_production_scaled(
             continue;
         }
 
-        // Combined per-commodity demand (pick-one recipe inputs + every
-        // concurrent recipe's inputs + maintenance) — see this module's doc
-        // comment on why a multi-function building shares one scale.
-        let (input_ratio, tight_commodity, tight_is_maintenance) = compute_effective_input_ratio(
-            stores,
-            recipe,
-            &concurrent_recipes,
-            if has_maintenance {
-                bdef.maintenance.as_slice()
-            } else {
-                &[]
-            },
-            maintenance_multiplier,
-        );
+        let maintenance_slice = if has_maintenance {
+            bdef.maintenance.as_slice()
+        } else {
+            &[][..]
+        };
 
         // Power/labor ratios only apply to recipe-running buildings. A pure
         // maintenance-only building doesn't consume labour or drive brownouts.
+        // Both are computed colony-wide, so they apply to every line equally.
         let (power_ratio, applies_labor) = if has_any_recipe {
             let pr = if bdef.category == BuildingCategory::Power {
                 1.0
@@ -393,69 +422,112 @@ pub fn process_production_scaled(
         };
         let effective_labor_ratio = if applies_labor { labor_ratio } else { 1.0 };
 
-        // Deposit gating (issue #239) — only applies to deposit-gated
-        // recipes; inert (ratio 1.0) for everything else.
-        let (deposit_ratio, deposit_tight) =
-            compute_deposit_ratio(recipe, &concurrent_recipes, deposit_richness);
+        let mut pending_lines: Vec<PendingLine<'_>> = Vec::new();
 
-        // Overall scale factor.
-        let scale = input_ratio
-            .min(power_ratio)
-            .min(effective_labor_ratio)
-            .min(deposit_ratio)
-            .max(0.0);
+        // A maintenance-only building still needs an entry so its upkeep is
+        // charged; it just has no lines to run.
+        for line in &building_lines {
+            // Per-line demand: this line's own recipe inputs, pooled with the
+            // building's maintenance. Maintenance is pooled into every line
+            // rather than split between them because it is a building-level
+            // upkeep that competes with whatever each line is trying to draw —
+            // and for a building with a single line (every shipped building
+            // today) that makes this identical to the pre-#272 calculation.
+            // Upkeep is still *withdrawn* only once, below.
+            let (input_ratio, tight_commodity, tight_is_maintenance) =
+                compute_effective_input_ratio(
+                    stores,
+                    Some(line.selected),
+                    &[],
+                    maintenance_slice,
+                    maintenance_multiplier,
+                );
 
-        // Record shortfalls. Maintenance-only tight constraints report as
-        // `MaintenanceShort`; shared input+maintenance constraints stay as
-        // `InputShort` for backwards compatibility with pre-#180 events.
-        let mut shortfalls: Vec<ProductionShortfall> = Vec::new();
+            // Deposit gating (issue #239) — only applies to deposit-gated
+            // recipes; inert (ratio 1.0) for everything else.
+            let (deposit_ratio, deposit_tight) =
+                compute_deposit_ratio(Some(line.selected), &[], deposit_richness);
 
-        if input_ratio < 1.0 - 1e-9 {
-            let commodity_id = tight_commodity.unwrap_or_default();
-            let reason = if tight_is_maintenance {
-                ShortfallReason::MaintenanceShort { commodity_id }
-            } else {
-                ShortfallReason::InputShort { commodity_id }
-            };
-            shortfalls.push(ProductionShortfall {
-                reason,
-                effective_scale: input_ratio,
+            let scale = input_ratio
+                .min(power_ratio)
+                .min(effective_labor_ratio)
+                .min(deposit_ratio)
+                .max(0.0);
+
+            // Record shortfalls. Maintenance-only tight constraints report as
+            // `MaintenanceShort`; shared input+maintenance constraints stay as
+            // `InputShort` for backwards compatibility with pre-#180 events.
+            let mut shortfalls: Vec<ProductionShortfall> = Vec::new();
+            if input_ratio < 1.0 - 1e-9 {
+                let commodity_id = tight_commodity.unwrap_or_default();
+                let reason = if tight_is_maintenance {
+                    ShortfallReason::MaintenanceShort { commodity_id }
+                } else {
+                    ShortfallReason::InputShort { commodity_id }
+                };
+                shortfalls.push(ProductionShortfall {
+                    reason,
+                    effective_scale: input_ratio,
+                });
+            }
+            if power_ratio < 1.0 - 1e-9 {
+                shortfalls.push(ProductionShortfall {
+                    reason: ShortfallReason::PowerBrownout,
+                    effective_scale: power_ratio,
+                });
+            }
+            if deposit_ratio < 1.0 - 1e-9 {
+                shortfalls.push(ProductionShortfall {
+                    reason: ShortfallReason::DepositShort {
+                        commodity_id: deposit_tight.unwrap_or_default(),
+                    },
+                    effective_scale: deposit_ratio,
+                });
+            }
+            if effective_labor_ratio < 1.0 - 1e-9 {
+                shortfalls.push(ProductionShortfall {
+                    reason: ShortfallReason::LaborShort,
+                    effective_scale: effective_labor_ratio,
+                });
+            }
+
+            pending_lines.push(PendingLine {
+                line: line.line.clone(),
+                always_on: line.always_on,
+                recipe: line.selected,
+                scale,
+                shortfalls,
             });
         }
-        if power_ratio < 1.0 - 1e-9 {
-            shortfalls.push(ProductionShortfall {
-                reason: ShortfallReason::PowerBrownout,
-                effective_scale: power_ratio,
-            });
-        }
-        if deposit_ratio < 1.0 - 1e-9 {
-            shortfalls.push(ProductionShortfall {
-                reason: ShortfallReason::DepositShort {
-                    commodity_id: deposit_tight.unwrap_or_default(),
-                },
-                effective_scale: deposit_ratio,
-            });
-        }
-        if effective_labor_ratio < 1.0 - 1e-9 {
-            shortfalls.push(ProductionShortfall {
-                reason: ShortfallReason::LaborShort,
-                effective_scale: effective_labor_ratio,
-            });
-        }
+
+        // Upkeep is charged once for the building, at the busiest line's scale —
+        // a building that produced nothing pays nothing, matching pre-#272
+        // behaviour where a zero scale skipped maintenance entirely. A
+        // maintenance-only building has no lines, so it falls back to its own
+        // affordability ratio.
+        let maintenance_scale = if has_any_recipe {
+            pending_lines
+                .iter()
+                .map(|l| l.scale)
+                .fold(0.0_f64, f64::max)
+        } else {
+            let (ratio, _, _) = compute_effective_input_ratio(
+                stores,
+                None,
+                &[],
+                maintenance_slice,
+                maintenance_multiplier,
+            );
+            ratio.max(0.0)
+        };
 
         pending.push(PendingProduction {
             building_type,
-            recipe,
-            concurrent_recipes,
+            lines: pending_lines,
             building_category: bdef.category.clone(),
-            maintenance: if has_maintenance {
-                bdef.maintenance.as_slice()
-            } else {
-                &[]
-            },
+            maintenance: maintenance_slice,
             maintenance_multiplier,
-            scale,
-            shortfalls,
+            maintenance_scale,
         });
     }
 
@@ -463,60 +535,97 @@ pub fn process_production_scaled(
     let output_multiplier = f64::from(productivity_multiplier.max(0.0));
     let mut building_results: Vec<BuildingProductionResult> = Vec::new();
     for p in pending {
-        // Every simultaneously-running recipe (the pick-one recipe, if any,
-        // plus every concurrent one) shares `p.scale` — see this module's
-        // doc comment.
-        if p.scale > 1e-9 {
-            let running_recipes = p
-                .recipe
-                .into_iter()
-                .chain(p.concurrent_recipes.iter().copied());
-            for recipe in running_recipes {
-                for ingredient in &recipe.inputs {
-                    stores.withdraw(&ingredient.id, ingredient.quantity * p.scale);
-                }
-                for ingredient in &recipe.outputs {
-                    let commodity_category = registry
-                        .commodity(&ingredient.id)
-                        .map(|c| c.category.as_str());
-                    let category = yield_category_for(&p.building_category, commodity_category);
-                    let category_mult = f64::from(crate::system::category_modifier(
-                        category_modifiers,
-                        category,
-                    ));
-                    let tech_mult = f64::from(crate::modifier::resolve(
-                        1.0,
-                        &crate::modifier::ModifiableQuantity::ProductionRate(
-                            tech_bonus_category_key(category).to_string(),
-                        ),
-                        modifier_accumulator,
-                        difficulty_scalar,
-                    ));
-                    stores.deposit(
-                        &ingredient.id,
-                        ingredient.quantity
-                            * p.scale
-                            * output_multiplier
-                            * category_mult
-                            * tech_mult,
-                    );
-                }
+        // Each line applies at its OWN scale (issue #272) — that independence
+        // is the point of lines.
+        for line in &p.lines {
+            if line.scale <= 1e-9 {
+                continue;
             }
-            for ingredient in p.maintenance {
-                stores.withdraw(
+            for ingredient in &line.recipe.inputs {
+                stores.withdraw(&ingredient.id, ingredient.quantity * line.scale);
+            }
+            for ingredient in &line.recipe.outputs {
+                let commodity_category = registry
+                    .commodity(&ingredient.id)
+                    .map(|c| c.category.as_str());
+                let category = yield_category_for(&p.building_category, commodity_category);
+                let category_mult = f64::from(crate::system::category_modifier(
+                    category_modifiers,
+                    category,
+                ));
+                let tech_mult = f64::from(crate::modifier::resolve(
+                    1.0,
+                    &crate::modifier::ModifiableQuantity::ProductionRate(
+                        tech_bonus_category_key(category).to_string(),
+                    ),
+                    modifier_accumulator,
+                    difficulty_scalar,
+                ));
+                stores.deposit(
                     &ingredient.id,
-                    ingredient.quantity * p.maintenance_multiplier * p.scale,
+                    ingredient.quantity
+                        * line.scale
+                        * output_multiplier
+                        * category_mult
+                        * tech_mult,
                 );
             }
         }
-        let recipe_id = p.recipe.map(|r| r.id.clone()).unwrap_or_default();
-        let concurrent_recipe_ids = p.concurrent_recipes.iter().map(|r| r.id.clone()).collect();
+        // Upkeep is a building-level cost, charged once regardless of how many
+        // lines ran — charging it per line would multiply it by the line count.
+        if p.maintenance_scale > 1e-9 {
+            for ingredient in p.maintenance {
+                stores.withdraw(
+                    &ingredient.id,
+                    ingredient.quantity * p.maintenance_multiplier * p.maintenance_scale,
+                );
+            }
+        }
+
+        // `recipe_id` / `concurrent_recipe_ids` / `scale` keep their pre-#272
+        // meanings so existing consumers are unaffected: the default line's
+        // selection, the always-on recipes, and a single headline scale. With
+        // independent lines a single scale is necessarily a summary — the
+        // *worst* line, so "is anything wrong here?" still answers correctly.
+        // `line_results` carries the real per-line detail.
+        let recipe_id = p
+            .lines
+            .iter()
+            .find(|l| !l.always_on && l.line.is_none())
+            .map(|l| l.recipe.id.clone())
+            .unwrap_or_default();
+        let concurrent_recipe_ids = p
+            .lines
+            .iter()
+            .filter(|l| l.always_on)
+            .map(|l| l.recipe.id.clone())
+            .collect();
+        let scale = p
+            .lines
+            .iter()
+            .map(|l| l.scale)
+            .fold(f64::INFINITY, f64::min);
+        let scale = if scale.is_finite() { scale } else { 0.0 };
+        let shortfalls: Vec<ProductionShortfall> =
+            p.lines.iter().flat_map(|l| l.shortfalls.clone()).collect();
+        let line_results = p
+            .lines
+            .iter()
+            .map(|l| LineProductionResult {
+                line: l.line.clone(),
+                always_on: l.always_on,
+                recipe_id: l.recipe.id.clone(),
+                scale: l.scale,
+                shortfalls: l.shortfalls.clone(),
+            })
+            .collect();
         building_results.push(BuildingProductionResult {
             building_type: p.building_type.to_owned(),
             recipe_id,
             concurrent_recipe_ids,
-            scale: p.scale,
-            shortfalls: p.shortfalls,
+            scale,
+            shortfalls,
+            line_results,
         });
     }
 
@@ -3012,5 +3121,222 @@ mod tests {
         });
         let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         assert!(lines_for_building("silo", &empty, &reg).is_empty());
+    }
+
+    // ── Lines running live in the pipeline (issue #272) ───────────────────
+
+    /// Registry with a fabrication complex running two independent lines that
+    /// consume *different* feedstocks, so starving one cannot excuse the other.
+    fn live_lines_registry() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "complex".into(),
+            name: "Fabrication Complex".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        let r = |id: &str, line: Option<&str>, con: bool, i: &[(&str, f64)], o: &[(&str, f64)]| {
+            RecipeDef {
+                id: id.into(),
+                name: id.into(),
+                building: "complex".into(),
+                cycle_sols: 1,
+                inputs: i
+                    .iter()
+                    .map(|(id, q)| Ingredient {
+                        id: (*id).into(),
+                        quantity: *q,
+                    })
+                    .collect(),
+                outputs: o
+                    .iter()
+                    .map(|(id, q)| Ingredient {
+                        id: (*id).into(),
+                        quantity: *q,
+                    })
+                    .collect(),
+                concurrent: con,
+                line: line.map(Into::into),
+                power_draw: 0.0,
+            }
+        };
+        reg.insert_recipe(r(
+            "smelt",
+            Some("smelting"),
+            false,
+            &[("ore", 10.0)],
+            &[("metal", 5.0)],
+        ));
+        reg.insert_recipe(r(
+            "machine",
+            Some("machining"),
+            false,
+            &[("chem", 10.0)],
+            &[("part", 5.0)],
+        ));
+        reg
+    }
+
+    fn run_lines(pool: &mut ColonyPool, reg: &ContentRegistry) -> ProductionStepOutcome {
+        process_production(pool, &[("complex".to_string(), 1)], 1000.0, reg)
+    }
+
+    /// The capability, end to end: both lines run in the same turn and each
+    /// produces from its own feedstock.
+    #[test]
+    fn two_lines_both_produce_in_one_turn() {
+        let reg = live_lines_registry();
+        let mut pool = ColonyPool::new();
+        pool.deposit("ore", 100.0);
+        pool.deposit("chem", 100.0);
+
+        run_lines(&mut pool, &reg);
+
+        assert!(
+            (pool.amount("metal") - 5.0).abs() < 1e-9,
+            "metal={}",
+            pool.amount("metal")
+        );
+        assert!(
+            (pool.amount("part") - 5.0).abs() < 1e-9,
+            "part={}",
+            pool.amount("part")
+        );
+        assert!((pool.amount("ore") - 90.0).abs() < 1e-9);
+        assert!((pool.amount("chem") - 90.0).abs() < 1e-9);
+    }
+
+    /// Independent throttling — the design decision this was built around. One
+    /// line starved of its feedstock must not drag the other down.
+    #[test]
+    fn starving_one_line_leaves_the_other_at_full_rate() {
+        let reg = live_lines_registry();
+        let mut pool = ColonyPool::new();
+        pool.deposit("ore", 2.0); // 20% of what the smelting line wants
+        pool.deposit("chem", 100.0); // machining is fully fed
+
+        let outcome = run_lines(&mut pool, &reg);
+
+        // Machining ran flat out despite smelting starving.
+        assert!(
+            (pool.amount("part") - 5.0).abs() < 1e-9,
+            "machining should be unaffected, part={}",
+            pool.amount("part")
+        );
+        // Smelting ran at 20%.
+        assert!(
+            (pool.amount("metal") - 1.0).abs() < 1e-9,
+            "smelting should be throttled to 20%, metal={}",
+            pool.amount("metal")
+        );
+
+        let result = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "complex")
+            .expect("complex should have produced");
+        let line_scale = |name: &str| {
+            result
+                .line_results
+                .iter()
+                .find(|l| l.line.as_deref() == Some(name))
+                .map(|l| l.scale)
+                .expect("line result present")
+        };
+        assert!((line_scale("machining") - 1.0).abs() < 1e-9);
+        assert!((line_scale("smelting") - 0.2).abs() < 1e-9);
+        // The headline scale summarises the worst line, so "is anything wrong
+        // here?" still answers yes.
+        assert!(
+            (result.scale - 0.2).abs() < 1e-9,
+            "headline scale={}",
+            result.scale
+        );
+    }
+
+    /// Under the pre-#272 shared-scale model this test's `part` would be 1.0
+    /// (dragged to 20% by the ore shortage). Pinning the *difference* keeps the
+    /// independence from silently regressing to pooled behaviour.
+    #[test]
+    fn independence_is_what_distinguishes_lines_from_the_old_shared_scale() {
+        let reg = live_lines_registry();
+        let mut pool = ColonyPool::new();
+        pool.deposit("ore", 2.0);
+        pool.deposit("chem", 100.0);
+        run_lines(&mut pool, &reg);
+
+        let shared_scale_would_give = 5.0 * 0.2;
+        assert!(
+            (pool.amount("part") - shared_scale_would_give).abs() > 1e-6,
+            "part={} matches the old pooled-scale answer; independence has regressed",
+            pool.amount("part")
+        );
+    }
+
+    /// Player selection on one line changes only that line's output.
+    #[test]
+    fn switching_one_lines_recipe_leaves_the_other_running() {
+        let mut reg = live_lines_registry();
+        reg.insert_recipe(RecipeDef {
+            id: "smelt_alt".into(),
+            name: "smelt_alt".into(),
+            building: "complex".into(),
+            cycle_sols: 1,
+            inputs: vec![Ingredient {
+                id: "ore".into(),
+                quantity: 10.0,
+            }],
+            outputs: vec![Ingredient {
+                id: "alloy".into(),
+                quantity: 5.0,
+            }],
+            concurrent: false,
+            line: Some("smelting".into()),
+            power_draw: 0.0,
+        });
+
+        let mut pool = ColonyPool::new();
+        pool.deposit("ore", 100.0);
+        pool.deposit("chem", 100.0);
+
+        let mut active = std::collections::HashMap::new();
+        active.insert(
+            line_selection_key("complex", Some("smelting")),
+            "smelt_alt".to_string(),
+        );
+        let mut resources = ColonyResourcePool::new();
+        super::process_production_scaled(
+            &mut ColonyStores::new(&mut pool, &mut resources, &reg),
+            &[("complex".to_string(), 1)],
+            1000.0,
+            &reg,
+            1.0,
+            1.0,
+            false,
+            1.0,
+            &active,
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::default(),
+            &crate::modifier::DifficultyScalar::default(),
+        );
+
+        assert!(
+            (pool.amount("alloy") - 5.0).abs() < 1e-9,
+            "the switched line ran"
+        );
+        assert_eq!(pool.amount("metal"), 0.0, "the replaced recipe did not run");
+        assert!(
+            (pool.amount("part") - 5.0).abs() < 1e-9,
+            "the other line is untouched by the switch"
+        );
     }
 }
