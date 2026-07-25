@@ -85,9 +85,11 @@
 - id: fabrication_complex
   name: Fabrication Complex
   description: >
-    Combination foundry and machine shop. Switch it between smelting ore
-    into structural metal or machining metal into finished components
-    (issue #166 recipe selection) — runs one at a time. Self-powered.
+    Combination foundry and machine shop, running both at once on
+    independent production lines (issue #272): the foundry smelts ore into
+    structural metal while the machine shop machines metal into finished
+    components. An ore shortage throttles the foundry without stopping the
+    machine shop. Self-powered.
   category: processing
   power_delta: -2.0
   worker_slots: 2

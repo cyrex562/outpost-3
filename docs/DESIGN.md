@@ -156,7 +156,19 @@ The mechanism above is general — `RecipeDef.inputs`/`outputs` have always been
 
 A building whose every recipe is `concurrent` correctly has **no** pick-one recipe — `colony_hq` is that shape, and `BuildingDetailData.recipe` is `None` for it while `concurrent_recipes` is populated.
 
-**One shared scale factor.** Every simultaneously-running recipe throttles *together*: their inputs, maintenance draws, and deposit gates pool into one demand computation, and their power draws sum into one grid entry. So size the whole building's demand as a unit — a multi-function building whose one greedy recipe starves will drag its siblings down with it, by design.
+**Production lines: several chains in one building (issue #272).** `RecipeDef.line` partitions a building's recipes. Recipes sharing a line are **alternatives** — one runs. Different lines run **simultaneously and throttle independently**, each scaling from its own inputs, so a starved smelting line doesn't stop the machine shop beside it.
+
+This was not possible before, for a structural reason worth recording: `Colony.active_recipes` is keyed by building type, so a building had room for exactly *one* selection — a second choice silently overwrote the first. The only way to get several chains was to mark all but one `concurrent: true`, i.e. always-on with no player choice. `colony_hq`'s shape was dictated by that limit, not chosen.
+
+Three properties make the change cheap and safe:
+
+- **No save migration.** The default line keys its selection on the bare `building_type` — exactly how selections were keyed before lines existed — so pre-#272 saves resolve unchanged. Named lines use a composite key separated by ASCII unit separator, which cannot occur in a content id.
+- **No new command field.** A recipe knows its own line, so `Command::SetActiveRecipe` derives it: selecting a smelting recipe sets the smelting line and leaves machining alone. No host or frontend change was needed. Selecting an always-on recipe is rejected — a line of one has nothing to choose.
+- **`concurrent: true` is now a special case of a line**, not a parallel mechanism: it makes a line of one, which always runs. The old rule, restated in the new vocabulary.
+
+`fabrication_complex` is the first content to use it. It was always described as a combination foundry *and* machine shop but could only run one at a time; it now runs both, on independent lines. That is a deliberate throughput increase — one instance nets +2.5 `structural_metal`/sol **and** +1 `components`/sol, where before a player picked either +4 metal or +1 components — pinned by `content/checks/fabrication_lines/`.
+
+**Power, labour and upkeep are still shared.** Lines throttle independently on their *inputs*, but the constraints that are genuinely building- or colony-wide still apply across all of them: power and labour ratios are computed colony-wide, and maintenance is pooled into every line's demand while being *charged* only once, at the busiest line's scale. Charging upkeep per line would silently multiply it by the line count.
 
 **Don't produce the same commodity from two always-on recipes** unless you mean to. Their outputs are *summed*, so two `concurrent` recipes each yielding 5 power give 10, silently. That is occasionally what you want (two distinct generation processes), so it's a warning rather than an error: `ContentRegistry::lint()` reports it, and the balance harness prints it before the numbers on every `check` run. The same applies when an always-on recipe overlaps a *selectable* one — that doubles conditionally, depending on which recipe the player picked, which is harder to spot.
 

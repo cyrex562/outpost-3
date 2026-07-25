@@ -1,0 +1,26 @@
+id: fabrication-lines-check
+name: Fabrication Complex Independent Production Lines
+version: '0.1.0'
+description: >
+  Pins fabrication_complex running BOTH its production lines at once
+  (issue #272): the foundry line smelting structural_ore into
+  structural_metal, and the machine_shop line machining structural_metal
+  into components.
+
+  Before #272 this building could only run one of the two — not by design,
+  but because a colony could store exactly one recipe selection per building
+  type, so a second choice overwrote the first. The building was always
+  described as a combination foundry AND machine shop; the data model just
+  couldn't express it.
+
+  This is a deliberate throughput increase for an existing building. At one
+  instance it now nets +2.5 structural_metal/sol AND +1 components/sol,
+  where before a player picked either +4 metal/sol or +1 components/sol.
+  Nothing else in content/base changes, and no other bundle used this
+  building, so this bundle is where that number is pinned.
+
+  Note what the harness cannot show here: the lines throttle INDEPENDENTLY,
+  so starving the ore feed cuts the foundry without stopping the machine
+  shop. BalanceCalculator is a steady-state accumulator with no scale factor,
+  so that behaviour is proven in the engine instead — see
+  colony::production::tests::starving_one_line_leaves_the_other_at_full_rate.

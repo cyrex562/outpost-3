@@ -1,0 +1,23 @@
+# Expected net rates with ONE fabrication_complex running both lines:
+#
+#   structural_ore:    5 supplied − 5 smelted            =  0/sol (closed)
+#   structural_metal:  4 smelted − 1.5 machined          = +2.5/sol
+#   components:        2 per 2-sol cycle                 = +1/sol
+#
+# The metal figure is the one that proves both lines ran: a single-line
+# building would show either +4 metal and no components, or no metal at all.
+# +2.5 metal *with* +1 components is only reachable if both lines produced.
+
+- commodity: structural_metal
+  expect: closed
+  min_net: 2.5
+  label: metal-surplus-2.5-per-sol-foundry-minus-machine-shop-draw
+
+- commodity: components
+  expect: closed
+  min_net: 1.0
+  label: components-1-per-sol-machine-shop-line-ran
+
+- commodity: structural_ore
+  expect: closed
+  label: ore-feed-exactly-matches-foundry-draw

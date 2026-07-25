@@ -210,6 +210,13 @@ pub enum Command {
     /// selection is colony-wide per type, not per placed instance. Errors if
     /// `recipe_id` doesn't name a recipe belonging to `building_type` in the
     /// loaded content registry.
+    ///
+    /// **The production line is derived from the recipe** (issue #272), not
+    /// passed in: a recipe knows its own [`content::types::RecipeDef::line`], so
+    /// selecting one sets *that* line's choice and leaves every other line in the
+    /// building untouched. That is why this command needed no new field to
+    /// support multi-line buildings — and why no host or frontend change was
+    /// required either.
     SetActiveRecipe {
         /// Target colony.
         colony_id: ColonyId,
@@ -3171,9 +3178,22 @@ impl GameEngine {
                         recipe.building
                     )));
                 }
+                // An always-on recipe is a line of one — there is nothing to
+                // select, and storing a choice for it would be a no-op the
+                // caller would have no way to notice. Say so instead (#272).
+                if recipe.concurrent && recipe.line.is_none() {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "recipe '{recipe_id}' is always-on and has no alternatives to                          choose between"
+                    )));
+                }
+                // Key the selection by the recipe's own line, so choosing on one
+                // line leaves the building's other lines alone (issue #272).
+                // The default line keys on the bare building id, which is what
+                // makes pre-#272 saves and callers keep working unchanged.
+                let key = colony::line_selection_key(building_type, recipe.line.as_deref());
                 self.state.colonies[idx]
                     .active_recipes
-                    .insert(building_type.clone(), recipe_id.clone());
+                    .insert(key, recipe_id.clone());
                 Ok(vec![Event::ActiveRecipeSet {
                     colony_id: *colony_id,
                     building_type: building_type.clone(),
@@ -7078,6 +7098,144 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, EngineError::ColonyNotFound(_)));
+    }
+
+    // ── SetActiveRecipe across production lines (issue #272) ──
+
+    /// Registry with a two-line fabrication complex plus an always-on vent.
+    fn make_multiline_registry() -> content::ContentRegistry {
+        use content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+        let mut reg = content::ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "complex".into(),
+            name: "Complex".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
+            id: id.into(),
+            name: id.into(),
+            building: "complex".into(),
+            cycle_sols: 1,
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: out.into(),
+                quantity: 1.0,
+            }],
+            concurrent: con,
+            line: line.map(Into::into),
+            power_draw: 0.0,
+        };
+        reg.insert_recipe(r("smelt_a", Some("smelting"), false, "metal"));
+        reg.insert_recipe(r("smelt_b", Some("smelting"), false, "alloy"));
+        reg.insert_recipe(r("mach_p", Some("machining"), false, "part"));
+        reg.insert_recipe(r("mach_q", Some("machining"), false, "gear"));
+        reg.insert_recipe(r("vent", None, true, "heat"));
+        reg
+    }
+
+    fn multiline_engine() -> (GameEngine, ColonyId) {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(make_multiline_registry());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Lines".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("FoundColony must report the new colony")
+        };
+        (engine, *colony_id)
+    }
+
+    /// The command needed no new field: the recipe knows its own line, so
+    /// selecting on one line must leave the other line's selection intact.
+    #[test]
+    fn selecting_a_recipe_sets_only_its_own_line() {
+        let (mut engine, colony_id) = multiline_engine();
+
+        for recipe_id in ["smelt_b", "mach_q"] {
+            engine
+                .apply(&Command::SetActiveRecipe {
+                    colony_id,
+                    building_type: "complex".into(),
+                    recipe_id: recipe_id.into(),
+                })
+                .unwrap();
+        }
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let active = &engine.state.colonies[idx].active_recipes;
+        let reg = engine.state.registry.as_ref().unwrap();
+        let running: Vec<String> = colony::lines_for_building("complex", active, reg)
+            .iter()
+            .map(|l| l.selected.id.clone())
+            .collect();
+
+        assert!(running.contains(&"smelt_b".to_string()), "{running:?}");
+        assert!(
+            running.contains(&"mach_q".to_string()),
+            "the second selection must not have clobbered the first: {running:?}"
+        );
+        assert!(
+            running.contains(&"vent".to_string()),
+            "always-on line still runs"
+        );
+    }
+
+    /// Before #272 this exact sequence lost the first selection, because both
+    /// writes landed on the same `building_type` key.
+    #[test]
+    fn two_selections_on_one_building_no_longer_overwrite_each_other() {
+        let (mut engine, colony_id) = multiline_engine();
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "complex".into(),
+                recipe_id: "smelt_b".into(),
+            })
+            .unwrap();
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "complex".into(),
+                recipe_id: "mach_q".into(),
+            })
+            .unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].active_recipes.len(),
+            2,
+            "two lines means two stored selections, not one overwritten key"
+        );
+    }
+
+    /// Selecting an always-on recipe is a category error — it has no
+    /// alternatives — and should say so rather than silently doing nothing.
+    #[test]
+    fn selecting_an_always_on_recipe_is_rejected() {
+        let (mut engine, colony_id) = multiline_engine();
+        let err = engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "complex".into(),
+                recipe_id: "vent".into(),
+            })
+            .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::InvalidArgument(m) if m.contains("always-on")),
+            "expected a clear always-on rejection, got: {err:?}"
+        );
     }
 
     // ── SetActiveRecipe (issue #166) ──

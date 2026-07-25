@@ -464,29 +464,45 @@ fn resolve_instances(
             .ok_or_else(|| format!("unknown building id: {}", entry.building_id))?
             .clone();
 
-        let recipe = if let Some(ref rid) = entry.recipe_id {
+        // Which recipes actually run comes from the pack's production lines, not
+        // the bundle (issue #272): a building runs one recipe per line, and
+        // asking an author to list them would just be a way to get them wrong.
+        // An explicit `recipe_id` is a *selection* — it picks that recipe on its
+        // own line and leaves the building's other lines at their defaults,
+        // exactly like `Command::SetActiveRecipe` does in the engine.
+        let mut selection: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Some(ref rid) = entry.recipe_id {
             let r = registry
                 .recipe(rid)
-                .ok_or_else(|| format!("unknown recipe id: {rid}"))?
-                .clone();
-            Some(r)
-        } else {
-            None
-        };
+                .ok_or_else(|| format!("unknown recipe id: {rid}"))?;
+            if r.building != entry.building_id {
+                return Err(format!(
+                    "recipe '{rid}' belongs to building '{}', not '{}'",
+                    r.building, entry.building_id
+                ));
+            }
+            selection.insert(
+                outpost_core::colony::line_selection_key(&entry.building_id, r.line.as_deref()),
+                rid.clone(),
+            );
+        }
 
-        // Always-on recipes for this building type come from the pack, not the
-        // bundle: they run unconditionally, so asking an author to list them
-        // would just be a way to get them wrong (issue #272).
-        let concurrent_recipes: Vec<_> = {
-            let mut found: Vec<_> = registry
-                .recipes()
-                .filter(|r| r.building == entry.building_id && r.concurrent)
-                .cloned()
-                .collect();
-            // `ContentRegistry` iterates a HashMap, so sort for determinism.
-            found.sort_by(|a, b| a.id.cmp(&b.id));
-            found
-        };
+        let lines =
+            outpost_core::colony::lines_for_building(&entry.building_id, &selection, registry);
+
+        // `BalanceCalculator` sums `recipe` with `concurrent_recipes`, so the
+        // split between them doesn't affect the numbers — the default line goes
+        // in `recipe` purely so the shape still reads naturally.
+        let mut recipe = None;
+        let mut concurrent_recipes = Vec::new();
+        for line in lines {
+            if line.line.is_none() && !line.always_on && recipe.is_none() {
+                recipe = Some(line.selected.clone());
+            } else {
+                concurrent_recipes.push(line.selected.clone());
+            }
+        }
 
         instances.push(BuildingInstance {
             building,

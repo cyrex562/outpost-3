@@ -1,0 +1,8 @@
+# One fabrication_complex. Its two lines are picked up from the pack
+# automatically — a bundle lists the building, not its lines.
+buildings:
+  - building_id: fabrication_complex
+  - building_id: ore_feed
+    recipe_id: supply_ore
+
+imports: []

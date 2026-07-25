@@ -158,11 +158,18 @@
     - id: structural_ore
       quantity: 10.0
 
-# fabrication_complex runs one of these two at a time (active_recipes
-# selection, issue #166) — sorted-first default is foundry_smelt_ore.
+# fabrication_complex runs BOTH of these at once, on two independent
+# production lines (issue #272). It is a combination foundry *and* machine shop,
+# so forcing a choice between them was a limitation of the old data model — a
+# building could hold exactly one recipe selection — rather than a design intent.
+#
+# The lines throttle independently: an ore shortage starves the foundry without
+# stopping the machine shop, which works from metal already in the pool. Each
+# line still offers a pick-one choice if more alternatives are authored onto it.
 - id: foundry_smelt_ore
   name: Smelt Ore (Foundry)
   building: fabrication_complex
+  line: foundry
   cycle_sols: 1
   inputs:
     - id: structural_ore
@@ -174,6 +181,7 @@
 - id: machine_shop_fabricate_components
   name: Fabricate Components (Machine Shop)
   building: fabrication_complex
+  line: machine_shop
   cycle_sols: 2
   inputs:
     - id: structural_metal
