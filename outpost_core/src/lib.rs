@@ -91,6 +91,19 @@ const BODY_SURFACE_PREVIEW_RADIUS: u32 = 8;
 /// `starting_population / 100.0`.
 pub const MAX_SUPPLY_OVERRIDE_MULTIPLE: f64 = 3.0;
 
+/// Ceiling on how many sols one [`Command::FastForward`] will advance
+/// (issue #332).
+///
+/// `max_sols` arrives from a host — a WebSocket client or a Tauri `invoke` — so
+/// it is untrusted input. A request for a billion sols would run the full turn
+/// pipeline a billion times inside a single command, with no interrupt able to
+/// cut it short and no way for the caller to cancel. Two in-game years is far
+/// more than any UI control needs (the footer's own button asks for 30).
+///
+/// Requests above this are clamped, not rejected: a host asking for "a long
+/// time" shouldn't need to know the ceiling.
+pub const MAX_FAST_FORWARD_SOLS: u32 = 720;
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /// A command submitted to the engine from the outside world.
@@ -1896,25 +1909,18 @@ impl GameEngine {
                 max_sols,
                 threshold,
             } => {
-                let (result, mut events) = self.run_fast_forward(*max_sols, *threshold)?;
-                let (sols_advanced, halted, halting_reason) = match &result {
-                    AdvanceResult::Completed { turns_advanced, .. } => {
-                        (*turns_advanced, false, None)
+                // Clamp rather than reject: a host is free to ask for "a long
+                // time" without knowing the ceiling, but an unbounded request
+                // would run the whole pipeline that many times inside one
+                // command with no way to interrupt it.
+                let requested = (*max_sols).min(MAX_FAST_FORWARD_SOLS);
+                let (result, mut events, sols_advanced) =
+                    self.run_fast_forward(requested, *threshold)?;
+                let (halted, halting_reason) = match &result {
+                    AdvanceResult::Completed { .. } => (false, None),
+                    AdvanceResult::Halted { interrupt, .. } => {
+                        (true, Some(interrupt.message.clone()))
                     }
-                    // `at_turn` is the sol it stopped on, so the count of sols
-                    // actually run is that minus where the run started. Derive it
-                    // from the event stream instead: one ColonySolAdvanced per sol.
-                    AdvanceResult::Halted { interrupt, .. } => (
-                        u32::try_from(
-                            events
-                                .iter()
-                                .filter(|e| matches!(e, Event::ColonySolAdvanced { .. }))
-                                .count(),
-                        )
-                        .unwrap_or(u32::MAX),
-                        true,
-                        Some(interrupt.message.clone()),
-                    ),
                 };
                 events.push(Event::FastForwardEnded {
                     sol: self.state.sol,
@@ -4779,8 +4785,13 @@ impl GameEngine {
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
                 let cost = edge.cost;
                 let throughput = f64::from(edge.throughput);
-                // Wire up a trade route so auto-flow activates.
-                let route = TradeRoute::new(*from_colony, *to_colony, throughput);
+                // Wire up a trade route so auto-flow activates. Same transit
+                // derivation as `AddTradeRoute` — infrastructure links
+                // same-body colonies, so this resolves to the default in
+                // practice, but going through one path means the two can't
+                // drift apart later.
+                let transit = self.route_transit_sols(*from_colony, *to_colony);
+                let route = TradeRoute::with_transit(*from_colony, *to_colony, throughput, transit);
                 let route_id = route.id;
                 self.state.trade_network.add_route(route);
                 // Track the route so DemolishInfrastructure can remove it.
@@ -5241,7 +5252,7 @@ impl GameEngine {
         threshold: Tier,
     ) -> Result<AdvanceResult, EngineError> {
         self.run_fast_forward(n, threshold)
-            .map(|(result, _)| result)
+            .map(|(result, _, _)| result)
     }
 
     /// The fast-forward loop, also returning every event the sols it ran emitted.
@@ -5254,13 +5265,31 @@ impl GameEngine {
         &mut self,
         n: u32,
         threshold: Tier,
-    ) -> Result<(AdvanceResult, Vec<Event>), EngineError> {
+    ) -> Result<(AdvanceResult, Vec<Event>, u32), EngineError> {
         let mut digest: Vec<Interrupt> = Vec::new();
         let mut all_events: Vec<Event> = Vec::new();
+        // Sols actually advanced. Not always `n`: an interrupt can halt the run,
+        // and a victory recorded mid-run ends it early (see the loop below).
+        let mut sols_run: u32 = 0;
 
         for _ in 0..n {
-            let events = self.apply(&Command::AdvanceColonySol)?;
+            // A sol can *itself* record a victory (the deep-space expedition
+            // path pushes `VictoryAchieved` and returns normally). The next
+            // `apply` then hits the top-of-`apply` game-over guard. Propagating
+            // that error would throw away every event collected so far —
+            // including the `VictoryAchieved` that caused it — and skip
+            // `FastForwardEnded`, even though real mutation already happened.
+            //
+            // Stepping sol by sol doesn't behave that way: the victory sol
+            // returns its events to the caller and only a *further* advance
+            // errors. So treat game-over as the run reaching its natural end.
+            let events = match self.apply(&Command::AdvanceColonySol) {
+                Ok(events) => events,
+                Err(EngineError::GameOver) => break,
+                Err(e) => return Err(e),
+            };
             all_events.extend(events.iter().cloned());
+            sols_run += 1;
 
             // Update per-colony stability + population trackers after each sol.
             let colony_ids: Vec<_> = self.state.colonies.iter().map(|c| c.id).collect();
@@ -5304,7 +5333,7 @@ impl GameEngine {
                         .collect();
                     self.last_advance_digest = Some(ui::InterruptDigestData {
                         stopped_at_turn: self.state.sol,
-                        turns_advanced: n,
+                        turns_advanced: sols_run,
                         halting_interrupt: Some(irq.clone()),
                         digest_items,
                         active_filter: ui::DigestFilter::new(),
@@ -5316,6 +5345,7 @@ impl GameEngine {
                             digest,
                         },
                         all_events,
+                        sols_run,
                     ));
                 }
                 // Below threshold: accumulate in digest.
@@ -5332,17 +5362,18 @@ impl GameEngine {
             .collect();
         self.last_advance_digest = Some(ui::InterruptDigestData {
             stopped_at_turn: self.state.sol,
-            turns_advanced: n,
+            turns_advanced: sols_run,
             halting_interrupt: None,
             digest_items,
             active_filter: ui::DigestFilter::new(),
         });
         Ok((
             AdvanceResult::Completed {
-                turns_advanced: n,
+                turns_advanced: sols_run,
                 digest,
             },
             all_events,
+            sols_run,
         ))
     }
 
@@ -7738,6 +7769,41 @@ mod tests {
             sols_advanced as u64,
             engine.sol(),
             "sols_advanced must match how far the clock actually moved"
+        );
+    }
+
+    /// `max_sols` is untrusted host input, so it is clamped rather than run
+    /// verbatim — an unbounded request would run the turn pipeline that many
+    /// times inside one uninterruptible command.
+    #[test]
+    fn fast_forward_clamps_an_absurd_max_sols() {
+        let mut engine = GameEngine::with_seed(5);
+        engine
+            .apply(&Command::FoundColony {
+                name: "Clamp".into(),
+                starting_population: 60,
+            })
+            .unwrap();
+
+        let events = engine
+            .apply(&Command::FastForward {
+                max_sols: u32::MAX,
+                threshold: Tier::Blocking,
+            })
+            .unwrap();
+
+        assert_eq!(
+            engine.sol(),
+            u64::from(MAX_FAST_FORWARD_SOLS),
+            "should have advanced exactly the ceiling, not u32::MAX sols"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::FastForwardEnded { sols_advanced, .. }
+                    if *sols_advanced == MAX_FAST_FORWARD_SOLS
+            )),
+            "the run must report the clamped count it actually ran"
         );
     }
 
@@ -10918,6 +10984,73 @@ mod tests {
         );
     }
 
+    /// The reserve retune's real risk case: a *long* route, where the import a
+    /// colony is waiting on spends many sols in flight.
+    ///
+    /// The 3-sol reserve is sized against the default one-sol convoy, so this
+    /// pins what actually happens on a 10-sol route rather than assuming it's
+    /// fine. Nothing may go negative or be destroyed, and the importer must
+    /// recover once the pipeline fills.
+    #[test]
+    fn a_long_route_still_conserves_stock_and_recovers() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+        let idx_a = engine.find_colony_index(a).unwrap();
+        let idx_b = engine.find_colony_index(b).unwrap();
+
+        engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 50.0,
+            })
+            .unwrap();
+        // Stretch the route well past the reserve it was sized against.
+        engine.state.trade_network.routes[0].transit_sols = 10;
+
+        let mut total_deposited = 0.0;
+        for _ in 0..80 {
+            engine.state.colonies[idx_a].pool.deposit("water", 40.0);
+            total_deposited += 40.0;
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+
+            // Nothing may go negative at any point in the pipeline.
+            assert!(
+                engine.state.colonies[idx_a].pool.amount("water") >= 0.0
+                    && engine.state.colonies[idx_b].pool.amount("water") >= 0.0,
+                "pools must never go negative"
+            );
+            for convoy in &engine.state.trade_network.convoys {
+                assert!(convoy.amount > 0.0, "an empty convoy should not exist");
+            }
+        }
+
+        // Conservation across the whole run: what was deposited is either in a
+        // pool, in flight, or consumed by needs — never lost to the model.
+        let in_pools = engine.state.colonies[idx_a].pool.amount("water")
+            + engine.state.colonies[idx_b].pool.amount("water");
+        let in_flight: f64 = engine
+            .state
+            .trade_network
+            .convoys
+            .iter()
+            .map(|c| c.amount)
+            .sum();
+        assert!(
+            in_pools + in_flight <= total_deposited + 1e-6,
+            "water was created: {in_pools} in pools + {in_flight} in flight > \
+             {total_deposited} deposited"
+        );
+
+        // The importer must actually be supplied once the pipeline has filled —
+        // a long route should slow imports, not prevent them.
+        assert!(
+            engine.state.colonies[idx_b].pool.amount("water") > 0.0,
+            "B should be receiving water over a 10-sol route; it has {}",
+            engine.state.colonies[idx_b].pool.amount("water")
+        );
+    }
+
     /// Done-when (#332 part 2): the reserve came down from 10 sols to 3 now that
     /// trade rebalances every sol. This pins that the smaller reserve plus convoy
     /// latency does not starve an importing colony over a long run — the
@@ -12332,6 +12465,117 @@ mod tests {
         assert!(
             engine.state.victory.is_some(),
             "GameState::victory should be Some after expedition completes"
+        );
+    }
+
+    /// Once victory is recorded, `FastForward` is refused exactly like
+    /// `AdvanceColonySol` — the game-over guard sits at the top of `apply` and
+    /// applies to every command. Pinned so the new command can't quietly become
+    /// a way to keep playing past the end of the game.
+    #[test]
+    fn fast_forward_is_refused_once_victory_is_recorded() {
+        let mut engine = GameEngine::new();
+        let project_id = register_interstellar_expedition(&mut engine, 10.0);
+        engine
+            .apply(&Command::AdvanceMegaproject {
+                project_id,
+                progress: 100,
+            })
+            .unwrap();
+        assert!(engine.state.victory.is_some());
+
+        let err = engine
+            .apply(&Command::FastForward {
+                max_sols: 20,
+                threshold: Tier::Blocking,
+            })
+            .unwrap_err();
+        assert!(
+            matches!(err, EngineError::GameOver),
+            "expected GameOver, got: {err:?}"
+        );
+    }
+
+    /// A victory recorded *inside* the fast-forward loop must end the run
+    /// cleanly rather than throwing the whole run away.
+    ///
+    /// A returning deep-space expedition sets `state.victory` from within
+    /// `AdvanceColonySol` and returns `Ok`. The *next* iteration then hits the
+    /// game-over guard at the top of `apply`. Propagating that out of the loop
+    /// would discard every event collected so far — including the
+    /// `VictoryAchieved` that caused it — and skip `FastForwardEnded`, even
+    /// though those sols already ran and mutated state. Stepping sol by sol
+    /// doesn't behave that way, so neither may fast-forward.
+    #[test]
+    fn fast_forward_ends_cleanly_when_victory_lands_mid_run() {
+        use crate::expedition::{Expedition, ExpeditionStatus};
+        use crate::map::HexCoord;
+
+        let mut engine = GameEngine::new();
+        let founded = engine
+            .apply(&Command::FoundColony {
+                name: "Winner".into(),
+                starting_population: 80,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &founded[0] else {
+            panic!("FoundColony must report the new colony")
+        };
+        let colony_id = *colony_id;
+        register_interstellar_expedition(&mut engine, 10.0);
+
+        // A deep-space expedition already on its way home, due back on sol 4:
+        // launched 0, arrived 1, so return ETA = 1 + DEFAULT_ONSITE_SOLS + 1.
+        let transit = 1;
+        let return_eta = 1 + u64::from(crate::expedition::DEFAULT_ONSITE_SOLS) + transit;
+        engine.state.expeditions.push(Expedition {
+            id: crate::expedition::FieldExpeditionId::new(),
+            origin_colony: colony_id,
+            target_hex: HexCoord { q: 0, r: 0 },
+            crew_count: 4,
+            supply_consumed_per_sol: 0.0,
+            sol_launched: 0,
+            eta_sol: 1,
+            status: ExpeditionStatus::Returning,
+            supplies_remaining: 1000.0,
+            sol_arrived: Some(1),
+            discovered_resources: vec![],
+            is_deep_space: true,
+        });
+
+        // Ask for far more sols than the expedition needs, so the run is still
+        // going when victory lands and the guard bites on the following sol.
+        let events = engine
+            .apply(&Command::FastForward {
+                max_sols: 40,
+                threshold: Tier::Blocking,
+            })
+            .expect("a victory mid-run must not surface as an error");
+
+        assert!(engine.state.victory.is_some(), "victory should have landed");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::VictoryAchieved { .. })),
+            "the VictoryAchieved event must survive; got {events:?}"
+        );
+
+        let sols_advanced = events
+            .iter()
+            .find_map(|e| match e {
+                Event::FastForwardEnded { sols_advanced, .. } => Some(*sols_advanced),
+                _ => None,
+            })
+            .expect("FastForwardEnded must still be emitted");
+        assert!(
+            sols_advanced >= return_eta.try_into().unwrap() && sols_advanced < 40,
+            "should report the sols it actually ran, stopping at victory: \
+             got {sols_advanced}, expedition returned on sol {return_eta}"
+        );
+        assert_eq!(
+            u64::from(sols_advanced),
+            engine.sol(),
+            "sols_advanced must match how far the clock moved"
         );
     }
 

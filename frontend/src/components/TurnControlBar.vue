@@ -80,6 +80,15 @@ async function haltAndShowDigest(): Promise<void> {
 /** Issue one fast-forward, and stop the clock if it came back halted. */
 async function tick(sols: number): Promise<void> {
   if (gameStore.busy) return // let the in-flight command finish first
+
+  // `gameStore.sendCommand` catches its own errors, surfaces a toast, and
+  // resolves with `[]` — it does not reject. So a rejection is not the failure
+  // signal here; a *missing terminator* is. A successful run always emits
+  // exactly one `fast_forward_ended`, so its absence means the command was
+  // rejected. Without this the timer would keep re-issuing a failing command
+  // every tick, forever, with nothing but a toast to show for it.
+  //
+  // The try/catch stays only to cover a future store that does throw.
   let events: GameEvent[]
   try {
     events = await gameStore.sendCommand({
@@ -88,13 +97,19 @@ async function tick(sols: number): Promise<void> {
       threshold: threshold.value,
     })
   } catch {
-    // sendCommand surfaces its own error toast; just stop the clock.
     playing.value = false
     stopTimer()
     return
   }
-  const halted = events.some((e) => e.kind === 'fast_forward_ended' && e.halted)
-  if (halted) await haltAndShowDigest()
+
+  const ended = events.find((e) => e.kind === 'fast_forward_ended')
+  if (!ended) {
+    // Rejected (or an unrecognised reply). Stop rather than spin.
+    playing.value = false
+    stopTimer()
+    return
+  }
+  if (ended.kind === 'fast_forward_ended' && ended.halted) await haltAndShowDigest()
 }
 
 function togglePlay(): void {

@@ -207,7 +207,27 @@ describe('TurnControlBar time controls (issue #332)', () => {
     expect(wrapper.get('[data-testid="btn-play-pause"]').text()).toContain('Pause')
   })
 
-  it('stops the clock when a command rejects', async () => {
+  // `gameStore.sendCommand` catches its own errors and resolves with `[]`; it
+  // does not reject. A test that mocks a rejection therefore proves nothing
+  // about the real failure path — the clock has to stop on the empty resolve.
+  it('stops the clock when the engine rejects the command (store resolves [])', async () => {
+    sendCommand.mockResolvedValue([])
+    const wrapper = mount(TurnControlBar)
+    const btn = wrapper.get('[data-testid="btn-play-pause"]')
+    await btn.trigger('click')
+    await vi.advanceTimersByTimeAsync(1300)
+    await vi.waitFor(() => {
+      expect(btn.text()).toContain('Play')
+    })
+    const calls = sendCommand.mock.calls.length
+    expect(calls).toBeGreaterThan(0)
+    // A spinning timer would keep hammering a command that cannot succeed.
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(sendCommand.mock.calls.length).toBe(calls)
+  })
+
+  // Defensive: a future store that does throw must not spin either.
+  it('stops the clock if the store throws outright', async () => {
     sendCommand.mockRejectedValue(new Error('engine said no'))
     const wrapper = mount(TurnControlBar)
     const btn = wrapper.get('[data-testid="btn-play-pause"]')
