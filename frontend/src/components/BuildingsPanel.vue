@@ -58,6 +58,36 @@ function statusDetail(b: BuildingRow): string {
   return b.scale > 0 ? `${(b.scale * 100).toFixed(0)}% output` : 'Produced nothing last turn'
 }
 
+/**
+ * One-line summary of what a building actually makes (issue #272).
+ *
+ * The row used to show only the pick-one recipe, so a multi-function building
+ * like `colony_hq` — whose recipes are *all* always-on — read as having no
+ * function at all. This is the merged output of every recipe it runs.
+ */
+function outputSummary(b: BuildingRow): string {
+  if (b.outputs.length === 0) return ''
+  return b.outputs.map((o) => `${formatQty(o.quantity)} ${o.commodity_id}`).join(', ')
+}
+
+/** Same, for what the building consumes. */
+function inputSummary(b: BuildingRow): string {
+  if (b.inputs.length === 0) return ''
+  return b.inputs.map((i) => `${formatQty(i.quantity)} ${i.commodity_id}`).join(', ')
+}
+
+/** Trim trailing zeroes so "24" doesn't render as "24.0". */
+function formatQty(q: number): string {
+  return Number.isInteger(q) ? String(q) : q.toFixed(1)
+}
+
+/** Tooltip listing every recipe running in this building. */
+function recipeTooltip(b: BuildingRow): string {
+  if (b.running_recipe_ids.length === 0) return 'No recipes — this is a storage or habitat structure.'
+  if (b.running_recipe_ids.length === 1) return `Running: ${b.running_recipe_ids[0]}`
+  return `Running ${b.running_recipe_ids.length} recipes at once: ${b.running_recipe_ids.join(', ')}`
+}
+
 function assignLabour(buildingType: string): void {
   const labour = labourDraft.value[buildingType]
   if (labour === undefined) return
@@ -104,6 +134,29 @@ function assignLabour(buildingType: string): void {
           title="This facility runs always-on recipes — there is no recipe to choose."
         >always-on</span>
         <span class="building-meta">{{ b.slot_cost }} slot{{ b.slot_cost !== 1 ? 's' : '' }}</span>
+        <span
+          v-if="b.running_recipe_ids.length > 1"
+          class="building-badge badge-multi"
+          :data-testid="`building-recipe-count-${b.building_type}`"
+          :title="recipeTooltip(b)"
+        >{{ b.running_recipe_ids.length }} recipes</span>
+        <div
+          v-if="b.outputs.length > 0 || b.inputs.length > 0"
+          class="building-io"
+          :data-testid="`building-io-${b.building_type}`"
+          :title="recipeTooltip(b)"
+        >
+          <span
+            v-if="b.inputs.length > 0"
+            class="io-in"
+            :data-testid="`building-inputs-${b.building_type}`"
+          >← {{ inputSummary(b) }}</span>
+          <span
+            v-if="b.outputs.length > 0"
+            class="io-out"
+            :data-testid="`building-outputs-${b.building_type}`"
+          >→ {{ outputSummary(b) }}</span>
+        </div>
         <div class="labour-controls">
           <input
             class="labour-input"
@@ -137,6 +190,18 @@ function assignLabour(buildingType: string): void {
 
 <style scoped>
 .panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
+.building-io {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.7rem;
+  font-family: monospace;
+  margin-top: 0.15rem;
+}
+.io-in { color: #c98; }
+.io-out { color: #8c9; }
+.badge-multi { border-color: #685; color: #ac9; }
 .panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.6rem; }
 .hint { font-size: 0.75rem; color: #446; font-style: italic; }
 

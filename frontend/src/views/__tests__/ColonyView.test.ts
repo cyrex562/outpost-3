@@ -143,6 +143,12 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
           scale: 1.0,
           shortfall_reason: null,
           always_on: true,
+          running_recipe_ids: ['hq_generate_power', 'hq_pump_water'],
+          inputs: [],
+          outputs: [
+            { commodity_id: 'power', quantity: 24 },
+            { commodity_id: 'water', quantity: 24 },
+          ],
         },
       ],
       stockpile: [],

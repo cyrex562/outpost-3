@@ -730,9 +730,9 @@ fn first_recipe_for_building<'r>(
 /// single-recipe buildings working with no player action needed, and a
 /// building whose every recipe is `concurrent` correctly returns `None`
 /// here (its recipes still run — see [`concurrent_recipes_for_building`]).
-pub(crate) fn recipe_for_building<'r>(
+pub(crate) fn recipe_for_building<'r, S: std::hash::BuildHasher>(
     building_type: &str,
-    active_recipes: &std::collections::HashMap<String, String>,
+    active_recipes: &std::collections::HashMap<String, String, S>,
     registry: &'r ContentRegistry,
 ) -> Option<&'r RecipeDef> {
     if let Some(recipe_id) = active_recipes.get(building_type) {
@@ -761,6 +761,78 @@ pub(crate) fn concurrent_recipes_for_building<'r>(
     // Deterministic ordering, same discipline as `first_recipe_for_building`.
     recipes.sort_by(|a, b| a.id.cmp(&b.id));
     recipes
+}
+
+/// A building type's combined per-cycle input/output footprint (issue #272).
+///
+/// Until now a building's "0-N inputs, 0-N outputs" profile only existed
+/// implicitly — you had to mentally sum whichever recipes happen to run. This is
+/// that sum, made explicit for the UI and for content authors.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BuildingIoSummary {
+    /// Recipe ids that contributed, pick-one first then concurrent ones in id
+    /// order. Empty for a building with no recipes at all.
+    pub recipe_ids: Vec<String>,
+    /// Commodities consumed per cycle, merged across recipes, sorted by id.
+    pub inputs: Vec<(String, f64)>,
+    /// Commodities produced per cycle, merged across recipes, sorted by id.
+    pub outputs: Vec<(String, f64)>,
+}
+
+impl BuildingIoSummary {
+    /// `true` when this building neither consumes nor produces anything — a
+    /// pure storage or habitat structure.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.inputs.is_empty() && self.outputs.is_empty()
+    }
+}
+
+/// Sum the per-cycle flows of every recipe a building instance actually runs
+/// (issue #272).
+///
+/// That is the resolved pick-one recipe (`active_recipes`' selection, else the
+/// deterministic default) **plus** every [`RecipeDef::concurrent`] recipe — the
+/// same set the production step runs on one shared scale factor, so the summary
+/// describes what the building really does rather than one arbitrary recipe.
+///
+/// A commodity appearing in more than one running recipe is **merged**, not
+/// listed twice: two concurrent recipes each producing 5 power report 10, which
+/// is what actually lands in the pool. Note that a commodity appearing as both
+/// an input and an output stays in both lists rather than being netted —
+/// throughput and net change are different questions, and the caller may want
+/// either.
+///
+/// Quantities are per *cycle*, matching `RecipeDef`, not per sol — divide by
+/// `cycle_sols` for a rate (see [`crate::balance`]).
+#[must_use]
+pub fn building_io_summary<S: std::hash::BuildHasher>(
+    building_type: &str,
+    active_recipes: &std::collections::HashMap<String, String, S>,
+    registry: &ContentRegistry,
+) -> BuildingIoSummary {
+    let pick_one = recipe_for_building(building_type, active_recipes, registry);
+    let concurrent = concurrent_recipes_for_building(building_type, registry);
+
+    let mut recipe_ids = Vec::new();
+    let mut inputs: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+    let mut outputs: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+
+    for recipe in pick_one.into_iter().chain(concurrent) {
+        recipe_ids.push(recipe.id.clone());
+        for i in &recipe.inputs {
+            *inputs.entry(i.id.clone()).or_default() += i.quantity;
+        }
+        for o in &recipe.outputs {
+            *outputs.entry(o.id.clone()).or_default() += o.quantity;
+        }
+    }
+
+    BuildingIoSummary {
+        recipe_ids,
+        inputs: inputs.into_iter().collect(),
+        outputs: outputs.into_iter().collect(),
+    }
 }
 
 /// Returns true if there is at least one recipe (pick-one or concurrent)
@@ -2371,5 +2443,192 @@ mod tests {
         assert!((pool2.amount("widget_b") - 1.0).abs() < 1e-9);
         assert!((pool2.amount("widget_c") - 1.0).abs() < 1e-9);
         assert_eq!(pool2.amount("widget_a"), 0.0);
+    }
+
+    // ── Building-level I/O summary (issue #272) ───────────────────────────
+
+    /// Build a registry with a multi-function building whose recipes are *all*
+    /// concurrent — the `colony_hq` shape — plus one with a pick-one choice.
+    fn make_registry_for_io_summary() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        let building = |id: &str| BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        };
+        reg.insert_building(building("hq"));
+        reg.insert_building(building("refinery"));
+        reg.insert_building(building("silo"));
+
+        let recipe = |id: &str,
+                      b: &str,
+                      concurrent: bool,
+                      inputs: Vec<(&str, f64)>,
+                      outputs: Vec<(&str, f64)>| RecipeDef {
+            id: id.into(),
+            name: id.into(),
+            building: b.into(),
+            cycle_sols: 1,
+            inputs: inputs
+                .into_iter()
+                .map(|(id, quantity)| Ingredient {
+                    id: id.into(),
+                    quantity,
+                })
+                .collect(),
+            outputs: outputs
+                .into_iter()
+                .map(|(id, quantity)| Ingredient {
+                    id: id.into(),
+                    quantity,
+                })
+                .collect(),
+            concurrent,
+            power_draw: 0.0,
+        };
+
+        // Three always-on recipes, two of which produce the *same* commodity.
+        reg.insert_recipe(recipe("hq_power", "hq", true, vec![], vec![("power", 6.0)]));
+        reg.insert_recipe(recipe("hq_water", "hq", true, vec![], vec![("water", 4.0)]));
+        reg.insert_recipe(recipe(
+            "hq_trickle",
+            "hq",
+            true,
+            vec![("water", 1.0)],
+            vec![("power", 2.0)],
+        ));
+
+        // Pick-one alternatives plus one always-on recipe alongside them.
+        reg.insert_recipe(recipe(
+            "refine_a",
+            "refinery",
+            false,
+            vec![("ore", 2.0)],
+            vec![("metal", 1.0)],
+        ));
+        reg.insert_recipe(recipe(
+            "refine_b",
+            "refinery",
+            false,
+            vec![("ore", 4.0)],
+            vec![("alloy", 1.0)],
+        ));
+        reg.insert_recipe(recipe(
+            "refinery_vent",
+            "refinery",
+            true,
+            vec![],
+            vec![("waste_heat", 3.0)],
+        ));
+        reg
+    }
+
+    /// The motivating case: a building whose recipes are all concurrent has no
+    /// pick-one recipe, so the old `recipe_id`-only view showed nothing at all.
+    /// The summary must report every running recipe and the merged flows.
+    #[test]
+    fn io_summary_covers_an_all_concurrent_building() {
+        let reg = make_registry_for_io_summary();
+        let summary = building_io_summary("hq", &std::collections::HashMap::new(), &reg);
+
+        assert_eq!(
+            summary.recipe_ids,
+            vec!["hq_power", "hq_trickle", "hq_water"],
+            "all three always-on recipes run, in id order"
+        );
+        // power appears in two recipes: 6 + 2 = 8, merged rather than listed twice.
+        assert_eq!(
+            summary.outputs,
+            vec![("power".to_string(), 8.0), ("water".to_string(), 4.0)]
+        );
+        assert_eq!(summary.inputs, vec![("water".to_string(), 1.0)]);
+        assert!(!summary.is_empty());
+    }
+
+    /// A commodity that is both consumed and produced stays in both lists —
+    /// netting it would conflate throughput with net change.
+    #[test]
+    fn io_summary_does_not_net_a_commodity_against_itself() {
+        let reg = make_registry_for_io_summary();
+        let summary = building_io_summary("hq", &std::collections::HashMap::new(), &reg);
+        assert!(summary.inputs.iter().any(|(id, _)| id == "water"));
+        assert!(summary.outputs.iter().any(|(id, _)| id == "water"));
+    }
+
+    /// The summary follows the player's recipe selection, and always includes
+    /// the always-on recipes alongside it.
+    #[test]
+    fn io_summary_follows_the_selected_pick_one_recipe() {
+        let reg = make_registry_for_io_summary();
+
+        let default = building_io_summary("refinery", &std::collections::HashMap::new(), &reg);
+        assert_eq!(
+            default.recipe_ids,
+            vec!["refine_a", "refinery_vent"],
+            "the deterministic default plus the always-on one"
+        );
+        assert_eq!(default.inputs, vec![("ore".to_string(), 2.0)]);
+
+        let mut active = std::collections::HashMap::new();
+        active.insert("refinery".to_string(), "refine_b".to_string());
+        let selected = building_io_summary("refinery", &active, &reg);
+        assert_eq!(selected.recipe_ids, vec!["refine_b", "refinery_vent"]);
+        assert_eq!(selected.inputs, vec![("ore".to_string(), 4.0)]);
+        assert!(
+            selected.outputs.iter().any(|(id, _)| id == "alloy"),
+            "the selected recipe's output should show, not the default's"
+        );
+        assert!(
+            selected.outputs.iter().any(|(id, _)| id == "waste_heat"),
+            "the always-on recipe runs regardless of selection"
+        );
+    }
+
+    /// A pure storage building has no recipes and therefore an empty summary —
+    /// not a panic, and not a phantom row.
+    #[test]
+    fn io_summary_is_empty_for_a_building_with_no_recipes() {
+        let reg = make_registry_for_io_summary();
+        let summary = building_io_summary("silo", &std::collections::HashMap::new(), &reg);
+        assert!(summary.recipe_ids.is_empty());
+        assert!(summary.is_empty());
+    }
+
+    /// The summary must describe the set the production step actually runs. If
+    /// these drift apart the panel starts lying, so pin them against each other.
+    #[test]
+    fn io_summary_matches_what_production_actually_ran() {
+        let reg = make_registry_for_io_summary();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 100.0);
+        let outcome = process_production(&mut pool, &[("hq".to_string(), 1)], 100.0, &reg);
+
+        let result = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "hq")
+            .expect("hq should have produced");
+        let summary = building_io_summary("hq", &std::collections::HashMap::new(), &reg);
+
+        let mut ran: Vec<String> = result.concurrent_recipe_ids.clone();
+        if !result.recipe_id.is_empty() {
+            ran.push(result.recipe_id.clone());
+        }
+        ran.sort();
+        let mut summarised = summary.recipe_ids.clone();
+        summarised.sort();
+        assert_eq!(
+            ran, summarised,
+            "the summary and the production step must agree on which recipes run"
+        );
     }
 }

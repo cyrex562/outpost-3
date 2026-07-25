@@ -104,6 +104,25 @@ pub struct BuildingRow {
     ///
     /// [`concurrent`]: crate::content::types::RecipeDef::concurrent
     pub always_on: bool,
+    /// Ids of every recipe this building actually runs — the resolved pick-one
+    /// recipe plus all always-on ones (issue #272).
+    ///
+    /// The buildings list used to show only the pick-one `recipe_id`, so a
+    /// multi-function building like `colony_hq` (whose recipes are *all*
+    /// concurrent) read as having no function at all.
+    #[serde(default)]
+    pub running_recipe_ids: Vec<String>,
+    /// Commodities this building consumes per cycle, summed across every recipe
+    /// it runs and merged by commodity (issue #272).
+    #[serde(default)]
+    pub inputs: Vec<IngredientRow>,
+    /// Commodities this building produces per cycle, summed across every recipe
+    /// it runs and merged by commodity (issue #272).
+    ///
+    /// This is the "producing power + water + oxygen" line a player needs to
+    /// understand a consolidated building at a glance.
+    #[serde(default)]
+    pub outputs: Vec<IngredientRow>,
 }
 
 /// A single commodity row in the stockpile table.
@@ -508,6 +527,15 @@ mod tests {
                 scale: 1.0,
                 shortfall_reason: None,
                 always_on: false,
+                running_recipe_ids: vec!["grow_food".into()],
+                inputs: vec![IngredientRow {
+                    commodity_id: "water".into(),
+                    quantity: 5.0,
+                }],
+                outputs: vec![IngredientRow {
+                    commodity_id: "food".into(),
+                    quantity: 3.0,
+                }],
             }],
             resources: vec![ResourceRow {
                 resource_id: "power".into(),

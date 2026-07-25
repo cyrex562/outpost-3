@@ -224,6 +224,7 @@ mod tests {
         let instances = vec![BuildingInstance {
             building,
             recipe: Some(recipe),
+            concurrent_recipes: vec![],
         }];
         let imports = vec![Flow {
             commodity_id: "ore".to_string(),
@@ -290,6 +291,7 @@ mod tests {
         let instances = vec![BuildingInstance {
             building,
             recipe: Some(recipe),
+            concurrent_recipes: vec![],
         }];
         // No imports — ore is never produced → Impossible, not Bottleneck
         // For a bottleneck we need partial import
@@ -350,6 +352,7 @@ mod tests {
         let instances = vec![BuildingInstance {
             building,
             recipe: Some(recipe),
+            concurrent_recipes: vec![],
         }];
         let imports = vec![Flow {
             commodity_id: "ore".to_string(),

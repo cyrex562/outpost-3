@@ -35,7 +35,11 @@
 //!     power_draw: 0.0,
 //!     concurrent: false,
 //! };
-//! let buildings = vec![BuildingInstance { building: mine_def, recipe: Some(mine_recipe) }];
+//! let buildings = vec![BuildingInstance {
+//!     building: mine_def,
+//!     recipe: Some(mine_recipe),
+//!     concurrent_recipes: vec![],
+//! }];
 //! let report = BalanceCalculator::compute(&buildings, &[]);
 //! ```
 
@@ -73,6 +77,20 @@ pub struct BuildingInstance {
     pub building: BuildingDef,
     /// The recipe this building is running, or `None` if it has no recipe.
     pub recipe: Option<RecipeDef>,
+    /// Always-on ([`RecipeDef::concurrent`]) recipes this building runs
+    /// *alongside* [`Self::recipe`], every turn (issue #272).
+    ///
+    /// Lets one instance represent a real multi-function building. Check bundles
+    /// previously faked `colony_hq` as three co-located instances all naming the
+    /// same `building_id`; that gave the correct answer — [`BalanceCalculator`]
+    /// reads nothing but recipe flows, so the per-building fields were never
+    /// double-counted — but it described a colony that doesn't exist.
+    ///
+    /// **This does not model shared-scale throttling**, and cannot: the
+    /// calculator is a steady-state net-rate accumulator with no scale factor for
+    /// *any* building. Shortfall behaviour is the engine's job (see
+    /// `colony::production`), which is why the engine has its own tests for it.
+    pub concurrent_recipes: Vec<RecipeDef>,
 }
 
 // ─── Output types ─────────────────────────────────────────────────────────────
@@ -158,18 +176,20 @@ impl BalanceCalculator {
 
         // ── Building recipes (rate = quantity / cycle_sols) ───────────────────
         for inst in buildings {
-            let Some(recipe) = &inst.recipe else {
-                continue;
-            };
-            let cycle = f64::from(recipe.cycle_sols.max(1));
-            for input in &recipe.inputs {
-                if input.quantity > 0.0 {
-                    *consumption.entry(input.id.clone()).or_default() += input.quantity / cycle;
+            // The pick-one recipe plus every always-on one (issue #272) — the
+            // same set the engine's production step runs together.
+            for recipe in inst.recipe.iter().chain(&inst.concurrent_recipes) {
+                let cycle = f64::from(recipe.cycle_sols.max(1));
+                for input in &recipe.inputs {
+                    if input.quantity > 0.0 {
+                        *consumption.entry(input.id.clone()).or_default() += input.quantity / cycle;
+                    }
                 }
-            }
-            for output in &recipe.outputs {
-                if output.quantity > 0.0 {
-                    *production.entry(output.id.clone()).or_default() += output.quantity / cycle;
+                for output in &recipe.outputs {
+                    if output.quantity > 0.0 {
+                        *production.entry(output.id.clone()).or_default() +=
+                            output.quantity / cycle;
+                    }
                 }
             }
         }
@@ -304,6 +324,98 @@ mod tests {
         BuildingInstance {
             building: make_building(building_id),
             recipe,
+            concurrent_recipes: vec![],
+        }
+    }
+
+    /// A multi-function building: one instance running several always-on
+    /// recipes at once (issue #272).
+    fn multi_function_instance(
+        building_id: &str,
+        recipe: Option<RecipeDef>,
+        concurrent_recipes: Vec<RecipeDef>,
+    ) -> BuildingInstance {
+        BuildingInstance {
+            building: make_building(building_id),
+            recipe,
+            concurrent_recipes,
+        }
+    }
+
+    // ── Multi-function buildings (issue #272) ────────────────────────────
+
+    /// One instance running several always-on recipes must account for all of
+    /// them — that is the whole point of the field.
+    #[test]
+    fn a_multi_function_instance_counts_every_concurrent_recipe() {
+        let power = make_recipe("hq_power", "colony_hq", vec![], vec![("power", 24.0)]);
+        let water = make_recipe("hq_water", "colony_hq", vec![], vec![("water", 24.0)]);
+        let sink = make_recipe(
+            "consume",
+            "sink",
+            vec![("power", 20.0), ("water", 15.0)],
+            vec![],
+        );
+
+        let buildings = vec![
+            multi_function_instance("colony_hq", None, vec![power, water]),
+            instance("sink", Some(sink)),
+        ];
+        let report = BalanceCalculator::compute(&buildings, &[]);
+
+        let net = |id: &str| {
+            report
+                .commodities
+                .iter()
+                .find(|c| c.commodity_id == id)
+                .map_or(0.0, |c| c.net_rate)
+        };
+        assert!(
+            (net("power") - 4.0).abs() < 1e-9,
+            "power net was {}",
+            net("power")
+        );
+        assert!(
+            (net("water") - 9.0).abs() < 1e-9,
+            "water net was {}",
+            net("water")
+        );
+    }
+
+    /// The equivalence the `colony_hq_efficiency` bundle relied on before #272:
+    /// N co-located single-recipe instances and one multi-recipe instance give
+    /// identical results, because the calculator reads nothing but recipe flows.
+    ///
+    /// Pinned so the claim in that bundle's `pack.yaml` stays true, and so a
+    /// future change that starts reading `BuildingDef` fields (power_delta,
+    /// slot_cost) has to notice it is breaking the old pattern.
+    #[test]
+    fn one_multi_recipe_instance_equals_n_co_located_instances() {
+        let power = make_recipe("hq_power", "colony_hq", vec![], vec![("power", 24.0)]);
+        let water = make_recipe("hq_water", "colony_hq", vec![], vec![("water", 24.0)]);
+
+        let combined = vec![multi_function_instance(
+            "colony_hq",
+            None,
+            vec![power.clone(), water.clone()],
+        )];
+        let faked = vec![
+            instance("colony_hq", Some(power)),
+            instance("colony_hq", Some(water)),
+        ];
+
+        let a = BalanceCalculator::compute(&combined, &[]);
+        let b = BalanceCalculator::compute(&faked, &[]);
+        assert_eq!(a.commodities.len(), b.commodities.len());
+        for (x, y) in a.commodities.iter().zip(&b.commodities) {
+            assert_eq!(x.commodity_id, y.commodity_id);
+            assert!(
+                (x.net_rate - y.net_rate).abs() < 1e-9,
+                "{} diverged: {} vs {}",
+                x.commodity_id,
+                x.net_rate,
+                y.net_rate
+            );
         }
     }
 
