@@ -931,6 +931,34 @@ mod tests {
         );
     }
 
+    /// The shipped base pack must lint clean (issue #272), or the warning
+    /// channel is noise nobody reads.
+    ///
+    /// Lives here rather than in `outpost_core` because the lint runs over a
+    /// loaded registry and core cannot touch the filesystem (CLAUDE.md rule 1).
+    #[test]
+    fn the_base_content_pack_lints_clean() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        if !base_dir.is_dir() {
+            return;
+        }
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+        let warnings = registry.lint();
+        assert!(
+            warnings.is_empty(),
+            "content/base should lint clean; found:\n{}",
+            warnings
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
     /// `handle_new_game`'s tech-loading step (issue #250) reads
     /// `content/base/tech.yaml` from disk the same way it's authored, so the
     /// browser-mode tech tree isn't permanently empty like it was before

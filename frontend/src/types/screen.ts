@@ -23,6 +23,25 @@ export interface BuildingRow {
   shortfall_reason: string | null
   /** Building has only always-on recipes, so there is no recipe to choose. */
   always_on: boolean
+  /**
+   * Ids of every recipe this building actually runs — the resolved pick-one
+   * recipe plus all always-on ones (issue #272).
+   */
+  running_recipe_ids: string[]
+  /** Commodities consumed per cycle, summed across every running recipe. */
+  inputs: IngredientRow[]
+  /**
+   * Commodities produced per cycle, summed across every running recipe
+   * (issue #272) — the "producing power + water + oxygen" line that makes a
+   * consolidated building legible at a glance.
+   */
+  outputs: IngredientRow[]
+}
+
+/** A commodity id + per-cycle quantity pair. */
+export interface IngredientRow {
+  commodity_id: string
+  quantity: number
 }
 
 /**

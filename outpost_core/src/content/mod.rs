@@ -19,11 +19,13 @@
 //! ```
 
 pub mod error;
+pub mod lint;
 pub mod loader;
 pub mod registry;
 pub mod types;
 
 pub use error::ContentError;
+pub use lint::ContentWarning;
 pub use loader::PackLoader;
 pub use registry::ContentRegistry;
 pub use types::{

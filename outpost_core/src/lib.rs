@@ -4974,6 +4974,23 @@ impl GameEngine {
                         let shortfall_reason = result
                             .and_then(|r| r.shortfalls.first())
                             .map(|s| describe_shortfall(&s.reason));
+                        // The building's real I/O footprint: the resolved
+                        // pick-one recipe plus every always-on one, merged by
+                        // commodity (issue #272). Without a registry there is
+                        // nothing to derive it from, so it stays empty.
+                        let io = self.state.registry.as_ref().map(|reg| {
+                            colony::building_io_summary(&b.building_type, &c.active_recipes, reg)
+                        });
+                        let (running_recipe_ids, inputs, outputs) = io.map_or_else(
+                            || (Vec::new(), Vec::new(), Vec::new()),
+                            |io| {
+                                (
+                                    io.recipe_ids,
+                                    io.inputs.into_iter().map(ingredient_row).collect(),
+                                    io.outputs.into_iter().map(ingredient_row).collect(),
+                                )
+                            },
+                        );
                         ui::BuildingRow {
                             building_type: b.building_type.clone(),
                             labour_assigned: 0,
@@ -4982,6 +4999,9 @@ impl GameEngine {
                             scale,
                             shortfall_reason,
                             always_on: self.building_is_always_on(&b.building_type),
+                            running_recipe_ids,
+                            inputs,
+                            outputs,
                         }
                     })
                     .collect();
@@ -5889,6 +5909,16 @@ fn colony_store_amount(colony: &colony::Colony, id: &str, id_is_resource: bool) 
         colony.resources.amount(id)
     } else {
         colony.pool.amount(id)
+    }
+}
+
+/// Convert a `(commodity_id, quantity)` pair from
+/// [`colony::BuildingIoSummary`] into the wire-shaped row the UI reads
+/// (issue #272).
+fn ingredient_row((commodity_id, quantity): (String, f64)) -> ui::IngredientRow {
+    ui::IngredientRow {
+        commodity_id,
+        quantity,
     }
 }
 

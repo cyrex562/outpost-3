@@ -1,18 +1,16 @@
 # Colony configuration for the colony_hq efficiency balance check.
 #
-# One colony_hq instance, represented as 4 BuildingInstance entries (one per
-# concurrent recipe — see pack.yaml's approximation note), plus a synthetic
-# 100-colonist consumption sink covering water/oxygen/power only (no food —
-# colony_hq doesn't produce it).
+# ONE colony_hq instance. Its four `concurrent: true` recipes are picked up
+# automatically from the pack (issue #272) — they always run, so listing them
+# here would only be a way to get them wrong. Plus a synthetic 100-colonist
+# consumption sink covering water/oxygen/power only (no food — colony_hq
+# doesn't produce it).
+#
+# This used to be four BuildingInstance entries all naming `colony_hq`, one per
+# recipe. That produced the right numbers but described a colony that doesn't
+# exist; see pack.yaml.
 buildings:
   - building_id: colony_hq
-    recipe_id: hq_generate_power
-  - building_id: colony_hq
-    recipe_id: hq_pump_water
-  - building_id: colony_hq
-    recipe_id: hq_scrub_oxygen
-  - building_id: colony_hq
-    recipe_id: hq_conduct_research
   - building_id: colonist_life_support
     recipe_id: colonist_consumption
 

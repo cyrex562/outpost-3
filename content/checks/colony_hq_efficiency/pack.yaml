@@ -17,14 +17,22 @@ description: >
   that output `research` are themselves tech-gated.
 
   colony_hq's four recipes (hq_generate_power, hq_pump_water,
-  hq_scrub_oxygen, hq_conduct_research) are all `concurrent: true` — the
-  real engine (outpost_core::colony::production) runs them simultaneously
-  against ONE building instance sharing a single scale factor. This static
-  balance calculator has no concept of `concurrent` recipes or shared
-  per-instance scale, so it's approximated here as four separate
-  BuildingInstance entries all naming `colony_hq` as their `building_id`
-  (one per recipe) — equivalent at full production (no shortfall), which is
-  what this steady-state closure check verifies. The real shared-scale
-  behavior (a shortfall throttling every output together) is proven instead by
+  hq_scrub_oxygen, hq_conduct_research) are all `concurrent: true` — the real
+  engine (outpost_core::colony::production) runs them simultaneously against
+  ONE building instance sharing a single scale factor. Since issue #272 the
+  harness represents that faithfully: colony.yaml lists a single colony_hq
+  entry and `BuildingInstance.concurrent_recipes` is populated from the pack.
+
+  This bundle previously approximated it as four separate BuildingInstance
+  entries all naming `colony_hq`. That gave the *correct numbers* — the
+  calculator reads nothing but recipe flows, so the per-building fields
+  (power_delta, worker_slots, slot_cost, maintenance) were never
+  double-counted — but it described a colony that doesn't exist, and would
+  have misled anyone reading the bundle as documentation.
+
+  What the calculator still cannot express, by construction, is shared-scale
+  throttling: it is a steady-state net-rate accumulator with no scale factor
+  for *any* building, concurrent or not. A shortfall throttling every output
+  together is proven instead by
   outpost_web::ws::tests::colony_hq_runs_all_concurrent_recipes_from_real_pack,
   which exercises the actual production.rs code path.

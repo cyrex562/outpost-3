@@ -282,6 +282,14 @@ fn check_subcommand(args: &[String]) -> Result<i32, String> {
     let assertion_list: Vec<Assertion> = serde_yaml::from_str(&assertions_text)
         .map_err(|e| format!("invalid assertions.yaml: {e}"))?;
 
+    // Surface suspicious authoring patterns before the numbers (issue #272).
+    // These never fail the check — they're for a human to judge — but a
+    // silently-doubled concurrent output would otherwise show up only as a
+    // balance figure nobody can account for.
+    for warning in registry.lint() {
+        eprintln!("content warning: {warning}");
+    }
+
     // Resolve instances and run calculator.
     let building_instances = resolve_instances(&colony_config, &registry)?;
     let imports: Vec<Flow> = colony_config
@@ -418,7 +426,25 @@ fn resolve_instances(
             None
         };
 
-        instances.push(BuildingInstance { building, recipe });
+        // Always-on recipes for this building type come from the pack, not the
+        // bundle: they run unconditionally, so asking an author to list them
+        // would just be a way to get them wrong (issue #272).
+        let concurrent_recipes: Vec<_> = {
+            let mut found: Vec<_> = registry
+                .recipes()
+                .filter(|r| r.building == entry.building_id && r.concurrent)
+                .cloned()
+                .collect();
+            // `ContentRegistry` iterates a HashMap, so sort for determinism.
+            found.sort_by(|a, b| a.id.cmp(&b.id));
+            found
+        };
+
+        instances.push(BuildingInstance {
+            building,
+            recipe,
+            concurrent_recipes,
+        });
     }
 
     Ok(instances)
