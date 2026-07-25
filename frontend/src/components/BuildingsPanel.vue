@@ -130,7 +130,7 @@ function assignLabour(buildingType: string): void {
     <div v-if="props.buildings !== null" class="slots-summary" data-testid="slots-summary">
       Build slots: {{ props.slotsUsed }} / {{ props.slotCapacity }}
       &nbsp;|&nbsp;
-      Labour: {{ props.labourAvailable }} / {{ props.labourTotal }} free
+      Labour: {{ props.labourAvailable.toFixed(0) }} of {{ props.labourTotal.toFixed(0) }} able to work
     </div>
   </div>
 </template>

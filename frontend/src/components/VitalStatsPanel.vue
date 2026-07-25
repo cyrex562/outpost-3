@@ -18,6 +18,10 @@ const props = defineProps<{
   slotsUsed: number
   /** Total build-slot capacity for the colony. */
   slotCapacity: number
+  /** Workforce taken up by jobs at operational buildings (issue #305). */
+  labourEmployed: number
+  /** Workforce with no job to go to (issue #305). */
+  labourUnemployed: number
 }>()
 
 function stabilityClass(stability: number): string {
@@ -111,6 +115,26 @@ function sparklinePath(values: number[]): string {
         <span class="stat-value" data-testid="build-slots">{{ props.slotsUsed }} / {{ props.slotCapacity }}</span>
       </div>
     </div>
+
+    <!-- Employed vs unemployed split of the available workforce (#305). -->
+    <div class="stat-row" data-testid="labour-breakdown">
+      <div class="stat-block">
+        <span class="stat-label">Employed</span>
+        <span class="stat-value" data-testid="labour-employed">
+          {{ props.labourEmployed.toFixed(0) }}
+        </span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-label">Unemployed</span>
+        <span
+          class="stat-value"
+          :class="{ 'stat-warn': props.labourUnemployed > 0 }"
+          data-testid="labour-unemployed"
+        >
+          {{ props.labourUnemployed.toFixed(0) }}
+        </span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -122,6 +146,7 @@ function sparklinePath(values: number[]): string {
 .stat-block { display: flex; flex-direction: column; }
 .stat-label { font-size: 0.7rem; color: #668; margin-bottom: 0.1rem; }
 .stat-value { font-size: 1.1rem; color: #dde; }
+.stat-value.stat-warn { color: #eab764; }
 
 .sparkline-wrap { align-self: flex-end; }
 .sparkline { display: block; }

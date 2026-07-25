@@ -343,6 +343,8 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                   :population-trend="populationTrend"
                   :slots-used="screen?.slots_used ?? 0"
                   :slot-capacity="screen?.slot_capacity ?? 0"
+                  :labour-employed="screen?.labour_employed ?? 0"
+                  :labour-unemployed="screen?.labour_unemployed ?? 0"
                 />
               </Pane>
               <Pane :size="leftSizes[1]" min-size="10">

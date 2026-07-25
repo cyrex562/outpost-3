@@ -324,17 +324,7 @@ pub fn process_production_scaled(
     let brownout_ratio = power_grid.supply_ratio();
 
     // ── Step 2: compute labor ratio ──────────────────────────────────────────
-    let labor_demanded: f32 = buildings
-        .iter()
-        .filter_map(|(bt, _)| registry.building(bt))
-        .filter(|bd| has_recipe(bd.id.as_str(), registry))
-        .map(|bd| {
-            #[allow(clippy::cast_precision_loss)]
-            {
-                bd.worker_slots as f32
-            }
-        })
-        .sum();
+    let labor_demanded: f32 = labor_demanded(buildings.iter().map(|(bt, _)| bt.as_str()), registry);
 
     let labor_ratio = if labor_demanded <= 0.0 {
         1.0_f64
@@ -778,6 +768,30 @@ pub(crate) fn concurrent_recipes_for_building<'r>(
 fn has_recipe(building_type: &str, registry: &ContentRegistry) -> bool {
     first_recipe_for_building(building_type, registry).is_some()
         || !concurrent_recipes_for_building(building_type, registry).is_empty()
+}
+
+/// Total worker slots demanded by the given buildings — the "jobs offered" a
+/// colony's labour ratio is divided against.
+///
+/// Only buildings with at least one recipe count: a facility with nothing to
+/// produce asks for nobody. `pub(crate)` because the colony-screen query
+/// (issue #305) reports employed/unemployed from this same number — computing
+/// it twice would let the readout drift from what actually gates production.
+pub(crate) fn labor_demanded<'a, I>(building_types: I, registry: &ContentRegistry) -> f32
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    building_types
+        .into_iter()
+        .filter_map(|bt| registry.building(bt))
+        .filter(|bd| has_recipe(bd.id.as_str(), registry))
+        .map(|bd| {
+            #[allow(clippy::cast_precision_loss)]
+            {
+                bd.worker_slots as f32
+            }
+        })
+        .sum()
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
