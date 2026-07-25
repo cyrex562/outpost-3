@@ -410,7 +410,29 @@ export interface BuildingDetail {
   available_recipes: RecipeRow[]
   /** Recipes that always run alongside `recipe` every turn (concurrent/multi-function buildings, issue #272). */
   concurrent_recipes: RecipeRow[]
+  /**
+   * The building's production lines (issue #272) — prefer this over
+   * `available_recipes` for a picker.
+   *
+   * `available_recipes` is a flat list of every selectable recipe, which only
+   * reads correctly for a single-line building. For a multi-line one it shows
+   * recipes from *different* lines as if they were alternatives, when in fact
+   * all of them run at once.
+   */
+  lines: RecipeLineRow[]
   last_run: BuildingRunRow | null
+}
+
+/** One production line on a building (issue #272). */
+export interface RecipeLineRow {
+  /** Authored line name; `null` is the building's default line. */
+  line: string | null
+  /** True when the line always runs and offers no choice. */
+  always_on: boolean
+  /** Recipe currently running on this line. */
+  selected_recipe_id: string
+  /** Every recipe on this line. Length 1 means there is nothing to choose. */
+  alternatives: RecipeRow[]
 }
 
 /** Full detail for one building type within a colony (issue #182). */

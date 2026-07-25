@@ -5838,6 +5838,15 @@ impl GameEngine {
             .into_iter()
             .map(recipe_to_row)
             .collect(),
+            lines: colony::lines_for_building(building_type, active_recipes, registry)
+                .into_iter()
+                .map(|l| ui::RecipeLineRow {
+                    line: l.line,
+                    always_on: l.always_on,
+                    selected_recipe_id: l.selected.id.clone(),
+                    alternatives: l.alternatives.into_iter().map(recipe_to_row).collect(),
+                })
+                .collect(),
             last_run,
         })
     }
@@ -7235,6 +7244,74 @@ mod tests {
         assert!(
             matches!(&err, EngineError::InvalidArgument(m) if m.contains("always-on")),
             "expected a clear always-on rejection, got: {err:?}"
+        );
+    }
+
+    /// The building-detail query must describe lines, not just a flat recipe
+    /// list — otherwise a picker shows two lines' recipes as if they were
+    /// alternatives when in fact both run.
+    #[test]
+    fn building_detail_reports_each_production_line() {
+        let (mut engine, colony_id) = multiline_engine();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("complex", 1));
+
+        let QueryResult::BuildingDetail(detail) = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "complex".into(),
+            })
+            .unwrap()
+        else {
+            panic!("expected BuildingDetail")
+        };
+
+        let line = |name: Option<&str>| {
+            detail
+                .lines
+                .iter()
+                .find(|l| l.line.as_deref() == name)
+                .unwrap_or_else(|| panic!("missing line {name:?}: {:?}", detail.lines))
+        };
+
+        let smelting = line(Some("smelting"));
+        assert_eq!(
+            smelting.selected_recipe_id, "smelt_a",
+            "deterministic default"
+        );
+        assert_eq!(
+            smelting
+                .alternatives
+                .iter()
+                .map(|r| r.recipe_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["smelt_a", "smelt_b"],
+            "a picker for this line offers exactly its own two recipes"
+        );
+        assert!(!smelting.always_on);
+
+        let machining = line(Some("machining"));
+        assert_eq!(machining.alternatives.len(), 2);
+        assert!(
+            !machining
+                .alternatives
+                .iter()
+                .any(|r| r.recipe_id.starts_with("smelt")),
+            "lines must not leak each other's recipes into the same picker"
+        );
+
+        let vent = line(Some("vent"));
+        assert!(vent.always_on);
+        assert_eq!(vent.alternatives.len(), 1, "nothing to choose");
+
+        // The flat pre-#272 list is still populated for older consumers, and is
+        // exactly the thing that would mislead a multi-line picker.
+        assert_eq!(
+            detail.available_recipes.len(),
+            4,
+            "flat list lumps both lines together — kept for back-compat only"
         );
     }
 

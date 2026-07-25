@@ -36,6 +36,7 @@ function makeDetail(overrides: Partial<BuildingDetail>): BuildingDetail {
     },
     available_recipes: [],
     concurrent_recipes: [],
+    lines: [],
     last_run: {
       scale: 1.0,
       is_full_production: true,
@@ -170,6 +171,7 @@ describe('BuildingDetailsHud (#182)', () => {
             cycle_sols: 1,
           },
         ],
+        lines: [],
       }),
     )
     const wrapper = mount(BuildingDetailsHud, {
@@ -181,6 +183,159 @@ describe('BuildingDetailsHud (#182)', () => {
     expect(wrapper.text()).toContain('Generate Power (Colony HQ)')
     expect(wrapper.text()).toContain('Pump Water (Colony HQ)')
     expect(wrapper.text()).not.toContain('No recipe (storage/habitat building).')
+  })
+
+  describe('production lines (#272)', () => {
+    const smelt = {
+      recipe_id: 'foundry_smelt_ore',
+      name: 'Smelt Structural Ore',
+      inputs: [{ commodity_id: 'structural_ore', quantity: 5 }],
+      outputs: [{ commodity_id: 'structural_metal', quantity: 2.5 }],
+      cycle_sols: 1,
+    }
+    const smeltConductive = {
+      recipe_id: 'foundry_smelt_conductive',
+      name: 'Smelt Conductive Ore',
+      inputs: [{ commodity_id: 'conductive_ore', quantity: 5 }],
+      outputs: [{ commodity_id: 'conductive_metal', quantity: 2 }],
+      cycle_sols: 1,
+    }
+    const fabricate = {
+      recipe_id: 'machine_shop_fabricate_components',
+      name: 'Fabricate Components',
+      inputs: [{ commodity_id: 'structural_metal', quantity: 2 }],
+      outputs: [{ commodity_id: 'components', quantity: 1 }],
+      cycle_sols: 1,
+    }
+
+    /** A two-line `fabrication_complex`: foundry (pick-one) + machine shop. */
+    function twoLineDetail() {
+      return makeDetail({
+        building_type: 'fabrication_complex',
+        name: 'Fabrication Complex',
+        recipe: smelt,
+        available_recipes: [smelt, smeltConductive],
+        concurrent_recipes: [],
+        lines: [
+          {
+            line: 'foundry',
+            always_on: false,
+            selected_recipe_id: 'foundry_smelt_ore',
+            alternatives: [smelt, smeltConductive],
+          },
+          {
+            line: 'machine_shop',
+            always_on: true,
+            selected_recipe_id: 'machine_shop_fabricate_components',
+            alternatives: [fabricate],
+          },
+        ],
+      })
+    }
+
+    it('renders one section per line, each showing its own selected recipe flows', async () => {
+      getBuildingDetail.mockResolvedValueOnce(twoLineDetail())
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: 'fabrication_complex' },
+      })
+      await flushPromises()
+
+      const foundry = wrapper.find('[data-testid="line-section-foundry"]')
+      const shop = wrapper.find('[data-testid="line-section-machine_shop"]')
+      expect(foundry.exists()).toBe(true)
+      expect(shop.exists()).toBe(true)
+
+      // Each line shows only its own selected recipe's flows.
+      expect(foundry.text()).toContain('structural_metal ×2.5')
+      expect(foundry.text()).not.toContain('components ×1')
+      expect(shop.text()).toContain('components ×1')
+
+      // The unselected foundry alternative is an option, not a rendered flow.
+      expect(foundry.text()).not.toContain('conductive_metal ×2')
+
+      // The flat pre-#272 picker must be gone — it presented simultaneous
+      // lines as mutually exclusive alternatives.
+      expect(wrapper.find('[data-testid="recipe-section"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="recipe-select"]').exists()).toBe(false)
+    })
+
+    it('offers a selector only on the line that has alternatives, and marks always-on lines', async () => {
+      getBuildingDetail.mockResolvedValueOnce(twoLineDetail())
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: 'fabrication_complex' },
+      })
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="line-select-foundry"]').exists()).toBe(true)
+      // Single-alternative line offers no meaningless dropdown.
+      expect(wrapper.find('[data-testid="line-select-machine_shop"]').exists()).toBe(false)
+
+      expect(wrapper.find('[data-testid="line-section-machine_shop"] [data-testid="line-always-on"]').exists()).toBe(
+        true,
+      )
+      expect(wrapper.find('[data-testid="line-section-foundry"] [data-testid="line-always-on"]').exists()).toBe(false)
+
+      // The multi-line explainer tells the player the lines are simultaneous.
+      expect(wrapper.find('[data-testid="lines-explainer"]').exists()).toBe(true)
+    })
+
+    it('switching a line recipe sends only that line\'s recipe id and reloads', async () => {
+      getBuildingDetail.mockResolvedValueOnce(twoLineDetail())
+      setActiveRecipe.mockResolvedValueOnce(undefined)
+      const switched = twoLineDetail()
+      switched.lines[0].selected_recipe_id = 'foundry_smelt_conductive'
+      switched.recipe = smeltConductive
+      getBuildingDetail.mockResolvedValueOnce(switched)
+
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: 'fabrication_complex' },
+      })
+      await flushPromises()
+
+      const select = wrapper.find('[data-testid="line-select-foundry"]')
+      ;(select.element as HTMLSelectElement).value = 'foundry_smelt_conductive'
+      await select.trigger('change')
+      await flushPromises()
+
+      expect(setActiveRecipe).toHaveBeenCalledWith('colony-1', 'fabrication_complex', 'foundry_smelt_conductive')
+      // The machine shop line is untouched by a foundry switch.
+      const shop = wrapper.find('[data-testid="line-section-machine_shop"]')
+      expect(shop.text()).toContain('components ×1')
+      expect(wrapper.find('[data-testid="line-section-foundry"]').text()).toContain('conductive_metal ×2')
+    })
+
+    it('a single unnamed line renders as a plain "Recipe" section with no explainer', async () => {
+      getBuildingDetail.mockResolvedValueOnce(
+        makeDetail({
+          lines: [
+            {
+              line: null,
+              always_on: false,
+              selected_recipe_id: 'research_recipe',
+              alternatives: [
+                {
+                  recipe_id: 'research_recipe',
+                  name: 'Basic Research',
+                  inputs: [{ commodity_id: 'water', quantity: 1 }],
+                  outputs: [{ commodity_id: 'research', quantity: 2 }],
+                  cycle_sols: 1,
+                },
+              ],
+            },
+          ],
+        }),
+      )
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: 'research_lab' },
+      })
+      await flushPromises()
+
+      const section = wrapper.find('[data-testid="line-section-default"]')
+      expect(section.exists()).toBe(true)
+      expect(section.text()).toContain('Recipe: Basic Research')
+      expect(section.text()).toContain('research ×2')
+      expect(wrapper.find('[data-testid="lines-explainer"]').exists()).toBe(false)
+    })
   })
 
   it('emits close when the backdrop is clicked', async () => {
