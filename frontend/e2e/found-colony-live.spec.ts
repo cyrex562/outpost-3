@@ -87,6 +87,20 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   expect(opened.width).toBeGreaterThan(hostBox.width * 0.9)
   expect(opened.height).toBeGreaterThan(hostBox.height * 0.9)
 
+  // An untouched fill-host window keeps tracking the host, so growing the app
+  // grows the window and therefore the map inside it — otherwise the window
+  // would be stranded at the old size the moment the player resized the app.
+  const planetMap = page.getByTestId('planet-hex-map')
+  const mapBefore = (await planetMap.boundingBox())!
+  await page.setViewportSize({ width: 1280, height: 1200 })
+  await expect
+    .poll(async () => (await planetMap.boundingBox())?.height ?? 0, { timeout: 5_000 })
+    .toBeGreaterThan(mapBefore.height + 100)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await expect
+    .poll(async () => (await win.boundingBox())?.height ?? 0, { timeout: 5_000 })
+    .toBeLessThan(hostBox.height + 1)
+
   // Maximise sits it flush against the host, and restore brings it back.
   await page.getByTestId('fw-maximise').click()
   const maxed = (await win.boundingBox())!

@@ -119,18 +119,19 @@ describe('FloatingWindow host-relative sizing (issue #320)', () => {
     document.body.innerHTML = ''
   })
 
-  it('opens filling the host with fill-host, insetting by initialX', async () => {
+  it('opens filling the host with fill-host, per-axis inset', async () => {
     const restore = withHostSize(1600, 900)
     try {
       const wrapper = mountWindow({ fillHost: true })
       // The onMounted resize is reactive, so let Vue flush it to the DOM.
       await wrapper.vm.$nextTick()
       const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
-      // Inset 10 (initialX) on every side — not the 400x300 initial size.
+      // Inset by initialX (10) horizontally and initialY (20) vertically —
+      // not the 400x300 initial size, and not initialX on all four sides.
       expect(s.left).toBe('10px')
-      expect(s.top).toBe('10px')
+      expect(s.top).toBe('20px')
       expect(s.width).toBe('1580px')
-      expect(s.height).toBe('880px')
+      expect(s.height).toBe('860px')
     } finally {
       restore()
     }
@@ -240,6 +241,91 @@ describe('FloatingWindow host-relative sizing (issue #320)', () => {
       const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
       expect(s.width).toBe('1400px')
       expect(s.height).toBe('900px')
+    } finally {
+      restore()
+    }
+  })
+
+  it('survives a reload as maximised rather than looking flush but unmaximised', async () => {
+    const restore = withHostSize(1200, 800)
+    try {
+      const first = mountWindow()
+      await first.get('[data-testid="fw-maximise"]').trigger('click')
+      first.unmount()
+
+      // Remount from the persisted entry: the flag rides along with the
+      // geometry, so the window doesn't come back looking maximised while the
+      // button still offers to maximise it.
+      const wrapper = mountWindow()
+      await wrapper.vm.$nextTick()
+      const win = wrapper.get('[data-testid="floating-window"]')
+      expect(win.classes()).toContain('maximised')
+      expect(wrapper.get('[data-testid="fw-maximise"]').attributes('aria-pressed')).toBe('true')
+
+      // ...and restore still returns to the pre-maximise geometry.
+      await wrapper.get('[data-testid="fw-maximise"]').trigger('click')
+      const s = styleOf(win.element)
+      expect(s.width).toBe('400px')
+      expect(s.height).toBe('300px')
+    } finally {
+      restore()
+    }
+  })
+
+  it('keeps an untouched fill-host window filling a host that grows', async () => {
+    let restore = withHostSize(1000, 700)
+    try {
+      const wrapper = mountWindow({ fillHost: true })
+      await wrapper.vm.$nextTick()
+      expect(styleOf(wrapper.get('[data-testid="floating-window"]').element).width).toBe('980px')
+
+      restore()
+      restore = withHostSize(1600, 900)
+      window.dispatchEvent(new Event('resize'))
+      await wrapper.vm.$nextTick()
+
+      const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+      expect(s.width).toBe('1580px')
+      expect(s.height).toBe('860px')
+    } finally {
+      restore()
+    }
+  })
+
+  it('stops auto-filling once the player has moved the window', async () => {
+    let restore = withHostSize(1000, 700)
+    try {
+      const wrapper = mountWindow({ fillHost: true })
+      await wrapper.vm.$nextTick()
+
+      await wrapper.get('[data-testid="fw-titlebar"]').trigger('mousedown', { button: 0, clientX: 50, clientY: 50 })
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 90, clientY: 80 }))
+      window.dispatchEvent(new MouseEvent('mouseup'))
+      await wrapper.vm.$nextTick()
+      const dragged = styleOf(wrapper.get('[data-testid="floating-window"]').element).width
+
+      restore()
+      restore = withHostSize(1600, 900)
+      window.dispatchEvent(new Event('resize'))
+      await wrapper.vm.$nextTick()
+
+      // A growing host must not overwrite the size the player just chose.
+      expect(styleOf(wrapper.get('[data-testid="floating-window"]').element).width).toBe(dragged)
+    } finally {
+      restore()
+    }
+  })
+
+  it('insets vertically by initialY, not initialX', async () => {
+    const restore = withHostSize(1000, 700)
+    try {
+      const wrapper = mountWindow({ fillHost: true, initialX: 10, initialY: 40 })
+      await wrapper.vm.$nextTick()
+      const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+      expect(s.left).toBe('10px')
+      expect(s.top).toBe('40px')
+      expect(s.width).toBe('980px')
+      expect(s.height).toBe('620px')
     } finally {
       restore()
     }

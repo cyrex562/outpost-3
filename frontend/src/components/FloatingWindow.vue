@@ -28,10 +28,12 @@ const props = defineProps<{
   initialWidth?: number
   initialHeight?: number
   /**
-   * Open filling the host (inset by `initialX`/`initialY`) instead of at
-   * `initialWidth`×`initialHeight`. A persisted geometry still wins — this is
-   * only the first-run default. Ignored when the host can't be measured
-   * (e.g. jsdom), where the explicit initial size is used instead.
+   * Open filling the host — inset horizontally by `initialX` and vertically by
+   * `initialY` — instead of at `initialWidth`×`initialHeight`. Such a window
+   * keeps tracking the host until the player moves, resizes, or maximises it.
+   * A persisted geometry still wins; this is only the untouched default.
+   * Ignored when the host can't be measured (e.g. jsdom), where the explicit
+   * initial size is used instead.
    */
   fillHost?: boolean
 }>()
@@ -46,18 +48,41 @@ interface Rect {
 const MIN_W = 240
 const MIN_H = 180
 
-function loadPersisted(): Rect | null {
+function isRect(v: unknown): v is Rect {
+  const p = v as Rect | null
+  return (
+    !!p &&
+    typeof p.x === 'number' &&
+    typeof p.y === 'number' &&
+    typeof p.w === 'number' &&
+    typeof p.h === 'number'
+  )
+}
+
+/**
+ * Persisted shape. `maximised`/`restore` ride along with the geometry so a
+ * reload can't leave a window rendered flush with its host while the button
+ * still offers to maximise it.
+ */
+interface Persisted extends Rect {
+  maximised?: boolean
+  restore?: Rect | null
+}
+
+function loadPersisted(): Persisted | null {
   try {
     const raw = window.localStorage.getItem(props.storageKey)
     if (!raw) return null
-    const p = JSON.parse(raw) as Rect
-    if (
-      typeof p.x === 'number' &&
-      typeof p.y === 'number' &&
-      typeof p.w === 'number' &&
-      typeof p.h === 'number'
-    ) {
-      return { x: p.x, y: p.y, w: Math.max(MIN_W, p.w), h: Math.max(MIN_H, p.h) }
+    const p = JSON.parse(raw) as Persisted
+    if (isRect(p)) {
+      return {
+        x: p.x,
+        y: p.y,
+        w: Math.max(MIN_W, p.w),
+        h: Math.max(MIN_H, p.h),
+        maximised: p.maximised === true,
+        restore: isRect(p.restore) ? p.restore : null,
+      }
     }
   } catch {
     // corrupt entry — fall back to defaults
@@ -65,28 +90,44 @@ function loadPersisted(): Rect | null {
   return null
 }
 
-const hadPersisted = loadPersisted() !== null
+const persisted = loadPersisted()
+const hadPersisted = persisted !== null
 
 const rect = reactive<Rect>(
-  loadPersisted() ?? {
-    x: props.initialX ?? 24,
-    y: props.initialY ?? 24,
-    w: props.initialWidth ?? 640,
-    h: props.initialHeight ?? 460,
-  },
+  persisted
+    ? { x: persisted.x, y: persisted.y, w: persisted.w, h: persisted.h }
+    : {
+        x: props.initialX ?? 24,
+        y: props.initialY ?? 24,
+        w: props.initialWidth ?? 640,
+        h: props.initialHeight ?? 460,
+      },
 )
 
 const rootRef = ref<HTMLElement | null>(null)
 
 /** Whether the window is currently maximised to its host. */
-const maximised = ref(false)
+const maximised = ref(persisted?.maximised ?? false)
 /** Geometry to return to when un-maximising. */
-let restoreRect: Rect | null = null
+let restoreRect: Rect | null = persisted?.restore ?? null
+
+/**
+ * Whether the current geometry is the player's own choice rather than a
+ * `fill-host` default. Only gestures persist geometry, so anything loaded from
+ * storage was chosen deliberately. An untouched `fill-host` window keeps
+ * tracking its host as the app resizes; once the player moves, resizes, or
+ * maximises it, we stop second-guessing their size.
+ */
+const userSized = ref(hadPersisted)
 
 /**
  * Inner size of the positioned ancestor this window floats within, or `null`
  * when it can't be measured — jsdom reports 0, and a 0-sized host would
  * otherwise collapse the window to its minimum.
+ *
+ * The host is the window's direct parent by convention; both call sites make
+ * `FloatingWindow` the only child of a `position: relative` `.map-host`.
+ * Wrapping it in another element would silently measure the wrapper instead.
  */
 function hostSize(): { w: number; h: number } | null {
   const host = rootRef.value?.parentElement
@@ -97,15 +138,20 @@ function hostSize(): { w: number; h: number } | null {
   return { w, h }
 }
 
-/** Resize to fill the host, inset by `inset` on every side. */
-function fitToHost(inset: number): boolean {
+/** Resize to fill the host, inset by `insetX`/`insetY` on the relevant sides. */
+function fitToHost(insetX: number, insetY: number = insetX): boolean {
   const host = hostSize()
   if (!host) return false
-  rect.x = inset
-  rect.y = inset
-  rect.w = Math.max(MIN_W, host.w - inset * 2)
-  rect.h = Math.max(MIN_H, host.h - inset * 2)
+  rect.x = insetX
+  rect.y = insetY
+  rect.w = Math.max(MIN_W, host.w - insetX * 2)
+  rect.h = Math.max(MIN_H, host.h - insetY * 2)
   return true
+}
+
+/** The `fill-host` inset this window opens with. */
+function openInset(): { x: number; y: number } {
+  return { x: props.initialX ?? 0, y: props.initialY ?? 0 }
 }
 
 /**
@@ -133,16 +179,23 @@ function toggleMaximise(): void {
     if (!fitToHost(0)) return
     maximised.value = true
   }
+  userSized.value = true
   savePersisted()
 }
 
 /**
- * Keep the window sensible when the app window changes size: a maximised
- * window re-fills, any other window is pulled back inside the host.
+ * Keep the window sensible when the host changes size. A maximised window
+ * re-fills; an untouched `fill-host` window keeps filling, so growing the app
+ * doesn't leave it stranded at the old size; anything the player sized is only
+ * pulled back inside the host.
  */
 function onHostResize(): void {
   if (maximised.value) {
     fitToHost(0)
+    savePersisted()
+  } else if (!userSized.value && props.fillHost) {
+    const inset = openInset()
+    fitToHost(inset.x, inset.y)
   } else {
     clampToHost()
   }
@@ -152,7 +205,14 @@ function savePersisted(): void {
   try {
     window.localStorage.setItem(
       props.storageKey,
-      JSON.stringify({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }),
+      JSON.stringify({
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        maximised: maximised.value,
+        restore: restoreRect,
+      }),
     )
   } catch {
     // storage full or blocked — non-fatal
@@ -210,28 +270,49 @@ function onUp(): void {
   if (dragging || resizing) {
     dragging = false
     resizing = false
+    // The geometry is now the player's choice, so stop auto-filling the host.
+    userSized.value = true
     savePersisted()
   }
 }
+
+/**
+ * Watches the host directly, so a layout change that doesn't resize the app
+ * window (a splitter drag, a collapsing sidebar) is still picked up. `resize`
+ * alone would miss those. Absent in jsdom, hence the guard.
+ */
+let hostObserver: ResizeObserver | null = null
 
 onMounted(() => {
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
   window.addEventListener('resize', onHostResize)
 
-  // First run with `fill-host`: open filling the host. A persisted geometry is
-  // the player's own choice and always wins; otherwise pull the default
-  // in-bounds so a hardcoded initial size can't overhang a small host.
-  if (!hadPersisted && props.fillHost) {
-    fitToHost(props.initialX ?? 0)
+  // A maximised window re-fills in case the host changed while it was gone;
+  // otherwise a first run with `fill-host` opens filling the host. A persisted
+  // geometry is the player's own choice and always wins — but is still pulled
+  // in-bounds, so a size chosen on a bigger display can't overhang this one.
+  const inset = openInset()
+  if (maximised.value) {
+    fitToHost(0)
+  } else if (!hadPersisted && props.fillHost) {
+    fitToHost(inset.x, inset.y)
   } else {
     clampToHost()
+  }
+
+  const host = rootRef.value?.parentElement
+  if (host && typeof ResizeObserver !== 'undefined') {
+    hostObserver = new ResizeObserver(onHostResize)
+    hostObserver.observe(host)
   }
 })
 onUnmounted(() => {
   window.removeEventListener('mousemove', onMove)
   window.removeEventListener('mouseup', onUp)
   window.removeEventListener('resize', onHostResize)
+  hostObserver?.disconnect()
+  hostObserver = null
 })
 </script>
 
@@ -252,6 +333,7 @@ onUnmounted(() => {
         type="button"
         data-testid="fw-maximise"
         :title="maximised ? 'Restore' : 'Maximise'"
+        :aria-label="maximised ? 'Restore' : 'Maximise'"
         :aria-pressed="maximised"
         @mousedown.stop
         @click="toggleMaximise"
