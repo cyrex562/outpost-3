@@ -258,6 +258,30 @@ impl HexCell {
     }
 }
 
+/// Hex radius treated as "in proximity" when scoring a founding site
+/// ([`PlanetMap::site_score`]) — the site cell plus two rings, 19 hexes.
+///
+/// Sized as the neighbourhood a colony can plausibly reach and exploit rather
+/// than the whole map, so the recommendation stays local and meaningful.
+pub const SITE_PROXIMITY_RADIUS: u32 = 2;
+
+/// How much a unit of distance-weighted per-commodity richness is worth
+/// against the terrain base in [`PlanetMap::site_score`]. Matches the weight
+/// [`HexCell::suitability`] gives a single cell's deposits, so the two scores
+/// stay on a comparable scale.
+const PROXIMITY_DEPOSIT_WEIGHT: f32 = 5.0;
+
+/// Weight a neighbouring cell's deposits by how far away they are, so
+/// resources on the site itself count fullest and ones two rings out still
+/// count meaningfully. Linear: `1.0`, `0.75`, `0.5` at distance 0, 1, 2.
+fn proximity_falloff(distance: u32) -> f32 {
+    // `u8::from` keeps the conversion lossless; the clamped distance is always
+    // a small constant. The floor keeps the weight positive should the radius
+    // ever be widened past 4.
+    let steps = f32::from(u8::try_from(distance.min(SITE_PROXIMITY_RADIUS)).unwrap_or(0));
+    (1.0 - 0.25 * steps).max(0.05)
+}
+
 /// Suitability multiplier from a cell's surface temperature band, in
 /// `(0.0, 1.0]`.
 ///
@@ -422,7 +446,7 @@ impl PlanetMap {
         self.cells.get(&coord)
     }
 
-    /// Return the best landing site (highest suitability) in the map.
+    /// Return the best landing site in the map, by [`Self::site_score`].
     ///
     /// Returns `None` only if the map has no habitable cells (degenerate).
     #[must_use]
@@ -430,37 +454,93 @@ impl PlanetMap {
         self.top_landing_sites(1, 0).into_iter().next()
     }
 
+    /// Score a candidate founding site by the **variety of resources within
+    /// reach**, combined with the site cell's own terrain and climate.
+    ///
+    /// Distinct from [`HexCell::suitability`], which scores a single cell in
+    /// isolation (and is what the hex map displays per-tile). A founding
+    /// recommendation needs a different question answered — "where can this
+    /// colony draw the widest range of resources from?" — so this scans the
+    /// neighbourhood within [`SITE_PROXIMITY_RADIUS`] and keeps, **per
+    /// commodity**, the best distance-weighted richness found.
+    ///
+    /// Because the per-commodity bests are summed, an area holding several
+    /// different resources outscores one holding a single very rich deposit —
+    /// piling more of the same commodity nearby only improves that one term.
+    /// This is issue #302: the old cell-only score summed `richness * 5.0`
+    /// across a single cell's deposits, so one rich `precious_ore` tile beat a
+    /// well-rounded neighbourhood.
+    ///
+    /// Returns `0.0` for a missing or uninhabitable cell.
+    #[must_use]
+    pub fn site_score(&self, coord: HexCoord) -> f32 {
+        let Some(cell) = self.cell(coord) else {
+            return 0.0;
+        };
+        if !cell.is_habitable() {
+            return 0.0;
+        }
+
+        // Best distance-weighted richness per distinct commodity in reach.
+        let mut best_per_commodity: HashMap<&str, f32> = HashMap::new();
+        for near_coord in coord.within_radius(SITE_PROXIMITY_RADIUS) {
+            let Some(near) = self.cell(near_coord) else {
+                continue;
+            };
+            let falloff = proximity_falloff(coord.distance(near_coord));
+            for deposit in &near.deposits {
+                let weighted = deposit.richness * falloff;
+                let entry = best_per_commodity
+                    .entry(deposit.commodity_id.as_str())
+                    .or_insert(0.0);
+                if weighted > *entry {
+                    *entry = weighted;
+                }
+            }
+        }
+        let variety_bonus: f32 =
+            best_per_commodity.values().sum::<f32>() * PROXIMITY_DEPOSIT_WEIGHT;
+
+        // Terrain workability plus climate, mirroring `HexCell::suitability`'s
+        // shape so a harsh-climate site still loses to a temperate one even
+        // when it's resource-rich (climate multiplies the whole score).
+        let base = 10.0 / cell.terrain.difficulty();
+        (base + variety_bonus) * temperature_suitability_factor(cell.temperature)
+    }
+
     /// Return up to `n` recommended landing sites, greedily selected by
-    /// suitability while enforcing a minimum hex distance between any two
-    /// picks (issue #188) so the recommendations don't all cluster in the
+    /// [`Self::site_score`] while enforcing a minimum hex distance between any
+    /// two picks (issue #188) so the recommendations don't all cluster in the
     /// same corner of the map.
     ///
     /// Habitable, unoccupied cells only. If fewer than `n` cells satisfy the
     /// distance constraint, the returned list is shorter than `n`.
     #[must_use]
     pub fn top_landing_sites(&self, n: usize, min_distance: u32) -> Vec<HexCoord> {
-        let mut candidates: Vec<&HexCell> = self
+        // Score each candidate once up front rather than inside the comparator
+        // — `site_score` scans a 19-hex neighbourhood, so scoring inside
+        // `sort_by` would recompute it O(n log n) times on a path the founding
+        // wizard hits interactively.
+        let mut candidates: Vec<(HexCoord, f32)> = self
             .cells
             .values()
             .filter(|c| c.is_habitable() && !self.colonies.iter().any(|node| node.coord == c.coord))
+            .map(|c| (c.coord, self.site_score(c.coord)))
             .collect();
-        candidates.sort_by(|a, b| {
-            b.suitability()
-                .partial_cmp(&a.suitability())
+        candidates.sort_by(|(a_coord, a_score), (b_coord, b_score)| {
+            b_score
+                .partial_cmp(a_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| (a.coord.q, a.coord.r).cmp(&(b.coord.q, b.coord.r)))
+                .then_with(|| (a_coord.q, a_coord.r).cmp(&(b_coord.q, b_coord.r)))
         });
 
         let mut picked: Vec<HexCoord> = Vec::with_capacity(n);
-        for cell in candidates {
+        for (coord, _) in candidates {
             if picked.len() >= n {
                 break;
             }
-            if picked
-                .iter()
-                .all(|p| p.distance(cell.coord) >= min_distance)
-            {
-                picked.push(cell.coord);
+            if picked.iter().all(|p| p.distance(coord) >= min_distance) {
+                picked.push(coord);
             }
         }
         picked
@@ -1941,6 +2021,181 @@ mod tests {
             map.best_landing_site(),
             map.top_landing_sites(1, 0).into_iter().next()
         );
+    }
+
+    // ── Site scoring by resource variety in proximity (issue #302) ───────────
+
+    /// A uniform plains/temperate map with no deposits, so tests can place
+    /// exactly the deposits they care about and compare scores directly.
+    fn flat_map(radius: u32) -> PlanetMap {
+        let mut cells = HashMap::new();
+        for coord in HexCoord::origin().within_radius(radius) {
+            cells.insert(
+                coord,
+                HexCell::new(coord, Terrain::Plains, Biome::Grassland),
+            );
+        }
+        PlanetMap {
+            seed: 0,
+            radius,
+            cells,
+            colonies: Vec::new(),
+            edges: Vec::new(),
+            sites: HashMap::new(),
+        }
+    }
+
+    fn put_deposit(map: &mut PlanetMap, coord: HexCoord, commodity: &str, richness: f32) {
+        map.cells
+            .get_mut(&coord)
+            .expect("coord in map")
+            .deposits
+            .push(Deposit::new(commodity, richness));
+    }
+
+    #[test]
+    fn site_score_prefers_a_varied_neighbourhood_over_one_rich_deposit() {
+        // This is the reported bug: a lone very rich `precious_ore` tile used
+        // to win because the old score summed a single cell's richness.
+        let mut map = flat_map(8);
+        let rich_single = HexCoord::new(-5, 0);
+        let varied = HexCoord::new(5, 0);
+        // Far enough apart that the two radius-2 neighbourhoods can't overlap.
+        assert!(rich_single.distance(varied) > 2 * SITE_PROXIMITY_RADIUS);
+
+        put_deposit(&mut map, rich_single, "precious_ore", 1.0);
+
+        // Four different commodities, each individually poorer and one ring out.
+        for (i, commodity) in ["structural_ore", "conductive_ore", "silicates", "biomass"]
+            .iter()
+            .enumerate()
+        {
+            put_deposit(&mut map, varied.neighbours()[i], commodity, 0.5);
+        }
+
+        assert!(
+            map.site_score(varied) > map.site_score(rich_single),
+            "varied neighbourhood {} should beat one rich deposit {}",
+            map.site_score(varied),
+            map.site_score(rich_single)
+        );
+        // The recommendation must land *in* the resource-rich neighbourhood
+        // rather than on the lone rich tile. Several cells adjacent to `varied`
+        // reach the same four deposits and therefore tie with it exactly, so
+        // assert proximity rather than an exact coordinate.
+        let best = map.best_landing_site().expect("a habitable site exists");
+        assert!(
+            best.distance(varied) <= SITE_PROXIMITY_RADIUS,
+            "best site {best:?} should be near the varied cluster {varied:?}"
+        );
+        assert!(best.distance(rich_single) > SITE_PROXIMITY_RADIUS);
+    }
+
+    #[test]
+    fn site_score_counts_neighbouring_deposits_not_only_the_site_cell() {
+        let mut map = flat_map(6);
+        let with_neighbours = HexCoord::new(-4, 0);
+        let barren = HexCoord::new(4, 0);
+        put_deposit(
+            &mut map,
+            with_neighbours.neighbours()[0],
+            "structural_ore",
+            0.6,
+        );
+
+        assert!(map.site_score(with_neighbours) > map.site_score(barren));
+        // The site cell itself holds nothing — the score comes from proximity.
+        assert!(map.cell(with_neighbours).expect("cell").deposits.is_empty());
+    }
+
+    #[test]
+    fn site_score_does_not_reward_piling_up_the_same_commodity() {
+        let mut map = flat_map(8);
+        let mono = HexCoord::new(-5, 0);
+        let varied = HexCoord::new(5, 0);
+
+        // Five neighbours all holding the *same*, richer commodity...
+        for n in mono.neighbours().iter().take(5) {
+            put_deposit(&mut map, *n, "structural_ore", 0.8);
+        }
+        // ...loses to three neighbours holding three *different*, poorer ones.
+        for (i, commodity) in ["structural_ore", "hydrocarbons", "silicates"]
+            .iter()
+            .enumerate()
+        {
+            put_deposit(&mut map, varied.neighbours()[i], commodity, 0.5);
+        }
+
+        assert!(
+            map.site_score(varied) > map.site_score(mono),
+            "variety {} should beat quantity of one commodity {}",
+            map.site_score(varied),
+            map.site_score(mono)
+        );
+    }
+
+    #[test]
+    fn site_score_weights_closer_deposits_more_heavily() {
+        let mut map = flat_map(8);
+        let near = HexCoord::new(-5, 0);
+        let far = HexCoord::new(5, 0);
+        // Same commodity, same richness — only the distance differs.
+        put_deposit(&mut map, near, "structural_ore", 0.7);
+        let two_out = HexCoord::new(far.q + 2, far.r);
+        assert_eq!(far.distance(two_out), 2);
+        put_deposit(&mut map, two_out, "structural_ore", 0.7);
+
+        assert!(map.site_score(near) > map.site_score(far));
+    }
+
+    #[test]
+    fn top_landing_sites_at_radius_12_completes_within_budget() {
+        // `site_score` scans a 19-hex neighbourhood per candidate, and the
+        // founding wizard calls this interactively ("jump to best site"), so
+        // guard against it becoming a visible stall on a full-size map.
+        let map = PlanetMap::generate(3, 12);
+        let start = std::time::Instant::now();
+        let sites = map.top_landing_sites(3, 4);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 100,
+            "top_landing_sites at radius 12 took {elapsed:?}, expected well under 100ms"
+        );
+        assert!(!sites.is_empty(), "a generated map should offer some site");
+    }
+
+    #[test]
+    fn site_score_is_zero_for_uninhabitable_and_unknown_cells() {
+        let mut map = flat_map(3);
+        let ocean = HexCoord::new(1, 0);
+        let cell = map.cells.get_mut(&ocean).expect("coord in map");
+        *cell = HexCell::new(ocean, Terrain::Ocean, Biome::Grassland);
+        assert!(!map.cell(ocean).expect("cell").is_habitable());
+
+        assert!(map.site_score(ocean).abs() < 1e-6);
+        // A coordinate outside the map scores zero rather than panicking.
+        assert!(map.site_score(HexCoord::new(99, 99)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn site_score_still_penalises_harsh_climate_despite_rich_surroundings() {
+        // Climate multiplies the whole score, mirroring `suitability` — so a
+        // resource-rich Extreme-band site loses to a bare temperate one.
+        let mut map = flat_map(8);
+        let harsh_rich = HexCoord::new(-5, 0);
+        let plain_temperate = HexCoord::new(5, 0);
+        map.cells
+            .get_mut(&harsh_rich)
+            .expect("coord in map")
+            .temperature = TemperatureBand::Extreme;
+        for (i, commodity) in ["structural_ore", "conductive_ore", "silicates"]
+            .iter()
+            .enumerate()
+        {
+            put_deposit(&mut map, harsh_rich.neighbours()[i], commodity, 1.0);
+        }
+
+        assert!(map.site_score(plain_temperate) > map.site_score(harsh_rich));
     }
 
     #[test]
