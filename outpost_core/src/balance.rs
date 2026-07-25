@@ -387,8 +387,8 @@ mod tests {
     /// identical results, because the calculator reads nothing but recipe flows.
     ///
     /// Pinned so the claim in that bundle's `pack.yaml` stays true, and so a
-    /// future change that starts reading `BuildingDef` fields (power_delta,
-    /// slot_cost) has to notice it is breaking the old pattern.
+    /// future change that starts reading `BuildingDef` fields (`power_delta`,
+    /// `slot_cost`) has to notice it is breaking the old pattern.
     #[test]
     fn one_multi_recipe_instance_equals_n_co_located_instances() {
         let power = make_recipe("hq_power", "colony_hq", vec![], vec![("power", 24.0)]);

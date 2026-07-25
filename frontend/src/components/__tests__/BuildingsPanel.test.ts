@@ -217,3 +217,77 @@ describe('BuildingsPanel multi-function I/O summary (#272)', () => {
     expect(text).toContain('1.5 brine')
   })
 })
+
+// ── Review follow-ups (issue #272) ───────────────────────────────────────────
+
+describe('BuildingsPanel I/O honesty and resilience (#272 review)', () => {
+  function mountRows(rows: Partial<BuildingRow>[]) {
+    return mount(BuildingsPanel, {
+      props: {
+        buildings: rows.map(makeRow),
+        slotsUsed: 1,
+        slotCapacity: 10,
+        labourAvailable: 9,
+        labourTotal: 10,
+      },
+    })
+  }
+
+  /**
+   * The figures are nominal recipe rates, so a throttled building would
+   * otherwise show full output right beside its own shortfall reason. The line
+   * has to say which number it is.
+   */
+  it('labels the I/O line as rated rather than actual', () => {
+    const wrapper = mountRows([
+      { building_type: 'smelter', scale: 0.3, full_capacity: false, shortfall_reason: 'input short: water' },
+    ])
+    expect(wrapper.get('[data-testid="building-io-rated-smelter"]').text()).toBe('rated')
+    // Both readings are on the row, and neither is disguised as the other.
+    expect(wrapper.get('[data-testid="building-outputs-smelter"]').text()).toContain(
+      'structural_metal',
+    )
+    expect(wrapper.get('[data-testid="building-reason-smelter"]').text()).toContain('water')
+  })
+
+  it('says the figures are rated in the recipe tooltip too', () => {
+    const wrapper = mountRows([
+      { building_type: 'colony_hq', running_recipe_ids: ['a', 'b'], outputs: [{ commodity_id: 'power', quantity: 5 }] },
+    ])
+    expect(
+      wrapper.get('[data-testid="building-recipe-count-colony_hq"]').attributes('title'),
+    ).toContain('rated')
+  })
+
+  /**
+   * The Rust fields are `#[serde(default)]`, so a host on an older build can
+   * legitimately omit them. Dereferencing `.length` on the absent value would
+   * take the whole panel down rather than degrading.
+   */
+  it('survives a payload missing the new I/O fields entirely', () => {
+    const legacyRow = {
+      building_type: 'legacy_shed',
+      labour_assigned: 0,
+      slot_cost: 1,
+      full_capacity: true,
+      scale: 1,
+      shortfall_reason: null,
+      always_on: false,
+    } as unknown as BuildingRow
+
+    const wrapper = mount(BuildingsPanel, {
+      props: {
+        buildings: [legacyRow],
+        slotsUsed: 1,
+        slotCapacity: 10,
+        labourAvailable: 9,
+        labourTotal: 10,
+      },
+    })
+
+    // The row still renders, just without an I/O line.
+    expect(wrapper.find('[data-testid="building-row-legacy_shed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="building-io-legacy_shed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="building-recipe-count-legacy_shed"]').exists()).toBe(false)
+  })
+})

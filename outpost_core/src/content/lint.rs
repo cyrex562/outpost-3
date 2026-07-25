@@ -108,9 +108,14 @@ impl ContentRegistry {
 
         for (building_id, per_commodity) in &concurrent_outputs {
             for (commodity_id, recipe_ids) in per_commodity {
-                if recipe_ids.len() > 1 {
-                    let mut ids: Vec<String> = recipe_ids.iter().map(|s| (*s).to_owned()).collect();
-                    ids.sort();
+                // Count *distinct* recipes. A single recipe that lists the same
+                // commodity twice in its own `outputs` would otherwise be
+                // reported as two recipes overlapping, which is a different —
+                // and wrong — diagnosis to send an author chasing.
+                let mut ids: Vec<String> = recipe_ids.iter().map(|s| (*s).to_owned()).collect();
+                ids.sort();
+                ids.dedup();
+                if ids.len() > 1 {
                     warnings.push(ContentWarning::DuplicateConcurrentOutput {
                         building_id: (*building_id).to_owned(),
                         commodity_id: (*commodity_id).to_owned(),
@@ -127,8 +132,10 @@ impl ContentRegistry {
                 };
                 let mut concurrent_ids: Vec<&str> = recipe_ids.clone();
                 concurrent_ids.sort_unstable();
+                concurrent_ids.dedup();
                 let mut pick_one_ids: Vec<&str> = pick_one.clone();
                 pick_one_ids.sort_unstable();
+                pick_one_ids.dedup();
                 for c in &concurrent_ids {
                     for p in &pick_one_ids {
                         warnings.push(ContentWarning::ConcurrentShadowsPickOne {
@@ -253,6 +260,26 @@ mod tests {
         reg.insert_recipe(recipe("route_a", "refinery", false, &[("metal", 1.0)]));
         reg.insert_recipe(recipe("route_b", "refinery", false, &[("metal", 2.0)]));
         assert!(reg.lint().is_empty());
+    }
+
+    /// One recipe listing the same commodity twice in its own `outputs` is not
+    /// two recipes overlapping — reporting it that way would send an author
+    /// hunting for a second recipe that doesn't exist.
+    #[test]
+    fn a_single_recipe_listing_one_output_twice_is_not_a_recipe_overlap() {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(building("hq"));
+        reg.insert_recipe(recipe(
+            "hq_power",
+            "hq",
+            true,
+            &[("power", 5.0), ("power", 3.0)],
+        ));
+        assert!(
+            reg.lint().is_empty(),
+            "one recipe is one recipe, however it lists its outputs: {:?}",
+            reg.lint()
+        );
     }
 
     /// Same commodity, *different* buildings: not an overlap.

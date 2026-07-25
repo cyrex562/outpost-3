@@ -12,7 +12,7 @@
  */
 
 import { ref } from 'vue'
-import type { BuildingRow } from '@/types/screen'
+import type { BuildingRow, IngredientRow } from '@/types/screen'
 
 const props = defineProps<{
   /** `null` when the colony screen hasn't loaded yet for the selected colony. */
@@ -59,21 +59,44 @@ function statusDetail(b: BuildingRow): string {
 }
 
 /**
- * One-line summary of what a building actually makes (issue #272).
+ * The building's merged flows, at **full output** (issue #272).
  *
  * The row used to show only the pick-one recipe, so a multi-function building
  * like `colony_hq` — whose recipes are *all* always-on — read as having no
- * function at all. This is the merged output of every recipe it runs.
+ * function at all. This is the merged nominal I/O of every recipe it runs.
+ *
+ * These are *rated* figures, not last turn's actual throughput (that is
+ * `nominal × scale`). The line is labelled accordingly, because showing an
+ * unscaled `24 water` next to a "water short" badge would otherwise look like a
+ * contradiction.
  */
 function outputSummary(b: BuildingRow): string {
-  if (b.outputs.length === 0) return ''
-  return b.outputs.map((o) => `${formatQty(o.quantity)} ${o.commodity_id}`).join(', ')
+  return joinFlows(b.outputs)
 }
 
 /** Same, for what the building consumes. */
 function inputSummary(b: BuildingRow): string {
-  if (b.inputs.length === 0) return ''
-  return b.inputs.map((i) => `${formatQty(i.quantity)} ${i.commodity_id}`).join(', ')
+  return joinFlows(b.inputs)
+}
+
+/**
+ * `?? []` guards: these fields are `#[serde(default)]` on the Rust side, so a
+ * host on an older build can legitimately omit them from a payload a newer
+ * frontend bundle receives. Dereferencing `.length` on the absent value would
+ * take the whole panel down.
+ */
+function joinFlows(flows: IngredientRow[] | undefined): string {
+  return (flows ?? []).map((f) => `${formatQty(f.quantity)} ${f.commodity_id}`).join(', ')
+}
+
+/** How many flow lines a row has, absent-safe. */
+function flowCount(b: BuildingRow): number {
+  return (b.inputs ?? []).length + (b.outputs ?? []).length
+}
+
+/** Recipes running in this building, absent-safe. */
+function runningRecipes(b: BuildingRow): string[] {
+  return b.running_recipe_ids ?? []
 }
 
 /** Trim trailing zeroes so "24" doesn't render as "24.0". */
@@ -83,9 +106,11 @@ function formatQty(q: number): string {
 
 /** Tooltip listing every recipe running in this building. */
 function recipeTooltip(b: BuildingRow): string {
-  if (b.running_recipe_ids.length === 0) return 'No recipes — this is a storage or habitat structure.'
-  if (b.running_recipe_ids.length === 1) return `Running: ${b.running_recipe_ids[0]}`
-  return `Running ${b.running_recipe_ids.length} recipes at once: ${b.running_recipe_ids.join(', ')}`
+  const ids = runningRecipes(b)
+  if (ids.length === 0) return 'No recipes — this is a storage or habitat structure.'
+  const rated = 'Figures are rated output at full capacity, not last turn\'s actual.'
+  if (ids.length === 1) return `Running: ${ids[0]}. ${rated}`
+  return `Running ${ids.length} recipes at once: ${ids.join(', ')}. ${rated}`
 }
 
 function assignLabour(buildingType: string): void {
@@ -135,27 +160,28 @@ function assignLabour(buildingType: string): void {
         >always-on</span>
         <span class="building-meta">{{ b.slot_cost }} slot{{ b.slot_cost !== 1 ? 's' : '' }}</span>
         <span
-          v-if="b.running_recipe_ids.length > 1"
+          v-if="runningRecipes(b).length > 1"
           class="building-badge badge-multi"
           :data-testid="`building-recipe-count-${b.building_type}`"
           :title="recipeTooltip(b)"
-        >{{ b.running_recipe_ids.length }} recipes</span>
+        >{{ runningRecipes(b).length }} recipes</span>
         <div
-          v-if="b.outputs.length > 0 || b.inputs.length > 0"
+          v-if="flowCount(b) > 0"
           class="building-io"
           :data-testid="`building-io-${b.building_type}`"
           :title="recipeTooltip(b)"
         >
           <span
-            v-if="b.inputs.length > 0"
+            v-if="(b.inputs ?? []).length > 0"
             class="io-in"
             :data-testid="`building-inputs-${b.building_type}`"
           >← {{ inputSummary(b) }}</span>
           <span
-            v-if="b.outputs.length > 0"
+            v-if="(b.outputs ?? []).length > 0"
             class="io-out"
             :data-testid="`building-outputs-${b.building_type}`"
           >→ {{ outputSummary(b) }}</span>
+          <span class="io-rated" :data-testid="`building-io-rated-${b.building_type}`">rated</span>
         </div>
         <div class="labour-controls">
           <input
@@ -201,6 +227,7 @@ function assignLabour(buildingType: string): void {
 }
 .io-in { color: #c98; }
 .io-out { color: #8c9; }
+.io-rated { color: #667; font-style: italic; }
 .badge-multi { border-color: #685; color: #ac9; }
 .panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.6rem; }
 .hint { font-size: 0.75rem; color: #446; font-style: italic; }

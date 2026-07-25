@@ -112,15 +112,23 @@ pub struct BuildingRow {
     /// concurrent) read as having no function at all.
     #[serde(default)]
     pub running_recipe_ids: Vec<String>,
-    /// Commodities this building consumes per cycle, summed across every recipe
-    /// it runs and merged by commodity (issue #272).
+    /// Commodities this building consumes per cycle at **full output**, summed
+    /// across every recipe it runs and merged by commodity (issue #272).
+    ///
+    /// Nominal, not actual — see [`Self::outputs`].
     #[serde(default)]
     pub inputs: Vec<IngredientRow>,
-    /// Commodities this building produces per cycle, summed across every recipe
-    /// it runs and merged by commodity (issue #272).
+    /// Commodities this building produces per cycle at **full output**, summed
+    /// across every recipe it runs and merged by commodity (issue #272).
     ///
-    /// This is the "producing power + water + oxygen" line a player needs to
+    /// This is the "produces power + water + oxygen" line a player needs to
     /// understand a consolidated building at a glance.
+    ///
+    /// **Nominal, not actual.** These are unscaled authored rates. Last turn's
+    /// real throughput is this times [`Self::scale`], so a consumer rendering
+    /// both must label which one it is showing — otherwise a building throttled
+    /// to 30% appears to claim full output right next to its own
+    /// [`Self::shortfall_reason`].
     #[serde(default)]
     pub outputs: Vec<IngredientRow>,
 }

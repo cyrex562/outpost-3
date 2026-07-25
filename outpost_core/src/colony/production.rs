@@ -763,11 +763,21 @@ pub(crate) fn concurrent_recipes_for_building<'r>(
     recipes
 }
 
-/// A building type's combined per-cycle input/output footprint (issue #272).
+/// A building type's combined per-cycle input/output footprint at **full
+/// output** (issue #272).
 ///
 /// Until now a building's "0-N inputs, 0-N outputs" profile only existed
 /// implicitly — you had to mentally sum whichever recipes happen to run. This is
 /// that sum, made explicit for the UI and for content authors.
+///
+/// **Nominal, not actual.** These are the authored recipe quantities, unscaled:
+/// what the building would move at `scale == 1.0`. Last turn's *real* throughput
+/// is `nominal × scale`, where `scale` comes from
+/// [`BuildingProductionResult`]. That is deliberate — issue #272 gap 3 asked for
+/// a *declared* footprint an author can check against their intent, which has to
+/// be independent of whatever a particular colony managed this turn — but it
+/// means a consumer showing these figures next to a shortfall must say which it
+/// is showing, or the two will appear to contradict each other.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BuildingIoSummary {
     /// Recipe ids that contributed, pick-one first then concurrent ones in id
@@ -788,13 +798,16 @@ impl BuildingIoSummary {
     }
 }
 
-/// Sum the per-cycle flows of every recipe a building instance actually runs
-/// (issue #272).
+/// Sum the full-output per-cycle flows of every recipe a building instance
+/// runs (issue #272).
 ///
 /// That is the resolved pick-one recipe (`active_recipes`' selection, else the
 /// deterministic default) **plus** every [`RecipeDef::concurrent`] recipe — the
 /// same set the production step runs on one shared scale factor, so the summary
-/// describes what the building really does rather than one arbitrary recipe.
+/// covers the building's whole function rather than one arbitrary recipe.
+///
+/// The quantities are **nominal**: unscaled authored rates, not what the
+/// building achieved last turn. See [`BuildingIoSummary`].
 ///
 /// A commodity appearing in more than one running recipe is **merged**, not
 /// listed twice: two concurrent recipes each producing 5 power report 10, which
