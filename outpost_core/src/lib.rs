@@ -7407,6 +7407,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 8.0,
             concurrent: false,
+            line: None,
         });
 
         reg
@@ -8711,6 +8712,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         reg
     }
@@ -9329,6 +9331,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 50.0, // no power source at this outpost — brownout.
             concurrent: false,
+            line: None,
         });
 
         let mut engine = GameEngine::new();
@@ -9952,6 +9955,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_a".into(),
@@ -9965,6 +9969,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         engine.state.registry = Some(registry);
 
@@ -10029,6 +10034,7 @@ mod tests {
                 cycle_sols: 1,
                 power_draw: 0.0,
                 concurrent: true,
+                line: None,
             });
         }
         engine.state.registry = Some(registry);
@@ -10098,6 +10104,7 @@ mod tests {
                 cycle_sols: 1,
                 power_draw: 0.0,
                 concurrent: true,
+                line: None,
             });
         }
         engine.state.registry = Some(registry);
@@ -11572,6 +11579,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         engine.state.registry = Some(registry);
 
@@ -11661,6 +11669,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         engine.state.registry = Some(registry);
 
@@ -12415,6 +12424,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 4.0,
             concurrent: false,
+            line: None,
         });
 
         reg

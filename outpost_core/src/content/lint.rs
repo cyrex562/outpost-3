@@ -190,6 +190,7 @@ mod tests {
                 })
                 .collect(),
             concurrent,
+            line: None,
             power_draw: 0.0,
         }
     }

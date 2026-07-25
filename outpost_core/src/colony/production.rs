@@ -848,6 +848,124 @@ pub fn building_io_summary<S: std::hash::BuildHasher>(
     }
 }
 
+/// Separator between a building id and a line name in a
+/// [`crate::colony::Colony::active_recipes`] key (issue #272).
+///
+/// ASCII unit separator: it cannot occur in a content-pack id, so a composite
+/// key can never collide with a bare `building_type`. That matters because the
+/// **default** line keys on the bare `building_type` — exactly how selections
+/// were keyed before lines existed — which is what lets pre-#272 saves and
+/// `Command::SetActiveRecipe` keep working with no migration at all.
+const LINE_KEY_SEP: char = '\u{1f}';
+
+/// Storage key for a line's recipe selection.
+///
+/// `None` (the default line) → the bare `building_type`, for back-compat.
+/// `Some(line)` → a composite key that cannot collide with one.
+#[must_use]
+pub fn line_selection_key(building_type: &str, line: Option<&str>) -> String {
+    match line {
+        None => building_type.to_owned(),
+        Some(l) => format!("{building_type}{LINE_KEY_SEP}{l}"),
+    }
+}
+
+/// One independently-throttling production line within a building (issue #272).
+///
+/// A building's recipes are partitioned into lines. Recipes sharing a line are
+/// **alternatives** — exactly one runs, chosen by the player or by the
+/// deterministic default. Different lines run **simultaneously**, each computing
+/// its own scale from its own inputs, which is what makes them separate
+/// production chains rather than one chain plus a set of always-on extras.
+#[derive(Debug, Clone)]
+pub struct RecipeLine<'r> {
+    /// Authored line name; `None` is the building's default line.
+    pub line: Option<String>,
+    /// `true` for a line derived from a [`RecipeDef::concurrent`] recipe — it has
+    /// exactly one member, so there is nothing to choose and it always runs.
+    pub always_on: bool,
+    /// The recipe currently running on this line.
+    pub selected: &'r RecipeDef,
+    /// Every recipe on this line, in id order — what a picker would offer.
+    /// Length 1 means no real choice.
+    pub alternatives: Vec<&'r RecipeDef>,
+}
+
+impl RecipeLine<'_> {
+    /// Key this line's selection is stored under in `active_recipes`.
+    #[must_use]
+    pub fn selection_key(&self, building_type: &str) -> String {
+        line_selection_key(building_type, self.line.as_deref())
+    }
+}
+
+/// Partition a building's recipes into independently-running lines (issue #272).
+///
+/// - A [`RecipeDef::concurrent`] recipe becomes a line of its own, always on.
+///   This reproduces the pre-#272 rule ("concurrent recipes always run") exactly,
+///   now expressed in the same vocabulary as everything else.
+/// - Every other recipe joins the line named by [`RecipeDef::line`], or the
+///   default line when that is `None`. One recipe per line runs: the selection in
+///   `active_recipes` if it is valid for that line, else the lexicographically
+///   smallest recipe id on the line (the same deterministic default as before —
+///   `ContentRegistry` iterates a `HashMap`, so an arbitrary "first" would vary
+///   between runs).
+///
+/// Lines come back in a deterministic order: the default line first, then named
+/// lines and always-on lines by name.
+#[must_use]
+pub fn lines_for_building<'r, S: std::hash::BuildHasher>(
+    building_type: &str,
+    active_recipes: &std::collections::HashMap<String, String, S>,
+    registry: &'r ContentRegistry,
+) -> Vec<RecipeLine<'r>> {
+    // Group non-concurrent recipes by line, and collect concurrent ones apart.
+    let mut grouped: std::collections::BTreeMap<Option<String>, Vec<&RecipeDef>> =
+        std::collections::BTreeMap::new();
+    let mut always_on: Vec<&RecipeDef> = Vec::new();
+
+    for recipe in registry.recipes().filter(|r| r.building == building_type) {
+        if recipe.concurrent && recipe.line.is_none() {
+            always_on.push(recipe);
+        } else {
+            grouped.entry(recipe.line.clone()).or_default().push(recipe);
+        }
+    }
+
+    let mut lines: Vec<RecipeLine<'r>> = Vec::new();
+
+    for (line, mut alternatives) in grouped {
+        alternatives.sort_by(|a, b| a.id.cmp(&b.id));
+        let key = line_selection_key(building_type, line.as_deref());
+        // A selection only counts if it names a recipe actually on this line —
+        // otherwise a stale save or a cross-line id would silently run nothing.
+        let selected = active_recipes
+            .get(&key)
+            .and_then(|id| alternatives.iter().copied().find(|r| &r.id == id))
+            .or_else(|| alternatives.first().copied());
+        if let Some(selected) = selected {
+            lines.push(RecipeLine {
+                line,
+                always_on: false,
+                selected,
+                alternatives,
+            });
+        }
+    }
+
+    always_on.sort_by(|a, b| a.id.cmp(&b.id));
+    for recipe in always_on {
+        lines.push(RecipeLine {
+            line: Some(recipe.id.clone()),
+            always_on: true,
+            selected: recipe,
+            alternatives: vec![recipe],
+        });
+    }
+
+    lines
+}
+
 /// Returns true if there is at least one recipe (pick-one or concurrent)
 /// for the given building type.
 fn has_recipe(building_type: &str, registry: &ContentRegistry) -> bool {
@@ -998,6 +1116,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 30.0,
             concurrent: false,
+            line: None,
         });
 
         // Smelter: converts ore to plates; needs 50 kW; 3 workers
@@ -1030,6 +1149,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 50.0,
             concurrent: false,
+            line: None,
         });
 
         reg
@@ -1330,6 +1450,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
 
         reg
@@ -1544,6 +1665,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
 
         let mut pool = ColonyPool::new();
@@ -1892,6 +2014,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "refine_gadget".into(),
@@ -1905,6 +2028,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         reg
     }
@@ -2022,6 +2146,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         // Non-deposit-gated recipe (not in VEIN_COMMODITIES) — a control to
         // prove gating is scoped to deposit-tracked commodities only.
@@ -2051,6 +2176,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         reg
     }
@@ -2256,6 +2382,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: true,
+            line: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "hq_purify_water".into(),
@@ -2272,6 +2399,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 5.0,
             concurrent: true,
+            line: None,
         });
         reg
     }
@@ -2395,6 +2523,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "hybrid_alt_b".into(),
@@ -2408,6 +2537,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "hybrid_always_on".into(),
@@ -2421,6 +2551,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: true,
+            line: None,
         });
 
         let mut pool = ColonyPool::new();
@@ -2506,6 +2637,7 @@ mod tests {
                 })
                 .collect(),
             concurrent,
+            line: None,
             power_draw: 0.0,
         };
 
@@ -2643,5 +2775,242 @@ mod tests {
             ran, summarised,
             "the summary and the production step must agree on which recipes run"
         );
+    }
+
+    // ── Production lines (issue #272) ─────────────────────────────────────
+
+    fn lines_registry() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        let b = |id: &str| BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        };
+        reg.insert_building(b("complex"));
+        reg.insert_building(b("legacy"));
+
+        let r = |id: &str, bld: &str, con: bool, line: Option<&str>| RecipeDef {
+            id: id.into(),
+            name: id.into(),
+            building: bld.into(),
+            cycle_sols: 1,
+            inputs: vec![],
+            outputs: vec![],
+            concurrent: con,
+            line: line.map(Into::into),
+            power_draw: 0.0,
+        };
+
+        // Two independent switchable lines on one building — the thing that was
+        // impossible before #272.
+        reg.insert_recipe(r("smelt_a", "complex", false, Some("smelting")));
+        reg.insert_recipe(r("smelt_b", "complex", false, Some("smelting")));
+        reg.insert_recipe(r("mach_p", "complex", false, Some("machining")));
+        reg.insert_recipe(r("mach_q", "complex", false, Some("machining")));
+        // Plus an always-on line alongside them.
+        reg.insert_recipe(r("vent", "complex", true, None));
+
+        // A pre-#272 shaped building: two unlined alternatives + one concurrent.
+        reg.insert_recipe(r("old_x", "legacy", false, None));
+        reg.insert_recipe(r("old_y", "legacy", false, None));
+        reg.insert_recipe(r("old_always", "legacy", true, None));
+        reg
+    }
+
+    /// The core new capability: two switchable lines coexist, each with its own
+    /// selection, and both run.
+    #[test]
+    fn two_named_lines_each_keep_their_own_selection() {
+        let reg = lines_registry();
+        let mut active = std::collections::HashMap::new();
+        active.insert(
+            line_selection_key("complex", Some("smelting")),
+            "smelt_b".to_string(),
+        );
+        active.insert(
+            line_selection_key("complex", Some("machining")),
+            "mach_q".to_string(),
+        );
+
+        let lines = lines_for_building("complex", &active, &reg);
+        let running: Vec<&str> = lines.iter().map(|l| l.selected.id.as_str()).collect();
+
+        assert!(
+            running.contains(&"smelt_b"),
+            "smelting selection lost: {running:?}"
+        );
+        assert!(
+            running.contains(&"mach_q"),
+            "machining selection lost: {running:?}"
+        );
+        assert!(
+            running.contains(&"vent"),
+            "always-on line missing: {running:?}"
+        );
+        assert_eq!(running.len(), 3, "one per line: {running:?}");
+    }
+
+    /// Selecting on one line must not disturb another — this is exactly what the
+    /// old single-key-per-building map got wrong.
+    #[test]
+    fn selecting_on_one_line_leaves_the_other_line_alone() {
+        let reg = lines_registry();
+        let mut active = std::collections::HashMap::new();
+        active.insert(
+            line_selection_key("complex", Some("smelting")),
+            "smelt_b".to_string(),
+        );
+
+        let lines = lines_for_building("complex", &active, &reg);
+        let pick = |line: &str| {
+            lines
+                .iter()
+                .find(|l| l.line.as_deref() == Some(line))
+                .map(|l| l.selected.id.clone())
+        };
+        assert_eq!(
+            pick("smelting").as_deref(),
+            Some("smelt_b"),
+            "explicit choice"
+        );
+        assert_eq!(
+            pick("machining").as_deref(),
+            Some("mach_p"),
+            "untouched line falls back to its own deterministic default, not to nothing"
+        );
+    }
+
+    /// A pre-#272 building keeps its exact previous shape: one pick-one choice
+    /// plus the always-on recipe, and the default-line selection is still keyed
+    /// on the bare building id so old saves resolve unchanged.
+    #[test]
+    fn an_unlined_building_behaves_exactly_as_before() {
+        let reg = lines_registry();
+
+        // No selection: deterministic default is the smallest id.
+        let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let lines = lines_for_building("legacy", &empty, &reg);
+        let running: Vec<&str> = lines.iter().map(|l| l.selected.id.as_str()).collect();
+        assert!(
+            running.contains(&"old_x"),
+            "default should be old_x: {running:?}"
+        );
+        assert!(
+            !running.contains(&"old_y"),
+            "alternatives must not both run"
+        );
+        assert!(
+            running.contains(&"old_always"),
+            "concurrent recipe still always runs"
+        );
+
+        // A pre-#272 save keys the selection on the bare building id.
+        let mut legacy_save = std::collections::HashMap::new();
+        legacy_save.insert("legacy".to_string(), "old_y".to_string());
+        let lines = lines_for_building("legacy", &legacy_save, &reg);
+        let running: Vec<&str> = lines.iter().map(|l| l.selected.id.as_str()).collect();
+        assert!(
+            running.contains(&"old_y"),
+            "a pre-#272 selection must still resolve: {running:?}"
+        );
+        assert_eq!(
+            line_selection_key("legacy", None),
+            "legacy",
+            "the default line's key is the bare building id — this is the whole \
+             reason no save migration is needed"
+        );
+    }
+
+    /// A selection naming a recipe on a *different* line is ignored rather than
+    /// silently running nothing.
+    #[test]
+    fn a_selection_from_the_wrong_line_falls_back_to_that_lines_default() {
+        let reg = lines_registry();
+        let mut active = std::collections::HashMap::new();
+        // Point the smelting line at a machining recipe.
+        active.insert(
+            line_selection_key("complex", Some("smelting")),
+            "mach_q".to_string(),
+        );
+
+        let lines = lines_for_building("complex", &active, &reg);
+        let smelting = lines
+            .iter()
+            .find(|l| l.line.as_deref() == Some("smelting"))
+            .expect("smelting line should still exist");
+        assert_eq!(
+            smelting.selected.id, "smelt_a",
+            "a cross-line id must fall back to the line's own default"
+        );
+    }
+
+    /// Line partitioning must be stable — `ContentRegistry` iterates a `HashMap`.
+    #[test]
+    fn line_order_and_alternatives_are_deterministic() {
+        let reg = lines_registry();
+        let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let first: Vec<Option<String>> = lines_for_building("complex", &empty, &reg)
+            .iter()
+            .map(|l| l.line.clone())
+            .collect();
+        for _ in 0..12 {
+            let again: Vec<Option<String>> = lines_for_building("complex", &empty, &reg)
+                .iter()
+                .map(|l| l.line.clone())
+                .collect();
+            assert_eq!(first, again, "line order must not vary between calls");
+        }
+        let lines = lines_for_building("complex", &empty, &reg);
+        let smelting = lines
+            .iter()
+            .find(|l| l.line.as_deref() == Some("smelting"))
+            .unwrap();
+        assert_eq!(
+            smelting
+                .alternatives
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["smelt_a", "smelt_b"],
+            "alternatives are id-sorted so a picker's order is stable"
+        );
+        assert!(!smelting.always_on);
+        let vent = lines.iter().find(|l| l.always_on).unwrap();
+        assert_eq!(
+            vent.alternatives.len(),
+            1,
+            "an always-on line has nothing to choose"
+        );
+    }
+
+    /// A building with no recipes yields no lines — not a panic, not a phantom.
+    #[test]
+    fn a_building_with_no_recipes_has_no_lines() {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "silo".into(),
+            name: "silo".into(),
+            description: String::new(),
+            category: BuildingCategory::Storage,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        assert!(lines_for_building("silo", &empty, &reg).is_empty());
     }
 }

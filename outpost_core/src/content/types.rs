@@ -167,6 +167,25 @@ pub struct RecipeDef {
     /// so every recipe authored before this field existed is unaffected.
     #[serde(default)]
     pub concurrent: bool,
+    /// Production line this recipe belongs to within its building (issue #272).
+    ///
+    /// Recipes sharing a line on the same building are **alternatives** — one of
+    /// them runs. Different lines run **simultaneously and throttle
+    /// independently**, which is what lets one building host several genuinely
+    /// separate production chains rather than one switchable chain plus a set of
+    /// always-on extras.
+    ///
+    /// `None` (the default) means the building's *default* line, so every recipe
+    /// authored before this field existed keeps its exact previous behaviour:
+    /// non-`concurrent` recipes with no line are alternatives to each other, and
+    /// each [`Self::concurrent`] recipe becomes a line of its own containing only
+    /// itself — a line with one member has nothing to choose, so it always runs.
+    ///
+    /// Setting both `line` and `concurrent` is redundant rather than an error:
+    /// `line` wins, and the recipe is an alternative within that line like any
+    /// other. `ContentRegistry::lint` flags it.
+    #[serde(default)]
+    pub line: Option<String>,
 }
 
 fn default_cycle_sols() -> u32 {

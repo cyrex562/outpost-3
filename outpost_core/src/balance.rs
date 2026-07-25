@@ -34,6 +34,7 @@
 //!     cycle_sols: 1,
 //!     power_draw: 0.0,
 //!     concurrent: false,
+//!     line: None,
 //! };
 //! let buildings = vec![BuildingInstance {
 //!     building: mine_def,
@@ -374,6 +375,7 @@ mod tests {
             cycle_sols: 1,
             power_draw: 0.0,
             concurrent: false,
+            line: None,
         }
     }
 
