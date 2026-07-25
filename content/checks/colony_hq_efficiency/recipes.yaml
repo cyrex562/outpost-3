@@ -30,6 +30,16 @@
       quantity: 7.0
   concurrent: true
 
+- id: hq_conduct_research
+  name: Baseline Research (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: research
+      quantity: 1.0
+  concurrent: true
+
 # Synthetic sink: models a 100-colonist population's per-capita draw from
 # outpost_core::needs::NeedsConfig::default_survival() (water 0.15, oxygen
 # 0.05, power 0.2 per colonist per sol). food_ration omitted — colony_hq

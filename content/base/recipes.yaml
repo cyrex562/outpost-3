@@ -76,11 +76,13 @@
     - id: oxygen
       quantity: 7.0
 
-# colony_hq's three recipes are `concurrent: true` — all three always run
-# together every turn (see production.rs's module doc comment), rather than
-# `active_recipes` picking one. Outputs mirror generate_power_solar_mk1 /
-# pump_water / scrub_oxygen exactly, so colony_hq is a drop-in slot-efficient
-# alternative to building all three standalone structures.
+# colony_hq's recipes are all `concurrent: true` — they always run together
+# every turn (see production.rs's module doc comment), rather than
+# `active_recipes` picking one. The power/water/oxygen outputs mirror
+# generate_power_solar_mk1 / pump_water / scrub_oxygen exactly, so colony_hq is
+# a drop-in slot-efficient alternative to building all three standalone
+# structures; hq_conduct_research below adds a research trickle those three
+# have no equivalent for.
 - id: hq_generate_power
   name: Generate Power (Colony HQ)
   building: colony_hq
@@ -109,6 +111,31 @@
   outputs:
     - id: oxygen
       quantity: 7.0
+  concurrent: true
+
+# Administrative research trickle (issue #310). Without this, research is
+# unreachable through ordinary colony production: the only two buildings that
+# output `research` are research_lab (gated behind basic_construction, itself
+# 100 RP) and physics_lab (deeper still), so a fresh colony could never earn
+# the first tech — the sole alternative source is a lucky survey-expedition
+# anomaly (anomalies.yaml `research_bonus`).
+#
+# 1 RP/sol is deliberately one fifth of research_lab's conduct_research (5
+# RP/sol): basic_construction's 100 RP lands in ~100 sols on HQ alone versus
+# ~17 with one lab, so labs stay clearly worth building. No inputs and no
+# power_draw of its own — like the other three hq_* recipes, it rides the
+# building's `power_delta: -13.0` and worker slots, so it is still throttled
+# by the HQ's shared scale rather than being unconditionally free. Notably it
+# takes no water, so it can't compete with hq_pump_water the way
+# research_lab's 1.0-water input would.
+- id: hq_conduct_research
+  name: Baseline Research (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: research
+      quantity: 1.0
   concurrent: true
 
 # ── Landing kit (self-powered starter buildings, see buildings.yaml) ───────

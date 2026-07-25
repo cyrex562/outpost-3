@@ -30,6 +30,16 @@
       quantity: 7.0
   concurrent: true
 
+- id: hq_conduct_research
+  name: Baseline Research (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: research
+      quantity: 1.0
+  concurrent: true
+
 - id: grow_rations_dome
   name: Grow Rations (Greenhouse Dome)
   building: greenhouse_dome
