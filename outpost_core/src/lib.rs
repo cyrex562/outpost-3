@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Module layout mirrors the major design systems described in `docs/DESIGN.md`:
-//! - [`turn`]       — two-cadence turn model (colony-sol, strategic-month)
+//! - [`turn`]       — single-cadence turn model (the colony-sol; issue #332)
 //! - [`colony`]     — pooled commodities, slots, production chains
 //! - [`content`]    — content-pack loading for authored data
 //! - [`population`] — aggregate population pool, stability, labour derivation
@@ -103,8 +103,6 @@ pub const MAX_SUPPLY_OVERRIDE_MULTIPLE: f64 = 3.0;
 pub enum Command {
     /// Advance the simulation by one colony-sol turn.
     AdvanceColonySol,
-    /// Advance the simulation by one strategic-month turn (manual override).
-    AdvanceStrategicMonth,
     /// Found a new colony with the given name and starting population.
     FoundColony {
         /// Display name for the new colony.
@@ -1248,8 +1246,12 @@ pub enum Event {
         colony_id: ColonyId,
         /// Orbit band the finished station will occupy.
         orbit_type: orbital::OrbitType,
-        /// Strategic months until completion.
-        build_months: u32,
+        /// Sols until completion.
+        ///
+        /// Renamed from `build_months` in #332: the underlying project now
+        /// counts down in sols, so the blueprint's authored month figure is
+        /// multiplied by [`system::SOLS_PER_MONTH`] before it lands here.
+        build_sols: u32,
         /// System body the finished station will orbit (issue #234); `None`
         /// for a Lagrange-band, system-wide station.
         body_id: Option<system::BodyId>,
@@ -1839,17 +1841,24 @@ impl GameEngine {
 
         match cmd {
             Command::AdvanceColonySol => {
+                let month_before = self.state.month;
                 let outcome = self.processor.advance(&mut self.state);
                 let hazard_outcomes = outcome.hazard_outcomes.clone();
                 let mut events = vec![Event::ColonySolAdvanced { sol: outcome.sol }];
-                if outcome
-                    .cadences_fired
-                    .contains(&turn::TurnCadence::StrategicMonth)
-                {
+
+                // The month is a calendar label derived from the sol counter
+                // (issue #332), so announce it when it actually rolls over
+                // rather than when a now-nonexistent monthly pipeline fires.
+                if outcome.month != month_before {
                     events.push(Event::StrategicMonthAdvanced {
                         month: outcome.month,
                     });
-                    // Emit TechUnlocked for each completed tech this month.
+                }
+
+                // Everything below used to be gated behind the strategic month.
+                // It all runs per sol now, so it is emitted per sol.
+                {
+                    // Emit TechUnlocked for each tech completed this sol.
                     for tech_id in outcome.completed_techs {
                         events.push(Event::TechUnlocked { tech_id });
                     }
@@ -1864,7 +1873,7 @@ impl GameEngine {
                     }
 
                     // ── Orbital construction countdown ────────────────────────
-                    // Decrement each in-progress project; when months_remaining
+                    // Decrement each in-progress project; when sols_remaining
                     // hits zero, place the finished station in the registry.
                     {
                         let mut completed_projects: Vec<orbital::OrbitalConstructionProject> =
@@ -1900,167 +1909,186 @@ impl GameEngine {
                         }
                     }
 
-                    // ── Gate migration ────────────────────────────────────────
-                    // For every open emigration gate, compute departures as
-                    // rate * source_population and enqueue a PendingMigration.
-                    {
-                        let gates: Vec<EmigrationGate> = self.state.emigration_gates.clone();
-                        let mut batch_count = 0usize;
-                        let mut total_in_transit = 0.0_f32;
-                        for gate in &gates {
-                            let Ok(from_idx) = self.find_colony_index(gate.from_colony) else {
-                                continue;
-                            };
-                            if self.find_colony_index(gate.to_colony).is_err() {
-                                continue;
+                    // ── Migration (still month-cadenced) ──────────────────────
+                    // Migration is NOT part of issue #332's cadence
+                    // unification, but it lived inside the same
+                    // strategic-month `if` as research/trade/shipments, so
+                    // un-gating that block would have silently un-gated this
+                    // too — a ~30x increase in population movement.
+                    //
+                    // Its rates are all denominated per month
+                    // (`AutoMigrationParams::max_outflow_fraction` "up to 5%
+                    // can leave per month", `transit_turns: 1` month,
+                    // `NeedsConfig::voluntary_emigration_rate`), so moving it
+                    // to the sol cadence means retuning every one of them.
+                    // That is a balance change worth doing deliberately and
+                    // testing, not a side effect of this refactor — so the
+                    // month gate is preserved here and migration's cadence is
+                    // follow-up work on #332.
+                    if outcome.month != month_before {
+                        // ── Gate migration ────────────────────────────────────────
+                        // For every open emigration gate, compute departures as
+                        // rate * source_population and enqueue a PendingMigration.
+                        {
+                            let gates: Vec<EmigrationGate> = self.state.emigration_gates.clone();
+                            let mut batch_count = 0usize;
+                            let mut total_in_transit = 0.0_f32;
+                            for gate in &gates {
+                                let Ok(from_idx) = self.find_colony_index(gate.from_colony) else {
+                                    continue;
+                                };
+                                if self.find_colony_index(gate.to_colony).is_err() {
+                                    continue;
+                                }
+                                let src_pop = self.state.populations[from_idx].count;
+                                let movers = (src_pop * gate.rate).floor();
+                                if movers < 1.0 {
+                                    continue;
+                                }
+                                self.state.populations[from_idx].count =
+                                    (src_pop - movers).max(0.0);
+                                let mig = PendingMigration::new(
+                                    Some(gate.from_colony),
+                                    gate.to_colony,
+                                    movers,
+                                    1, // 1 strategic month transit
+                                    false,
+                                    movers * 0.1,
+                                );
+                                self.state.pending_migrations.push(mig);
+                                batch_count += 1;
+                                total_in_transit += movers;
                             }
-                            let src_pop = self.state.populations[from_idx].count;
-                            let movers = (src_pop * gate.rate).floor();
-                            if movers < 1.0 {
-                                continue;
-                            }
-                            self.state.populations[from_idx].count = (src_pop - movers).max(0.0);
-                            let mig = PendingMigration::new(
-                                Some(gate.from_colony),
-                                gate.to_colony,
-                                movers,
-                                1, // 1 strategic month transit
-                                false,
-                                movers * 0.1,
-                            );
-                            self.state.pending_migrations.push(mig);
-                            batch_count += 1;
-                            total_in_transit += movers;
-                        }
-                        if batch_count > 0 {
-                            events.push(Event::GateMigrationQueued {
-                                batch_count,
-                                total_in_transit,
-                            });
-                        }
-                    }
-
-                    // ── Voluntary emigration at low stability ─────────────────
-                    // When stability ≤ emigration_stability_floor auto-trigger
-                    // a small outflow even without an open gate.
-                    if let Some(config) = self.state.needs_config.clone() {
-                        // Which store `housing` lives in is content-driven, so
-                        // resolve it once here rather than per colony (issue #304).
-                        let housing_is_resource = self
-                            .state
-                            .registry
-                            .as_ref()
-                            .is_some_and(|r| r.is_resource("housing"));
-                        let colony_ids: Vec<ColonyId> =
-                            self.state.colonies.iter().map(|c| c.id).collect();
-                        let attractiveness: Vec<ColonyAttractiveness> = self
-                            .state
-                            .colonies
-                            .iter()
-                            .zip(self.state.populations.iter())
-                            .map(|(colony, pop)| {
-                                #[allow(clippy::cast_possible_truncation)]
-                                let housing =
-                                    colony_store_amount(colony, "housing", housing_is_resource)
-                                        as f32;
-                                compute_attractiveness(
-                                    colony.id,
-                                    pop.stability,
-                                    housing,
-                                    pop.count,
-                                    1.0,
-                                )
-                            })
-                            .collect();
-
-                        for (i, &src_id) in colony_ids.iter().enumerate() {
-                            let stability = self.state.populations[i].stability;
-                            if stability > config.emigration_stability_floor {
-                                continue;
-                            }
-                            let src_pop = self.state.populations[i].count;
-                            if src_pop < 1.0 {
-                                continue;
-                            }
-                            let src_score = attractiveness
-                                .iter()
-                                .find(|a| a.colony_id == src_id)
-                                .map_or(0.0, |a| a.score);
-                            // Find the most attractive other colony.
-                            let best_dst = attractiveness
-                                .iter()
-                                .filter(|a| a.colony_id != src_id && a.score > src_score)
-                                .max_by(|a, b| {
-                                    a.score
-                                        .partial_cmp(&b.score)
-                                        .unwrap_or(std::cmp::Ordering::Equal)
+                            if batch_count > 0 {
+                                events.push(Event::GateMigrationQueued {
+                                    batch_count,
+                                    total_in_transit,
                                 });
-                            let Some(dst) = best_dst else { continue };
-                            let movers = (src_pop * config.voluntary_emigration_rate)
-                                .floor()
-                                .max(1.0);
-                            let movers = movers.min(src_pop);
-                            self.state.populations[i].count = (src_pop - movers).max(0.0);
-                            let mig = PendingMigration::new(
-                                Some(src_id),
-                                dst.colony_id,
-                                movers,
-                                1,
-                                false,
-                                movers * 0.1,
-                            );
-                            self.state.pending_migrations.push(mig);
-                            events.push(Event::VoluntaryEmigrationTriggered {
-                                from_colony: src_id,
-                                to_colony: dst.colony_id,
-                                count: movers,
-                            });
-                        }
-                    }
-
-                    // ── Tick and resolve pending migrations ───────────────────
-                    {
-                        // Which store `housing` lives in is content-driven (#304).
-                        let housing_is_resource = self
-                            .state
-                            .registry
-                            .as_ref()
-                            .is_some_and(|r| r.is_resource("housing"));
-                        let mut arrived: Vec<PendingMigration> = Vec::new();
-                        self.state.pending_migrations.retain_mut(|m| {
-                            if m.tick() {
-                                arrived.push(m.clone());
-                                false
-                            } else {
-                                true
                             }
-                        });
-                        for mig in &arrived {
-                            let Ok(to_idx) = self.find_colony_index(mig.to_colony) else {
-                                continue;
-                            };
-                            #[allow(clippy::cast_possible_truncation)]
-                            let housing = colony_store_amount(
-                                &self.state.colonies[to_idx],
-                                "housing",
-                                housing_is_resource,
-                            ) as f32;
-                            let current_pop = self.state.populations[to_idx].count;
-                            let outcome = resolve_arrival(mig, housing, current_pop);
-                            self.state.populations[to_idx].count += outcome.arrived;
-                            self.state.populations[to_idx].stability =
-                                (self.state.populations[to_idx].stability
-                                    + outcome.overcrowding_stability_penalty)
-                                    .clamp(0.0, 1.0);
-                            events.push(Event::MigrationArrived {
-                                from_colony: mig.from_colony,
-                                to_colony: mig.to_colony,
-                                count: outcome.arrived,
-                                overcrowding_stability_penalty: outcome
-                                    .overcrowding_stability_penalty,
-                                forced_departure_stability_penalty: outcome
-                                    .forced_departure_stability_penalty,
+                        }
+
+                        // ── Voluntary emigration at low stability ─────────────────
+                        // When stability ≤ emigration_stability_floor auto-trigger
+                        // a small outflow even without an open gate.
+                        if let Some(config) = self.state.needs_config.clone() {
+                            // Which store `housing` lives in is content-driven, so
+                            // resolve it once here rather than per colony (issue #304).
+                            let housing_is_resource = self
+                                .state
+                                .registry
+                                .as_ref()
+                                .is_some_and(|r| r.is_resource("housing"));
+                            let colony_ids: Vec<ColonyId> =
+                                self.state.colonies.iter().map(|c| c.id).collect();
+                            let attractiveness: Vec<ColonyAttractiveness> = self
+                                .state
+                                .colonies
+                                .iter()
+                                .zip(self.state.populations.iter())
+                                .map(|(colony, pop)| {
+                                    #[allow(clippy::cast_possible_truncation)]
+                                    let housing =
+                                        colony_store_amount(colony, "housing", housing_is_resource)
+                                            as f32;
+                                    compute_attractiveness(
+                                        colony.id,
+                                        pop.stability,
+                                        housing,
+                                        pop.count,
+                                        1.0,
+                                    )
+                                })
+                                .collect();
+
+                            for (i, &src_id) in colony_ids.iter().enumerate() {
+                                let stability = self.state.populations[i].stability;
+                                if stability > config.emigration_stability_floor {
+                                    continue;
+                                }
+                                let src_pop = self.state.populations[i].count;
+                                if src_pop < 1.0 {
+                                    continue;
+                                }
+                                let src_score = attractiveness
+                                    .iter()
+                                    .find(|a| a.colony_id == src_id)
+                                    .map_or(0.0, |a| a.score);
+                                // Find the most attractive other colony.
+                                let best_dst = attractiveness
+                                    .iter()
+                                    .filter(|a| a.colony_id != src_id && a.score > src_score)
+                                    .max_by(|a, b| {
+                                        a.score
+                                            .partial_cmp(&b.score)
+                                            .unwrap_or(std::cmp::Ordering::Equal)
+                                    });
+                                let Some(dst) = best_dst else { continue };
+                                let movers = (src_pop * config.voluntary_emigration_rate)
+                                    .floor()
+                                    .max(1.0);
+                                let movers = movers.min(src_pop);
+                                self.state.populations[i].count = (src_pop - movers).max(0.0);
+                                let mig = PendingMigration::new(
+                                    Some(src_id),
+                                    dst.colony_id,
+                                    movers,
+                                    1,
+                                    false,
+                                    movers * 0.1,
+                                );
+                                self.state.pending_migrations.push(mig);
+                                events.push(Event::VoluntaryEmigrationTriggered {
+                                    from_colony: src_id,
+                                    to_colony: dst.colony_id,
+                                    count: movers,
+                                });
+                            }
+                        }
+
+                        // ── Tick and resolve pending migrations ───────────────────
+                        {
+                            // Which store `housing` lives in is content-driven (#304).
+                            let housing_is_resource = self
+                                .state
+                                .registry
+                                .as_ref()
+                                .is_some_and(|r| r.is_resource("housing"));
+                            let mut arrived: Vec<PendingMigration> = Vec::new();
+                            self.state.pending_migrations.retain_mut(|m| {
+                                if m.tick() {
+                                    arrived.push(m.clone());
+                                    false
+                                } else {
+                                    true
+                                }
                             });
+                            for mig in &arrived {
+                                let Ok(to_idx) = self.find_colony_index(mig.to_colony) else {
+                                    continue;
+                                };
+                                #[allow(clippy::cast_possible_truncation)]
+                                let housing = colony_store_amount(
+                                    &self.state.colonies[to_idx],
+                                    "housing",
+                                    housing_is_resource,
+                                ) as f32;
+                                let current_pop = self.state.populations[to_idx].count;
+                                let outcome = resolve_arrival(mig, housing, current_pop);
+                                self.state.populations[to_idx].count += outcome.arrived;
+                                self.state.populations[to_idx].stability =
+                                    (self.state.populations[to_idx].stability
+                                        + outcome.overcrowding_stability_penalty)
+                                        .clamp(0.0, 1.0);
+                                events.push(Event::MigrationArrived {
+                                    from_colony: mig.from_colony,
+                                    to_colony: mig.to_colony,
+                                    count: outcome.arrived,
+                                    overcrowding_stability_penalty: outcome
+                                        .overcrowding_stability_penalty,
+                                    forced_departure_stability_penalty: outcome
+                                        .forced_departure_stability_penalty,
+                                });
+                            }
                         }
                     }
                 }
@@ -2829,13 +2857,6 @@ impl GameEngine {
                 }
 
                 Ok(events)
-            }
-
-            Command::AdvanceStrategicMonth => {
-                self.state.month += 1;
-                Ok(vec![Event::StrategicMonthAdvanced {
-                    month: self.state.month,
-                }])
             }
 
             Command::FoundColony {
@@ -4054,13 +4075,13 @@ impl GameEngine {
                     body_id.clone(),
                 );
                 project.costs_paid = true;
-                let build_months = project.months_remaining;
+                let build_sols = project.sols_remaining;
                 self.state.orbital_construction_queue.push(project);
                 Ok(vec![Event::OrbitalConstructionStarted {
                     blueprint_id: blueprint_id.clone(),
                     colony_id: *colony_id,
                     orbit_type: *orbit_type,
-                    build_months,
+                    build_sols,
                     body_id: body_id.clone(),
                 }])
             }
@@ -5767,15 +5788,27 @@ mod tests {
         assert!(matches!(events[0], Event::ColonySolAdvanced { sol: 1 }));
     }
 
+    /// The month is now a calendar label derived from the sol counter (issue
+    /// #332), not something the player advances directly — `AdvanceStrategicMonth`
+    /// is gone. It rolls over on the sol that crosses the boundary.
     #[test]
-    fn advance_strategic_month_increments_counter() {
+    fn the_month_label_rolls_over_on_the_boundary_sol() {
         let mut engine = GameEngine::new();
-        let events = engine.apply(&Command::AdvanceStrategicMonth).unwrap();
+        let sols_per_month = turn::DEFAULT_SOLS_PER_MONTH;
+
+        for _ in 1..sols_per_month {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        assert_eq!(engine.month(), 0, "still in month 0 before the boundary");
+
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
         assert_eq!(engine.month(), 1);
-        assert!(matches!(
-            events[0],
-            Event::StrategicMonthAdvanced { month: 1 }
-        ));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::StrategicMonthAdvanced { month: 1 })),
+            "the boundary sol should announce the new month, got {events:?}"
+        );
     }
 
     #[test]
@@ -7333,13 +7366,114 @@ mod tests {
         assert!(system_total > 0.0, "system total must be positive");
     }
 
+    /// Fast-forwarding N sols must equal issuing `AdvanceColonySol` N times.
+    ///
+    /// This is the property that lets a speed control exist at all: if
+    /// fast-forward diverged from stepping, the button would change the game
+    /// rather than just how fast you watch it. Issue #332.
+    ///
+    /// `Tier::Blocking` is used as the threshold so nothing halts the run —
+    /// the engine emits no `Blocking` interrupts, so all N sols execute.
+    #[test]
+    fn fast_forward_is_identical_to_stepping_sol_by_sol() {
+        const SEED: u64 = 4242;
+        const SOLS: u32 = 40; // deliberately past a 30-sol month boundary
+
+        fn seeded_engine() -> (GameEngine, uuid::Uuid) {
+            let mut engine = GameEngine::with_seed(SEED);
+            let events = engine
+                .apply(&Command::FoundColony {
+                    name: "Determinism".into(),
+                    starting_population: 80,
+                })
+                .unwrap();
+            let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+                panic!("FoundColony must report the new colony")
+            };
+            (engine, *colony_id)
+        }
+
+        let (mut stepped, stepped_colony) = seeded_engine();
+        for _ in 0..SOLS {
+            stepped.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let (mut fast, fast_colony) = seeded_engine();
+        let result = fast
+            .advance_until_interrupted(SOLS, Tier::Blocking)
+            .unwrap();
+
+        assert!(
+            matches!(
+                result,
+                AdvanceResult::Completed { turns_advanced, .. } if turns_advanced == SOLS
+            ),
+            "nothing should halt a Blocking-threshold run, got {result:?}"
+        );
+
+        // Clocks agree.
+        assert_eq!(stepped.sol(), fast.sol(), "sol counters must match");
+        assert_eq!(stepped.month(), fast.month(), "month labels must match");
+
+        // Simulation state agrees.
+        assert!(
+            (stepped.state.research_pool.total() - fast.state.research_pool.total()).abs() < 1e-6,
+            "research pools diverged: {} vs {}",
+            stepped.state.research_pool.total(),
+            fast.state.research_pool.total()
+        );
+
+        let a = stepped
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == stepped_colony)
+            .unwrap();
+        let b = fast
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == fast_colony)
+            .unwrap();
+
+        let mut ids: Vec<&str> = a.pool.commodity_ids().collect();
+        ids.sort_unstable();
+        let mut fast_ids: Vec<&str> = b.pool.commodity_ids().collect();
+        fast_ids.sort_unstable();
+        assert_eq!(ids, fast_ids, "commodity pools hold different ids");
+        for id in ids {
+            assert!(
+                (a.pool.amount(id) - b.pool.amount(id)).abs() < 1e-6,
+                "{id} diverged: {} vs {}",
+                a.pool.amount(id),
+                b.pool.amount(id)
+            );
+        }
+
+        // Population dynamics are RNG-driven, so this is the real determinism
+        // check: same seed, same stream position, same outcome.
+        let pa = &stepped.state.populations[0];
+        let pb = &fast.state.populations[0];
+        assert!(
+            (pa.count - pb.count).abs() < 1e-6,
+            "populations diverged: {} vs {}",
+            pa.count,
+            pb.count
+        );
+        assert!(
+            (pa.stability - pb.stability).abs() < 1e-6,
+            "stability diverged: {} vs {}",
+            pa.stability,
+            pb.stability
+        );
+    }
+
     // ── command round-trip (serde) ──
 
     #[test]
     fn command_round_trip_serde() {
         let cmds = vec![
             Command::AdvanceColonySol,
-            Command::AdvanceStrategicMonth,
             Command::FoundColony {
                 name: "RT Colony".into(),
                 starting_population: 50,
@@ -10299,9 +10433,9 @@ mod tests {
     }
 
     #[test]
-    fn trade_flow_runs_on_strategic_month_via_engine() {
+    fn trade_flow_moves_commodities_via_the_engine() {
         // Advance 30 sols with a trade route; goods should move once the
-        // strategic-month sub-pipeline fires.
+        // trade pass moves commodities between connected colonies.
         let mut engine = GameEngine::new();
         let (a, b) = found_two_colonies(&mut engine);
 
@@ -10319,7 +10453,7 @@ mod tests {
             })
             .unwrap();
 
-        // Advance 30 sols so the strategic-month fires.
+        // Advance 30 sols; trade runs on each one (issue #332).
         for _ in 0..30 {
             engine.apply(&Command::AdvanceColonySol).unwrap();
         }
@@ -12758,15 +12892,19 @@ mod tests {
             })
             .unwrap();
 
+        // The event's `build_sols` must report sols, not the blueprint's
+        // authored month figure (issue #332).
         assert!(
             events.iter().any(|e| matches!(
                 e,
                 Event::OrbitalConstructionStarted {
                     blueprint_id,
+                    build_sols,
                     ..
                 } if blueprint_id == "habitat_bp"
+                    && *build_sols == 2 * system::SOLS_PER_MONTH
             )),
-            "OrbitalConstructionStarted must be emitted"
+            "OrbitalConstructionStarted must be emitted with build_sols in sols; got {events:?}"
         );
 
         // Costs must be deducted.
@@ -12861,8 +12999,8 @@ mod tests {
         );
     }
 
-    /// Done-when: after build_months strategic months the station is completed
-    /// and OrbitalStationCompleted is emitted.
+    /// Done-when: after the blueprint's `build_months` worth of sols the station
+    /// is completed and OrbitalStationCompleted is emitted.
     #[test]
     fn orbital_construction_completes_after_configured_months() {
         use turn::TurnProcessor;
@@ -12898,27 +13036,29 @@ mod tests {
             })
             .unwrap();
 
+        // The blueprint authors 2 months; the countdown is kept in sols now
+        // (issue #332), so the same elapsed time is 2 × SOLS_PER_MONTH sols.
+        let total_sols = 2 * system::SOLS_PER_MONTH;
         assert_eq!(engine.state.orbital_construction_queue.len(), 1);
         assert_eq!(
-            engine.state.orbital_construction_queue[0].months_remaining,
-            2
+            engine.state.orbital_construction_queue[0].sols_remaining,
+            total_sols
         );
 
-        // Replace processor with 1-sol-per-month cadence for fast testing.
-        engine.processor = TurnProcessor::with_cadence(0, 1);
+        // Every sol but the last leaves it in the queue.
+        for sol in 1..total_sols {
+            let ev = engine.apply(&Command::AdvanceColonySol).unwrap();
+            assert_eq!(
+                engine.state.orbital_construction_queue.len(),
+                1,
+                "still in queue at sol {sol} of {total_sols}"
+            );
+            assert!(!ev
+                .iter()
+                .any(|e| matches!(e, Event::OrbitalStationCompleted { .. })));
+        }
 
-        // Advance sol 1 → strategic month 1 → months_remaining decrements to 1.
-        let ev1 = engine.apply(&Command::AdvanceColonySol).unwrap();
-        assert_eq!(
-            engine.state.orbital_construction_queue.len(),
-            1,
-            "still in queue after month 1"
-        );
-        assert!(!ev1
-            .iter()
-            .any(|e| matches!(e, Event::OrbitalStationCompleted { .. })));
-
-        // Advance sol 2 → strategic month 2 → months_remaining hits 0 → station placed.
+        // The final sol completes it.
         let ev2 = engine.apply(&Command::AdvanceColonySol).unwrap();
         assert!(
             engine.state.orbital_construction_queue.is_empty(),
@@ -12930,7 +13070,7 @@ mod tests {
                 Event::OrbitalStationCompleted { blueprint_id, .. }
                 if blueprint_id == "habitat_bp"
             )),
-            "OrbitalStationCompleted must be emitted on the finishing month"
+            "OrbitalStationCompleted must be emitted on the finishing sol"
         );
         // Station must be in the registry.
         assert_eq!(engine.state.orbital_registry.stations.len(), 1);

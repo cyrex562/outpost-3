@@ -627,8 +627,18 @@ pub struct OrbitalConstructionProject {
     pub orbit_type: OrbitType,
     /// Station specialisation that will be built.
     pub station_type: StationType,
-    /// Strategic months remaining until completion.
-    pub months_remaining: u32,
+    /// Sols remaining until completion (issue #332).
+    ///
+    /// The blueprint authors a build time in months; [`Self::new`] converts it
+    /// to sols so the countdown ticks on the single sol cadence with the same
+    /// elapsed duration, rather than jumping in 30-sol steps.
+    ///
+    /// The `months_remaining` alias lets a pre-#332 save deserialise. Its value
+    /// will be read as sols, so an in-flight project from such a save finishes
+    /// sooner than it would have — see the PR's save-compatibility note. Held to
+    /// be acceptable because the alternative is refusing to load the save.
+    #[serde(alias = "months_remaining")]
+    pub sols_remaining: u32,
     /// Whether commodity costs have already been deducted from the colony pool.
     pub costs_paid: bool,
     /// The system body the finished station will orbit (issue #234) — see
@@ -654,18 +664,23 @@ impl OrbitalConstructionProject {
             colony_id,
             orbit_type,
             station_type,
-            months_remaining: build_months,
+            sols_remaining: build_months.saturating_mul(crate::system::SOLS_PER_MONTH),
             costs_paid: false,
             body_id,
         }
     }
 
-    /// Decrement the countdown by one strategic month.
+    /// Decrement the countdown by one **sol** (issue #332).
     ///
-    /// Returns `true` when the station is ready to be placed (months hit zero).
+    /// Returns `true` when the station is ready to be placed (the countdown hits
+    /// zero). Guards against firing repeatedly once already at zero, so a
+    /// project can't complete twice.
     pub fn tick(&mut self) -> bool {
-        self.months_remaining = self.months_remaining.saturating_sub(1);
-        self.months_remaining == 0
+        if self.sols_remaining == 0 {
+            return false;
+        }
+        self.sols_remaining = self.sols_remaining.saturating_sub(1);
+        self.sols_remaining == 0
     }
 }
 
@@ -1102,11 +1117,22 @@ mod tests {
             3,
             Some(BodyId::new()),
         );
-        assert_eq!(project.months_remaining, 3);
-        assert!(!project.tick()); // month 2 remaining
-        assert!(!project.tick()); // month 1 remaining
-        assert!(project.tick()); // completes at 0
-        assert_eq!(project.months_remaining, 0);
+        // 3 authored months become 3 × SOLS_PER_MONTH sols (issue #332), so the
+        // build takes the same elapsed time but reports progress every sol.
+        let total_sols = 3 * crate::system::SOLS_PER_MONTH;
+        assert_eq!(project.sols_remaining, total_sols);
+        for sol in 1..total_sols {
+            assert!(
+                !project.tick(),
+                "should not complete at sol {sol} of {total_sols}"
+            );
+        }
+        assert!(project.tick(), "completes on the final sol");
+        assert_eq!(project.sols_remaining, 0);
+        assert!(
+            !project.tick(),
+            "an already-complete project must not complete a second time"
+        );
     }
 
     #[test]
@@ -1120,7 +1146,11 @@ mod tests {
             1,
             Some(BodyId::new()),
         );
-        // Single month to build.
+        // One authored month is SOLS_PER_MONTH sols of countdown (issue #332),
+        // so completion lands on the last of them, not the first tick.
+        for _ in 1..crate::system::SOLS_PER_MONTH {
+            assert!(!project.tick());
+        }
         assert!(project.tick());
     }
 }
