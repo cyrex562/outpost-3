@@ -4782,6 +4782,20 @@ impl GameEngine {
                     })
                     .collect();
                 let manual_override = self.state.directive_store.is_manual_override(*colony_id);
+
+                // Employed vs unemployed labour (issue #305). "Jobs offered" is
+                // the very same `labor_demanded` sum `colony::production`
+                // divides the workforce against, so this readout can't disagree
+                // with what actually gates production.
+                let labour_available_now = p.available_labor();
+                let labour_demanded: f32 = self.state.registry.as_ref().map_or(0.0, |registry| {
+                    colony::production::labor_demanded(
+                        c.buildings.iter().map(|b| b.building_type.as_str()),
+                        registry,
+                    )
+                });
+                let labour_employed = labour_demanded.min(labour_available_now);
+
                 Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
                     colony_id: c.id,
                     name: c.name.clone(),
@@ -4789,8 +4803,16 @@ impl GameEngine {
                     stability: p.stability,
                     slots_used: c.slots_used(),
                     slot_capacity: c.slot_capacity,
-                    labour_available: p.available_labor(),
-                    labour_total: p.count * 0.5,
+                    labour_available: labour_available_now,
+                    // Was `p.count * 0.5`, which made `labour_total` smaller
+                    // than `labour_available` (= count * stability) at any
+                    // stability above 0.5 — the panel read "90 / 50 free".
+                    // The ceiling is the whole workforce; stability is what
+                    // reduces how much of it can work today (issue #305).
+                    labour_total: p.count,
+                    labour_demanded,
+                    labour_employed,
+                    labour_unemployed: (labour_available_now - labour_employed).max(0.0),
                     buildings,
                     stockpile,
                     construction_queue,
@@ -9422,6 +9444,93 @@ mod tests {
         assert!(!row.full_capacity);
         assert!(row.shortfall_reason.is_none());
         assert!(!row.always_on, "a pick-one building is not always-on");
+    }
+
+    /// The colony screen breaks labour into employed vs unemployed (issue
+    /// #305). "Employed" is the worker-slot demand of buildings that actually
+    /// have a recipe, capped by the workforce able to work this turn — the same
+    /// quantity `colony::production` derives its labour ratio from.
+    #[test]
+    fn colony_screen_splits_labour_into_employed_and_unemployed() {
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+
+        // A recipe-having building with worker slots creates real demand.
+        let slots = engine
+            .state
+            .registry
+            .as_ref()
+            .unwrap()
+            .building("research_lab")
+            .map(|b| b.worker_slots)
+            .expect("research_lab in the pack");
+        assert!(slots > 0, "fixture needs a building that demands workers");
+
+        // Measure the delta rather than the absolute — the fixture colony
+        // already has other recipe-having buildings contributing worker slots.
+        let demand_before = {
+            let QueryResult::ColonyScreen(s) =
+                engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+            else {
+                panic!("expected ColonyScreen")
+            };
+            s.labour_demanded
+        };
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("research_lab", 1));
+
+        let QueryResult::ColonyScreen(screen) =
+            engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+        else {
+            panic!("expected ColonyScreen")
+        };
+
+        assert!(
+            (screen.labour_demanded - demand_before - f32::from(u16::try_from(slots).unwrap()))
+                .abs()
+                < 1e-6,
+            "adding the lab should raise demand by its worker slots ({slots}); \
+             went from {demand_before} to {}",
+            screen.labour_demanded
+        );
+        // This colony has plenty of people, so every job is filled and the
+        // remainder is unemployed.
+        assert!((screen.labour_employed - screen.labour_demanded).abs() < 1e-6);
+        assert!(
+            (screen.labour_employed + screen.labour_unemployed - screen.labour_available).abs()
+                < 1e-4,
+            "employed + unemployed must account for the whole available workforce"
+        );
+        assert!(screen.labour_unemployed > 0.0);
+    }
+
+    /// With no recipe-having buildings there are no jobs, so the entire
+    /// workforce is unemployed — and `labour_available` never exceeds
+    /// `labour_total` (the old `count * 0.5` ceiling made it read "90 / 50").
+    #[test]
+    fn colony_screen_reports_all_labour_unemployed_when_there_are_no_jobs() {
+        let mut engine = GameEngine::with_seed(0);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings.clear();
+
+        let QueryResult::ColonyScreen(screen) =
+            engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+        else {
+            panic!("expected ColonyScreen")
+        };
+
+        assert!(screen.labour_demanded.abs() < 1e-6);
+        assert!(screen.labour_employed.abs() < 1e-6);
+        assert!((screen.labour_unemployed - screen.labour_available).abs() < 1e-4);
+        assert!(
+            screen.labour_available <= screen.labour_total + 1e-4,
+            "available ({}) must not exceed the workforce ceiling ({})",
+            screen.labour_available,
+            screen.labour_total
+        );
     }
 
     /// Query::BuildingDetail errors on an unknown building type.

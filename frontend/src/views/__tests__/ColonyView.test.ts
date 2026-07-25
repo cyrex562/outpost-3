@@ -128,6 +128,9 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
       slot_capacity: 5,
       labour_available: 5,
       labour_total: 10,
+      labour_demanded: 4,
+      labour_employed: 4,
+      labour_unemployed: 1,
       buildings: [
         {
           building_type: 'colony_hq',

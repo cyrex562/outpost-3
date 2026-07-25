@@ -56,6 +56,12 @@ export interface ColonyScreenData {
   slot_capacity: number
   labour_available: number
   labour_total: number
+  /** Worker slots the colony's operational buildings are asking for. */
+  labour_demanded: number
+  /** Workforce taken up by those jobs: min(demanded, available). */
+  labour_employed: number
+  /** Workforce with no job to go to: available - employed. */
+  labour_unemployed: number
   buildings: BuildingRow[]
   stockpile: StockpileRow[]
   construction_queue: ConstructionQueueRow[]

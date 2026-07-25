@@ -35,10 +35,23 @@ pub struct ColonyScreenData {
     pub slots_used: u32,
     /// Total build slot capacity.
     pub slot_capacity: u32,
-    /// Labour units available this turn.
+    /// Labour units able to work this turn (population scaled by stability).
     pub labour_available: f32,
-    /// Total labour derived from population.
+    /// Total workforce the population could field at full stability — the
+    /// ceiling [`Self::labour_available`] is reduced from by unrest.
     pub labour_total: f32,
+    /// Worker slots the colony's operational buildings are asking for — the
+    /// number of jobs on offer (issue #305).
+    pub labour_demanded: f32,
+    /// Workforce actually taken up by those jobs:
+    /// `min(labour_demanded, labour_available)`.
+    pub labour_employed: f32,
+    /// Workforce with no job to go to: `labour_available - labour_employed`.
+    ///
+    /// Note this is "no post to fill", not a social-unemployment model — there
+    /// is no gameplay consequence attached yet (see issue #305's open
+    /// questions).
+    pub labour_unemployed: f32,
     /// All operational buildings with their current labour assignments.
     pub buildings: Vec<BuildingRow>,
     /// Stockpile rows — one per commodity that has ever had a non-zero amount.
@@ -461,6 +474,9 @@ mod tests {
             slot_capacity: 5,
             labour_available: 40.0,
             labour_total: 50.0,
+            labour_demanded: 12.0,
+            labour_employed: 12.0,
+            labour_unemployed: 28.0,
             buildings: vec![BuildingRow {
                 building_type: "greenhouse".to_string(),
                 labour_assigned: 10,
