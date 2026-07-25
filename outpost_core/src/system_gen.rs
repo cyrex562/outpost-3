@@ -57,6 +57,76 @@ const MIN_GIANT_MOONS: u32 = 2;
 const MAX_GIANT_MOONS: u32 = 20;
 const MAX_ROCKY_MOONS: u32 = 3;
 
+/// Curated pool of star-system names (real nearby stars + catalog
+/// designations) used to name a generated system. Bodies are named after the
+/// system: planets `"<System>-<n>"`, moons `"<System>-<n><letter>"`.
+const SYSTEM_NAMES: &[&str] = &[
+    "Vega",
+    "Rigel",
+    "Altair",
+    "Deneb",
+    "Antares",
+    "Sirius",
+    "Procyon",
+    "Capella",
+    "Arcturus",
+    "Aldebaran",
+    "Pollux",
+    "Regulus",
+    "Bellatrix",
+    "Castor",
+    "Mizar",
+    "Fomalhaut",
+    "Achernar",
+    "Canopus",
+    "Spica",
+    "Lyra",
+    "Tau Ceti",
+    "Epsilon Eridani",
+    "Wolf 359",
+    "Ross 128",
+    "Luyten",
+    "Gliese 581",
+    "Kapteyn",
+    "Barnard",
+    "Teegarden",
+    "Trappist",
+    "Kepler",
+    "Cygni",
+    "Draconis",
+    "Hydrae",
+    "Serpentis",
+    "Corvus",
+    "Lupus",
+    "Ara",
+    "Vela",
+    "Carina",
+];
+
+/// Pick a deterministic system name for `seed` from [`SYSTEM_NAMES`].
+///
+/// Derived directly from `seed` (not the generation RNG) so the name is stable
+/// regardless of how many random draws the body generation makes — the same
+/// seed always yields the same system name, and the [`GenerateSystem`]
+/// command handler can recover it independently of the body list.
+///
+/// [`GenerateSystem`]: crate::system::SystemCommand::GenerateSystem
+#[must_use]
+pub fn system_name_for_seed(seed: u64) -> &'static str {
+    // The modulo is always < SYSTEM_NAMES.len() (a small constant), so it fits
+    // usize on any target; try_from keeps clippy happy about the cast.
+    let idx = usize::try_from(seed % SYSTEM_NAMES.len() as u64).unwrap_or(0);
+    SYSTEM_NAMES[idx]
+}
+
+/// Suffix letter for the `m`-th (0-based) moon of a planet: `a`, `b`, `c`, …
+/// Moon counts are capped well under 26 ([`MAX_GIANT_MOONS`]), so a single
+/// lowercase letter always suffices.
+fn moon_letter(m: u32) -> char {
+    let idx = u8::try_from(m.min(25)).unwrap_or(0);
+    char::from(b'a' + idx)
+}
+
 /// Tunable knobs for [`generate_system`] (playtest feedback: expose these as
 /// New Game sliders rather than only the hardcoded defaults). All fields
 /// have sane defaults via [`Default`] matching the pre-slider behavior.
@@ -116,6 +186,10 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut bodies: Vec<Body> = Vec::new();
     let hz_center = params.habitable_zone_center_au;
+    // Bodies are named after the system: planets "<System>-<n>", moons
+    // "<System>-<n><letter>" (map/nav feedback). The system name is
+    // seed-derived so it's stable across runs of the same seed.
+    let system_name = system_name_for_seed(seed);
 
     // ── Inner planets ──────────────────────────────────────────────────────
     // `min_inner_planets`/`max_inner_planets` can arrive independently from
@@ -134,7 +208,7 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     // landing near the habitable zone — see this fn's doc comment.
     let mut distance_au = 0.25 + rng.gen_range(0.0..0.15);
     for i in 0..inner_count {
-        let planet_name = format!("Body-{}", i + 1);
+        let planet_name = format!("{system_name}-{}", i + 1);
         let mut body = generate_body(
             &mut rng,
             planet_name.clone(),
@@ -167,7 +241,7 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     if rng.gen_bool(0.75) {
         let mut belt = generate_body(
             &mut rng,
-            "Belt".to_string(),
+            format!("{system_name} Belt"),
             &BodyKind::AsteroidBelt,
             distance_au,
             hz_center,
@@ -192,7 +266,9 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     // and land Neptune-like — see `subtype_for`/`gravity_for_kind`.
     let giant_count = rng.gen_range(0..=2u32);
     for i in 0..giant_count {
-        let giant_name = format!("Giant-{}", i + 1);
+        // Giants continue the planet numbering after the inner worlds, so a
+        // system reads "<System>-1..N" across rocky planets then giants.
+        let giant_name = format!("{system_name}-{}", inner_count + i + 1);
         let mut giant = generate_body(
             &mut rng,
             giant_name.clone(),
@@ -232,7 +308,7 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         let comet_center = distance_au * rng.gen_range(1.3..1.8);
         let mut comet = generate_body(
             &mut rng,
-            "Cometary Belt".to_string(),
+            format!("{system_name} Cometary Belt"),
             &BodyKind::CometaryBelt,
             comet_center,
             hz_center,
@@ -463,7 +539,8 @@ fn attach_moons(
         let moon_distance = parent_distance + rng.gen_range(0.02..0.15);
         let mut moon = generate_body(
             rng,
-            format!("{parent_name}-Moon-{}", m + 1),
+            // "<System>-<n><letter>", e.g. parent "Vega-2" → moon "Vega-2a".
+            format!("{parent_name}{}", moon_letter(m)),
             &BodyKind::Moon,
             moon_distance,
             hz_center,
@@ -779,6 +856,59 @@ mod tests {
         SystemGenParams {
             abundance_scalar,
             ..SystemGenParams::default()
+        }
+    }
+
+    #[test]
+    fn system_name_is_seed_stable_and_from_the_pool() {
+        assert_eq!(system_name_for_seed(7), system_name_for_seed(7));
+        assert!(SYSTEM_NAMES.contains(&system_name_for_seed(123_456)));
+    }
+
+    #[test]
+    fn bodies_are_named_after_the_system() {
+        // Find a seed that produces at least one moon so we can check the
+        // "<System>-<n><letter>" moon form too.
+        let (seed, bodies) = (0u64..64)
+            .map(|s| (s, generate_system(s, &params(1.0))))
+            .find(|(_, b)| b.iter().any(|body| body.kind == BodyKind::Moon))
+            .expect("some seed in 0..64 yields a moon");
+        let system = system_name_for_seed(seed);
+
+        // Every planet/giant is "<System>-<n>"; every moon is "<planet><letter>".
+        let planet_prefix = format!("{system}-");
+        for body in &bodies {
+            match body.kind {
+                BodyKind::InnerPlanet | BodyKind::GasGiant => {
+                    assert!(
+                        body.name.starts_with(&planet_prefix),
+                        "planet {:?} should start with {planet_prefix:?}",
+                        body.name
+                    );
+                }
+                BodyKind::Moon => {
+                    // A moon's name is its parent planet's name + a lowercase
+                    // letter, e.g. "Vega-2a".
+                    assert!(
+                        body.name.starts_with(&planet_prefix)
+                            && body
+                                .name
+                                .chars()
+                                .last()
+                                .is_some_and(|c| c.is_ascii_lowercase()),
+                        "moon {:?} should be '<System>-<n><letter>'",
+                        body.name
+                    );
+                }
+                BodyKind::AsteroidBelt | BodyKind::CometaryBelt => {
+                    assert!(
+                        body.name.starts_with(system),
+                        "belt {:?} should start with the system name {system:?}",
+                        body.name
+                    );
+                }
+                BodyKind::OrbitalStation => {}
+            }
         }
     }
 

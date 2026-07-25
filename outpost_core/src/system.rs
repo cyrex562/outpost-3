@@ -656,6 +656,10 @@ pub struct ShippingRoute {
 /// System node map: bodies as nodes, shipping routes as edges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemNodeMap {
+    /// Display name of the star system (e.g. `"Vega"`); body names are derived
+    /// from it. Set when the system is generated; empty until then.
+    #[serde(default)]
+    pub system_name: String,
     /// All celestial bodies in the system.
     pub bodies: HashMap<BodyId, Body>,
     /// Directed shipping routes between bodies.
@@ -675,6 +679,7 @@ impl SystemNodeMap {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            system_name: String::new(),
             bodies: HashMap::new(),
             routes: HashMap::new(),
             propulsion_level: 1,
@@ -1498,6 +1503,7 @@ pub fn apply_system_command(
             max_inner_planets,
         } => {
             state.node_map.bodies.clear();
+            state.node_map.system_name = crate::system_gen::system_name_for_seed(*seed).to_string();
             let gen_params = crate::system_gen::SystemGenParams {
                 habitable_zone_center_au: *habitable_zone_center_au,
                 min_inner_planets: *min_inner_planets,
