@@ -75,7 +75,11 @@ function backToSystem(): void {
 .toolbar h2 { color: #8cf; margin: 0; }
 .hint { color: #557; font-style: italic; font-size: 0.85rem; }
 .err { color: #d66; font-size: 0.8rem; }
-.map-host { flex: 1; min-height: 70vh; }
+/* Fill the shell rather than reserving a fixed 70vh (issue #320): `min-height:
+   0` lets the flex item shrink to the space `.app-main` actually gives it, so
+   the map grows on a large display and stops pushing the app into a scrollbar
+   on a short one. `PlanetHexMap` fills this host and fits its own viewBox. */
+.map-host { flex: 1; min-height: 0; }
 
 .btn {
   background: #1a1a28;
