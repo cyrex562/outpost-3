@@ -57,6 +57,31 @@ test('view a body surface preview from the system map', async ({ page }) => {
   await expect(page.getByTestId('surface-view')).toBeVisible()
   await expect(page.getByTestId('planet-hex-map')).toBeVisible({ timeout: 15_000 })
 
+  // ── The map uses the space it's given (issue #320) ──
+  // `.map-host` fills the shell instead of reserving a fixed 70vh, and the SVG
+  // carries preserveAspectRatio="xMidYMid meet", so a taller viewport must
+  // yield a taller *rendered* map with the content-space viewBox unchanged —
+  // i.e. the map scales up rather than leaving the extra space empty.
+  const map = page.getByTestId('planet-hex-map')
+  await page.setViewportSize({ width: 1280, height: 720 })
+  const small = await map.boundingBox()
+  const viewBoxBefore = await map.getAttribute('viewBox')
+
+  await page.setViewportSize({ width: 1280, height: 1200 })
+  // Wait for the layout to settle rather than sampling mid-reflow.
+  await expect
+    .poll(async () => (await map.boundingBox())?.height ?? 0, { timeout: 5_000 })
+    .toBeGreaterThan((small?.height ?? 0) + 100)
+
+  expect(await map.getAttribute('viewBox')).toBe(viewBoxBefore)
+  // And it must not have overflowed the shell into a page scrollbar.
+  const overflows = await page.evaluate(
+    () => document.documentElement.scrollHeight > document.documentElement.clientHeight,
+  )
+  expect(overflows).toBe(false)
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+
   // ── Back to the system map ──
   await page.getByTestId('btn-back-system').click()
   await expect(page).toHaveURL(/#\/system/)

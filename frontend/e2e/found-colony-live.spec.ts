@@ -78,6 +78,22 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   const win = page.getByTestId('floating-window')
   await expect(win).toBeVisible()
   await expect(page.getByTestId('planet-hex-map')).toBeVisible()
+
+  // Issue #320: with `fill-host` the window opens filling its host rather than
+  // at a fixed 760x520, so most of a large display isn't left empty. Measure
+  // against the host itself — the viewport also carries the header/nav chrome.
+  const hostBox = (await page.locator('.map-host').boundingBox())!
+  const opened = (await win.boundingBox())!
+  expect(opened.width).toBeGreaterThan(hostBox.width * 0.9)
+  expect(opened.height).toBeGreaterThan(hostBox.height * 0.9)
+
+  // Maximise sits it flush against the host, and restore brings it back.
+  await page.getByTestId('fw-maximise').click()
+  const maxed = (await win.boundingBox())!
+  expect(maxed.width).toBeGreaterThanOrEqual(hostBox.width - 1)
+  await page.getByTestId('fw-maximise').click()
+  await expect(win).not.toHaveClass(/maximised/)
+
   const before = await win.boundingBox()
   const bar = page.getByTestId('fw-titlebar')
   const barBox = (await bar.boundingBox())!

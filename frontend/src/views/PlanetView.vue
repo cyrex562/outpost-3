@@ -187,13 +187,18 @@ async function demolish(edge: InfraEdge): Promise<void> {
       </div>
 
       <!-- The planet map is a resizable, moveable window (UI-rework PR6):
-           drag its title bar to reposition, drag the corner to resize; its
-           geometry persists per-player. `.map-host` is the positioned area it
-           floats within. -->
+           drag its title bar to reposition, drag the corner to resize, or use
+           the title-bar button to maximise; its geometry persists per-player.
+           `.map-host` is the positioned area it floats within.
+
+           `fill-host` (issue #320) makes it open filling that host rather than
+           at 760×520, which left most of a large display empty. The initial
+           width/height are the fallback for hosts that can't be measured. -->
       <div class="map-host">
         <FloatingWindow
           title="Planet Map"
           storage-key="outpost3.planet-window"
+          fill-host
           :initial-x="16"
           :initial-y="16"
           :initial-width="760"

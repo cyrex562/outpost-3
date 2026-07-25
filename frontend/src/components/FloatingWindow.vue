@@ -10,9 +10,14 @@
  * SystemMapView, using global mouse listeners so a drag keeps tracking even
  * when the cursor leaves the window mid-gesture. The default slot is the
  * window's content, which fills the body and manages its own overflow.
+ *
+ * Sizing (issue #320): with `fill-host`, a window that has never been moved
+ * opens filling its host rather than at a fixed pixel size, so a large display
+ * isn't mostly empty. A maximise/restore toggle and a clamp-to-host pass on
+ * app resize keep it usable afterwards — see `fitToHost`/`clampToHost`.
  */
 
-import { onMounted, onUnmounted, reactive } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
 const props = defineProps<{
   title: string
@@ -22,6 +27,13 @@ const props = defineProps<{
   initialY?: number
   initialWidth?: number
   initialHeight?: number
+  /**
+   * Open filling the host (inset by `initialX`/`initialY`) instead of at
+   * `initialWidth`×`initialHeight`. A persisted geometry still wins — this is
+   * only the first-run default. Ignored when the host can't be measured
+   * (e.g. jsdom), where the explicit initial size is used instead.
+   */
+  fillHost?: boolean
 }>()
 
 interface Rect {
@@ -53,6 +65,8 @@ function loadPersisted(): Rect | null {
   return null
 }
 
+const hadPersisted = loadPersisted() !== null
+
 const rect = reactive<Rect>(
   loadPersisted() ?? {
     x: props.initialX ?? 24,
@@ -61,6 +75,78 @@ const rect = reactive<Rect>(
     h: props.initialHeight ?? 460,
   },
 )
+
+const rootRef = ref<HTMLElement | null>(null)
+
+/** Whether the window is currently maximised to its host. */
+const maximised = ref(false)
+/** Geometry to return to when un-maximising. */
+let restoreRect: Rect | null = null
+
+/**
+ * Inner size of the positioned ancestor this window floats within, or `null`
+ * when it can't be measured — jsdom reports 0, and a 0-sized host would
+ * otherwise collapse the window to its minimum.
+ */
+function hostSize(): { w: number; h: number } | null {
+  const host = rootRef.value?.parentElement
+  if (!host) return null
+  const w = host.clientWidth
+  const h = host.clientHeight
+  if (w <= 0 || h <= 0) return null
+  return { w, h }
+}
+
+/** Resize to fill the host, inset by `inset` on every side. */
+function fitToHost(inset: number): boolean {
+  const host = hostSize()
+  if (!host) return false
+  rect.x = inset
+  rect.y = inset
+  rect.w = Math.max(MIN_W, host.w - inset * 2)
+  rect.h = Math.max(MIN_H, host.h - inset * 2)
+  return true
+}
+
+/**
+ * Pull a window back inside the host. Guards against a geometry persisted on a
+ * large display leaving the window mostly off-screen on a smaller one — the
+ * size is only ever reduced, never grown, so a deliberate user size survives.
+ */
+function clampToHost(): void {
+  const host = hostSize()
+  if (!host) return
+  rect.w = Math.max(MIN_W, Math.min(rect.w, host.w))
+  rect.h = Math.max(MIN_H, Math.min(rect.h, host.h))
+  rect.x = Math.max(0, Math.min(rect.x, host.w - rect.w))
+  rect.y = Math.max(0, Math.min(rect.y, host.h - rect.h))
+}
+
+function toggleMaximise(): void {
+  if (maximised.value) {
+    if (restoreRect) Object.assign(rect, restoreRect)
+    maximised.value = false
+    clampToHost()
+  } else {
+    restoreRect = { x: rect.x, y: rect.y, w: rect.w, h: rect.h }
+    // Flush against the host edges — a maximise should leave no margin.
+    if (!fitToHost(0)) return
+    maximised.value = true
+  }
+  savePersisted()
+}
+
+/**
+ * Keep the window sensible when the app window changes size: a maximised
+ * window re-fills, any other window is pulled back inside the host.
+ */
+function onHostResize(): void {
+  if (maximised.value) {
+    fitToHost(0)
+  } else {
+    clampToHost()
+  }
+}
 
 function savePersisted(): void {
   try {
@@ -86,6 +172,9 @@ let originH = 0
 
 function onDragStart(e: MouseEvent): void {
   if (e.button !== 0) return
+  // Dragging a maximised window makes it free-floating again at its current
+  // size — it is no longer flush with the host, so the flag would be a lie.
+  maximised.value = false
   dragging = true
   originClientX = e.clientX
   originClientY = e.clientY
@@ -128,27 +217,58 @@ function onUp(): void {
 onMounted(() => {
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
+  window.addEventListener('resize', onHostResize)
+
+  // First run with `fill-host`: open filling the host. A persisted geometry is
+  // the player's own choice and always wins; otherwise pull the default
+  // in-bounds so a hardcoded initial size can't overhang a small host.
+  if (!hadPersisted && props.fillHost) {
+    fitToHost(props.initialX ?? 0)
+  } else {
+    clampToHost()
+  }
 })
 onUnmounted(() => {
   window.removeEventListener('mousemove', onMove)
   window.removeEventListener('mouseup', onUp)
+  window.removeEventListener('resize', onHostResize)
 })
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="floating-window"
+    :class="{ maximised }"
     data-testid="floating-window"
     :style="{ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` }"
   >
     <div class="fw-titlebar" data-testid="fw-titlebar" @mousedown="onDragStart">
       <span class="fw-title">{{ title }}</span>
-      <span class="fw-hint">drag to move · grip to resize</span>
+      <span class="fw-hint">{{ maximised ? 'maximised · drag to restore' : 'drag to move · grip to resize' }}</span>
+      <!-- mousedown is stopped so hitting the button can't also start a drag. -->
+      <button
+        class="fw-max"
+        type="button"
+        data-testid="fw-maximise"
+        :title="maximised ? 'Restore' : 'Maximise'"
+        :aria-pressed="maximised"
+        @mousedown.stop
+        @click="toggleMaximise"
+      >
+        {{ maximised ? '❐' : '▢' }}
+      </button>
     </div>
     <div class="fw-body">
       <slot />
     </div>
-    <div class="fw-resize" data-testid="fw-resize" title="Resize" @mousedown="onResizeStart" />
+    <div
+      v-if="!maximised"
+      class="fw-resize"
+      data-testid="fw-resize"
+      title="Resize"
+      @mousedown="onResizeStart"
+    />
   </div>
 </template>
 
@@ -177,6 +297,22 @@ onUnmounted(() => {
 }
 .fw-title { color: #8cf; font-size: 0.82rem; font-weight: 600; }
 .fw-hint { color: #556; font-size: 0.68rem; font-style: italic; margin-left: auto; }
+
+/* A maximised window is flush with the host, so the rounded corners and drop
+   shadow would just read as a rendering artefact against the host edge. */
+.floating-window.maximised { border-radius: 0; box-shadow: none; }
+
+.fw-max {
+  background: #1a1a28;
+  border: 1px solid #446;
+  border-radius: 3px;
+  color: #aac;
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+}
+.fw-max:hover { background: #22223a; color: #8cf; }
 
 .fw-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 
