@@ -798,6 +798,94 @@ pub async fn get_tech_tree(State(state): State<AppState>) -> impl IntoResponse {
     Json(nodes).into_response()
 }
 
+/// One accumulated interrupt in the fast-forward digest.
+#[derive(Debug, Serialize)]
+pub struct DigestItemWire {
+    /// Severity tier slug (`ambient` / `notable` / `urgent` / `blocking`).
+    pub tier: String,
+    /// Human-readable description.
+    pub message: String,
+    /// Colony this interrupt belongs to, if colony-scoped.
+    pub colony_id: Option<String>,
+    /// Whether the player has dismissed it.
+    pub acknowledged: bool,
+}
+
+/// The return-from-fast-forward triage payload.
+#[derive(Debug, Serialize)]
+pub struct InterruptDigestWire {
+    /// Sol the run stopped on.
+    pub stopped_at_sol: u64,
+    /// How many sols the run was asked to advance.
+    pub sols_requested: u32,
+    /// Message of the interrupt that halted the run, if one did.
+    pub halting_message: Option<String>,
+    /// Tier slug of the halting interrupt, if one halted the run.
+    pub halting_tier: Option<String>,
+    /// Below-threshold interrupts accumulated during the run.
+    pub items: Vec<DigestItemWire>,
+}
+
+/// Render an interrupt tier as the same slug `ClientCommand::FastForward`
+/// accepts, so the UI can round-trip a tier it read back into a threshold.
+fn tier_slug(tier: outpost_core::interrupt::Tier) -> &'static str {
+    use outpost_core::interrupt::Tier;
+    match tier {
+        Tier::Ambient => "ambient",
+        Tier::Notable => "notable",
+        Tier::Urgent => "urgent",
+        Tier::Blocking => "blocking",
+    }
+}
+
+/// `GET /api/interrupt-digest` — what happened during the last fast-forward
+/// (issue #332).
+///
+/// The counterpart to `ClientCommand::FastForward`: the command reports only
+/// that the run ended and why, and this is where the accumulated
+/// below-threshold interrupts are read for the digest panel. Returns an empty
+/// digest before any fast-forward has run.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_interrupt_digest(State(state): State<AppState>) -> impl IntoResponse {
+    use outpost_core::{Query, QueryResult};
+
+    let engine = state.engine.lock().expect("engine lock");
+    let Ok(QueryResult::InterruptDigest(digest)) = engine.query(&Query::InterruptDigest) else {
+        // `Query::InterruptDigest` is infallible in core and always returns this
+        // variant, so this arm is unreachable in practice — reported as a server
+        // error rather than unwrapped, per the no-panics rule.
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "interrupt digest query failed" })),
+        )
+            .into_response();
+    };
+
+    Json(InterruptDigestWire {
+        stopped_at_sol: digest.stopped_at_turn,
+        sols_requested: digest.turns_advanced,
+        halting_message: digest.halting_interrupt.as_ref().map(|i| i.message.clone()),
+        halting_tier: digest
+            .halting_interrupt
+            .as_ref()
+            .map(|i| tier_slug(i.tier).to_owned()),
+        items: digest
+            .digest_items
+            .iter()
+            .map(|item| DigestItemWire {
+                tier: tier_slug(item.interrupt.tier).to_owned(),
+                message: item.interrupt.message.clone(),
+                colony_id: item.interrupt.colony_id.map(|id| id.to_string()),
+                acknowledged: item.acknowledged,
+            })
+            .collect(),
+    })
+    .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,6 +897,92 @@ mod tests {
     fn test_router() -> axum::Router {
         let state = new_state(RuntimeConfig::default());
         build_router(state)
+    }
+
+    #[tokio::test]
+    async fn interrupt_digest_is_empty_before_any_fast_forward() {
+        let router = test_router();
+        let response = router
+            .oneshot(
+                Request::get("/api/interrupt-digest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["items"].as_array().unwrap().len(), 0);
+        assert!(json["halting_message"].is_null());
+    }
+
+    /// The digest is only useful if a fast-forward actually populates it — an
+    /// endpoint that always returns empty would pass the test above forever.
+    #[tokio::test]
+    async fn interrupt_digest_reports_a_halt_after_a_fast_forward() {
+        use outpost_core::interrupt::Tier;
+        use outpost_core::{Command, Event};
+
+        let state = new_state(RuntimeConfig::default());
+        {
+            let mut engine = state.engine.lock().expect("engine lock");
+            let founded = engine
+                .apply(&Command::FoundColony {
+                    name: "Digest".into(),
+                    starting_population: 100,
+                })
+                .unwrap();
+            let Event::ColonyFounded { colony_id, .. } = &founded[0] else {
+                panic!("FoundColony must report the new colony")
+            };
+            let colony_id = *colony_id;
+
+            // Stage a declining stability trajectory so the predictive warning
+            // fires deterministically on the first sol.
+            let tracker = engine
+                .state
+                .stability_trackers
+                .entry(colony_id)
+                .or_default();
+            for s in [1.0f32, 0.7, 0.5, 0.3, 0.22] {
+                tracker.push(s);
+            }
+            engine.state.populations[0].stability = 0.22;
+
+            engine
+                .apply(&Command::FastForward {
+                    max_sols: 50,
+                    threshold: Tier::Urgent,
+                })
+                .unwrap();
+        }
+
+        let response = build_router(state)
+            .oneshot(
+                Request::get("/api/interrupt-digest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["halting_tier"], "urgent",
+            "the halting interrupt should be reported with its tier: {json}"
+        );
+        assert!(
+            json["halting_message"]
+                .as_str()
+                .is_some_and(|m| !m.is_empty()),
+            "the halt should carry a message: {json}"
+        );
     }
 
     #[tokio::test]

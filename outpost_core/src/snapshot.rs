@@ -637,6 +637,45 @@ mod tests {
         assert!((restored.trade_network.routes[0].throughput_cap - 50.0).abs() < 1e-4);
     }
 
+    /// In-flight convoys hold cargo that has already been debited from the
+    /// sender's pool and exists nowhere else, so a snapshot that drops them
+    /// destroys goods across a save/load (issue #332).
+    #[test]
+    fn round_trip_trade_convoys_in_flight() {
+        use crate::trade::{TradeConvoy, TradeRoute};
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Alpha"), 100);
+        state.add_colony(Colony::new("Beta"), 200);
+        let id_a = state.colonies[0].id;
+        let id_b = state.colonies[1].id;
+
+        let route = TradeRoute::with_transit(id_a, id_b, 50.0, 4);
+        let route_id = route.id;
+        state.trade_network.routes.push(route);
+        state.trade_network.convoys.push(TradeConvoy {
+            id: uuid::Uuid::new_v4(),
+            route_id,
+            from_colony: id_a,
+            to_colony: id_b,
+            commodity_id: "water".into(),
+            amount: 37.5,
+            sols_remaining: 3,
+        });
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.trade_network.routes[0].transit_sols, 4);
+        assert_eq!(restored.trade_network.convoys.len(), 1);
+        let convoy = &restored.trade_network.convoys[0];
+        assert_eq!(convoy.to_colony, id_b);
+        assert_eq!(convoy.commodity_id, "water");
+        assert_eq!(convoy.sols_remaining, 3);
+        assert!((convoy.amount - 37.5).abs() < 1e-6);
+    }
+
     #[test]
     fn round_trip_directive_store() {
         use crate::directive::Directive;

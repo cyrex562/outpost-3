@@ -183,6 +183,28 @@ pub(crate) fn client_command_to_core(
 
     match cmd {
         ClientCommand::AdvanceSol => Ok(Command::AdvanceColonySol),
+        ClientCommand::FastForward {
+            max_sols,
+            threshold,
+        } => {
+            use outpost_core::interrupt::Tier;
+            let threshold = match threshold.as_str() {
+                "ambient" => Tier::Ambient,
+                "notable" => Tier::Notable,
+                "urgent" => Tier::Urgent,
+                "blocking" => Tier::Blocking,
+                other => {
+                    return Err(format!(
+                        "unknown interrupt tier {other:?}; expected one of \
+                         ambient, notable, urgent, blocking"
+                    ))
+                }
+            };
+            Ok(Command::FastForward {
+                max_sols,
+                threshold,
+            })
+        }
         ClientCommand::FoundColony {
             name,
             starting_population,

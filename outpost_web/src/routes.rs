@@ -43,6 +43,10 @@ pub fn build_router(state: AppState) -> Router {
             get(query_routes::get_outpost_targets),
         )
         .route("/api/tech-tree", get(query_routes::get_tech_tree))
+        .route(
+            "/api/interrupt-digest",
+            get(query_routes::get_interrupt_digest),
+        )
         .route("/ws", get(ws_handler))
         // Session management
         .route("/sessions", post(create_session))

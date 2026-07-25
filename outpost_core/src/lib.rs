@@ -103,6 +103,22 @@ pub const MAX_SUPPLY_OVERRIDE_MULTIPLE: f64 = 3.0;
 pub enum Command {
     /// Advance the simulation by one colony-sol turn.
     AdvanceColonySol,
+    /// Advance up to `max_sols` sols, halting early on the first interrupt whose
+    /// tier is at or above `threshold` (issue #332).
+    ///
+    /// The command wrapper around [`GameEngine::advance_until_interrupted`],
+    /// which existed and was tested long before anything could reach it. Exposing
+    /// it through `apply` is what lets a host drive fast-forward at all.
+    ///
+    /// Emits the per-sol events for every sol it ran, followed by exactly one
+    /// [`Event::FastForwardEnded`]. The accumulated `Notable`/`Ambient` interrupts
+    /// are available afterwards from [`Query::InterruptDigest`].
+    FastForward {
+        /// Upper bound on sols to advance. Zero advances nothing.
+        max_sols: u32,
+        /// Lowest interrupt tier that halts the run.
+        threshold: interrupt::Tier,
+    },
     /// Found a new colony with the given name and starting population.
     FoundColony {
         /// Display name for the new colony.
@@ -1408,6 +1424,42 @@ pub enum Event {
         amount: f64,
     },
 
+    /// A [`Command::FastForward`] run finished (issue #332).
+    ///
+    /// Emitted once, after the per-sol events of every sol the run advanced. The
+    /// accumulated below-threshold interrupts are in [`Query::InterruptDigest`].
+    FastForwardEnded {
+        /// Sol the run stopped on.
+        sol: u64,
+        /// How many sols it actually advanced — less than the requested
+        /// `max_sols` when an interrupt halted it early.
+        sols_advanced: u32,
+        /// `true` when an interrupt at or above the threshold stopped the run,
+        /// `false` when it ran the full `max_sols`.
+        halted: bool,
+        /// Human-readable reason the run halted, if it did.
+        halting_reason: Option<String>,
+    },
+
+    /// An inter-colony trade convoy arrived and its cargo was credited to the
+    /// destination colony pool (issue #332).
+    ///
+    /// Distinct from [`Self::CargoDelivered`], which reports an interplanetary
+    /// [`system::CargoShipment`] the player dispatched by hand. This one is the
+    /// automatic trade network landing a convoy it dispatched itself.
+    TradeConvoyArrived {
+        /// Stable identifier of the convoy that arrived.
+        convoy_id: uuid::Uuid,
+        /// Colony that sent the cargo.
+        from_colony: ColonyId,
+        /// Colony whose pool was credited.
+        to_colony: ColonyId,
+        /// Commodity that was deposited.
+        commodity_id: String,
+        /// Quantity deposited into the destination pool.
+        amount: f64,
+    },
+
     /// An event produced by the system zoom layer.
     ///
     /// Wraps [`system::SystemEvent`] so all system-scope events are observable
@@ -1840,6 +1892,39 @@ impl GameEngine {
         }
 
         match cmd {
+            Command::FastForward {
+                max_sols,
+                threshold,
+            } => {
+                let (result, mut events) = self.run_fast_forward(*max_sols, *threshold)?;
+                let (sols_advanced, halted, halting_reason) = match &result {
+                    AdvanceResult::Completed { turns_advanced, .. } => {
+                        (*turns_advanced, false, None)
+                    }
+                    // `at_turn` is the sol it stopped on, so the count of sols
+                    // actually run is that minus where the run started. Derive it
+                    // from the event stream instead: one ColonySolAdvanced per sol.
+                    AdvanceResult::Halted { interrupt, .. } => (
+                        u32::try_from(
+                            events
+                                .iter()
+                                .filter(|e| matches!(e, Event::ColonySolAdvanced { .. }))
+                                .count(),
+                        )
+                        .unwrap_or(u32::MAX),
+                        true,
+                        Some(interrupt.message.clone()),
+                    ),
+                };
+                events.push(Event::FastForwardEnded {
+                    sol: self.state.sol,
+                    sols_advanced,
+                    halted,
+                    halting_reason,
+                });
+                Ok(events)
+            }
+
             Command::AdvanceColonySol => {
                 let month_before = self.state.month;
                 let outcome = self.processor.advance(&mut self.state);
@@ -1869,6 +1954,16 @@ impl GameEngine {
                             colony_id: record.colony_id,
                             commodity_id: record.commodity_id,
                             amount: record.amount,
+                        });
+                    }
+                    // Emit one event per trade convoy that landed this sol.
+                    for arrival in outcome.convoy_arrivals {
+                        events.push(Event::TradeConvoyArrived {
+                            convoy_id: arrival.convoy_id,
+                            from_colony: arrival.from_colony,
+                            to_colony: arrival.to_colony,
+                            commodity_id: arrival.commodity_id,
+                            amount: arrival.amount,
                         });
                     }
 
@@ -3389,7 +3484,9 @@ impl GameEngine {
                         "throughput_cap must be >= 0".into(),
                     ));
                 }
-                let route = TradeRoute::new(*colony_a, *colony_b, *throughput_cap);
+                let transit = self.route_transit_sols(*colony_a, *colony_b);
+                let route =
+                    TradeRoute::with_transit(*colony_a, *colony_b, *throughput_cap, transit);
                 let route_id = route.id;
                 self.state.trade_network.add_route(route);
                 Ok(vec![Event::TradeRouteAdded {
@@ -5143,10 +5240,27 @@ impl GameEngine {
         n: u32,
         threshold: Tier,
     ) -> Result<AdvanceResult, EngineError> {
+        self.run_fast_forward(n, threshold)
+            .map(|(result, _)| result)
+    }
+
+    /// The fast-forward loop, also returning every event the sols it ran emitted.
+    ///
+    /// [`Self::advance_until_interrupted`] drops the events; [`Command::FastForward`]
+    /// forwards them so a host sees the same event stream it would have got from
+    /// stepping sol by sol. Both go through here so there is exactly one
+    /// implementation of the loop.
+    fn run_fast_forward(
+        &mut self,
+        n: u32,
+        threshold: Tier,
+    ) -> Result<(AdvanceResult, Vec<Event>), EngineError> {
         let mut digest: Vec<Interrupt> = Vec::new();
+        let mut all_events: Vec<Event> = Vec::new();
 
         for _ in 0..n {
             let events = self.apply(&Command::AdvanceColonySol)?;
+            all_events.extend(events.iter().cloned());
 
             // Update per-colony stability + population trackers after each sol.
             let colony_ids: Vec<_> = self.state.colonies.iter().map(|c| c.id).collect();
@@ -5195,11 +5309,14 @@ impl GameEngine {
                         digest_items,
                         active_filter: ui::DigestFilter::new(),
                     });
-                    return Ok(AdvanceResult::Halted {
-                        at_turn: self.state.sol,
-                        interrupt: irq,
-                        digest,
-                    });
+                    return Ok((
+                        AdvanceResult::Halted {
+                            at_turn: self.state.sol,
+                            interrupt: irq,
+                            digest,
+                        },
+                        all_events,
+                    ));
                 }
                 // Below threshold: accumulate in digest.
                 digest.push(irq);
@@ -5220,10 +5337,13 @@ impl GameEngine {
             digest_items,
             active_filter: ui::DigestFilter::new(),
         });
-        Ok(AdvanceResult::Completed {
-            turns_advanced: n,
-            digest,
-        })
+        Ok((
+            AdvanceResult::Completed {
+                turns_advanced: n,
+                digest,
+            },
+            all_events,
+        ))
     }
 
     /// Collect interrupts generated by the events from one sol turn plus the
@@ -5499,6 +5619,41 @@ impl GameEngine {
             }
         }
         placed.then_some(out)
+    }
+
+    /// Convoy transit time in sols for a trade route between two colonies
+    /// (issue #332).
+    ///
+    /// Derived from the endpoints' body separation when both colonies have a
+    /// known home body, and [`trade::DEFAULT_TRANSIT_SOLS`] otherwise — two
+    /// colonies on the same body, or a colony founded without map context.
+    ///
+    /// **The distance figure is read as sols, not months.** A trade convoy is a
+    /// fast automatic transfer on the sol scale; month-scale bulk freight is
+    /// [`system::CargoShipment`]'s job, which is why the two systems are
+    /// separate. Reading `compute_travel_time`'s months as months here would put
+    /// every inter-body trade route on a 30-sol-plus pipeline and reintroduce
+    /// exactly the long rebalance gap #332 set out to remove.
+    fn route_transit_sols(&self, colony_a: ColonyId, colony_b: ColonyId) -> u32 {
+        let body_of = |id: ColonyId| {
+            self.state
+                .colonies
+                .iter()
+                .find(|c| c.id == id)
+                .and_then(|c| c.home_body_id.clone())
+        };
+        let (Some(body_a), Some(body_b)) = (body_of(colony_a), body_of(colony_b)) else {
+            return trade::DEFAULT_TRANSIT_SOLS;
+        };
+        if body_a == body_b {
+            return trade::DEFAULT_TRANSIT_SOLS;
+        }
+        self.state
+            .system_state
+            .node_map
+            .compute_travel_time(&body_a, &body_b)
+            .unwrap_or(trade::DEFAULT_TRANSIT_SOLS)
+            .max(trade::DEFAULT_TRANSIT_SOLS)
     }
 
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].
@@ -7465,6 +7620,192 @@ mod tests {
             "stability diverged: {} vs {}",
             pa.stability,
             pb.stability
+        );
+    }
+
+    // ── Command::FastForward (issue #332 part 3) ──
+
+    /// Done-when: fast-forward is reachable through the drive interface, not just
+    /// as a bare `GameEngine` method no host could call.
+    #[test]
+    fn fast_forward_command_advances_and_reports_how_far() {
+        let mut engine = GameEngine::with_seed(7);
+        engine
+            .apply(&Command::FoundColony {
+                name: "FF".into(),
+                starting_population: 80,
+            })
+            .unwrap();
+        let start = engine.sol();
+
+        let events = engine
+            .apply(&Command::FastForward {
+                max_sols: 12,
+                threshold: Tier::Blocking,
+            })
+            .unwrap();
+
+        assert_eq!(engine.sol(), start + 12, "should have advanced 12 sols");
+
+        // The per-sol event stream is forwarded, not swallowed.
+        let sols_reported = events
+            .iter()
+            .filter(|e| matches!(e, Event::ColonySolAdvanced { .. }))
+            .count();
+        assert_eq!(sols_reported, 12, "one ColonySolAdvanced per sol advanced");
+
+        // Exactly one terminator, and it agrees with the run.
+        let enders: Vec<&Event> = events
+            .iter()
+            .filter(|e| matches!(e, Event::FastForwardEnded { .. }))
+            .collect();
+        assert_eq!(enders.len(), 1, "exactly one FastForwardEnded");
+        assert!(
+            matches!(
+                enders[0],
+                Event::FastForwardEnded { sols_advanced, halted, .. }
+                    if *sols_advanced == 12 && !*halted
+            ),
+            "a Blocking-threshold run should complete unhalted, got {:?}",
+            enders[0]
+        );
+    }
+
+    /// The command must halt where the underlying driver halts, and say so —
+    /// otherwise a host cannot tell "ran out of sols" from "something needs you".
+    #[test]
+    fn fast_forward_command_halts_early_and_says_why() {
+        let mut engine = GameEngine::with_seed(11);
+        let founded = engine
+            .apply(&Command::FoundColony {
+                name: "Halting".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &founded[0] else {
+            panic!("FoundColony must report the new colony")
+        };
+        let colony_id = *colony_id;
+
+        // Same staging as `advance_halts_on_urgent_interrupt`: a steep declining
+        // stability trajectory makes the predictive warning fire on the first
+        // sol, so the halt is deterministic rather than luck of the RNG.
+        let tracker = engine
+            .state
+            .stability_trackers
+            .entry(colony_id)
+            .or_default();
+        for s in [1.0f32, 0.7, 0.5, 0.3, 0.22] {
+            tracker.push(s);
+        }
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.populations[idx].stability = 0.22;
+
+        let events = engine
+            .apply(&Command::FastForward {
+                max_sols: 500,
+                threshold: Tier::Urgent,
+            })
+            .unwrap();
+
+        let ender = events
+            .iter()
+            .find_map(|e| match e {
+                Event::FastForwardEnded {
+                    sols_advanced,
+                    halted,
+                    halting_reason,
+                    ..
+                } => Some((*sols_advanced, *halted, halting_reason.clone())),
+                _ => None,
+            })
+            .expect("FastForwardEnded must be emitted");
+
+        let (sols_advanced, halted, reason) = ender;
+        assert!(
+            halted,
+            "the predictive warning should halt an Urgent-threshold run"
+        );
+        assert!(
+            sols_advanced < 500,
+            "a halted run must report fewer sols than requested, got {sols_advanced}"
+        );
+        assert!(
+            reason.is_some_and(|r| !r.is_empty()),
+            "a halted run must carry a reason"
+        );
+        assert_eq!(
+            sols_advanced as u64,
+            engine.sol(),
+            "sols_advanced must match how far the clock actually moved"
+        );
+    }
+
+    /// Zero sols is a no-op, not a panic or an off-by-one advance.
+    #[test]
+    fn fast_forward_command_with_zero_sols_does_nothing() {
+        let mut engine = GameEngine::with_seed(3);
+        engine
+            .apply(&Command::FoundColony {
+                name: "Zero".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let before = engine.sol();
+
+        let events = engine
+            .apply(&Command::FastForward {
+                max_sols: 0,
+                threshold: Tier::Urgent,
+            })
+            .unwrap();
+
+        assert_eq!(engine.sol(), before, "no sols should have passed");
+        assert_eq!(events.len(), 1, "only the terminator: {events:?}");
+    }
+
+    /// The command path must be identical to stepping — the whole point of
+    /// fast-forward is that it is not a different simulation.
+    #[test]
+    fn fast_forward_command_matches_stepping_sol_by_sol() {
+        const SEED: u64 = 909;
+        const SOLS: u32 = 35;
+
+        fn seeded() -> GameEngine {
+            let mut engine = GameEngine::with_seed(SEED);
+            engine
+                .apply(&Command::FoundColony {
+                    name: "Parity".into(),
+                    starting_population: 90,
+                })
+                .unwrap();
+            engine
+        }
+
+        let mut stepped = seeded();
+        for _ in 0..SOLS {
+            stepped.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let mut fast = seeded();
+        fast.apply(&Command::FastForward {
+            max_sols: SOLS,
+            threshold: Tier::Blocking,
+        })
+        .unwrap();
+
+        assert_eq!(stepped.sol(), fast.sol());
+        assert_eq!(stepped.month(), fast.month());
+        assert!(
+            (stepped.state.populations[0].count - fast.state.populations[0].count).abs() < 1e-6,
+            "populations diverged: {} vs {}",
+            stepped.state.populations[0].count,
+            fast.state.populations[0].count
+        );
+        assert!(
+            (stepped.state.populations[0].stability - fast.state.populations[0].stability).abs()
+                < 1e-6,
+            "stability diverged"
         );
     }
 
@@ -10463,6 +10804,156 @@ mod tests {
         assert!(
             food_at_b > 0.0,
             "colony B should have received some food via trade; got {food_at_b}"
+        );
+    }
+
+    /// Done-when (#332 part 2): trade takes time. Cargo leaves the sender on the
+    /// sol it is dispatched and lands on a later sol, announced by
+    /// `TradeConvoyArrived` — it never teleports.
+    #[test]
+    fn a_trade_convoy_leaves_on_one_sol_and_lands_on_a_later_one() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+
+        let idx_a = engine.find_colony_index(a).unwrap();
+        let idx_b = engine.find_colony_index(b).unwrap();
+        engine.state.colonies[idx_a].pool.deposit("food", 100.0);
+        let before = engine.state.colonies[idx_a].pool.amount("food");
+
+        engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 20.0,
+            })
+            .unwrap();
+        // Neither colony has a home body, so the route takes the default transit.
+        let transit = engine.state.trade_network.routes[0].transit_sols;
+        assert_eq!(transit, trade::DEFAULT_TRANSIT_SOLS);
+
+        // Sol 1 dispatches: A is debited, B is not yet credited, and the cargo is
+        // sitting in the convoy manifest.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx_a].pool.amount("food") < before,
+            "the sender should be debited at dispatch"
+        );
+        assert_eq!(
+            engine.state.colonies[idx_b].pool.amount("food"),
+            0.0,
+            "the receiver must not be credited on the dispatch sol"
+        );
+        assert!(
+            !engine.state.trade_network.convoys.is_empty(),
+            "the cargo should be in flight"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::TradeConvoyArrived { .. })),
+            "nothing has arrived yet; got {events:?}"
+        );
+
+        // Sol 2 lands it.
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::TradeConvoyArrived { to_colony, commodity_id, .. }
+                    if *to_colony == b && commodity_id == "food"
+            )),
+            "expected a TradeConvoyArrived for B; got {events:?}"
+        );
+        assert!(
+            engine.state.colonies[idx_b].pool.amount("food") > 0.0,
+            "B's pool should be credited on arrival"
+        );
+    }
+
+    /// Convoys already in flight must still land after their route is removed —
+    /// otherwise deleting a road strands, and effectively destroys, cargo that
+    /// was already debited from the sender.
+    #[test]
+    fn a_convoy_in_flight_still_arrives_after_its_route_is_removed() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+        let idx_a = engine.find_colony_index(a).unwrap();
+        let idx_b = engine.find_colony_index(b).unwrap();
+        engine.state.colonies[idx_a].pool.deposit("food", 100.0);
+
+        let events = engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 20.0,
+            })
+            .unwrap();
+        let route_id = events
+            .iter()
+            .find_map(|e| match e {
+                Event::TradeRouteAdded { route_id, .. } => Some(*route_id),
+                _ => None,
+            })
+            .expect("route id");
+
+        // Dispatch, then tear the route down while the cargo is travelling.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let in_flight: f64 = engine
+            .state
+            .trade_network
+            .convoys
+            .iter()
+            .map(|c| c.amount)
+            .sum();
+        assert!(in_flight > 0.0, "expected cargo in flight");
+        engine
+            .apply(&Command::RemoveTradeRoute { route_id })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let at_b = engine.state.colonies[idx_b].pool.amount("food");
+        assert!(
+            (at_b - in_flight).abs() < 1e-6,
+            "the in-flight cargo should still land: expected {in_flight}, B has {at_b}"
+        );
+    }
+
+    /// Done-when (#332 part 2): the reserve came down from 10 sols to 3 now that
+    /// trade rebalances every sol. This pins that the smaller reserve plus convoy
+    /// latency does not starve an importing colony over a long run — the
+    /// regression a reserve retune is most likely to cause.
+    #[test]
+    fn an_importing_colony_does_not_run_dry_under_the_retuned_reserve() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+        let idx_a = engine.find_colony_index(a).unwrap();
+        let idx_b = engine.find_colony_index(b).unwrap();
+
+        // A is the producer, restocked every sol; B has a standing shortfall.
+        engine.state.colonies[idx_b].pool.deposit("water", 20.0);
+        engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 50.0,
+            })
+            .unwrap();
+
+        let mut b_low_water_sols = 0;
+        for _ in 0..60 {
+            engine.state.colonies[idx_a].pool.deposit("water", 40.0);
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            if engine.state.colonies[idx_b].pool.amount("water") <= 0.0 {
+                b_low_water_sols += 1;
+            }
+        }
+
+        assert_eq!(
+            b_low_water_sols,
+            0,
+            "B should never hit zero water with a producer next door and a \
+             {}-sol reserve; it was dry on {b_low_water_sols} sols",
+            turn::TRADE_RESERVE_SOLS
         );
     }
 

@@ -76,6 +76,7 @@ pub fn run() {
             commands::list_saves,
             commands::get_system_bodies,
             commands::get_tech_tree,
+            commands::get_interrupt_digest,
             commands::get_colonize_targets,
             commands::list_buildings,
             commands::get_planet_map,

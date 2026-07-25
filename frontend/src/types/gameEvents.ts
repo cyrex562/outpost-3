@@ -81,6 +81,29 @@ export interface OtherEvent {
   [key: string]: unknown
 }
 
+/** An inter-colony trade convoy landed and was credited to a pool (issue #332). */
+export interface TradeConvoyArrivedEvent {
+  kind: 'trade_convoy_arrived'
+  convoy_id: string
+  from_colony: string
+  to_colony: string
+  commodity_id: string
+  amount: number
+}
+
+/**
+ * A fast-forward run finished (issue #332).
+ *
+ * The UI's cue to stop its play timer and, when `halted`, open the digest panel.
+ */
+export interface FastForwardEndedEvent {
+  kind: 'fast_forward_ended'
+  sol: number
+  sols_advanced: number
+  halted: boolean
+  halting_reason: string | null
+}
+
 /** Union of all known game event types. */
 export type GameEvent =
   | ColonySolAdvancedEvent
@@ -94,4 +117,6 @@ export type GameEvent =
   | OutpostDecommissionedEvent
   | OutpostConstructionQueuedEvent
   | OutpostPromotedEvent
+  | TradeConvoyArrivedEvent
+  | FastForwardEndedEvent
   | OtherEvent

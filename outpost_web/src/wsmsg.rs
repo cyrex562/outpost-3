@@ -50,6 +50,19 @@ pub enum ClientMessage {
 pub enum ClientCommand {
     /// Advance one colony-sol turn.
     AdvanceSol,
+    /// Advance up to `max_sols` sols, halting early on an interrupt at or above
+    /// `threshold` (issue #332).
+    ///
+    /// `threshold` is a tier slug — `"ambient"`, `"notable"`, `"urgent"`, or
+    /// `"blocking"`. An unrecognised value is rejected rather than silently
+    /// defaulting, so a typo can't turn a cautious fast-forward into one that
+    /// runs straight through a crisis.
+    FastForward {
+        /// Upper bound on sols to advance.
+        max_sols: u32,
+        /// Lowest interrupt tier that halts the run.
+        threshold: String,
+    },
     /// Found a new colony.
     FoundColony {
         /// Colony display name.
@@ -613,6 +626,34 @@ pub enum ServerEvent {
         /// Quantity deposited.
         amount: f64,
     },
+    /// An inter-colony trade convoy landed and was credited to a colony pool
+    /// (issue #332).
+    TradeConvoyArrived {
+        /// Convoy UUID.
+        convoy_id: String,
+        /// Sending colony UUID.
+        from_colony: String,
+        /// Receiving colony UUID.
+        to_colony: String,
+        /// Commodity identifier.
+        commodity_id: String,
+        /// Quantity deposited.
+        amount: f64,
+    },
+    /// A fast-forward run finished (issue #332).
+    ///
+    /// The UI's cue to stop its play timer and, when `halted`, open the digest
+    /// panel — `GET /api/interrupt-digest` has the accumulated detail.
+    FastForwardEnded {
+        /// Sol the run stopped on.
+        sol: u64,
+        /// Sols actually advanced.
+        sols_advanced: u32,
+        /// Whether an interrupt stopped the run early.
+        halted: bool,
+        /// Why it halted, when it did.
+        halting_reason: Option<String>,
+    },
     /// An orbital station construction project finished.
     OrbitalStationCompleted {
         /// Station UUID.
@@ -852,6 +893,30 @@ impl ServerEvent {
                 colony_id: colony_id.to_string(),
                 commodity_id: commodity_id.clone(),
                 amount: *amount,
+            },
+            Event::TradeConvoyArrived {
+                convoy_id,
+                from_colony,
+                to_colony,
+                commodity_id,
+                amount,
+            } => Self::TradeConvoyArrived {
+                convoy_id: convoy_id.to_string(),
+                from_colony: from_colony.to_string(),
+                to_colony: to_colony.to_string(),
+                commodity_id: commodity_id.clone(),
+                amount: *amount,
+            },
+            Event::FastForwardEnded {
+                sol,
+                sols_advanced,
+                halted,
+                halting_reason,
+            } => Self::FastForwardEnded {
+                sol: *sol,
+                sols_advanced: *sols_advanced,
+                halted: *halted,
+                halting_reason: halting_reason.clone(),
             },
             Event::OrbitalStationCompleted {
                 station_id,

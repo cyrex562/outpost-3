@@ -68,6 +68,13 @@ type CmdResult<T> = Result<T, CmdError>;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClientCommand {
     AdvanceSol,
+    /// Advance up to `max_sols` sols, halting on an interrupt at or above
+    /// `threshold` (issue #332). `threshold` is a tier slug: `ambient`,
+    /// `notable`, `urgent`, or `blocking`.
+    FastForward {
+        max_sols: u32,
+        threshold: String,
+    },
     FoundColony {
         name: String,
         starting_population: u64,
@@ -319,6 +326,25 @@ pub enum ServerEvent {
         building_type: String,
         recipe_id: String,
     },
+    /// An inter-colony trade convoy landed and was credited to a colony pool
+    /// (issue #332).
+    TradeConvoyArrived {
+        convoy_id: String,
+        from_colony: String,
+        to_colony: String,
+        commodity_id: String,
+        amount: f64,
+    },
+    /// A fast-forward run finished (issue #332).
+    ///
+    /// The UI's cue to stop its play timer and, when `halted`, open the digest
+    /// panel.
+    FastForwardEnded {
+        sol: u64,
+        sols_advanced: u32,
+        halted: bool,
+        halting_reason: Option<String>,
+    },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
         core_kind: String,
@@ -329,6 +355,30 @@ impl ServerEvent {
     fn from_core(event: &Event) -> Self {
         match event {
             Event::ColonySolAdvanced { sol } => Self::ColonySolAdvanced { sol: *sol },
+            Event::TradeConvoyArrived {
+                convoy_id,
+                from_colony,
+                to_colony,
+                commodity_id,
+                amount,
+            } => Self::TradeConvoyArrived {
+                convoy_id: convoy_id.to_string(),
+                from_colony: from_colony.to_string(),
+                to_colony: to_colony.to_string(),
+                commodity_id: commodity_id.clone(),
+                amount: *amount,
+            },
+            Event::FastForwardEnded {
+                sol,
+                sols_advanced,
+                halted,
+                halting_reason,
+            } => Self::FastForwardEnded {
+                sol: *sol,
+                sols_advanced: *sols_advanced,
+                halted: *halted,
+                halting_reason: halting_reason.clone(),
+            },
             Event::StrategicMonthAdvanced { month } => {
                 Self::StrategicMonthAdvanced { month: *month }
             }
@@ -505,6 +555,24 @@ pub struct ColonyWire {
 
 fn parse_colony(id: &str) -> Result<ColonyId, CmdError> {
     ColonyId::from_str(id).map_err(|_| CmdError::InvalidArg(format!("bad colony id: {id}")))
+}
+
+/// Parse an interrupt-tier slug into [`outpost_core::interrupt::Tier`]
+/// (issue #332). Mirrors the `outpost_web` WS mapping.
+///
+/// Rejects an unknown slug rather than defaulting: silently falling back would
+/// turn a typo'd cautious fast-forward into one that runs through a crisis.
+fn parse_tier(s: &str) -> Result<outpost_core::interrupt::Tier, CmdError> {
+    use outpost_core::interrupt::Tier;
+    match s.to_lowercase().as_str() {
+        "ambient" => Ok(Tier::Ambient),
+        "notable" => Ok(Tier::Notable),
+        "urgent" => Ok(Tier::Urgent),
+        "blocking" => Ok(Tier::Blocking),
+        other => Err(CmdError::InvalidArg(format!(
+            "unknown interrupt tier: {other}; expected ambient, notable, urgent, or blocking"
+        ))),
+    }
 }
 
 /// Parse an infrastructure-type string (`road`/`rail`/`pipeline`) into
@@ -1060,6 +1128,13 @@ pub fn apply_command(
 
     let core_cmd = match command {
         ClientCommand::AdvanceSol => Command::AdvanceColonySol,
+        ClientCommand::FastForward {
+            max_sols,
+            threshold,
+        } => Command::FastForward {
+            max_sols,
+            threshold: parse_tier(&threshold)?,
+        },
         ClientCommand::FoundColony {
             name,
             starting_population,
@@ -1524,6 +1599,81 @@ pub struct TechNodeWire {
     /// Zero-based position in `TechState.research_queue` (the actual FIFO
     /// drain order), only meaningful when `state == "queued"`.
     pub queue_position: Option<usize>,
+}
+
+/// One accumulated interrupt in the fast-forward digest (issue #332).
+#[derive(Debug, Serialize)]
+pub struct DigestItemWire {
+    pub tier: String,
+    pub message: String,
+    pub colony_id: Option<String>,
+    pub acknowledged: bool,
+}
+
+/// The return-from-fast-forward triage payload (issue #332).
+#[derive(Debug, Serialize)]
+pub struct InterruptDigestWire {
+    pub stopped_at_sol: u64,
+    pub sols_requested: u32,
+    pub halting_message: Option<String>,
+    pub halting_tier: Option<String>,
+    pub items: Vec<DigestItemWire>,
+}
+
+/// Render an interrupt tier as the slug `ClientCommand::FastForward` accepts,
+/// so the UI can feed a tier it read back in as a threshold.
+fn tier_slug(tier: outpost_core::interrupt::Tier) -> &'static str {
+    use outpost_core::interrupt::Tier;
+    match tier {
+        Tier::Ambient => "ambient",
+        Tier::Notable => "notable",
+        Tier::Urgent => "urgent",
+        Tier::Blocking => "blocking",
+    }
+}
+
+/// Return what happened during the last fast-forward run (issue #332).
+///
+/// `ClientCommand::FastForward` reports only that a run ended and why; this is
+/// where the accumulated below-threshold interrupts are read for the digest
+/// panel. Empty before any fast-forward has run.
+#[tauri::command]
+pub fn get_interrupt_digest(
+    engine_state: State<'_, EngineState>,
+) -> CmdResult<InterruptDigestWire> {
+    use outpost_core::{Query, QueryResult};
+
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+
+    let QueryResult::InterruptDigest(digest) = engine
+        .query(&Query::InterruptDigest)
+        .map_err(|e| CmdError::Engine(e.to_string()))?
+    else {
+        return Err(CmdError::Engine(
+            "InterruptDigest query returned the wrong result variant".into(),
+        ));
+    };
+
+    Ok(InterruptDigestWire {
+        stopped_at_sol: digest.stopped_at_turn,
+        sols_requested: digest.turns_advanced,
+        halting_message: digest.halting_interrupt.as_ref().map(|i| i.message.clone()),
+        halting_tier: digest
+            .halting_interrupt
+            .as_ref()
+            .map(|i| tier_slug(i.tier).to_owned()),
+        items: digest
+            .digest_items
+            .iter()
+            .map(|item| DigestItemWire {
+                tier: tier_slug(item.interrupt.tier).to_owned(),
+                message: item.interrupt.message.clone(),
+                colony_id: item.interrupt.colony_id.map(|id| id.to_string()),
+                acknowledged: item.acknowledged,
+            })
+            .collect(),
+    })
 }
 
 /// Return the full tech tree with per-node state.
