@@ -1,14 +1,19 @@
-//! Turn model — two-cadence turn processing.
+//! Turn model — single-cadence turn processing.
 //!
-//! Outpost 3 uses two interleaved turn cadences (see `docs/DESIGN.md §4`):
-//! - **Colony-sol**: the shorter operational cadence for day-to-day colony
-//!   management (production, labour allocation, events).
-//! - **Strategic-month**: the longer cadence for fleet movement, diplomacy,
-//!   and star-system-scale actions.
+//! The **colony-sol** is the game's only cadence (issue #332). Every system runs
+//! on it: production, labour, needs, hazards, population, research, trade, and
+//! shipment delivery.
 //!
-//! The [`TurnProcessor`] owns cadence bookkeeping and fires the strategic-month
-//! sub-pipeline every `sols_per_month` sols (default 30). RNG is injected as a
-//! seeded [`rand_chacha::ChaCha8Rng`] stream so turn resolution is deterministic.
+//! Outpost 3 previously interleaved a second "strategic-month" cadence that
+//! gated research, trade, shipment delivery, and orbital construction behind a
+//! 30-sol boundary. That is gone. `sols_per_month` survives only as the divisor
+//! for the [`GameState::month`] calendar label — no system branches on it — and
+//! the `TurnCadence` enum went with the second cadence it existed to
+//! distinguish.
+//!
+//! RNG is injected as a seeded [`rand_chacha::ChaCha8Rng`] stream so turn
+//! resolution is deterministic — which is what makes fast-forwarding N sols
+//! identical to advancing N times.
 
 use std::collections::{HashMap, HashSet};
 
@@ -39,7 +44,11 @@ use crate::tech::{TechRegistry, TechState};
 use crate::trade::TradeNetwork;
 use crate::victory::{VictoryCondition, VictoryState};
 
-/// Default number of colony-sols that constitute one strategic-month.
+/// Colony-sols in one calendar month.
+///
+/// Only used to derive the [`GameState::month`] display label and to convert
+/// month-denominated authored durations (shipment travel, orbital build times)
+/// into sols. Not a cadence — see the module docs (issue #332).
 pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
 
 /// Sols of its own consumption a colony holds back from trade.
@@ -49,38 +58,29 @@ pub const DEFAULT_SOLS_PER_MONTH: u64 = 30;
 /// to the auto-trade pass — a colony must not export what its population is
 /// about to eat, drink, or breathe.
 ///
-/// Trade runs on the strategic pass, so the reserve needs to cover the sols
-/// until the next one could rebalance; a month's cadence with a handful of sols
-/// of headroom is the intent. Balance dial — expect the harness to retune it.
+/// Sized when trade ran once per 30 sols and the reserve had to bridge that
+/// whole gap (#331). Trade rebalances every sol now (#332), so this is far more
+/// conservative than it needs to be and can very likely come down — left alone
+/// here so the cadence change lands without a simultaneous balance change.
+/// Balance dial; expect the harness to retune it.
 pub const TRADE_RESERVE_SOLS: u32 = 10;
-
-/// Identifies which turn cadence is being processed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum TurnCadence {
-    /// Day-to-day colony operations cadence.
-    ColonySol,
-    /// Star-system-scale strategic cadence.
-    StrategicMonth,
-}
 
 /// A record of one completed turn produced by [`TurnProcessor::advance`].
 #[derive(Debug, Clone)]
 pub struct TurnOutcome {
-    /// Which cadence(s) fired this tick.
-    pub cadences_fired: Vec<TurnCadence>,
     /// Colony-sol counter after this advance.
     pub sol: u64,
-    /// Strategic-month counter after this advance (if a month just fired).
+    /// Calendar-month label after this advance, derived from [`Self::sol`].
     pub month: u64,
-    /// Tech IDs that completed during this strategic month (empty if no month fired).
+    /// Tech IDs that completed this sol.
     pub completed_techs: Vec<String>,
-    /// Cargo delivery events produced during the strategic-month pipeline (empty on colony-sol-only turns).
+    /// Cargo deliveries that arrived this sol.
     pub cargo_delivered: Vec<CargoDeliveryRecord>,
     /// Environmental hazard outcomes rolled this colony-sol (empty when no hazards triggered).
     pub hazard_outcomes: Vec<crate::hazard::HazardOutcome>,
 }
 
-/// A record of one commodity quantity delivered to a colony pool during a strategic month.
+/// A record of one commodity quantity delivered to a colony pool.
 #[derive(Debug, Clone)]
 pub struct CargoDeliveryRecord {
     /// Shipment that arrived.
@@ -106,7 +106,9 @@ pub struct GameState {
     pub populations: Vec<Population>,
     /// Colony-sol turn counter (monotonically increasing).
     pub sol: u64,
-    /// Strategic-month turn counter (monotonically increasing).
+    /// Calendar-month label, derived from [`Self::sol`] each advance.
+    ///
+    /// Display only: no system is gated on it (issue #332).
     pub month: u64,
     /// Optional content registry used by the production step.
     ///
@@ -331,18 +333,22 @@ impl Default for GameState {
     }
 }
 
-/// Processes colony-sol and strategic-month turns against a [`GameState`].
+/// Processes turns against a [`GameState`], one sol at a time.
 ///
-/// Each call to [`TurnProcessor::advance`] fires exactly one colony-sol.
-/// When `sol % sols_per_month == 0` (after increment) the strategic-month
-/// sub-pipeline also fires. The sub-pipeline is a placeholder in Phase 1 and
-/// will be wired to real mechanics in Phase 5+.
+/// Each call to [`TurnProcessor::advance`] fires exactly one colony-sol, and
+/// every system runs on that one cadence — there is no strategic-month
+/// sub-pipeline any more (issue #332). `sols_per_month` survives only to derive
+/// the calendar label in [`GameState::month`]; nothing branches on it.
 ///
 /// RNG is a seeded [`ChaCha8Rng`] injected at construction — never a global
-/// source — ensuring deterministic, reproducible turn resolution.
+/// source — ensuring deterministic, reproducible turn resolution. That is what
+/// makes fast-forwarding N sols identical to advancing N times
+/// ([`crate::GameEngine::advance_until_interrupted`]).
 #[derive(Debug)]
 pub struct TurnProcessor {
-    /// Number of colony-sols per strategic-month.
+    /// Colony-sols per calendar month — the divisor for the derived
+    /// [`GameState::month`] label. Not a cadence: no system is gated on it
+    /// (issue #332).
     sols_per_month: u64,
     /// Seeded RNG stream for deterministic turn resolution.
     rng: ChaCha8Rng,
@@ -371,25 +377,32 @@ impl TurnProcessor {
 
     /// Advance `state` by exactly one colony-sol.
     ///
-    /// Fires the strategic-month sub-pipeline when `state.sol % sols_per_month == 0`
-    /// after incrementing. Returns a [`TurnOutcome`] describing what fired.
+    /// The sol is the game's **only** cadence (issue #332). Research, trade, and
+    /// shipment delivery used to run on a nested 30-sol "strategic month"
+    /// pipeline; they now run every sol like everything else, and `state.month`
+    /// is a derived calendar label rather than a gate on any system.
+    ///
+    /// The unification is deliberately balance-neutral:
+    ///
+    /// - **Research** drains the whole pool toward the current project whenever
+    ///   it runs (`tech::apply_research_turn_scaled`), and the pool is *fed*
+    ///   per sol, so applying it per sol moves the same total RP — just in finer
+    ///   increments, without progress sitting idle for up to 29 sols.
+    /// - **Shipments** carry their remaining duration in sols now, converted
+    ///   from the route's `travel_time_months` at dispatch, so a voyage takes
+    ///   the same elapsed time it always did.
+    /// - **Trade** now rebalances every sol instead of every 30. That one *is* a
+    ///   behaviour change, and an intended one: the 30-sol gap is the sole
+    ///   reason a need reserve sized in sols had to exist (#331).
     pub fn advance(&mut self, state: &mut GameState) -> TurnOutcome {
         state.sol += 1;
-        let mut cadences_fired = vec![TurnCadence::ColonySol];
+        // The month is a label derived from the sol counter, not a separate
+        // clock — nothing branches on it.
+        state.month = state.sol / self.sols_per_month;
         let hazard_outcomes = self.run_colony_sol_pipeline(state);
-
-        let mut completed_techs = Vec::new();
-        let mut cargo_delivered = Vec::new();
-        if state.sol.is_multiple_of(self.sols_per_month) {
-            state.month += 1;
-            cadences_fired.push(TurnCadence::StrategicMonth);
-            let result = Self::run_strategic_month_pipeline(state);
-            completed_techs = result.0;
-            cargo_delivered = result.1;
-        }
+        let (completed_techs, cargo_delivered) = Self::run_systemwide_pipeline(state);
 
         TurnOutcome {
-            cadences_fired,
             sol: state.sol,
             month: state.month,
             completed_techs,
@@ -584,11 +597,16 @@ impl TurnProcessor {
             .collect()
     }
 
+    /// System-wide sub-pipeline, run every sol (issue #332).
+    ///
+    /// Research progress, inter-colony trade, and shipment delivery. These
+    /// used to be gated behind a 30-sol "strategic month"; they are now on the
+    /// single sol cadence like every other system. See [`Self::advance`] for why
+    /// that is balance-neutral for research and shipments, and deliberate for
+    /// trade.
     ///
     /// Returns `(completed_tech_ids, cargo_delivery_records)`.
-    fn run_strategic_month_pipeline(
-        state: &mut GameState,
-    ) -> (Vec<String>, Vec<CargoDeliveryRecord>) {
+    fn run_systemwide_pipeline(state: &mut GameState) -> (Vec<String>, Vec<CargoDeliveryRecord>) {
         let mut completed_techs = Vec::new();
 
         // Drain research pool into tech progress if a registry is loaded.
@@ -741,37 +759,44 @@ mod tests {
     }
 
     #[test]
-    fn strategic_month_fires_at_configured_interval() {
+    /// The month is a label derived from the sol counter (issue #332).
+    ///
+    /// It no longer gates anything — research, trade, shipment delivery, and
+    /// orbital construction all run every sol — so this pins the label
+    /// arithmetic only. The old `cadences_fired`/`TurnCadence` bookkeeping is
+    /// gone with the second cadence it existed to distinguish.
+    fn the_month_label_tracks_the_sol_counter() {
         let mut state = make_state();
         let mut proc = TurnProcessor::with_cadence(0, 5);
 
-        for _ in 0..4 {
+        for sol in 1..5 {
             let out = proc.advance(&mut state);
-            assert!(!out.cadences_fired.contains(&TurnCadence::StrategicMonth));
-            assert_eq!(out.month, 0);
+            assert_eq!(out.sol, sol);
+            assert_eq!(out.month, 0, "sol {sol} is still month 0");
         }
         let out = proc.advance(&mut state);
-        assert!(out.cadences_fired.contains(&TurnCadence::StrategicMonth));
-        assert_eq!(out.month, 1);
+        assert_eq!(out.month, 1, "5 sols at 5 sols/month is month 1");
         assert_eq!(out.sol, 5);
     }
 
     #[test]
-    fn advance_m_sols_and_assert_one_strategic_month() {
+    fn advancing_a_month_of_sols_rolls_the_month_label_once() {
         const SOLS_PER_MONTH: u64 = 30;
         let mut state = make_state();
         let mut proc = TurnProcessor::with_cadence(99, SOLS_PER_MONTH);
 
-        let mut months_fired = 0u64;
+        let mut label_changes = 0u64;
+        let mut previous_month = state.month;
         for _ in 0..SOLS_PER_MONTH {
             let out = proc.advance(&mut state);
-            if out.cadences_fired.contains(&TurnCadence::StrategicMonth) {
-                months_fired += 1;
+            if out.month != previous_month {
+                label_changes += 1;
+                previous_month = out.month;
             }
         }
 
         assert_eq!(state.sol, SOLS_PER_MONTH);
-        assert_eq!(months_fired, 1);
+        assert_eq!(label_changes, 1, "the label should roll over exactly once");
         assert_eq!(state.month, 1);
     }
 
@@ -1411,6 +1436,82 @@ mod tests {
             0.0,
             "the water-rich colony held only its own reserve, so it must not \
              have exported any — it would have starved itself"
+        );
+    }
+    // ── One cadence (issue #332) ─────────────────────────────────────────────
+
+    /// Research, trade, and shipment delivery run every sol, not every 30.
+    ///
+    /// The specific thing pinned here is that research *progress* happens on a
+    /// sol that is not a month boundary. Before #332 it was gated behind
+    /// `sol % 30 == 0`, so 29 sols out of 30 banked RP and applied none of it.
+    #[test]
+    fn research_progresses_on_a_non_boundary_sol() {
+        use crate::tech::{TechDef, TechRegistry};
+
+        let registry = TechRegistry::build(vec![TechDef {
+            id: "cheap_tech".into(),
+            display_name: "Cheap Tech".into(),
+            research_cost: 5.0,
+            ..TechDef::default()
+        }])
+        .expect("single tech with no prerequisites is a valid registry");
+
+        let mut state = make_state();
+        state.tech_registry = Some(registry);
+        state
+            .tech_state
+            .research_queue
+            .push_back("cheap_tech".into());
+        state.research_pool.deposit(100.0);
+
+        // A 30-sol month, so sol 1 is emphatically not a boundary.
+        let mut proc = TurnProcessor::with_cadence(0, 30);
+        let out = proc.advance(&mut state);
+
+        assert_eq!(out.sol, 1);
+        assert_eq!(out.month, 0, "sol 1 is not a month boundary");
+        assert_eq!(
+            out.completed_techs,
+            vec!["cheap_tech".to_string()],
+            "research must progress on an ordinary sol, not wait for the month"
+        );
+    }
+
+    /// Trade rebalances every sol rather than once per 30.
+    #[test]
+    fn trade_flows_on_a_non_boundary_sol() {
+        use crate::content::types::{CommodityDef, Phase};
+        use crate::content::{CommodityTier, ContentRegistry};
+        use crate::trade::TradeRoute;
+
+        let mut registry = ContentRegistry::default();
+        registry.insert_commodity(CommodityDef {
+            id: "structural_ore".into(),
+            name: "Ore".into(),
+            description: String::new(),
+            category: "raw_material".into(),
+            phase: Phase::Solid,
+            base_value: 1.0,
+            tradeable: true,
+            tier: CommodityTier::default(),
+            weight: 1.0,
+        });
+
+        let mut state = make_state();
+        state.add_colony(Colony::new("Second"), 100);
+        state.registry = Some(registry);
+        state.colonies[0].pool.deposit("structural_ore", 100.0);
+        let (a, b) = (state.colonies[0].id, state.colonies[1].id);
+        state.trade_network.add_route(TradeRoute::new(a, b, 50.0));
+
+        let mut proc = TurnProcessor::with_cadence(0, 30);
+        let out = proc.advance(&mut state);
+
+        assert_eq!(out.month, 0, "sol 1 is not a month boundary");
+        assert!(
+            state.colonies[1].pool.amount("structural_ore") > 0.0,
+            "trade must run on an ordinary sol, not wait 30 of them"
         );
     }
 }

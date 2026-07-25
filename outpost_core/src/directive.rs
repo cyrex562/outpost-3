@@ -162,7 +162,7 @@ mod tests {
             id,
             colony_id: col,
             predicate: Predicate::Never,
-            action: Command::AdvanceStrategicMonth,
+            action: Command::AdvanceColonySol,
             priority: 10,
         };
         store.set_directive(d2);
@@ -220,7 +220,7 @@ mod tests {
             id: Uuid::new_v4(),
             colony_id: col,
             predicate: Predicate::Always,
-            action: Command::AdvanceStrategicMonth,
+            action: Command::AdvanceColonySol,
             priority: 1,
         };
         let high = Directive {

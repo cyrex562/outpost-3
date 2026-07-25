@@ -635,6 +635,15 @@ impl Body {
 /// the [`HARSH_WORLD_CAPABILITY_ID`] capability unlocked (issue #183).
 pub const HABITABILITY_FOUNDING_THRESHOLD: u8 = 30;
 
+/// Sols per calendar month, used to convert month-denominated travel times into
+/// the sol cadence shipments now tick on (issue #332).
+///
+/// Mirrors [`crate::turn::DEFAULT_SOLS_PER_MONTH`]. Kept as a separate constant
+/// because `system` must not depend on the turn processor's configured cadence —
+/// a route's distance-derived travel time is a physical quantity, not a
+/// function of how fast the player is advancing turns.
+pub const SOLS_PER_MONTH: u32 = 30;
+
 /// Capability slug (see [`crate::tech::TechEffect::UnlockCapability`]) that
 /// overrides [`HABITABILITY_FOUNDING_THRESHOLD`], letting the player found
 /// on any body regardless of habitability score once researched.
@@ -804,7 +813,12 @@ pub struct CargoShipment {
     pub cargo: Vec<(String, f64)>,
     /// Hauler assigned to this shipment.
     pub hauler_id: Uuid,
-    /// Strategic months remaining until arrival.
+    /// **Sols** remaining until arrival (issue #332).
+    ///
+    /// Was strategic months, ticked once per 30 sols. Now ticked every sol, with
+    /// the route's `travel_time_months` converted at dispatch, so a voyage takes
+    /// the same elapsed time — it just reports progress every sol instead of
+    /// jumping in 30-sol steps.
     pub turns_remaining: u32,
     /// Colony that should receive this cargo on arrival (if any).
     pub destination_colony: Option<crate::colony::ColonyId>,
@@ -1637,7 +1651,11 @@ pub fn apply_system_command(
                     to: to.clone(),
                     cargo: cargo.clone(),
                     hauler_id,
-                    turns_remaining: travel_time,
+                    // `compute_travel_time` is distance-derived and expressed in
+                    // months; shipments tick per sol now (issue #332), so
+                    // convert once here rather than teaching the tick loop about
+                    // two units.
+                    turns_remaining: travel_time.saturating_mul(SOLS_PER_MONTH),
                     destination_colony: *destination_colony,
                 },
             );
@@ -2372,7 +2390,22 @@ mod tests {
             .compute_travel_time(&body_a, &body_b)
             .unwrap();
         assert_eq!(travel_time, 1, "expected travel time of 1 month");
-        // After 1 advance the shipment (travel_time=1) should arrive
+        // A shipment's countdown is in sols now (issue #332), so a 1-month
+        // voyage is SOLS_PER_MONTH advances — same elapsed time, finer steps.
+        assert_eq!(
+            state.shipments.values().next().unwrap().turns_remaining,
+            SOLS_PER_MONTH,
+            "1 month of travel should be stored as SOLS_PER_MONTH sols"
+        );
+        for sol in 1..SOLS_PER_MONTH {
+            apply_system_command(&mut state, &SystemCommand::AdvanceShipments).unwrap();
+            assert_eq!(
+                state.shipments.len(),
+                1,
+                "still in transit at sol {sol} of {SOLS_PER_MONTH}"
+            );
+        }
+        // The final sol delivers it.
         let arrival_events =
             apply_system_command(&mut state, &SystemCommand::AdvanceShipments).unwrap();
         assert_eq!(
