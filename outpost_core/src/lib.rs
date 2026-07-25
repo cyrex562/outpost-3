@@ -3183,7 +3183,7 @@ impl GameEngine {
                 // caller would have no way to notice. Say so instead (#272).
                 if recipe.concurrent && recipe.line.is_none() {
                     return Err(EngineError::InvalidArgument(format!(
-                        "recipe '{recipe_id}' is always-on and has no alternatives to                          choose between"
+                        "recipe '{recipe_id}' is always-on and has no alternatives to choose between"
                     )));
                 }
                 // Key the selection by the recipe's own line, so choosing on one

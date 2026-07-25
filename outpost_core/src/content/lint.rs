@@ -42,6 +42,17 @@ pub enum ContentWarning {
         /// The selectable recipe it overlaps with.
         pick_one_recipe_id: String,
     },
+    /// A recipe sets both `line` and `concurrent` (issue #272). `line` wins —
+    /// the recipe is a selectable alternative within that line — so the
+    /// `concurrent` flag has no effect and misdescribes the recipe.
+    ConcurrentIgnoredOnLinedRecipe {
+        /// Building the recipe belongs to.
+        building_id: String,
+        /// The recipe carrying both flags.
+        recipe_id: String,
+        /// The line it was placed on, which takes precedence.
+        line: String,
+    },
 }
 
 impl std::fmt::Display for ContentWarning {
@@ -68,6 +79,16 @@ impl std::fmt::Display for ContentWarning {
                  '{concurrent_recipe_id}' and selectable recipe \
                  '{pick_one_recipe_id}' both produce '{commodity_id}', so \
                  selecting that recipe doubles it"
+            ),
+            Self::ConcurrentIgnoredOnLinedRecipe {
+                building_id,
+                recipe_id,
+                line,
+            } => write!(
+                f,
+                "building '{building_id}': recipe '{recipe_id}' sets both \
+                 `concurrent` and `line: {line}`; the line wins, so the \
+                 recipe is selectable rather than always-on"
             ),
         }
     }
@@ -149,6 +170,18 @@ impl ContentRegistry {
             }
         }
 
+        // `line` takes precedence over `concurrent` in `lines_for_building`, so
+        // a recipe carrying both is not always-on despite saying it is.
+        for recipe in self.recipes() {
+            if let (true, Some(line)) = (recipe.concurrent, recipe.line.as_ref()) {
+                warnings.push(ContentWarning::ConcurrentIgnoredOnLinedRecipe {
+                    building_id: recipe.building.clone(),
+                    recipe_id: recipe.id.clone(),
+                    line: line.clone(),
+                });
+            }
+        }
+
         warnings
     }
 }
@@ -193,6 +226,36 @@ mod tests {
             line: None,
             power_draw: 0.0,
         }
+    }
+
+    /// The `line` field silently overrides `concurrent` (issue #272), so an
+    /// author who sets both gets a selectable recipe while believing they
+    /// authored an always-on one. Say so rather than letting it pass.
+    #[test]
+    fn a_recipe_setting_both_line_and_concurrent_is_flagged() {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(building("complex"));
+        let mut lined = recipe("confused", "complex", true, &[("metal", 1.0)]);
+        lined.line = Some("foundry".into());
+        reg.insert_recipe(lined);
+        // A plain always-on recipe on the same building must NOT be flagged.
+        reg.insert_recipe(recipe("honest", "complex", true, &[("power", 1.0)]));
+
+        let warnings = reg.lint();
+        let flagged: Vec<&ContentWarning> = warnings
+            .iter()
+            .filter(|w| matches!(w, ContentWarning::ConcurrentIgnoredOnLinedRecipe { .. }))
+            .collect();
+        assert_eq!(
+            flagged.len(),
+            1,
+            "expected exactly one finding: {flagged:?}"
+        );
+        assert!(
+            format!("{}", flagged[0]).contains("confused"),
+            "wrong recipe flagged: {}",
+            flagged[0]
+        );
     }
 
     #[test]

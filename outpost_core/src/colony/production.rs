@@ -910,10 +910,11 @@ impl BuildingIoSummary {
 /// Sum the full-output per-cycle flows of every recipe a building instance
 /// runs (issue #272).
 ///
-/// That is the resolved pick-one recipe (`active_recipes`' selection, else the
-/// deterministic default) **plus** every [`RecipeDef::concurrent`] recipe — the
-/// same set the production step runs on one shared scale factor, so the summary
-/// covers the building's whole function rather than one arbitrary recipe.
+/// That is the selected recipe of *every* production line — the same set
+/// [`run_production`] runs, one per line — so the summary covers the building's
+/// whole function rather than one arbitrary recipe. A multi-line building like
+/// `fabrication_complex` reports its foundry *and* its machine shop; picking
+/// only the lexicographically-first recipe would silently hide the rest.
 ///
 /// The quantities are **nominal**: unscaled authored rates, not what the
 /// building achieved last turn. See [`BuildingIoSummary`].
@@ -933,14 +934,12 @@ pub fn building_io_summary<S: std::hash::BuildHasher>(
     active_recipes: &std::collections::HashMap<String, String, S>,
     registry: &ContentRegistry,
 ) -> BuildingIoSummary {
-    let pick_one = recipe_for_building(building_type, active_recipes, registry);
-    let concurrent = concurrent_recipes_for_building(building_type, registry);
-
     let mut recipe_ids = Vec::new();
     let mut inputs: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
     let mut outputs: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
 
-    for recipe in pick_one.into_iter().chain(concurrent) {
+    for line in lines_for_building(building_type, active_recipes, registry) {
+        let recipe = line.selected;
         recipe_ids.push(recipe.id.clone());
         for i in &recipe.inputs {
             *inputs.entry(i.id.clone()).or_default() += i.quantity;
@@ -2877,6 +2876,112 @@ mod tests {
         if !result.recipe_id.is_empty() {
             ran.push(result.recipe_id.clone());
         }
+        ran.sort();
+        let mut summarised = summary.recipe_ids.clone();
+        summarised.sort();
+        assert_eq!(
+            ran, summarised,
+            "the summary and the production step must agree on which recipes run"
+        );
+    }
+
+    /// A multi-line building's summary must cover *every* line. Before #272
+    /// this function resolved a single "pick-one" recipe, which for the shipped
+    /// `fabrication_complex` shape silently dropped the machine shop — the
+    /// colony panel would show the foundry alone and never mention that metal
+    /// is being consumed into components every sol.
+    #[test]
+    fn io_summary_covers_every_line_not_just_the_first() {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "complex".into(),
+            name: "complex".into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+        });
+        let recipe = |id: &str, line: &str, inputs: Vec<(&str, f64)>, outputs: Vec<(&str, f64)>| {
+            let ing = |v: Vec<(&str, f64)>| {
+                v.into_iter()
+                    .map(|(id, quantity)| Ingredient {
+                        id: id.into(),
+                        quantity,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            RecipeDef {
+                id: id.into(),
+                name: id.into(),
+                building: "complex".into(),
+                cycle_sols: 1,
+                inputs: ing(inputs),
+                outputs: ing(outputs),
+                concurrent: false,
+                line: Some(line.into()),
+                power_draw: 0.0,
+            }
+        };
+        // Named so the machine shop sorts *after* the foundry — the exact shape
+        // that made the old lexicographically-first resolution hide it.
+        reg.insert_recipe(recipe(
+            "a_smelt",
+            "foundry",
+            vec![("ore", 5.0)],
+            vec![("metal", 2.5)],
+        ));
+        reg.insert_recipe(recipe(
+            "z_machine",
+            "machine_shop",
+            vec![("metal", 2.0)],
+            vec![("components", 1.0)],
+        ));
+
+        let summary = building_io_summary("complex", &std::collections::HashMap::new(), &reg);
+
+        assert!(
+            summary.recipe_ids.contains(&"z_machine".to_string()),
+            "the machine shop line was dropped from the summary: {:?}",
+            summary.recipe_ids
+        );
+        let outputs: std::collections::HashMap<&str, f64> = summary
+            .outputs
+            .iter()
+            .map(|(id, q)| (id.as_str(), *q))
+            .collect();
+        assert_eq!(outputs.get("components"), Some(&1.0));
+        assert_eq!(outputs.get("metal"), Some(&2.5));
+        // `metal` is both produced by one line and consumed by the other, and
+        // must appear on both sides rather than being netted away.
+        let inputs: std::collections::HashMap<&str, f64> = summary
+            .inputs
+            .iter()
+            .map(|(id, q)| (id.as_str(), *q))
+            .collect();
+        assert_eq!(inputs.get("metal"), Some(&2.0));
+        assert_eq!(inputs.get("ore"), Some(&5.0));
+
+        // And it must still agree with what production actually runs.
+        let mut pool = ColonyPool::new();
+        pool.deposit("ore", 100.0);
+        pool.deposit("metal", 100.0);
+        let outcome = process_production(&mut pool, &[("complex".to_string(), 1)], 100.0, &reg);
+        let result = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "complex")
+            .expect("complex should have produced");
+        let mut ran: Vec<String> = result
+            .line_results
+            .iter()
+            .map(|l| l.recipe_id.clone())
+            .collect();
         ran.sort();
         let mut summarised = summary.recipe_ids.clone();
         summarised.sort();
