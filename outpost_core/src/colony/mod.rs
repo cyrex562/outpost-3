@@ -11,12 +11,14 @@
 //! [`crate::GameEngine::apply`] through the turn processor.
 
 pub mod building;
+pub mod labour;
 pub mod pool;
 pub mod production;
 pub mod resource_pool;
 pub mod stores;
 
 pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
+pub use labour::{allocate_labour, LabourAllocation, LabourPlan};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{
     building_io_summary, line_selection_key, lines_for_building, process_production,

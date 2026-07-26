@@ -205,6 +205,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         }
     }
 

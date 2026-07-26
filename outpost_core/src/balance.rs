@@ -24,6 +24,7 @@
 //!     construction_turns: 1,
 //!     tech_prerequisite: None,
 //!     maintenance: vec![],
+//!     default_priority: 5,
 //! };
 //! let mine_recipe = RecipeDef {
 //!     id: "mine_ore".into(),
@@ -345,6 +346,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         }
     }
 

@@ -18,16 +18,65 @@ pub struct PlacedBuilding {
     pub building_type: String,
     /// Number of build slots consumed by this building.
     pub slot_cost: u32,
+    /// Staffing priority: `1` is staffed first, [`MAX_BUILDING_PRIORITY`] last
+    /// (issue #307).
+    ///
+    /// Seeded from the building's [`BuildingDef::default_priority`] at
+    /// placement, then adjustable by the player. `#[serde(default)]` — a
+    /// pre-#307 save loads every building at
+    /// [`DEFAULT_BUILDING_PRIORITY`], which is the same footing they all
+    /// implicitly had under the old colony-wide labour ratio.
+    ///
+    /// [`BuildingDef::default_priority`]: crate::content::types::BuildingDef::default_priority
+    /// [`MAX_BUILDING_PRIORITY`]: crate::content::types::MAX_BUILDING_PRIORITY
+    /// [`DEFAULT_BUILDING_PRIORITY`]: crate::content::types::DEFAULT_BUILDING_PRIORITY
+    #[serde(default = "default_placed_priority")]
+    pub priority: u8,
+    /// Player-pinned labour allocation that automatic assignment must not touch
+    /// (issue #307).
+    ///
+    /// `None` — the default — leaves the building in the automatic pool.
+    /// `Some(n)` pins exactly `n` workers to it: the allocator hands those out
+    /// before it considers anything else, and never reclaims them, however
+    /// short the colony gets.
+    #[serde(default)]
+    pub labour_lock: Option<u32>,
+}
+
+fn default_placed_priority() -> u8 {
+    crate::content::types::DEFAULT_BUILDING_PRIORITY
 }
 
 impl PlacedBuilding {
-    /// Create a new placed building instance.
+    /// Create a new placed building instance at the default staffing priority.
+    ///
+    /// Prefer [`Self::with_priority`] where the building's
+    /// [`BuildingDef`](crate::content::types::BuildingDef) is in hand, so the
+    /// authored default is honoured.
     #[must_use]
     pub fn new(building_type: impl Into<String>, slot_cost: u32) -> Self {
         Self {
             id: Uuid::new_v4(),
             building_type: building_type.into(),
             slot_cost,
+            priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            labour_lock: None,
+        }
+    }
+
+    /// Create a new placed building at an explicit staffing priority, clamped
+    /// into `1..=MAX_BUILDING_PRIORITY`.
+    ///
+    /// Clamping rather than erroring is deliberate here: this takes an authored
+    /// content value, and a pack with `default_priority: 0` should load and
+    /// behave sensibly rather than fail the whole colony. Player-driven changes
+    /// go through `Command::SetBuildingPriority`, which *does* reject
+    /// out-of-range input.
+    #[must_use]
+    pub fn with_priority(building_type: impl Into<String>, slot_cost: u32, priority: u8) -> Self {
+        Self {
+            priority: priority.clamp(1, crate::content::types::MAX_BUILDING_PRIORITY),
+            ..Self::new(building_type, slot_cost)
         }
     }
 }
