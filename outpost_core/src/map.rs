@@ -318,6 +318,12 @@ pub struct PlanetMap {
     /// Radius of the map in cells from the origin (exclusive of boundary).
     pub radius: u32,
     /// All cells in the map, indexed by axial coordinate.
+    ///
+    /// Serialized as a flat list of `(coord, cell)` pairs, not as a JSON
+    /// object: `serde_json` — the save format — cannot use the [`HexCoord`]
+    /// struct as an object key, and every save of a real game failed with
+    /// `"key must be a string"` because of it (issue #337).
+    #[serde(with = "cells_serde")]
     pub cells: HashMap<HexCoord, HexCell>,
     /// Colony nodes placed on this map.
     pub colonies: Vec<ColonyNode>,
@@ -325,6 +331,33 @@ pub struct PlanetMap {
     pub edges: Vec<InfraEdge>,
     /// Deterministic site identifiers for each cell, keyed by [`SiteId`].
     pub sites: HashMap<SiteId, HexCoord>,
+}
+
+/// (De)serialize [`PlanetMap::cells`] as a `Vec<(HexCoord, HexCell)>`.
+///
+/// The axial coordinate is a struct, so it cannot be a JSON object key. See the
+/// field's doc comment.
+mod cells_serde {
+    use super::{HashMap, HexCell, HexCoord};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        cells: &HashMap<HexCoord, HexCell>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        // Sorted so a save file is byte-stable across runs — `HashMap` iteration
+        // order is not, and an unstable save defeats diffing and hashing.
+        let mut pairs: Vec<(&HexCoord, &HexCell)> = cells.iter().collect();
+        pairs.sort_by_key(|(c, _)| (c.q, c.r));
+        pairs.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<HexCoord, HexCell>, D::Error> {
+        let pairs = Vec::<(HexCoord, HexCell)>::deserialize(deserializer)?;
+        Ok(pairs.into_iter().collect())
+    }
 }
 
 impl PlanetMap {
