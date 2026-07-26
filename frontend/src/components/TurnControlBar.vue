@@ -116,10 +116,6 @@ function togglePlay(): void {
   playing.value = !playing.value
 }
 
-async function advanceOne(): Promise<void> {
-  await gameStore.sendCommand({ kind: 'advance_sol' })
-}
-
 async function fastForward(): Promise<void> {
   await tick(FAST_FORWARD_SOLS)
 }
@@ -191,15 +187,6 @@ onUnmounted(stopTimer)
         @click="fastForward"
       >
         ▶▶ {{ FAST_FORWARD_SOLS }} Sols
-      </button>
-
-      <button
-        class="btn-advance"
-        :disabled="gameStore.busy"
-        data-testid="btn-advance-turn"
-        @click="advanceOne"
-      >
-        Advance Turn ▶
       </button>
     </div>
 
@@ -291,22 +278,6 @@ onUnmounted(stopTimer)
   font-size: 0.72rem;
   border-radius: 3px;
 }
-
-/* Pin the advance button to the bottom-right of the screen. */
-.btn-advance {
-  background: #14202e;
-  border: 1px solid #468;
-  border-radius: 3px;
-  color: #8cf;
-  padding: 0.45rem 1.1rem;
-  font-family: monospace;
-  font-size: 0.9rem;
-  font-weight: bold;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.btn-advance:hover:not(:disabled) { background: #1b2c40; }
-.btn-advance:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .digest {
   position: absolute;

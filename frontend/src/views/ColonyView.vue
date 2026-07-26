@@ -220,19 +220,6 @@ async function cancelConstruction(projectId: string): Promise<void> {
   }
 }
 
-// ─── Labour assignment ────────────────────────────────────────────────────────
-
-async function assignLabour(buildingType: string, labour: number): Promise<void> {
-  const col = selectedColony.value
-  if (!col) return
-  await gameStore.sendCommand({
-    kind: 'assign_labour',
-    colony_id: col.id,
-    slot: buildingType,
-    labour,
-  })
-}
-
 // ─── Building details (issue #182; routed page as of navigation rework #7 phase 2) ──
 
 function openBuildingDetails(buildingType: string): void {
@@ -372,7 +359,6 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                   :slot-capacity="screen?.slot_capacity ?? 0"
                   :labour-available="screen?.labour_available ?? 0"
                   :labour-total="screen?.labour_total ?? 0"
-                  @assign-labour="assignLabour"
                   @view-details="openBuildingDetails"
                 />
               </Pane>

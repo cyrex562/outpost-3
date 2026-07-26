@@ -85,8 +85,15 @@ describe('BuildingsPanel status derivation (#169, corrected in #303)', () => {
   })
 })
 
-describe('BuildingsPanel labour assignment', () => {
-  it('emits assign-labour with the drafted value and clears the draft', async () => {
+describe('BuildingsPanel labour (issue #307)', () => {
+  // The per-building labour input and Assign button are gone. They were
+  // inert: `Command::AssignLabour` persists nothing, `PlacedBuilding` has no
+  // labour field, and `BuildingRow.labour_assigned` is hardcoded 0 — so the
+  // typed value was discarded and the displayed number never moved. Labour is
+  // allocated automatically as a colony-wide ratio. A real per-building
+  // override belongs in the building details page once #307 gives labour
+  // backing state; this pins that no inert control comes back meanwhile.
+  it('offers no per-building labour control', () => {
     const wrapper = mount(BuildingsPanel, {
       props: {
         buildings: [makeRow({ building_type: 'hydroponic_bay', labour_assigned: 3 })],
@@ -96,19 +103,21 @@ describe('BuildingsPanel labour assignment', () => {
         labourTotal: 10,
       },
     })
-    const input = wrapper.find('[data-testid="labour-input-hydroponic_bay"]')
-    await input.setValue('8')
-    const assignBtn = wrapper.find('[data-testid="assign-labour-hydroponic_bay"]')
-    expect(assignBtn.attributes('disabled')).toBeUndefined()
-    await assignBtn.trigger('click')
+    expect(wrapper.find('[data-testid="labour-input-hydroponic_bay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="assign-labour-hydroponic_bay"]').exists()).toBe(false)
+  })
 
-    const emitted = wrapper.emitted('assign-labour')
-    expect(emitted).toBeTruthy()
-    expect(emitted?.[0]).toEqual(['hydroponic_bay', 8])
-
-    // Draft is cleared after assigning, so the input reflects the prop value again.
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="assign-labour-hydroponic_bay"]').attributes('disabled')).toBeDefined()
+  it('still reports the colony-wide labour figures, which are real', () => {
+    const wrapper = mount(BuildingsPanel, {
+      props: {
+        buildings: [makeRow({ building_type: 'hydroponic_bay' })],
+        slotsUsed: 2,
+        slotCapacity: 10,
+        labourAvailable: 7,
+        labourTotal: 10,
+      },
+    })
+    expect(wrapper.get('[data-testid="slots-summary"]').text()).toContain('7 of 10')
   })
 })
 

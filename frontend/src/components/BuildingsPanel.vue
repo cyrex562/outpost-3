@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Active buildings + labour assignment panel.
+ * Active buildings panel.
  *
  * Status comes from the building's **actual production last turn** (`scale`,
  * with `shortfall_reason` explaining any shortfall) — issue #303. It used to
@@ -9,9 +9,17 @@
  * labour ratio), so *every* building reported as "Idle" regardless of what it
  * was doing. Buildings whose recipes are all always-on carry `always_on` so
  * the absent recipe picker can be explained rather than looking broken.
+ *
+ * **No per-building labour control here (issue #307).** This panel used to
+ * offer a number input and an Assign button per building. They did nothing:
+ * `Command::AssignLabour` validates its argument, emits an event, and persists
+ * no state, so the input's value was discarded and the displayed figure was
+ * always the hardcoded `0`. Labour is already allocated automatically, as a
+ * colony-wide ratio. A real per-building override belongs in the building
+ * details page once #307 gives labour actual backing state; until then no
+ * control is better than one that lies.
  */
 
-import { ref } from 'vue'
 import type { BuildingRow, IngredientRow } from '@/types/screen'
 
 const props = defineProps<{
@@ -24,16 +32,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'assign-labour', buildingType: string, labour: number): void
   (e: 'view-details', buildingType: string): void
 }>()
-
-/** Temporary labour values being edited (keyed by building_type). */
-const labourDraft = ref<Record<string, number>>({})
-
-function labourForBuilding(buildingType: string, current: number): number {
-  return labourDraft.value[buildingType] ?? current
-}
 
 function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' {
   if (b.full_capacity) return 'running'
@@ -113,17 +113,11 @@ function recipeTooltip(b: BuildingRow): string {
   return `Running ${ids.length} recipes at once: ${ids.join(', ')}. ${rated}`
 }
 
-function assignLabour(buildingType: string): void {
-  const labour = labourDraft.value[buildingType]
-  if (labour === undefined) return
-  emit('assign-labour', buildingType, labour)
-  delete labourDraft.value[buildingType]
-}
 </script>
 
 <template>
   <div class="panel" data-testid="buildings-panel">
-    <h4 class="panel-title">Buildings &amp; Labour</h4>
+    <h4 class="panel-title">Buildings</h4>
 
     <ul v-if="props.buildings !== null" class="building-list" data-testid="building-list">
       <li
@@ -182,24 +176,6 @@ function assignLabour(buildingType: string): void {
             :data-testid="`building-outputs-${b.building_type}`"
           >→ {{ outputSummary(b) }}</span>
           <span class="io-rated" :data-testid="`building-io-rated-${b.building_type}`">rated</span>
-        </div>
-        <div class="labour-controls">
-          <input
-            class="labour-input"
-            type="number"
-            min="0"
-            :value="labourForBuilding(b.building_type, b.labour_assigned)"
-            :data-testid="`labour-input-${b.building_type}`"
-            @input="labourDraft[b.building_type] = +($event.target as HTMLInputElement).value"
-          />
-          <button
-            class="btn-assign"
-            :disabled="labourDraft[b.building_type] === undefined"
-            :data-testid="`assign-labour-${b.building_type}`"
-            @click="assignLabour(b.building_type)"
-          >
-            Assign
-          </button>
         </div>
       </li>
       <li v-if="props.buildings.length === 0" class="empty-row">No active buildings.</li>
@@ -274,29 +250,6 @@ function assignLabour(buildingType: string): void {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-
-.labour-controls { display: flex; align-items: center; gap: 0.3rem; }
-.labour-input {
-  width: 54px;
-  background: #0d0d15;
-  border: 1px solid #334;
-  border-radius: 3px;
-  color: #cdd;
-  padding: 0.2rem 0.35rem;
-  font-family: monospace;
-  font-size: 0.8rem;
-}
-.btn-assign {
-  background: #1a2030;
-  border: 1px solid #336;
-  border-radius: 3px;
-  color: #89b;
-  padding: 0.15rem 0.4rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-.btn-assign:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-assign:hover:not(:disabled) { background: #1e2840; }
 
 .empty-row { color: #445; font-style: italic; }
 
