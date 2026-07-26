@@ -456,7 +456,7 @@ Implements the schematic-survey model above: `Command::LaunchSurveyExpedition` t
 
 **Anomalies fire through the interrupt system, as designed.** Each `Surveying`-phase expedition is checked once per sol against every loaded `expedition::AnomalyDef` (content-pack data, `content/base/anomalies.yaml`); a trigger halts the survey countdown, builds a `MidMissionEvent` (Investigate / Ignore), and moves the expedition to `ExpeditionPhase::AwaitingDecision`. The event is surfaced via the *existing* interrupt collection (`InterruptSource::EventFired`, tier taken from the event itself) rather than a new interrupt variant — the module doc's original intent ("mid-mission interrupts that reuse the interrupt + predicate system") is honored literally, not just in spirit. `Command::ResolveMissionDecision` resolves the pending choice; investigating rolls a weighted `AnomalyOutcome` (`expedition::resolve_anomaly_outcome`) and applies its `research_bonus` into `SystemResearchPool`, `resource_reward` into the origin colony's pool, and `unlocks_tech` (if any) via the same `TurnProcessor::apply_tech_effects` path normal research completion uses — not a shortcut that skips tech-effect application.
 
-**Survey completion reveals state, it doesn't gate anything.** `resolve_survey`'s outcome (`FullReveal`/`PartialReveal`/`Failed`) sets `Body.surveyed = true` (and `Body.candidate_site_name` on a full reveal) — new, UI-facing world state, not a new mechanical gate. Deposits themselves (`Body.deposits`, #232) were already always-true world state with no fog-of-war; #235 deliberately does **not** retrofit deposit visibility gating onto that model — `surveyed` only marks that an expedition *looked*, matching #232's explicit "coverage guarantee, not a gate" precedent rather than inventing a new one here.
+**Survey completion reveals state, it doesn't gate anything.** `resolve_survey`'s outcome (`FullReveal`/`PartialReveal`/`Failed`) sets `Body.surveyed = true` (and `Body.candidate_site_name` on a full reveal) — new, UI-facing world state, not a new mechanical gate. Deposits themselves (`Body.deposits`, #232) were already always-true world state with no fog-of-war; #235 deliberately does **not** retrofit deposit visibility gating onto that model — `surveyed` only marks that an expedition *looked*, matching #232's explicit "coverage guarantee, not a gate" precedent rather than inventing a new one here. **Superseded by §9C (#344):** the game now has fog of war and deposits are hidden until found. `Body.surveyed` survives as the *system-scale* marker described here, but the "always-true world state" claim no longer holds — surface deposits are gated. See §9C.
 
 ---
 
@@ -476,7 +476,40 @@ The problem this solves: `#232` gave bodies real per-hex deposits and mining rec
 
 **Why not vehicles, and why not a deposit floor.** Two alternatives were weighed and rejected. *Free-roaming mining vehicles* — a colony builds vehicles that drive to a hex, extract, and return — give more logistics texture but constitute a **third** parallel logistics layer alongside trade convoys (§7/#332) and infrastructure edges (§8.1/#26), for gameplay the expedition model already delivers; the reach, the cost, and the risk are all expressible without per-vehicle state, dispatch scheduling, or movement rendering. *A low-richness surface-deposit floor on every hex* would make mining always work with a one-line generation change, but drains the meaning out of the deposit map entirely, which is the opposite of what the 100 km hex scale (§8.1) was chosen to achieve.
 
-**Unresolved tension with §9A's deposit-visibility stance.** The decision here is that **founding a colony reveals a certain number of deposits around it**, with deposits beyond that neighbourhood hidden until surveyed. That is a fog-of-war model, and §9A explicitly declined to build one: `#235` set `Body.surveyed` as a marker that "an expedition *looked*" and deliberately did **not** retrofit visibility gating onto `Body.deposits`, following `#232`'s "coverage guarantee, not a gate" precedent. §9B needs hidden-until-revealed deposits for the targeting UI to have any tension; §9A/#232 asserted deposits are always-true world state. **These cannot both hold.** Resolving it is a prerequisite for implementing §9B, and the resolution should be explicit — either per-hex planet-map deposits gain a revealed flag (leaving `Body.deposits`' system-scale semantics alone, which is the narrower change), or the always-visible precedent is dropped outright. Not yet decided; flagged here rather than silently contradicted.
+**Deposit visibility is fog-of-war — see §9C.** §9B needs deposits hidden until found, for the targeting decision to carry any weight at all. That contradicted `#235`/`#232`, which had asserted deposits are always-visible world state. **Resolved in favour of fog-of-war**, and the earlier precedent is deliberately retracted rather than worked around; see §9C for the model and for what it supersedes.
+
+---
+
+### 9C. Fog of war (issue #344)
+
+**Decided: the game has fog of war.** Resource deposits, and eventually other world facts, are hidden until the player finds them. This is a deliberate reversal of the earlier position, and it **supersedes** two prior decisions:
+
+- `#232` established `Body.deposits` as a "coverage guarantee, not a gate" — always-true world state with no visibility model.
+- `#235` (§9A) explicitly declined to retrofit visibility gating, keeping `Body.surveyed` as a marker that "an expedition *looked*" rather than a gate on anything.
+
+Both were reasonable when the map had nothing to *do* with deposits. Once §9B makes reaching a deposit a real decision, always-visible deposits collapse that decision into arithmetic — the player reads the map and takes the best hex. **The reversal is the point, not a concession:** hiding deposits is what gives survey and exploration a reason to exist, and turns the 100 km hex map (§8.1) from a backdrop into something worth investigating.
+
+**Revealing is progressive, and technology makes it cheaper over time.** Early game, discovery is manual and local: expeditions and surveys extend the known area outward one target at a time. Later, technology buys breadth — survey satellites, reconnaissance flights, deep-scan instruments — so a mature player is no longer squinting hex by hex. This gives the tech tree a category of unlock whose value is *information* rather than throughput or capacity, which nothing in §7A currently occupies.
+
+**The starting state: a well-known home planet, an unknown system.** The colony ship is assumed to have done survey work on approach, so at founding the player gets **detailed information about the immediate area** (deposits, terrain, anomalies in the founding neighbourhood) plus a **general map of the whole home planet** — its terrain and broad geography, but not what every distant hex contains. Every *other* body in the system starts near-blank: little to nothing about surfaces, deposits, or anomalies until the player sends probes or expeditions.
+
+This asymmetry is what makes the opening legible without making it solved. The player can orient themselves and plan locally from turn one, and the rest of the planet is a map with blanks on it rather than a black void — but the system beyond is genuinely unexplored, and §9A's survey expeditions are how that changes.
+
+**This settles the boolean-vs-graded question: fog is layered, not a single flag.** A general planet map that shows terrain while hiding deposits cannot be expressed by one `revealed: bool` per hex — at founding, a distant home-planet hex is simultaneously *known* (terrain) and *unknown* (contents). So per-hex visibility needs at least two independent layers:
+
+- **Geography** — terrain, biome, elevation. Revealed planet-wide at founding for the home body; requires survey for other bodies.
+- **Contents** — deposits, anomalies, and anything else worth travelling to. Revealed only locally at founding, and thereafter only by going and looking (or by a technology that looks remotely).
+
+Whether *contents* is itself further graded (a satellite detects "something is there" while only a ground survey establishes richness) is still open, but the two-layer split above is settled.
+
+**Two scales of fog, kept distinct.** The system scale (which bodies exist, and what they hold) and the surface scale (which hexes on a body hold what) are different questions with different instruments, and conflating them would make one mechanic answer both. `Body.surveyed` (§9A) remains the system-scale marker; per-hex deposit visibility on the `PlanetMap` is the new surface-scale one. A body-scale survey should not reveal every hex on the surface, and a surface expedition should not reveal other bodies.
+
+**Existing machinery this should reuse rather than duplicate:**
+- `#234`'s `SatelliteConstellation` already computes a body-scoped `CoverageFootprint` every turn. That is the natural implementation of "survey satellites" — a coverage layer that reveals hexes — rather than a new orbital thing. Worth checking whether the reveal falls out of coverage math directly.
+- `#235`'s survey-expedition lifecycle and `AnomalyDef` outcome tables already model "send a thing, get information back, with variance." A reconnaissance flight is a short-range sibling, not a new subsystem.
+- `#184`'s modifier plumbing already carries tech effects into world values; an information-granting `TechEffect` variant is a new *kind* of effect but not a new mechanism.
+
+**Open, and deliberately not decided here:** whether the *contents* layer is itself graded (a remote sensor detects "something is there" while only a ground survey establishes richness); whether reveals are persistent once made or can decay; and whether terrain or atmosphere impedes remote sensing. Persistent-once-seen is almost certainly right — decay creates busywork unless it's tied to something meaningful.
 
 ---
 
@@ -629,7 +662,8 @@ A **headless tool** (runs the pure core, no UI) that takes a proposed colony/net
 7. **Balance numbers** — all scalars, to be tuned against the harness.
 8. ~~**Migration mechanics detail**~~ — **RESOLVED, see §6A** (hybrid auto+directed, time/capacity/willingness friction, cascading evacuations tuned by difficulty). Remaining TBD: friction *numbers* (harness).
 9. ~~**Existential-clock specifics**~~ — **RESOLVED, see §10A** (menace-as-data, escalating/phased/telegraphed, degrading failure, optional). Remaining TBD: authoring the actual menace definitions and phase timings (content + harness).
-10. ~~**Hex scale & off-colony resource reach**~~ — **RESOLVED, see §8.1, §8.3F, §9B** (100 km hexes, wrapping rectangle sized from body radius, expedition/outpost/colony tiers, continuous-yield recallable surface expeditions). Remaining TBD, both blocking implementation: **deposit visibility** — §9B needs hidden-until-revealed deposits while §9A/#232 asserted they're always visible, and these contradict (see §9B's closing paragraph); and the **range/yield numbers** themselves (harness).
+10. ~~**Hex scale & off-colony resource reach**~~ — **RESOLVED, see §8.1, §8.3F, §9B** (100 km hexes, wrapping rectangle sized from body radius, expedition/outpost/colony tiers, continuous-yield recallable surface expeditions). Remaining TBD: the **range/yield numbers** themselves (harness). The deposit-visibility contradiction that previously blocked this is resolved — see item 11.
+11. ~~**Deposit visibility / fog of war**~~ — **RESOLVED, see §9C** (fog of war exists; deposits hidden until found; per-hex visibility layered into *geography* and *contents*; home planet starts with planet-wide geography plus local contents, the rest of the system near-blank; technology buys breadth over time; system-scale and surface-scale fog kept distinct). Supersedes #232's "coverage guarantee, not a gate" and §9A/#235's decision not to gate visibility. Remaining TBD: whether the *contents* layer is further graded, whether reveals decay, and whether terrain impedes remote sensing.
 
 ---
 
