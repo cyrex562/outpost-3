@@ -83,6 +83,26 @@ pub enum TechEffect {
         /// Additive bonus in AU.
         bonus_au: f32,
     },
+    /// Makes site-preparation projects — those granting build-slot capacity —
+    /// cheaper in materials and quicker to build (issue #306).
+    ///
+    /// Each fraction is a proportional reduction (`0.15` = 15 % less). Multiple
+    /// researched techs stack **multiplicatively on the remaining scalar**, the
+    /// same discipline [`TechEffect::ReduceTransitTime`] uses, and for the same
+    /// reason: additive stacking would reach zero cost with enough techs, while
+    /// compounding reductions approach a floor without ever crossing it.
+    ///
+    /// Applies only to slot-granting projects, not to construction generally —
+    /// this represents better site-prep method (prefab utility spines, automated
+    /// grading), not cheaper buildings.
+    ReduceInfrastructureProject {
+        /// Proportional reduction in material cost, in `[0.0, 1.0)`.
+        #[serde(default)]
+        cost_fraction: f32,
+        /// Proportional reduction in construction turns, in `[0.0, 1.0)`.
+        #[serde(default)]
+        time_fraction: f32,
+    },
 }
 
 /// Authored technology definition — stored in content pack files.
@@ -815,6 +835,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         }];
         let researched = HashSet::new();
         let result = unlocked_buildings(buildings.iter(), &researched);
@@ -838,6 +859,7 @@ mod tests {
             tech_prerequisite: Some("science_tier2".to_string()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         }];
 
         let empty: HashSet<TechId> = HashSet::new();

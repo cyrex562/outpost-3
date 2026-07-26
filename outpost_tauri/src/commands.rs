@@ -284,6 +284,20 @@ pub enum ServerEvent {
         colony_id: String,
         building_type: String,
     },
+    /// A site-preparation project widened build-slot capacity (issue #306).
+    SlotCapacityExpanded {
+        colony_id: String,
+        building_type: String,
+        added: u32,
+        slot_capacity: u32,
+    },
+    /// An outpost's site preparation widened its build-slot capacity.
+    OutpostSlotCapacityExpanded {
+        outpost_id: String,
+        building_type: String,
+        added: u32,
+        slot_capacity: u32,
+    },
     /// Construction made no progress for want of materials (issue #306).
     ConstructionStalled {
         colony_id: String,
@@ -464,6 +478,28 @@ impl ServerEvent {
             } => Self::BuildingConstructed {
                 colony_id: colony_id.to_string(),
                 building_type: building_type.clone(),
+            },
+            Event::SlotCapacityExpanded {
+                colony_id,
+                building_type,
+                added,
+                slot_capacity,
+            } => Self::SlotCapacityExpanded {
+                colony_id: colony_id.to_string(),
+                building_type: building_type.clone(),
+                added: *added,
+                slot_capacity: *slot_capacity,
+            },
+            Event::OutpostSlotCapacityExpanded {
+                outpost_id,
+                building_type,
+                added,
+                slot_capacity,
+            } => Self::OutpostSlotCapacityExpanded {
+                outpost_id: outpost_id.to_string(),
+                building_type: building_type.clone(),
+                added: *added,
+                slot_capacity: *slot_capacity,
             },
             Event::ConstructionStalled {
                 colony_id,

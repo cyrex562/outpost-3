@@ -1134,6 +1134,21 @@ pub enum Event {
         /// Content-pack key of the completed building.
         building_type: String,
     },
+    /// A site-preparation project completed and widened the colony's build-slot
+    /// capacity (issue #306).
+    ///
+    /// Fires *instead of* [`Event::BuildingConstructed`]: the project's product
+    /// is capacity, so nothing is placed.
+    SlotCapacityExpanded {
+        /// Colony that grew.
+        colony_id: ColonyId,
+        /// Content-pack key of the completed project.
+        building_type: String,
+        /// Slots the project added.
+        added: u32,
+        /// The colony's total capacity after the expansion.
+        slot_capacity: u32,
+    },
     /// A colony's active construction project made no progress this sol because
     /// the pool could not fund its materials instalment (issue #306).
     ///
@@ -1807,6 +1822,18 @@ pub enum Event {
         /// Building type completed.
         building_type: String,
     },
+    /// An outpost's site preparation widened its build-slot capacity (mirrors
+    /// [`Event::SlotCapacityExpanded`], issue #306).
+    OutpostSlotCapacityExpanded {
+        /// Outpost that grew.
+        outpost_id: outpost::OutpostId,
+        /// Content-pack key of the completed project.
+        building_type: String,
+        /// Slots the project added.
+        added: u32,
+        /// The outpost's total capacity after the expansion.
+        slot_capacity: u32,
+    },
     /// An outpost's construction stalled for want of materials (mirrors
     /// [`Event::ConstructionStalled`], issue #306).
     OutpostConstructionStalled {
@@ -2330,6 +2357,20 @@ impl GameEngine {
                             .collect()
                     })
                     .unwrap_or_default();
+                // Site-preparation projects, snapshotted for the same
+                // borrow reason (issue #306). Only slot-granting building types
+                // appear, so an absent key means "this is a normal building".
+                let slot_grants: std::collections::HashMap<String, u32> = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .map(|reg| {
+                        reg.buildings()
+                            .filter(|def| def.grants_slot_capacity > 0)
+                            .map(|def| (def.id.clone(), def.grants_slot_capacity))
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
                 for colony in &mut self.state.colonies {
                     // Labour for the sol the project is about to work, withdrawn
@@ -2362,6 +2403,18 @@ impl GameEngine {
                         colony::ConstructionTick::Completed(completed) => {
                             colony.pool.withdraw("labor", labor);
                             let building_type = completed.building_type.clone();
+                            // Site preparation completes into capacity, not into
+                            // a standing building (issue #306).
+                            if let Some(added) = slot_grants.get(&building_type).copied() {
+                                colony.slot_capacity = colony.slot_capacity.saturating_add(added);
+                                events.push(Event::SlotCapacityExpanded {
+                                    colony_id: colony.id,
+                                    building_type,
+                                    added,
+                                    slot_capacity: colony.slot_capacity,
+                                });
+                                continue;
+                            }
                             // Seed the staffing priority from the building's
                             // authored default (issue #307), so a greenhouse comes
                             // out of construction already ahead of an ore mine.
@@ -2406,6 +2459,16 @@ impl GameEngine {
                         }
                         colony::ConstructionTick::Completed(completed) => {
                             let building_type = completed.building_type.clone();
+                            if let Some(added) = slot_grants.get(&building_type).copied() {
+                                out.slot_capacity = out.slot_capacity.saturating_add(added);
+                                events.push(Event::OutpostSlotCapacityExpanded {
+                                    outpost_id: out.id,
+                                    building_type,
+                                    added,
+                                    slot_capacity: out.slot_capacity,
+                                });
+                                continue;
+                            }
                             let priority = authored_priorities
                                 .get(&building_type)
                                 .copied()
@@ -3214,20 +3277,23 @@ impl GameEngine {
                         }
                     }
                 }
+                let slot_cost = self.effective_slot_cost(building_type, *slot_cost);
+                let (cost, turns) =
+                    self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_colony_index(*colony_id)?;
                 let available = self.state.colonies[idx].slots_available();
-                if *slot_cost > available {
+                if slot_cost > available {
                     return Err(EngineError::SlotCapacityExceeded {
-                        needed: *slot_cost,
+                        needed: slot_cost,
                         available,
                     });
                 }
                 let project = colony::ConstructionProject::new(
                     building_type.clone(),
-                    *slot_cost,
+                    slot_cost,
                     *labor_per_turn,
-                    self.scaled_construction_cost(construction_cost),
-                    *construction_turns,
+                    cost,
+                    turns,
                 );
                 let project_id = project.id;
                 self.state.colonies[idx].build_queue.enqueue(project);
@@ -4198,20 +4264,23 @@ impl GameEngine {
                         }
                     }
                 }
+                let slot_cost = self.effective_slot_cost(building_type, *slot_cost);
+                let (cost, turns) =
+                    self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_outpost_index(*outpost_id)?;
                 let available = self.state.outposts[idx].slots_available();
-                if *slot_cost > available {
+                if slot_cost > available {
                     return Err(EngineError::SlotCapacityExceeded {
-                        needed: *slot_cost,
+                        needed: slot_cost,
                         available,
                     });
                 }
                 let project = colony::ConstructionProject::new(
                     building_type.clone(),
-                    *slot_cost,
+                    slot_cost,
                     *labor_per_turn,
-                    self.scaled_construction_cost(construction_cost),
-                    *construction_turns,
+                    cost,
+                    turns,
                 );
                 let project_id = project.id;
                 self.state.outposts[idx].build_queue.enqueue(project);
@@ -6090,23 +6159,79 @@ impl GameEngine {
             .max(trade::DEFAULT_TRANSIT_SOLS)
     }
 
-    /// Apply the active difficulty's construction-cost scalar to an authored
-    /// cost list (issue #306).
+    /// Whether `building_type` is a site-preparation project — one whose
+    /// registry entry grants build-slot capacity (issue #306).
     ///
-    /// Applied once, at queue time, rather than per sol: the project then stores
-    /// the real cost, so the per-sol instalment, the queue readout, and the
-    /// cancellation refund all agree — and changing difficulty mid-game cannot
-    /// retroactively reprice work already underway.
-    fn scaled_construction_cost(&self, authored: &[(String, f64)]) -> Vec<(String, f64)> {
-        let scalar = f64::from(
+    /// `false` for a building the registry doesn't know, matching the
+    /// unregistered-`building_type` tolerance the tech gate already applies.
+    fn is_site_preparation(&self, building_type: &str) -> bool {
+        self.state
+            .registry
+            .as_ref()
+            .and_then(|reg| reg.building(building_type))
+            .is_some_and(|def| def.grants_slot_capacity > 0)
+    }
+
+    /// Price and schedule a queued project, folding in difficulty and — for
+    /// site preparation only — the researched infrastructure techs (issue #306).
+    ///
+    /// Returns `(construction_cost, construction_turns)`. Resolved once, at
+    /// queue time, so a project's terms are fixed when the player commits to it
+    /// rather than drifting as techs land mid-build.
+    fn project_terms(
+        &self,
+        building_type: &str,
+        authored_cost: &[(String, f64)],
+        authored_turns: u32,
+    ) -> (Vec<(String, f64)>, u32) {
+        let mut cost_scalar = f64::from(
             self.state
                 .difficulty_scalar
                 .scalar_for(&modifier::ModifiableQuantity::ConstructionCost),
         );
-        authored
+        let mut turns = authored_turns;
+        if self.is_site_preparation(building_type) {
+            cost_scalar *= f64::from(self.state.infrastructure_cost_scalar);
+            // Rounded rather than truncated, and floored at one sol: a project
+            // that took zero turns would complete on the sol it was queued.
+            //
+            // The scalar is clamped into `[MIN_INFRASTRUCTURE_SCALAR, 1.0]`, so
+            // the product never exceeds `turns` and the cast cannot overflow.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let scaled = (f64::from(turns) * f64::from(self.state.infrastructure_time_scalar))
+                .round() as u32;
+            turns = scaled.max(1);
+        }
+        let cost = authored_cost
             .iter()
-            .map(|(id, qty)| (id.clone(), qty * scalar))
-            .collect()
+            .map(|(id, qty)| (id.clone(), qty * cost_scalar))
+            .collect();
+        (cost, turns)
+    }
+
+    /// The build slots a queued project actually reserves (issue #306).
+    ///
+    /// Always `0` for a site-preparation project — one whose registry entry sets
+    /// [`BuildingDef::grants_slot_capacity`] — however the caller priced it.
+    /// Forced rather than validated because the failure mode is a deadlock, not
+    /// a bad number: a slot-granting project that reserved a slot could not be
+    /// queued by the full colony that needs it, so the only route out of "no
+    /// slots left" would itself require a spare slot. Anything else passes the
+    /// caller's value through untouched.
+    ///
+    /// [`BuildingDef::grants_slot_capacity`]: content::types::BuildingDef::grants_slot_capacity
+    fn effective_slot_cost(&self, building_type: &str, requested: u32) -> u32 {
+        let grants = self
+            .state
+            .registry
+            .as_ref()
+            .and_then(|reg| reg.building(building_type))
+            .is_some_and(|def| def.grants_slot_capacity > 0);
+        if grants {
+            0
+        } else {
+            requested
+        }
     }
 
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].
@@ -6935,6 +7060,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -6979,6 +7105,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7119,6 +7246,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -7175,6 +7303,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7356,6 +7485,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: 2,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -7697,6 +7827,272 @@ mod tests {
         }
     }
 
+    // ── Site preparation (issue #306) ──
+
+    /// A registry holding one normal building and one two-slot site-prep
+    /// project.
+    fn registry_with_site_prep() -> content::ContentRegistry {
+        let mut reg = content::ContentRegistry::default();
+        let base = |id: &str| content::types::BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: content::BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 2,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+        };
+        reg.insert_building(base("smelter"));
+        reg.insert_building(content::types::BuildingDef {
+            category: content::BuildingCategory::Infrastructure,
+            grants_slot_capacity: 2,
+            slot_cost: 0,
+            ..base("site_preparation")
+        });
+        reg
+    }
+
+    #[test]
+    fn a_completed_site_prep_project_widens_capacity_instead_of_placing_a_building() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Growing".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 40.0);
+        let base_capacity = engine.state.colonies[idx].slot_capacity;
+
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "site_preparation".into(),
+                slot_cost: 0,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 40.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let expanded = evs
+            .iter()
+            .find_map(|e| match e {
+                Event::SlotCapacityExpanded {
+                    added,
+                    slot_capacity,
+                    ..
+                } => Some((*added, *slot_capacity)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected SlotCapacityExpanded, got {evs:?}"));
+        assert_eq!(expanded.0, 2);
+        assert_eq!(expanded.1, base_capacity + 2);
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::BuildingConstructed { .. })),
+            "site preparation must not place a building"
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(engine.state.colonies[idx].slot_capacity, base_capacity + 2);
+        assert!(engine.state.colonies[idx].buildings.is_empty());
+        assert!(engine.state.colonies[idx].pool.amount("steel") < 1e-6);
+    }
+
+    /// The deadlock guard: a colony with every slot spoken for can still queue
+    /// the project that would free it up, whatever `slot_cost` the caller sends.
+    #[test]
+    fn site_prep_can_be_queued_by_a_colony_with_no_free_slots() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Packed".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let capacity = engine.state.colonies[idx].slot_capacity;
+        for _ in 0..capacity {
+            engine.state.colonies[idx]
+                .buildings
+                .push(colony::PlacedBuilding::new("smelter", 1));
+        }
+        assert_eq!(engine.state.colonies[idx].slots_available(), 0);
+
+        // A normal building is correctly refused.
+        assert!(matches!(
+            engine.apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            }),
+            Err(EngineError::SlotCapacityExceeded { .. })
+        ));
+
+        // Site preparation is not — even when the caller wrongly prices it at 1.
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "site_preparation".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .expect("site preparation must be queueable with no slots free");
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].build_queue.projects[0].slot_cost, 0,
+            "the caller's slot_cost must be overridden to 0"
+        );
+    }
+
+    /// Researched infrastructure techs cut a site-prep project's cost and turns,
+    /// and leave ordinary construction alone.
+    #[test]
+    fn infrastructure_techs_discount_site_prep_but_not_normal_buildings() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        // Two techs' worth of reduction, stacked multiplicatively: 0.5 x 0.5.
+        engine.state.infrastructure_cost_scalar = 0.5;
+        engine.state.infrastructure_time_scalar = 0.5;
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Practised".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+
+        for building_type in ["site_preparation", "smelter"] {
+            engine
+                .apply(&Command::QueueConstruction {
+                    colony_id,
+                    building_type: building_type.into(),
+                    slot_cost: 0,
+                    labor_per_turn: 0,
+                    construction_cost: vec![("steel".to_string(), 100.0)],
+                    construction_turns: 8,
+                })
+                .unwrap();
+        }
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let queue = &engine.state.colonies[idx].build_queue.projects;
+        let prep = queue
+            .iter()
+            .find(|p| p.building_type == "site_preparation")
+            .unwrap();
+        let smelter = queue.iter().find(|p| p.building_type == "smelter").unwrap();
+
+        assert!(
+            (prep.construction_cost[0].1 - 50.0).abs() < 1e-6,
+            "site prep should be half price, got {}",
+            prep.construction_cost[0].1
+        );
+        assert_eq!(prep.total_turns, 4, "site prep should take half the sols");
+        assert!(
+            (smelter.construction_cost[0].1 - 100.0).abs() < 1e-6,
+            "an ordinary building must be untouched, got {}",
+            smelter.construction_cost[0].1
+        );
+        assert_eq!(smelter.total_turns, 8);
+    }
+
+    /// The turn floor: however deep the discount, a project still takes a sol.
+    #[test]
+    fn site_prep_never_completes_in_zero_sols() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        engine.state.infrastructure_time_scalar = turn::MIN_INFRASTRUCTURE_SCALAR;
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Instant".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id: *colony_id,
+                building_type: "site_preparation".into(),
+                slot_cost: 0,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].build_queue.projects[0].total_turns, 1,
+            "1 sol x 0.25 rounds to 0, which must be floored to 1"
+        );
+    }
+
+    /// The tech effect itself: fractions compound on the remaining scalar and
+    /// stop at the floor rather than reaching zero.
+    #[test]
+    fn infrastructure_tech_effects_stack_multiplicatively_to_a_floor() {
+        let mut state = turn::GameState::new();
+        assert!((state.infrastructure_cost_scalar - 1.0).abs() < 1e-6);
+
+        let effects = vec![tech::TechEffect::ReduceInfrastructureProject {
+            cost_fraction: 0.5,
+            time_fraction: 0.5,
+        }];
+        turn::TurnProcessor::apply_tech_effects(&mut state, &effects);
+        assert!((state.infrastructure_cost_scalar - 0.5).abs() < 1e-6);
+
+        // Compounding, not additive: a second 50 % lands on the remaining half.
+        turn::TurnProcessor::apply_tech_effects(&mut state, &effects);
+        assert!(
+            (state.infrastructure_cost_scalar - 0.25).abs() < 1e-6,
+            "expected 0.25, got {}",
+            state.infrastructure_cost_scalar
+        );
+
+        // And it stops there rather than continuing toward free.
+        for _ in 0..5 {
+            turn::TurnProcessor::apply_tech_effects(&mut state, &effects);
+        }
+        assert!(
+            (state.infrastructure_cost_scalar - turn::MIN_INFRASTRUCTURE_SCALAR).abs() < 1e-6,
+            "expected the floor, got {}",
+            state.infrastructure_cost_scalar
+        );
+        assert!(state.infrastructure_time_scalar >= turn::MIN_INFRASTRUCTURE_SCALAR);
+    }
+
     // ── AssignLabour ──
 
     #[test]
@@ -7782,6 +8178,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -8225,6 +8622,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -8242,6 +8640,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_building(BuildingDef {
@@ -8258,6 +8657,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -10060,6 +10460,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -10314,6 +10715,7 @@ mod tests {
             tech_prerequisite: Some("advanced_outpost_tech".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -10367,6 +10769,7 @@ mod tests {
             tech_prerequisite: Some("advanced_outpost_tech".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -10678,6 +11081,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -11356,6 +11760,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -11435,6 +11840,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -11505,6 +11911,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -12995,6 +13402,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -13086,6 +13494,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -13820,6 +14229,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_building(BuildingDef {
@@ -13836,6 +14246,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {

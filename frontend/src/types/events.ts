@@ -46,6 +46,24 @@ export interface BuildingConstructedEvent {
   building_type: string
 }
 
+/** A site-preparation project widened the colony's build-slot capacity (#306). */
+export interface SlotCapacityExpandedEvent {
+  kind: 'slot_capacity_expanded'
+  colony_id: string
+  building_type: string
+  added: number
+  slot_capacity: number
+}
+
+/** An outpost's site preparation widened its build-slot capacity. */
+export interface OutpostSlotCapacityExpandedEvent {
+  kind: 'outpost_slot_capacity_expanded'
+  outpost_id: string
+  building_type: string
+  added: number
+  slot_capacity: number
+}
+
 /** Construction made no progress for want of materials (issue #306). */
 export interface ConstructionStalledEvent {
   kind: 'construction_stalled'
@@ -278,6 +296,8 @@ export type ServerEvent =
   | ConstructionQueuedEvent
   | ConstructionCancelledEvent
   | BuildingConstructedEvent
+  | SlotCapacityExpandedEvent
+  | OutpostSlotCapacityExpandedEvent
   | ConstructionStalledEvent
   | OutpostConstructionStalledEvent
   | LabourAssignedEvent

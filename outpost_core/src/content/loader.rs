@@ -576,4 +576,94 @@ mod tests {
             );
         }
     }
+
+    // ── Site preparation (issue #306) ────────────────────────────────────────
+
+    /// The authored slot-granting projects exist, are free of slot cost, and
+    /// actually charge materials.
+    ///
+    /// A slot-granting project that consumed a slot would deadlock a full
+    /// colony, and one that cost nothing would make capacity free — the whole
+    /// point of #306 is that expansion is bought.
+    #[test]
+    fn authored_site_preparation_projects_are_slot_free_and_cost_materials() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+
+        let granting: Vec<_> = buildings
+            .iter()
+            .filter(|b| b.grants_slot_capacity > 0)
+            .collect();
+        assert!(
+            granting.len() >= 3,
+            "expected the authored site-prep tiers, got {}",
+            granting.len()
+        );
+
+        for b in &granting {
+            assert_eq!(
+                b.slot_cost, 0,
+                "{} grants slots, so it must not consume one — see #306's deadlock note",
+                b.id
+            );
+            assert!(
+                !b.construction_cost.is_empty(),
+                "{} must be paid for in materials, not granted free",
+                b.id
+            );
+            assert_eq!(
+                b.worker_slots, 0,
+                "{} is site preparation, not a staffed building",
+                b.id
+            );
+        }
+
+        // The reverse direction: nothing that is a real building accidentally
+        // grants capacity.
+        for b in buildings.iter().filter(|b| b.grants_slot_capacity == 0) {
+            assert_ne!(
+                b.category,
+                crate::content::types::BuildingCategory::Infrastructure,
+                "{} is categorised as infrastructure but grants no capacity",
+                b.id
+            );
+        }
+    }
+
+    /// Larger tiers must buy capacity more cheaply per slot, or there is no
+    /// reason to ever research past the first.
+    #[test]
+    fn later_site_preparation_tiers_are_cheaper_per_slot() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+
+        let metal_per_slot = |id: &str| {
+            let b = buildings
+                .iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id} must exist in the roster"));
+            let metal: f64 = b
+                .construction_cost
+                .iter()
+                .filter(|i| i.id == "structural_metal")
+                .map(|i| i.quantity)
+                .sum();
+            metal / f64::from(b.grants_slot_capacity)
+        };
+
+        assert!(
+            metal_per_slot("colony_infrastructure") < metal_per_slot("site_preparation"),
+            "the mid tier must undercut the starter tier per slot"
+        );
+        assert!(
+            metal_per_slot("arcology_foundation") < metal_per_slot("colony_infrastructure"),
+            "the top tier must undercut the mid tier per slot"
+        );
+    }
 }
