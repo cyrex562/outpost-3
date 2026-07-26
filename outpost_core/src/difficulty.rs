@@ -728,7 +728,7 @@ mod tests {
         reg.insert_building(bdef);
         reg.insert_recipe(recipe);
 
-        let placed = vec![("smelter".to_string(), 1u32)];
+        let placed = crate::colony::ProductionInput::from_types(&[("smelter".to_string(), 1u32)]);
         let mut pool_normal = ColonyPool::new();
         pool_normal.deposit("ore", 100.0);
         let mut pool_hard = pool_normal.clone();

@@ -2401,10 +2401,12 @@ impl GameEngine {
                         .zip(self.state.populations.iter())
                     {
                         let labor: f32 = pop.available_labor();
-                        let placed: Vec<(String, u32)> = colony
+                        // Per-instance priorities and locks ride along so
+                        // production can allocate labour itself (#307).
+                        let placed: Vec<colony::ProductionInput> = colony
                             .buildings
                             .iter()
-                            .map(|b| (b.building_type.clone(), b.slot_cost))
+                            .map(colony::ProductionInput::from_placed)
                             .collect();
                         colony.pool.reset_deltas();
                         let deposits = colony_deposits.get(&colony.id).and_then(Option::as_ref);
@@ -2438,11 +2440,9 @@ impl GameEngine {
                                 });
                             }
                         }
-                        colony.last_production = prod_outcome
-                            .building_results
-                            .into_iter()
-                            .map(|r| (r.building_type.clone(), r))
-                            .collect();
+                        colony.last_labour = Some(prod_outcome.labour);
+                        colony.last_production =
+                            colony::summarize_by_type(prod_outcome.building_results);
                     }
 
                     // ── Step 3b: Outpost production (issue #233) ────────────
@@ -2465,10 +2465,10 @@ impl GameEngine {
                         .map(|o| (o.id, self.body_deposit_richness(&o.body_id)))
                         .collect();
                     for out in &mut self.state.outposts {
-                        let placed: Vec<(String, u32)> = out
+                        let placed: Vec<colony::ProductionInput> = out
                             .buildings
                             .iter()
-                            .map(|b| (b.building_type.clone(), b.slot_cost))
+                            .map(colony::ProductionInput::from_placed)
                             .collect();
                         out.pool.reset_deltas();
                         let empty_deposits = std::collections::HashMap::new();
@@ -2502,11 +2502,8 @@ impl GameEngine {
                                 });
                             }
                         }
-                        out.last_production = prod_outcome
-                            .building_results
-                            .into_iter()
-                            .map(|r| (r.building_type.clone(), r))
-                            .collect();
+                        out.last_production =
+                            colony::summarize_by_type(prod_outcome.building_results);
                     }
                 }
 
@@ -5093,18 +5090,42 @@ impl GameEngine {
                     .collect();
                 let manual_override = self.state.directive_store.is_manual_override(*colony_id);
 
-                // Employed vs unemployed labour (issue #305). "Jobs offered" is
-                // the very same `labor_demanded` sum `colony::production`
-                // divides the workforce against, so this readout can't disagree
-                // with what actually gates production.
+                // Employed vs unemployed labour (issue #305), read from the
+                // plan production actually produced (issue #307) so the readout
+                // cannot disagree with what gated production.
+                //
+                // Recomputing from the registry would: per-building demand is
+                // gated on whether each building could run at all, so a colony
+                // with an idle, input-starved factory offers fewer jobs than its
+                // `worker_slots` suggest. The old ungated sum would have
+                // over-reported both jobs offered and workers employed.
+                //
+                // Before the colony's first sol there is no plan yet, so fall
+                // back to the ungated registry sum — every building is assumed
+                // able to run, which is the right guess with no evidence.
                 let labour_available_now = p.available_labor();
-                let labour_demanded: f32 = self.state.registry.as_ref().map_or(0.0, |registry| {
-                    colony::production::labor_demanded(
-                        c.buildings.iter().map(|b| b.building_type.as_str()),
-                        registry,
-                    )
-                });
-                let labour_employed = labour_demanded.min(labour_available_now);
+                let (labour_demanded, labour_employed) = if let Some(plan) = &c.last_labour {
+                    let sum = |f: fn(&colony::LabourAllocation) -> u32| -> f32 {
+                        let total = plan
+                            .allocations
+                            .iter()
+                            .map(|a| f64::from(f(a)))
+                            .sum::<f64>();
+                        #[allow(clippy::cast_possible_truncation)]
+                        {
+                            total as f32
+                        }
+                    };
+                    (sum(|a| a.demand), sum(|a| a.assigned))
+                } else {
+                    let demanded: f32 = self.state.registry.as_ref().map_or(0.0, |registry| {
+                        colony::production::labor_demanded(
+                            c.buildings.iter().map(|b| b.building_type.as_str()),
+                            registry,
+                        )
+                    });
+                    (demanded, demanded.min(labour_available_now))
+                };
 
                 // Colony-local resources this sol (issue #304). Sorted by id so
                 // the panel doesn't reorder between polls — HashMap iteration
@@ -7844,6 +7865,110 @@ mod tests {
         assert!(result.scale > 0.0);
     }
 
+    /// Per-building labour steering works through the real `AdvanceColonySol`
+    /// pipeline, not just when `process_production_scaled` is called directly
+    /// (issue #307).
+    ///
+    /// The balance-harness bundles cannot cover this: the flow calculator sums
+    /// `worker_slots` as a *footprint* figure and never fills them, so it has no
+    /// labour-scaling model to exercise. This test is that coverage.
+    #[test]
+    fn building_priority_steers_labour_through_advance_sol() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+
+        // A second lab, so two instances of one type compete for staff.
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("research_lab", 1));
+
+        // Each lab wants 3 workers; starve the colony to 3 so exactly one can run.
+        let pop_idx = idx;
+        engine.state.populations[pop_idx].count = 3.0;
+        engine.state.populations[pop_idx].stability = 1.0;
+        assert!(
+            (engine.state.populations[pop_idx].available_labor() - 3.0).abs() < 1e-6,
+            "the shortage this test depends on must actually exist"
+        );
+
+        // Rank the two labs against each other — the point of per-instance priority.
+        let labs: Vec<uuid::Uuid> = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .filter(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .collect();
+        assert_eq!(labs.len(), 2);
+        for b in &mut engine.state.colonies[idx].buildings {
+            if b.id == labs[0] {
+                b.priority = 1;
+            } else if b.id == labs[1] {
+                b.priority = 9;
+            }
+        }
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        // The type-keyed summary keeps the worst instance, so it should report the
+        // starved lab rather than hiding it behind its fully-staffed sibling.
+        let summary = &engine.state.colonies[idx].last_production["research_lab"];
+        assert!(
+            summary.scale.abs() < 1e-6,
+            "expected the summary to surface the unstaffed lab, got scale {}",
+            summary.scale
+        );
+        assert!(
+            summary
+                .shortfalls
+                .iter()
+                .any(|s| s.reason == colony::ShortfallReason::LaborShort),
+            "expected a LaborShort shortfall, got {:?}",
+            summary.shortfalls
+        );
+    }
+
+    /// The employed/unemployed readout (#305) must not over-report once demand is
+    /// gated (#307).
+    ///
+    /// A lab with no water can't run, so it offers no jobs. The old readout summed
+    /// `worker_slots` straight from the registry and would have called those three
+    /// workers employed — describing staff at a building that produced nothing.
+    #[test]
+    fn labour_readout_excludes_jobs_at_a_building_that_cannot_run() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+
+        // Drain the water the lab's recipe needs, so it cannot run at all.
+        let water = engine.state.colonies[idx].pool.amount("water");
+        engine.state.colonies[idx].pool.withdraw("water", water);
+        assert!(engine.state.colonies[idx].pool.amount("water") < 1e-6);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let QueryResult::ColonyScreen(screen) = engine
+            .query(&Query::ColonyScreen { colony_id })
+            .expect("colony screen")
+        else {
+            panic!("expected a ColonyScreen result")
+        };
+
+        assert!(
+            screen.labour_employed.abs() < 1e-6,
+            "no one is employed at a lab that cannot run, got {}",
+            screen.labour_employed
+        );
+
+        // And the readout agrees with the plan production actually used.
+        let plan = engine.state.colonies[idx]
+            .last_labour
+            .as_ref()
+            .expect("a plan is recorded after the first sol");
+        let assigned: u32 = plan.allocations.iter().map(|a| a.assigned).sum();
+        assert_eq!(assigned, 0, "the plan and the readout must not disagree");
+    }
+
     #[test]
     fn research_drains_from_colony_into_system_pool_correctly() {
         let mut engine = GameEngine::with_seed(1);
@@ -10465,6 +10590,7 @@ mod tests {
         engine.state.colonies[idx].last_production.insert(
             "hq".to_string(),
             colony::BuildingProductionResult {
+                building_id: uuid::Uuid::nil(),
                 building_type: "hq".to_string(),
                 recipe_id: String::new(),
                 concurrent_recipe_ids: vec!["hq_power".into(), "hq_water".into()],

@@ -30,8 +30,13 @@
 //! input constraint, rather than one function silently continuing at full
 //! output while another starves.
 
+use uuid::Uuid;
+
 use crate::content::types::Ingredient;
 use crate::content::{BuildingCategory, ContentRegistry, RecipeDef};
+
+use super::building::PlacedBuilding;
+use super::labour::{LabourCandidate, LabourPlan};
 
 use super::stores::ColonyStores;
 
@@ -109,6 +114,14 @@ pub enum ShortfallReason {
 /// Outcome of one building's production attempt this turn.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuildingProductionResult {
+    /// The placed instance this result belongs to (issue #307).
+    ///
+    /// Per-building labour means two buildings of the same type can now run at
+    /// different scales, so a type key no longer identifies a result.
+    /// `#[serde(default)]` — a pre-#307 save loads with a nil id, which is
+    /// harmless: this is per-sol derived data, regenerated on the next advance.
+    #[serde(default)]
+    pub building_id: Uuid,
     /// Content-pack key of the building type.
     pub building_type: String,
     /// The pick-one recipe that ran (or was attempted), if the building has
@@ -175,13 +188,22 @@ pub struct ProductionStepOutcome {
     /// Labor available vs labor demanded this turn (fractional).
     pub labor_available: f32,
     /// Total labor demanded by all operational production buildings.
+    ///
+    /// Since #307 this is the sum of the **gated** per-building demands, so a
+    /// building that couldn't run at all this sol (no inputs, no power) doesn't
+    /// inflate it. It therefore reports jobs the colony could actually fill,
+    /// which is what "understaffed" should be measured against.
     pub labor_demanded: f32,
+    /// How the workforce was actually distributed across buildings (issue #307).
+    pub labour: LabourPlan,
 }
 
 // ─── Internal helpers for two-pass production resolution ─────────────────────
 
 /// Holds a building's pre-computed scale before any pool mutations occur.
 struct PendingProduction<'a> {
+    /// Placed instance this belongs to — the key labour is allocated against.
+    building_id: Uuid,
     building_type: &'a str,
     /// One entry per production line, each with its **own** scale (issue #272).
     lines: Vec<PendingLine<'a>>,
@@ -190,10 +212,19 @@ struct PendingProduction<'a> {
     /// Effective per-sol maintenance multiplier
     /// (`MaintenanceConsumption` scalar; `0.0` when disabled).
     maintenance_multiplier: f64,
-    /// Scale upkeep is charged at. The busiest line's scale when the building
-    /// runs anything (a building doing nothing pays nothing, as before); for a
-    /// maintenance-only building, its own affordability ratio.
+    /// A maintenance-only building's own affordability ratio, which needs no
+    /// labour input. `None` for a building with lines, whose upkeep scale is the
+    /// busiest line's and so isn't known until labour has been folded in.
+    maintenance_only_scale: Option<f64>,
+    /// Scale upkeep is charged at, resolved in Pass L.
     maintenance_scale: f64,
+    /// Whether this building consumes labour at all (issue #307). A pure
+    /// maintenance-only building doesn't, and is never reported labour-short.
+    applies_labour: bool,
+    /// Workers wanted this sol, already gated on being able to run.
+    labour_demand: u32,
+    priority: u8,
+    labour_lock: Option<u32>,
 }
 
 /// One line's resolved recipe and its own scale for this turn (issue #272).
@@ -248,6 +279,68 @@ fn tech_bonus_category_key(category: crate::system::YieldCategory) -> &'static s
     }
 }
 
+// ─── Production input ─────────────────────────────────────────────────────────
+
+/// One placed building as the production pipeline sees it.
+///
+/// Production used to take bare `(building_type, slot_cost)` pairs. Per-building
+/// labour (#307) needs **instance identity** — two mines of the same type can be
+/// staffed differently now, so a type key can no longer stand in for a building.
+/// Priority and lock ride along because production is where labour is allocated:
+/// demand has to be gated on whether each building can actually run, which isn't
+/// known until input, power, and deposit availability have been resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductionInput {
+    /// Stable identifier of the placed instance.
+    pub id: Uuid,
+    /// Content-pack key identifying the building type.
+    pub building_type: String,
+    /// Build slots consumed (carried through for power-grid and slot accounting).
+    pub slot_cost: u32,
+    /// Staffing priority: `1` is staffed first.
+    pub priority: u8,
+    /// Player-pinned labour allocation, if any.
+    pub labour_lock: Option<u32>,
+}
+
+impl ProductionInput {
+    /// Build an input from a placed building, carrying its priority and lock.
+    #[must_use]
+    pub fn from_placed(building: &PlacedBuilding) -> Self {
+        Self {
+            id: building.id,
+            building_type: building.building_type.clone(),
+            slot_cost: building.slot_cost,
+            priority: building.priority,
+            labour_lock: building.labour_lock,
+        }
+    }
+
+    /// Build inputs from bare `(building_type, slot_cost)` pairs, at the default
+    /// priority with no locks.
+    ///
+    /// For callers with no per-instance staffing state to express — outposts run
+    /// a fixed skeleton crew (see [`crate::outpost::OUTPOST_BASE_LABOR`]), and
+    /// most tests only care about a commodity chain. Identifiers are synthesised
+    /// **from the slice index** rather than randomly, so the allocator's
+    /// `(priority, building_type, id)` tiebreak stays reproducible — a random id
+    /// here would make equal-priority allocation vary between runs.
+    #[must_use]
+    pub fn from_types(buildings: &[(String, u32)]) -> Vec<Self> {
+        buildings
+            .iter()
+            .enumerate()
+            .map(|(index, (building_type, slot_cost))| Self {
+                id: Uuid::from_u128(index as u128),
+                building_type: building_type.clone(),
+                slot_cost: *slot_cost,
+                priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+                labour_lock: None,
+            })
+            .collect()
+    }
+}
+
 // ─── Production resolution ────────────────────────────────────────────────────
 
 /// Run the production step for a single colony.
@@ -269,7 +362,7 @@ fn tech_bonus_category_key(category: crate::system::YieldCategory) -> &'static s
 /// * `registry`        — content registry for looking up `BuildingDef` and `RecipeDef`
 pub fn process_production(
     stores: &mut ColonyStores<'_>,
-    buildings: &[(String, u32)],
+    buildings: &[ProductionInput],
     labor_available: f32,
     registry: &ContentRegistry,
 ) -> ProductionStepOutcome {
@@ -342,7 +435,7 @@ pub fn process_production(
 )]
 pub fn process_production_scaled(
     stores: &mut ColonyStores<'_>,
-    buildings: &[(String, u32)],
+    buildings: &[ProductionInput],
     labor_available: f32,
     registry: &ContentRegistry,
     power_scalar: f32,
@@ -359,24 +452,25 @@ pub fn process_production_scaled(
     let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
     let brownout_ratio = power_grid.supply_ratio();
 
-    // ── Step 2: compute labor ratio ──────────────────────────────────────────
-    let labor_demanded: f32 = labor_demanded(buildings.iter().map(|(bt, _)| bt.as_str()), registry);
-
-    let labor_ratio = if labor_demanded <= 0.0 {
-        1.0_f64
-    } else {
-        (f64::from(labor_available) / f64::from(labor_demanded)).min(1.0)
-    };
-
-    // ── Step 3: two-pass resolution ───────────────────────────────────────────
+    // ── Step 2: three-pass resolution ─────────────────────────────────────────
     //
-    // Pass A: compute scales based on the *start-of-turn* pool state so that
-    //         mines and other producers don't inflate inputs for downstream
-    //         buildings in the same turn.
+    // Pass A: compute every line's scale from input, power, and deposit
+    //         availability, against the *start-of-turn* pool state so that mines
+    //         and other producers don't inflate inputs for downstream buildings
+    //         in the same turn.
+    // Pass L: allocate labour across the buildings, then fold each building's
+    //         staffing ratio into its lines' scales.
     // Pass B: apply all scaled changes to the stores.
     //
-    // This avoids order-dependency and matches the C# "snapshot then apply"
-    // behaviour described in the behavioural spec.
+    // Labour sits **between** the other constraints and the application step,
+    // rather than being computed up front with them, because demand depends on
+    // what Pass A found (#307): a building with no ore left to dig or no power to
+    // run on offers no jobs this sol, and its workers should be free to go
+    // somewhere they can accomplish something. Pass A therefore can't already
+    // know its labour ratio, and Pass L can't run before it.
+    //
+    // The A/B split avoids order-dependency and matches the C# "snapshot then
+    // apply" behaviour described in the behavioural spec.
 
     let mut pending: Vec<PendingProduction<'_>> = Vec::new();
     let maintenance_multiplier = if maintenance_enabled {
@@ -385,7 +479,8 @@ pub fn process_production_scaled(
         0.0
     };
 
-    for (building_type, _slot_cost) in buildings {
+    for input in buildings {
+        let building_type = &input.building_type;
         let Some(bdef) = registry.building(building_type) else {
             continue; // unknown building type — skip
         };
@@ -407,10 +502,13 @@ pub fn process_production_scaled(
             &[][..]
         };
 
-        // Power/labor ratios only apply to recipe-running buildings. A pure
-        // maintenance-only building doesn't consume labour or drive brownouts.
-        // Both are computed colony-wide, so they apply to every line equally.
-        let (power_ratio, applies_labor) = if has_any_recipe {
+        // Power applies only to recipe-running buildings: a pure
+        // maintenance-only building doesn't drive brownouts. Power is computed
+        // colony-wide, so it applies to every line equally.
+        //
+        // `applies_labour` marks buildings that consume labour at all — the same
+        // recipe-running set. A maintenance-only building is never labour-short.
+        let (power_ratio, applies_labour) = if has_any_recipe {
             let pr = if bdef.category == BuildingCategory::Power {
                 1.0
             } else {
@@ -420,7 +518,6 @@ pub fn process_production_scaled(
         } else {
             (1.0, false)
         };
-        let effective_labor_ratio = if applies_labor { labor_ratio } else { 1.0 };
 
         let mut pending_lines: Vec<PendingLine<'_>> = Vec::new();
 
@@ -448,11 +545,9 @@ pub fn process_production_scaled(
             let (deposit_ratio, deposit_tight) =
                 compute_deposit_ratio(Some(line.selected), &[], deposit_richness);
 
-            let scale = input_ratio
-                .min(power_ratio)
-                .min(effective_labor_ratio)
-                .min(deposit_ratio)
-                .max(0.0);
+            // Labour is deliberately absent here — it is folded in by Pass L
+            // once demand has been gated on this very scale (#307).
+            let scale = input_ratio.min(power_ratio).min(deposit_ratio).max(0.0);
 
             // Record shortfalls. Maintenance-only tight constraints report as
             // `MaintenanceShort`; shared input+maintenance constraints stay as
@@ -484,13 +579,6 @@ pub fn process_production_scaled(
                     effective_scale: deposit_ratio,
                 });
             }
-            if effective_labor_ratio < 1.0 - 1e-9 {
-                shortfalls.push(ProductionShortfall {
-                    reason: ShortfallReason::LaborShort,
-                    effective_scale: effective_labor_ratio,
-                });
-            }
-
             pending_lines.push(PendingLine {
                 line: line.line.clone(),
                 always_on: line.always_on,
@@ -500,16 +588,12 @@ pub fn process_production_scaled(
             });
         }
 
-        // Upkeep is charged once for the building, at the busiest line's scale —
-        // a building that produced nothing pays nothing, matching pre-#272
-        // behaviour where a zero scale skipped maintenance entirely. A
-        // maintenance-only building has no lines, so it falls back to its own
-        // affordability ratio.
-        let maintenance_scale = if has_any_recipe {
-            pending_lines
-                .iter()
-                .map(|l| l.scale)
-                .fold(0.0_f64, f64::max)
+        // A maintenance-only building has no lines, so its upkeep scale is just
+        // its own affordability ratio and doesn't depend on labour. For everything
+        // else the scale is the busiest line's, which isn't known until Pass L has
+        // folded labour in — so it's computed there.
+        let maintenance_only_scale = if has_any_recipe {
+            None
         } else {
             let (ratio, _, _) = compute_effective_input_ratio(
                 stores,
@@ -518,17 +602,87 @@ pub fn process_production_scaled(
                 maintenance_slice,
                 maintenance_multiplier,
             );
-            ratio.max(0.0)
+            Some(ratio.max(0.0))
+        };
+
+        // What this building would want if it can run at all. A building whose
+        // lines are all stalled — no inputs, no power, no deposit — offers no
+        // jobs, so its workers are freed for buildings that can use them (#307).
+        let can_run = pending_lines.iter().any(|l| l.scale > 1e-9);
+        let labour_demand = if applies_labour && can_run {
+            bdef.worker_slots
+        } else {
+            0
         };
 
         pending.push(PendingProduction {
+            building_id: input.id,
             building_type,
             lines: pending_lines,
             building_category: bdef.category.clone(),
             maintenance: maintenance_slice,
             maintenance_multiplier,
-            maintenance_scale,
+            maintenance_only_scale,
+            maintenance_scale: 0.0,
+            applies_labour,
+            labour_demand,
+            priority: input.priority,
+            labour_lock: input.labour_lock,
         });
+    }
+
+    // ── Pass L: allocate labour, then fold it into the scales ─────────────────
+    //
+    // This is what replaces the old colony-wide ratio (#307). Before, every
+    // building was throttled by `available / demanded` alike, so a shortage hurt
+    // the greenhouse exactly as much as the ore mine. Now the workforce is handed
+    // out in priority order and a building either gets its staff or doesn't.
+    let labour_candidates: Vec<LabourCandidate> = pending
+        .iter()
+        .map(|p| LabourCandidate {
+            id: p.building_id,
+            building_type: p.building_type.to_owned(),
+            priority: p.priority,
+            labour_lock: p.labour_lock,
+            demand: p.labour_demand,
+        })
+        .collect();
+    let labour_plan = super::labour::allocate_from(&labour_candidates, workforce(labor_available));
+
+    // Summed as f64 then narrowed: worker counts are small enough that f32 is
+    // exact in practice, but the sum goes through f64 so the total can't drift.
+    let labor_demanded = labour_candidates
+        .iter()
+        .map(|c| f64::from(c.demand))
+        .sum::<f64>();
+    #[allow(clippy::cast_possible_truncation)]
+    let labor_demanded = labor_demanded as f32;
+
+    for p in &mut pending {
+        let labour_ratio = if p.applies_labour {
+            labour_plan
+                .for_building(p.building_id)
+                .map_or(1.0, super::labour::LabourAllocation::ratio)
+        } else {
+            1.0
+        };
+
+        if labour_ratio < 1.0 - 1e-9 {
+            for line in &mut p.lines {
+                line.shortfalls.push(ProductionShortfall {
+                    reason: ShortfallReason::LaborShort,
+                    effective_scale: labour_ratio,
+                });
+                line.scale = line.scale.min(labour_ratio).max(0.0);
+            }
+        }
+
+        // Upkeep is charged once for the building, at the busiest line's scale —
+        // a building that produced nothing pays nothing, matching pre-#272
+        // behaviour where a zero scale skipped maintenance entirely.
+        p.maintenance_scale = p
+            .maintenance_only_scale
+            .unwrap_or_else(|| p.lines.iter().map(|l| l.scale).fold(0.0_f64, f64::max));
     }
 
     // Pass B: apply all changes now that every scale has been determined.
@@ -620,6 +774,7 @@ pub fn process_production_scaled(
             })
             .collect();
         building_results.push(BuildingProductionResult {
+            building_id: p.building_id,
             building_type: p.building_type.to_owned(),
             recipe_id,
             concurrent_recipe_ids,
@@ -634,16 +789,70 @@ pub fn process_production_scaled(
         power_grid,
         labor_available,
         labor_demanded,
+        labour: labour_plan,
     }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Convert the `f32` labour figure the pipeline carries into a whole-worker count.
+///
+/// Truncates rather than rounds, so a fractional worker is never handed out as a
+/// whole one, and saturates at [`u32::MAX`] so an absurd population can't wrap
+/// around to zero workers.
+fn workforce(labor_available: f32) -> u32 {
+    let whole = labor_available.max(0.0).trunc();
+    if whole.is_nan() {
+        return 0;
+    }
+    // `f32` can represent values far beyond u32::MAX; clamp before converting.
+    if whole >= 4_294_967_296.0 {
+        u32::MAX
+    } else {
+        // Truncated, non-negative, and below u32::MAX — the conversion is exact.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        {
+            whole as u32
+        }
+    }
+}
+
+/// Collapse per-instance production results into one entry per building type,
+/// keeping the **worst-scaling** instance of each.
+///
+/// `Colony::last_production` and `Outpost::last_production` are keyed by building
+/// type, but since #307 two instances of a type can run at different scales, so
+/// the mapping is genuinely lossy. Keeping the worst makes the summary answer "is
+/// anything wrong with my mines?" correctly — the same convention
+/// [`BuildingProductionResult::scale`] already uses to summarise independent
+/// lines. Picking arbitrarily (whichever instance happened to be last) would let
+/// a starved building hide behind a healthy sibling.
+///
+/// The per-instance detail is still available on
+/// [`ProductionStepOutcome::building_results`]; re-keying the stored map by
+/// [`BuildingProductionResult::building_id`] waits on the per-instance building UI.
+#[must_use]
+pub fn summarize_by_type(
+    results: Vec<BuildingProductionResult>,
+) -> std::collections::HashMap<String, BuildingProductionResult> {
+    let mut by_type: std::collections::HashMap<String, BuildingProductionResult> =
+        std::collections::HashMap::new();
+    for result in results {
+        match by_type.get(&result.building_type) {
+            Some(existing) if existing.scale <= result.scale => {}
+            _ => {
+                by_type.insert(result.building_type.clone(), result);
+            }
+        }
+    }
+    by_type
+}
+
 /// Compute the colony power grid, scaling consumer power draws by
 /// `power_scalar` (issue #161). Generators are unaffected. Pass `1.0` for
 /// the neutral (no-difficulty) case.
 fn compute_power_grid_scaled(
-    buildings: &[(String, u32)],
+    buildings: &[ProductionInput],
     registry: &ContentRegistry,
     power_scalar: f32,
     active_recipes: &std::collections::HashMap<String, String>,
@@ -652,7 +861,8 @@ fn compute_power_grid_scaled(
     let mut demand = 0.0f64;
     let mul = f64::from(power_scalar.max(0.0));
 
-    for (building_type, _) in buildings {
+    for input in buildings {
+        let building_type = &input.building_type;
         let Some(bdef) = registry.building(building_type) else {
             continue;
         };
@@ -1111,7 +1321,9 @@ where
 mod tests {
     use super::*;
     use crate::colony::{ColonyPool, ColonyResourcePool};
-    use crate::content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
+    use crate::content::types::{
+        BuildingCategory, BuildingDef, Ingredient, RecipeDef, DEFAULT_BUILDING_PRIORITY,
+    };
     use crate::content::ContentRegistry;
 
     // ── Bare-pool test shims (issue #304) ────────────────────────────────────
@@ -1136,7 +1348,7 @@ mod tests {
         let mut resources = ColonyResourcePool::new();
         super::process_production(
             &mut ColonyStores::new(pool, &mut resources, registry),
-            buildings,
+            &ProductionInput::from_types(buildings),
             labor_available,
             registry,
         )
@@ -1161,7 +1373,7 @@ mod tests {
         let mut resources = ColonyResourcePool::new();
         super::process_production_scaled(
             &mut ColonyStores::new(pool, &mut resources, registry),
-            buildings,
+            &ProductionInput::from_types(buildings),
             labor_available,
             registry,
             power_scalar,
@@ -1393,27 +1605,90 @@ mod tests {
 
     // ── Labor-short: partial production ──────────────────────────────────────
 
+    /// A labour shortage is **concentrated, not spread** (issue #307).
+    ///
+    /// This test previously asserted the opposite: a colony-wide
+    /// `available / demanded` ratio ran *every* building at 40%. Per-building
+    /// allocation replaces that — the workforce is handed out in priority order
+    /// and a building either gets its staff or doesn't. Two half-fed buildings
+    /// producing nothing useful was the exact failure mode #307 set out to fix.
     #[test]
-    fn labor_short_scales_down_output() {
+    fn labor_short_starves_one_building_rather_than_throttling_both() {
         let reg = make_registry_with_power();
         let mut pool = ColonyPool::new();
         pool.deposit("iron_ore", 100.0);
 
-        // mine needs 2 workers + smelter needs 3 workers = 5 total.
-        // Give only 2 → labor_ratio = 2/5 = 0.4
+        // mine wants 2 workers, smelter wants 3 → 5 demanded, only 2 available.
+        // Both sit at the default priority, so the deterministic tiebreak decides:
+        // "mine" sorts before "smelter", and 2 workers is exactly its demand.
         let placed = buildings(&["solar_array", "mine", "smelter"]);
         let outcome = process_production(&mut pool, &placed, 2.0_f32, &reg);
 
-        let expected_ratio = 2.0_f64 / 5.0;
+        let result = |building_type: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == building_type)
+                .expect("building present in results")
+        };
+
+        let mine = result("mine");
+        assert!(
+            (mine.scale - 1.0).abs() < 1e-6,
+            "the fully-staffed mine runs at full rate, got {}",
+            mine.scale
+        );
+        assert!(
+            !mine
+                .shortfalls
+                .iter()
+                .any(|s| s.reason == ShortfallReason::LaborShort),
+            "a fully-staffed building is not labour-short"
+        );
+
+        let smelter = result("smelter");
+        assert!(
+            smelter.scale.abs() < 1e-6,
+            "the unstaffed smelter runs at zero, got {}",
+            smelter.scale
+        );
+        assert!(
+            smelter
+                .shortfalls
+                .iter()
+                .any(|s| s.reason == ShortfallReason::LaborShort),
+            "expected LaborShort for the unstaffed smelter"
+        );
+
+        // The old colony-wide ratio would have put both at 0.4.
+        assert!(
+            (mine.scale - smelter.scale).abs() > 0.5,
+            "the shortage must land unevenly"
+        );
+
+        // And the plan agrees with the scales it produced.
+        assert_eq!(outcome.labor_demanded, 5.0);
+        assert_eq!(outcome.labour.idle, 0);
+        assert_eq!(outcome.labour.unfilled, 3, "the smelter's three empty jobs");
+    }
+
+    #[test]
+    fn labor_short_reports_the_shortfall_on_every_starved_building() {
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 100.0);
+
+        // Zero workers: nothing can be staffed, so both report labour-short.
+        let placed = buildings(&["solar_array", "mine", "smelter"]);
+        let outcome = process_production(&mut pool, &placed, 0.0_f32, &reg);
 
         for res in &outcome.building_results {
             if res.building_type == "mine" || res.building_type == "smelter" {
                 assert!(
-                    (res.scale - expected_ratio).abs() < 1e-6,
-                    "building {} scale was {} (expected {})",
+                    res.scale.abs() < 1e-6,
+                    "building {} should be idle, got {}",
                     res.building_type,
-                    res.scale,
-                    expected_ratio
+                    res.scale
                 );
                 assert!(
                     res.shortfalls
@@ -1424,6 +1699,213 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Per-building labour steering (issue #307) ────────────────────────────
+
+    /// Build a production input at an explicit priority. Ids are index-derived so
+    /// the allocator's tiebreak stays reproducible across runs.
+    fn input_at(index: u128, building_type: &str, priority: u8) -> ProductionInput {
+        ProductionInput {
+            id: Uuid::from_u128(index),
+            building_type: building_type.to_owned(),
+            slot_cost: 1,
+            priority,
+            labour_lock: None,
+        }
+    }
+
+    fn run_inputs(
+        pool: &mut ColonyPool,
+        inputs: &[ProductionInput],
+        labor: f32,
+        reg: &ContentRegistry,
+    ) -> ProductionStepOutcome {
+        let mut resources = ColonyResourcePool::new();
+        super::process_production_scaled(
+            &mut ColonyStores::new(pool, &mut resources, reg),
+            inputs,
+            labor,
+            reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
+        )
+    }
+
+    /// Priority, not name order or build order, decides who gets staffed.
+    #[test]
+    fn a_better_priority_is_staffed_first_through_the_full_pipeline() {
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 100.0);
+
+        // The smelter has the better priority despite sorting later by name — so
+        // if priority were ignored, the alphabetical tiebreak would staff the mine
+        // and this test would fail.
+        let inputs = vec![
+            input_at(0, "solar_array", DEFAULT_BUILDING_PRIORITY),
+            input_at(1, "mine", 9),
+            input_at(2, "smelter", 1),
+        ];
+        // 3 workers: exactly the smelter's demand, leaving the mine nothing.
+        let outcome = run_inputs(&mut pool, &inputs, 3.0, &reg);
+
+        let scale = |bt: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == bt)
+                .map(|r| r.scale)
+                .expect("building present")
+        };
+        assert!(
+            (scale("smelter") - 1.0).abs() < 1e-6,
+            "priority 1 runs full"
+        );
+        assert!(
+            scale("mine").abs() < 1e-6,
+            "priority 9 gets what's left: none"
+        );
+    }
+
+    /// A building that cannot run for a *non-labour* reason releases its workers.
+    ///
+    /// This is why labour is allocated after input/power/deposit resolution rather
+    /// than alongside it: holding staff at a mine with nothing to dig would strand
+    /// them where they can accomplish nothing.
+    #[test]
+    fn a_building_that_cannot_run_releases_its_labour_to_a_worse_priority() {
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        // No ore at all, so the smelter is input-starved to a standstill.
+        assert_eq!(pool.amount("iron_ore"), 0.0);
+
+        let inputs = vec![
+            input_at(0, "solar_array", DEFAULT_BUILDING_PRIORITY),
+            // The smelter has the *better* priority and would otherwise take all
+            // three workers, leaving the mine idle and the colony with nothing.
+            input_at(1, "smelter", 1),
+            input_at(2, "mine", 9),
+        ];
+        let outcome = run_inputs(&mut pool, &inputs, 3.0, &reg);
+
+        let smelter = outcome.labour.for_building(inputs[1].id).expect("smelter");
+        assert_eq!(
+            smelter.demand, 0,
+            "a building with no inputs offers no jobs this sol"
+        );
+        assert_eq!(smelter.assigned, 0);
+
+        let mine = outcome.labour.for_building(inputs[2].id).expect("mine");
+        assert_eq!(
+            mine.assigned, 2,
+            "the freed workers staffed the mine despite its worse priority"
+        );
+        assert_eq!(outcome.labour.idle, 1, "3 workers, only 2 slots to fill");
+
+        // And the mine really did produce, rather than merely being allocated to.
+        assert!(pool.amount("iron_ore") > 0.0, "the mine ran");
+    }
+
+    /// A lock survives the full pipeline, not just the allocator.
+    #[test]
+    fn a_labour_lock_holds_staff_against_a_better_priority() {
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 100.0);
+
+        let mut locked_mine = input_at(1, "mine", 9);
+        locked_mine.labour_lock = Some(2);
+        let inputs = vec![
+            input_at(0, "solar_array", DEFAULT_BUILDING_PRIORITY),
+            locked_mine,
+            input_at(2, "smelter", 1),
+        ];
+        // 3 workers: the lock claims 2 first, so the priority-1 smelter — which
+        // wants 3 — is left with a single worker.
+        let outcome = run_inputs(&mut pool, &inputs, 3.0, &reg);
+
+        let mine = outcome.labour.for_building(inputs[1].id).expect("mine");
+        assert_eq!(mine.assigned, 2, "the lock is honoured first");
+        assert!(mine.locked);
+
+        let smelter = outcome.labour.for_building(inputs[2].id).expect("smelter");
+        assert_eq!(smelter.assigned, 1, "and gets only the remainder");
+        let smelter_scale = outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "smelter")
+            .map(|r| r.scale)
+            .expect("smelter result");
+        assert!(
+            (smelter_scale - 1.0 / 3.0).abs() < 1e-6,
+            "one of three workers means a third of the output, got {smelter_scale}"
+        );
+    }
+
+    /// Two instances of one type can now run at different scales — the thing the
+    /// old colony-wide ratio made impossible.
+    #[test]
+    fn two_instances_of_a_type_are_staffed_independently() {
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+
+        let inputs = vec![
+            input_at(0, "solar_array", DEFAULT_BUILDING_PRIORITY),
+            input_at(1, "mine", 1),
+            input_at(2, "mine", 9),
+        ];
+        // 2 workers: exactly one mine's worth.
+        let outcome = run_inputs(&mut pool, &inputs, 2.0, &reg);
+
+        let first = outcome.labour.for_building(inputs[1].id).expect("mine 1");
+        let second = outcome.labour.for_building(inputs[2].id).expect("mine 2");
+        assert_eq!(
+            first.assigned, 2,
+            "the better-priority mine is fully staffed"
+        );
+        assert_eq!(second.assigned, 0, "its sibling gets nothing");
+
+        // The type-keyed summary keeps the *worst* of the two, so a starved
+        // instance can't hide behind a healthy sibling.
+        let summary = summarize_by_type(outcome.building_results);
+        assert!(
+            summary["mine"].scale.abs() < 1e-6,
+            "the summary reports the starved instance, got {}",
+            summary["mine"].scale
+        );
+    }
+
+    #[test]
+    fn summarize_by_type_keeps_the_worst_instance_of_each_type() {
+        let result = |building_type: &str, scale: f64| BuildingProductionResult {
+            building_id: Uuid::new_v4(),
+            building_type: building_type.to_owned(),
+            recipe_id: String::new(),
+            concurrent_recipe_ids: vec![],
+            scale,
+            shortfalls: vec![],
+            line_results: vec![],
+        };
+        // Deliberately not in ascending order, so "keep the worst" can't be
+        // satisfied by accident by whichever entry happened to land last.
+        let summary = summarize_by_type(vec![
+            result("mine", 0.5),
+            result("mine", 0.1),
+            result("mine", 0.9),
+            result("farm", 1.0),
+        ]);
+
+        assert_eq!(summary.len(), 2);
+        assert!((summary["mine"].scale - 0.1).abs() < 1e-9);
+        assert!((summary["farm"].scale - 1.0).abs() < 1e-9);
     }
 
     // ── Deterministic for fixed seed ─────────────────────────────────────────
@@ -3437,7 +3919,7 @@ mod tests {
         let mut resources = ColonyResourcePool::new();
         super::process_production_scaled(
             &mut ColonyStores::new(&mut pool, &mut resources, &reg),
-            &[("complex".to_string(), 1)],
+            &ProductionInput::from_types(&[("complex".to_string(), 1)]),
             1000.0,
             &reg,
             1.0,

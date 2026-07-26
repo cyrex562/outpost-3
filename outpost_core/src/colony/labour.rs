@@ -30,7 +30,7 @@ use super::building::PlacedBuilding;
 use crate::content::ContentRegistry;
 
 /// What one building got out of the allocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LabourAllocation {
     /// The placed instance this applies to.
     pub building_id: Uuid,
@@ -70,7 +70,11 @@ impl LabourAllocation {
 }
 
 /// The result of allocating a colony's workforce.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serialisable because the colony stores the latest plan (`Colony::last_labour`)
+/// so between-sol queries report what production actually did, rather than
+/// recomputing an estimate that could disagree with it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LabourPlan {
     /// One entry per building, in the order they were considered.
     pub allocations: Vec<LabourAllocation>,
@@ -93,6 +97,31 @@ impl LabourPlan {
     pub fn understaffed(&self) -> impl Iterator<Item = &LabourAllocation> {
         self.allocations.iter().filter(|a| a.understaffed())
     }
+}
+
+/// One building offered to the allocator, with its labour demand already
+/// resolved by the caller.
+///
+/// Exists so the production pipeline can gate demand on things the allocator
+/// has no way to know about. A mine with empty ore veins, or one browned out to
+/// a standstill, offers **no jobs this sol** — the workers it would otherwise
+/// hold should go somewhere they can accomplish something. Production computes
+/// that feasibility (see
+/// [`process_production_scaled`](super::production::process_production_scaled))
+/// and passes the gated demand in here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabourCandidate {
+    /// The placed instance this describes.
+    pub id: Uuid,
+    /// Content-pack key, used for reporting and as a deterministic tiebreak.
+    pub building_type: String,
+    /// Staffing priority: `1` is staffed first.
+    pub priority: u8,
+    /// Player-pinned allocation, if any.
+    pub labour_lock: Option<u32>,
+    /// Workers this building wants **this sol**, already gated on whatever the
+    /// caller knows about its ability to run.
+    pub demand: u32,
 }
 
 /// Workers a building wants: its `worker_slots`, or `0` when it has no recipe.
@@ -137,8 +166,30 @@ pub fn allocate_labour(
     available: u32,
     registry: &ContentRegistry,
 ) -> LabourPlan {
+    let candidates: Vec<LabourCandidate> = buildings
+        .iter()
+        .map(|b| LabourCandidate {
+            id: b.id,
+            building_type: b.building_type.clone(),
+            priority: b.priority,
+            labour_lock: b.labour_lock,
+            demand: demand_for(b, registry),
+        })
+        .collect();
+    allocate_from(&candidates, available)
+}
+
+/// Distribute `available` workers across candidates whose demand the caller has
+/// already resolved.
+///
+/// The allocation rules are identical to [`allocate_labour`] — which is a thin
+/// wrapper over this — and documented there. Use this directly when demand
+/// depends on something the registry alone can't answer, such as whether a
+/// building has any input left to work on.
+#[must_use]
+pub fn allocate_from(candidates: &[LabourCandidate], available: u32) -> LabourPlan {
     // Stable consideration order, independent of the order buildings were built.
-    let mut order: Vec<&PlacedBuilding> = buildings.iter().collect();
+    let mut order: Vec<&LabourCandidate> = candidates.iter().collect();
     order.sort_by(|a, b| {
         a.priority
             .cmp(&b.priority)
@@ -152,13 +203,12 @@ pub fn allocate_labour(
     // Pass 1: locked buildings, in priority order.
     for b in &order {
         let Some(lock) = b.labour_lock else { continue };
-        let demand = demand_for(b, registry);
-        let assigned = lock.min(demand).min(remaining);
+        let assigned = lock.min(b.demand).min(remaining);
         remaining -= assigned;
         allocations.push(LabourAllocation {
             building_id: b.id,
             building_type: b.building_type.clone(),
-            demand,
+            demand: b.demand,
             assigned,
             locked: true,
             priority: b.priority,
@@ -170,13 +220,12 @@ pub fn allocate_labour(
         if b.labour_lock.is_some() {
             continue;
         }
-        let demand = demand_for(b, registry);
-        let assigned = demand.min(remaining);
+        let assigned = b.demand.min(remaining);
         remaining -= assigned;
         allocations.push(LabourAllocation {
             building_id: b.id,
             building_type: b.building_type.clone(),
-            demand,
+            demand: b.demand,
             assigned,
             locked: false,
             priority: b.priority,

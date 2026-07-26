@@ -18,12 +18,13 @@ pub mod resource_pool;
 pub mod stores;
 
 pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
-pub use labour::{allocate_labour, LabourAllocation, LabourPlan};
+pub use labour::{allocate_from, allocate_labour, LabourAllocation, LabourCandidate, LabourPlan};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{
     building_io_summary, line_selection_key, lines_for_building, process_production,
-    process_production_scaled, BuildingIoSummary, BuildingProductionResult, LineProductionResult,
-    PowerGrid, ProductionShortfall, ProductionStepOutcome, RecipeLine, ShortfallReason,
+    process_production_scaled, summarize_by_type, BuildingIoSummary, BuildingProductionResult,
+    LineProductionResult, PowerGrid, ProductionInput, ProductionShortfall, ProductionStepOutcome,
+    RecipeLine, ShortfallReason,
 };
 pub use resource_pool::ColonyResourcePool;
 pub use stores::ColonyStores;
@@ -98,8 +99,24 @@ pub struct Colony {
     ///
     /// Overwritten every sol by the turn processor's production step;
     /// buildings with no matching recipe (pure storage/habitat) are absent.
+    ///
+    /// Since per-building labour (#307), instances of one type can run at
+    /// different scales, so this type-keyed map holds the **worst** instance of
+    /// each — see [`summarize_by_type`]. Read
+    /// [`ProductionStepOutcome::building_results`] for per-instance detail.
     #[serde(default)]
     pub last_production: std::collections::HashMap<String, BuildingProductionResult>,
+    /// How the workforce was distributed on the most recent sol (issue #307).
+    ///
+    /// Stored rather than recomputed so between-sol readouts (employed vs
+    /// unemployed labour, #305) report what production *actually did*. Demand is
+    /// gated on whether each building could run at all, which a registry-only
+    /// estimate cannot know — so recomputing would over-report jobs offered
+    /// whenever a building sat idle for want of inputs or power.
+    ///
+    /// `None` until the colony's first sol has been processed.
+    #[serde(default)]
+    pub last_labour: Option<labour::LabourPlan>,
     /// Player-selected active recipe per `building_type`, for buildings with
     /// more than one authored recipe (issue #166).
     ///
@@ -144,6 +161,7 @@ impl Colony {
             habitability_modifier: default_habitability_modifier(),
             category_modifiers: Vec::new(),
             last_production: std::collections::HashMap::new(),
+            last_labour: None,
             active_recipes: std::collections::HashMap::new(),
             starter_kit_deployed: false,
         }
