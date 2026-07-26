@@ -271,8 +271,12 @@ pub enum ConstructionTick {
         project_id: ProjectId,
         /// Content-pack key of the building it would produce.
         building_type: String,
-        /// Per-commodity amount still needed to fund this sol, measured against
-        /// stock the build queue is actually allowed to spend.
+        /// Per-commodity amount the colony is **genuinely** short.
+        ///
+        /// Measured against raw stock, so a commodity the player merely reserved
+        /// never appears here — that is [`Self::StalledByReserve`]'s job, and
+        /// mixing the two would tell the player to produce something they already
+        /// have.
         missing: Vec<(String, f64)>,
     },
     /// The instalment was affordable from raw stock but not from *unreserved*
@@ -373,10 +377,27 @@ impl ConstructionQueue {
                     withheld: missing,
                 };
             }
+            // A genuine shortage names only what is genuinely absent — measured
+            // against **raw** stock, not the reserve-adjusted figure.
+            //
+            // Mixed case: an instalment needs glass the colony hasn't got and
+            // steel it has but reserved. Listing the steel as "missing" here
+            // would tell the player to go produce steel they are standing on.
+            // Once the glass arrives the sol stalls again and reports
+            // `StalledByReserve`, which is the accurate advice at that point —
+            // each event says one true thing rather than one true and one
+            // misleading.
+            let genuinely_absent: Vec<(String, f64)> = instalment
+                .iter()
+                .filter_map(|(id, qty)| {
+                    let short = qty - pool.amount(id);
+                    (short > AFFORDABILITY_EPSILON).then(|| (id.clone(), short))
+                })
+                .collect();
             return ConstructionTick::Stalled {
                 project_id: active.id,
                 building_type: active.building_type.clone(),
-                missing,
+                missing: genuinely_absent,
             };
         }
         for (id, qty) in &instalment {
@@ -550,6 +571,35 @@ mod tests {
             q.tick_active_charging(&mut pool, &no_reserves()),
             ConstructionTick::Idle
         ));
+    }
+
+    /// Mixed case (issue #355): one commodity genuinely absent, another merely
+    /// reserved. The stall must name only the absent one.
+    #[test]
+    fn a_mixed_shortage_names_only_what_is_genuinely_absent() {
+        let mut pool = super::super::ColonyPool::new();
+        pool.deposit("steel", 100.0); // held, but reserved below
+                                      // No glass at all.
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("steel".to_string(), 100.0);
+
+        let mut q = ConstructionQueue::new();
+        q.enqueue(sample_project(4)); // needs 25 steel + 12.5 glass per sol
+
+        match q.tick_active_charging(&mut pool, &reserves) {
+            ConstructionTick::Stalled { missing, .. } => {
+                assert!(
+                    missing.iter().any(|(id, _)| id == "glass"),
+                    "glass is genuinely absent and must be reported, got {missing:?}"
+                );
+                assert!(
+                    !missing.iter().any(|(id, _)| id == "steel"),
+                    "steel is in stock behind the player's own floor — reporting it                      as missing would send them producing what they already have;                      got {missing:?}"
+                );
+            }
+            other => panic!("a genuine shortage outranks the reserve, got {other:?}"),
+        }
+        assert!((pool.amount("steel") - 100.0).abs() < 1e-9, "nothing spent");
     }
 
     /// A project that stalls at 0 % must refund nothing, so cancelling it
