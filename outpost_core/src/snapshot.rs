@@ -445,6 +445,7 @@ impl Snapshot {
 mod tests {
     use super::*;
     use crate::colony::Colony;
+    use crate::modifier::ModifiableQuantity;
     use crate::turn::GameState;
     use crate::{Command, GameEngine};
 
@@ -1005,6 +1006,80 @@ mod tests {
             assert_eq!(restored.colonies.len(), 1);
             assert_eq!(restored.colonies[0].name, "Disk Colony");
         }
+    }
+
+    /// A real game always has a generated planet map, and `PlanetMap.cells` is
+    /// keyed by `HexCoord` — a struct, which JSON cannot use as an object key.
+    /// Every other test builds a `GameState` with `planet_map: None`, which is
+    /// why saving looked healthy while no real game could be saved at all.
+    #[test]
+    fn a_state_with_a_planet_map_can_be_saved() {
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Mapped"), 300);
+        state.planet_map = Some(crate::map::PlanetMap::generate(42, 4));
+
+        snap.save(&state)
+            .expect("a state with a planet map must save");
+
+        let restored = snap.load().unwrap();
+        let map = restored.planet_map.expect("the map must survive the trip");
+        assert!(!map.cells.is_empty(), "cells were dropped");
+        let original = state.planet_map.as_ref().unwrap();
+        assert_eq!(map.cells.len(), original.cells.len());
+        for (coord, cell) in &original.cells {
+            assert_eq!(
+                map.cells.get(coord).map(|c| &c.terrain),
+                Some(&cell.terrain),
+                "cell at {coord:?} did not round-trip"
+            );
+        }
+    }
+
+    /// The broader lesson of #337: every save test built its `GameState` by
+    /// hand, so no test ever serialized the state a *playing* game actually
+    /// holds. Drive the real command path instead, so the next field with an
+    /// unserializable key fails here rather than in someone's playtest.
+    #[test]
+    fn a_state_built_through_the_command_path_can_be_saved() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .expect("seed planet");
+        // Picking a difficulty is part of every real setup, and it seeds
+        // `DifficultyScalar` with a `ProductionRate(..)` key — the second
+        // unserializable-key bug in #337. Without this line the test passes
+        // while a real game still cannot be saved.
+        engine
+            .apply(&Command::SetDifficulty {
+                preset: DifficultyPreset::Hard,
+            })
+            .expect("set difficulty");
+        engine.state.add_colony(Colony::new("Playtest"), 300);
+        engine
+            .apply(&Command::AdvanceColonySol)
+            .expect("advance a sol");
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&engine.state)
+            .expect("a state produced by real commands must save");
+
+        let restored = snap.load().unwrap();
+        assert_eq!(restored.sol, engine.state.sol);
+        assert!(
+            restored.planet_map.is_some_and(|m| !m.cells.is_empty()),
+            "the seeded map must survive"
+        );
+        assert_eq!(
+            restored
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::ProductionRate("*".into())),
+            engine
+                .state
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::ProductionRate("*".into())),
+            "the difficulty scalar's newtype-variant key must round-trip"
+        );
     }
 
     // ── schema version is stored and checked ──────────────────────────────

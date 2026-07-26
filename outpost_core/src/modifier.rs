@@ -141,7 +141,67 @@ impl ModifierAccumulator {
 /// Applied after all tech bonuses: `effective = base × (1 + tech_sum) × difficulty`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DifficultyScalar {
+    /// Serialized as a flat list of `(quantity, scalar)` pairs, not as a JSON
+    /// object: [`ModifiableQuantity::ProductionRate`] is a newtype variant, and
+    /// `serde_json` — the save format — cannot use one as an object key. The
+    /// default grade table always seeds a `ProductionRate` entry, so every game
+    /// that set a difficulty failed to save with `"key must be a string"`
+    /// (issue #337).
+    #[serde(with = "scalars_serde")]
     scalars: std::collections::HashMap<ModifiableQuantity, f32>,
+}
+
+/// (De)serialize [`DifficultyScalar::scalars`] as a `Vec<(ModifiableQuantity, f32)>`.
+///
+/// See the field's doc comment for why the map form is unusable.
+mod scalars_serde {
+    use super::ModifiableQuantity;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub(super) fn serialize<S: Serializer>(
+        scalars: &HashMap<ModifiableQuantity, f32>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        // Sorted by debug form so save files stay byte-stable — `HashMap`
+        // iteration order is not stable across runs.
+        let mut pairs: Vec<(&ModifiableQuantity, &f32)> = scalars.iter().collect();
+        pairs.sort_by_key(|(q, _)| format!("{q:?}"));
+        pairs.serialize(serializer)
+    }
+
+    /// Accepts the new pair-list form *and* the legacy JSON-object form.
+    ///
+    /// A save written before #337 stored this field as an object. Only an
+    /// **empty** one can exist — serializing any key at all failed, so a save
+    /// with a populated scalar map was never written to disk — but `{}` was a
+    /// perfectly valid `SCHEMA_VERSION = 9` payload for a game saved before a
+    /// difficulty was chosen. Reading both shapes keeps those saves loadable
+    /// instead of rejecting them on a version bump.
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<ModifiableQuantity, f32>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Either {
+            Pairs(Vec<(ModifiableQuantity, f32)>),
+            /// Pre-#337 object form. Keys are read as opaque strings because
+            /// `ModifiableQuantity` cannot be parsed back from a JSON key.
+            Legacy(HashMap<String, f32>),
+        }
+
+        match Either::deserialize(deserializer)? {
+            Either::Pairs(pairs) => Ok(pairs.into_iter().collect()),
+            Either::Legacy(legacy) if legacy.is_empty() => Ok(HashMap::new()),
+            // Unreachable from any file this code could have written. Refuse
+            // rather than silently discard scalars, in case one turns up.
+            Either::Legacy(legacy) => Err(serde::de::Error::custom(format!(
+                "difficulty scalars use the pre-#337 object form and are not empty \
+                 ({} entries); this save cannot be read",
+                legacy.len()
+            ))),
+        }
+    }
 }
 
 impl DifficultyScalar {
@@ -265,5 +325,51 @@ mod tests {
         accum.add(ModifierDescriptor::new(mine.clone(), "tech", 0.30));
         assert!((accum.total_sum(&mine) - 0.30).abs() < 1e-4);
         assert!((accum.total_sum(&lab)).abs() < 1e-4);
+    }
+
+    /// A save written before #337 stored `scalars` as a JSON object. Only the
+    /// empty form can exist on disk, and it must still load — bumping the
+    /// schema version instead would reject those saves outright.
+    #[test]
+    fn the_pre_337_empty_object_form_still_loads() {
+        let legacy: DifficultyScalar =
+            serde_json::from_str(r#"{"scalars":{}}"#).expect("a pre-#337 save must still load");
+        assert!(
+            (legacy.scalar_for(&ModifiableQuantity::ResearchRate) - 1.0).abs() < 1e-6,
+            "an empty scalar map means no overrides"
+        );
+    }
+
+    /// The current form round-trips, including the newtype-variant key that
+    /// JSON cannot use as an object key.
+    #[test]
+    fn the_pair_list_form_round_trips_a_newtype_variant_key() {
+        let mut ds = DifficultyScalar::new();
+        ds.set(ModifiableQuantity::ProductionRate("mine".into()), 0.85);
+        ds.set(ModifiableQuantity::ResearchRate, 1.2);
+
+        let json = serde_json::to_string(&ds).expect("must serialize");
+        let back: DifficultyScalar = serde_json::from_str(&json).expect("must deserialize");
+
+        assert!(
+            (back.scalar_for(&ModifiableQuantity::ProductionRate("mine".into())) - 0.85).abs()
+                < 1e-6
+        );
+        assert!((back.scalar_for(&ModifiableQuantity::ResearchRate) - 1.2).abs() < 1e-6);
+        // An unset key still falls back rather than being invented.
+        assert!((back.scalar_for(&ModifiableQuantity::SlotCapacity) - 1.0).abs() < 1e-6);
+    }
+
+    /// A populated legacy object cannot exist, but if one turns up it must be
+    /// refused rather than silently read as "no overrides".
+    #[test]
+    fn a_populated_pre_337_object_is_refused_not_silently_dropped() {
+        let err = serde_json::from_str::<DifficultyScalar>(r#"{"scalars":{"ResearchRate":0.5}}"#)
+            .expect_err("a populated legacy object must not parse silently");
+        assert!(
+            format!("{err}").contains("pre-#337")
+                || format!("{err}").contains("data did not match"),
+            "unexpected error: {err}"
+        );
     }
 }
