@@ -7901,6 +7901,63 @@ mod tests {
         );
     }
 
+    /// **Construction is not gated by a reserve** (issue #308 + #306).
+    ///
+    /// Pins a real gap rather than asserting a virtue: `tick_active_charging`
+    /// draws construction materials straight from [`colony::ColonyPool`], never
+    /// through [`colony::ColonyStores`], so it never sees the reserve. A player
+    /// who reserves metal to protect their upkeep will still watch a build queue
+    /// eat it.
+    ///
+    /// That may well be the wrong call now that #306 made construction cost
+    /// materials at all, but it is the *current* call, and it should change
+    /// deliberately rather than by accident — so this test fails if the
+    /// behaviour drifts either way.
+    #[test]
+    fn a_reserve_does_not_protect_stock_from_the_build_queue() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Building Anyway".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 100.0);
+
+        engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "steel".into(),
+                amount: 100.0,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 100.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            (engine.state.colonies[idx].pool.amount("steel") - 50.0).abs() < 1e-6,
+            "construction currently ignores the reserve and drew its instalment; \
+             got {} steel left",
+            engine.state.colonies[idx].pool.amount("steel")
+        );
+    }
+
     /// Without the reserve, the same setup burns the food — proving the test
     /// above is measuring the reserve and not some unrelated idleness.
     #[test]

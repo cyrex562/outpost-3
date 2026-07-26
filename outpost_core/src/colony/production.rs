@@ -2313,6 +2313,46 @@ mod tests {
         assert!((pool.amount("water") - 5.0).abs() < 1e-9);
     }
 
+    /// Maintenance is deliberately **not** exempt from a reserve.
+    ///
+    /// A player who reserves the commodity their upkeep runs on can stall their
+    /// own buildings. That is a real choice with a `MaintenanceShort` shortfall to
+    /// explain it — exempting maintenance would mean two different "available"
+    /// figures inside one affordability ratio. Pinned here because the behaviour
+    /// is asserted in prose elsewhere and would otherwise be free to drift.
+    #[test]
+    fn a_reserve_can_stall_maintenance_and_says_so() {
+        let reg = make_registry_with_maintenance();
+        let mut pool = ColonyPool::new();
+        pool.deposit("spare_parts", 10.0); // ample upkeep …
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("spare_parts".to_string(), 10.0); // … all of it withheld
+
+        let inputs = vec![input_at(0, "advanced_smelter", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        let result = &outcome.building_results[0];
+        assert!(
+            result.scale.abs() < 1e-9,
+            "upkeep it cannot reach must stop the building, got scale {}",
+            result.scale
+        );
+        assert!(
+            result.shortfalls.iter().any(|s| matches!(
+                &s.reason,
+                ShortfallReason::MaintenanceShort { commodity_id } if commodity_id == "spare_parts"
+            )),
+            "expected MaintenanceShort(spare_parts), got {:?}",
+            result.shortfalls
+        );
+        assert!(
+            (pool.amount("spare_parts") - 10.0).abs() < 1e-9,
+            "the reserve must be intact, got {}",
+            pool.amount("spare_parts")
+        );
+    }
+
     /// A shortage lands unevenly, but a partial remainder is still handed over —
     /// the loser gets whatever the winner left rather than nothing.
     #[test]

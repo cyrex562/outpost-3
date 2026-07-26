@@ -150,6 +150,25 @@ pub struct Colony {
     /// population however large it is — which is the whole point of reserving
     /// food.
     ///
+    /// **Construction is also exempt, which is arguably wrong.** Build-queue
+    /// material instalments are drawn straight from [`Self::pool`] by
+    /// [`ConstructionQueue::tick_active_charging`], never through
+    /// [`ColonyStores`], so they do not see this floor: a player reserving metal
+    /// to protect their upkeep will still watch a build queue spend it. That
+    /// mattered less when construction was free (before issue #306) and may want
+    /// revisiting; `a_reserve_does_not_protect_stock_from_the_build_queue` pins
+    /// the current behaviour so it changes on purpose rather than by accident.
+    ///
+    /// **Maintenance is not exempt.** Reserving the commodity your upkeep runs on
+    /// can stall your own buildings, reported as
+    /// [`ShortfallReason::MaintenanceShort`]. Splitting inputs from maintenance
+    /// would need two different "available" figures inside one affordability
+    /// ratio, so the reserve applies to the whole production pass.
+    ///
+    /// [`ConstructionQueue::tick_active_charging`]: ConstructionQueue::tick_active_charging
+    /// [`ColonyStores`]: ColonyStores
+    /// [`ShortfallReason::MaintenanceShort`]: production::ShortfallReason::MaintenanceShort
+    ///
     /// Absent or `0.0` means unreserved. `#[serde(default)]` so pre-#308 saves
     /// load with nothing withheld, matching their behaviour exactly.
     #[serde(default)]
