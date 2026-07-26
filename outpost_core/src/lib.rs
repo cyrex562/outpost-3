@@ -193,9 +193,69 @@ pub enum Command {
         /// be empty.
         buildings: Vec<(String, u32)>,
     },
+    /// Set one placed building's staffing priority (issue #307).
+    ///
+    /// Scoped to a **building instance**, not a type — three mines can be ranked
+    /// against each other. Note this is deliberately unlike
+    /// [`Command::SetActiveRecipe`], which is type-scoped: recipe choice applies
+    /// to every instance of a type, staffing priority does not.
+    ///
+    /// Rejects a `priority` outside `1..=MAX_BUILDING_PRIORITY` rather than
+    /// clamping it. Clamping is right for authored content defaults, where a bad
+    /// pack should still load, but wrong for a player action — silently doing
+    /// something other than what was asked hides the mistake.
+    SetBuildingPriority {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance to re-prioritise.
+        building_id: uuid::Uuid,
+        /// New priority: `1` is staffed first.
+        priority: u8,
+    },
+    /// Pin or release a placed building's labour allocation (issue #307).
+    ///
+    /// This is the manual-override path: `Some(n)` pins exactly `n` workers to
+    /// the building, which automatic assignment hands out first and never
+    /// reclaims however short the colony gets. `None` unlocks it, returning the
+    /// building to the automatic pool.
+    SetBuildingLabourLock {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance to lock or unlock.
+        building_id: uuid::Uuid,
+        /// Workers to pin, or `None` to unlock.
+        lock: Option<u32>,
+    },
+    /// Give a placed building a player-chosen name, or clear it (issue #307).
+    ///
+    /// `Some(name)` sets it; `None` reverts to the auto-numbered default
+    /// (`"Mine 2"`). Names are trimmed and must be non-empty and at most
+    /// [`MAX_BUILDING_NAME_LEN`] characters.
+    ///
+    /// [`MAX_BUILDING_NAME_LEN`]: colony::MAX_BUILDING_NAME_LEN
+    RenameBuilding {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance to rename.
+        building_id: uuid::Uuid,
+        /// New name, or `None` to revert to the auto-numbered default.
+        name: Option<String>,
+    },
     /// Assign a number of labour units to a named slot in a colony.
     ///
     /// `slot` identifies the production slot; `labour` is the worker-unit count.
+    ///
+    /// **Vestigial — persists nothing.** It validates its arguments and emits
+    /// [`Event::LabourAssigned`], but no state changes and production ignores it
+    /// entirely. The real per-building override is
+    /// [`Command::SetBuildingLabourLock`] (issue #307).
+    ///
+    /// Left in place rather than removed because content packs can still author
+    /// [`AssignLabourFraction`] default directives that construct it, and
+    /// deciding what those should become is a directive-system question, not a
+    /// labour one. Removing it needs that decision first.
+    ///
+    /// [`AssignLabourFraction`]: content::types::DefaultAction::AssignLabourFraction
     AssignLabour {
         /// Target colony.
         colony_id: ColonyId,
@@ -1082,6 +1142,34 @@ pub enum Event {
         slot: String,
         /// Number of labour units assigned.
         labour: u64,
+    },
+    /// A placed building's staffing priority changed (issue #307).
+    BuildingPrioritySet {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance.
+        building_id: uuid::Uuid,
+        /// The priority now in effect.
+        priority: u8,
+    },
+    /// A placed building's labour allocation was pinned or released (issue #307).
+    BuildingLabourLockSet {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance.
+        building_id: uuid::Uuid,
+        /// Workers now pinned, or `None` if it was unlocked.
+        lock: Option<u32>,
+    },
+    /// A placed building was renamed, or reverted to its auto-numbered name
+    /// (issue #307).
+    BuildingRenamed {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance.
+        building_id: uuid::Uuid,
+        /// The name now in effect, or `None` if reverted to the default.
+        name: Option<String>,
     },
     /// A building type's active recipe was set (issue #166).
     ActiveRecipeSet {
@@ -2231,11 +2319,15 @@ impl GameEngine {
                             .get(&building_type)
                             .copied()
                             .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
-                        colony.buildings.push(colony::PlacedBuilding::with_priority(
+                        // Numbered against what's already standing, so the
+                        // player can tell this mine from the last one (#307).
+                        let placed = colony::PlacedBuilding::with_priority(
                             &building_type,
                             completed.slot_cost,
                             priority,
-                        ));
+                        )
+                        .numbered_within(&colony.buildings);
+                        colony.buildings.push(placed);
                         events.push(Event::BuildingConstructed {
                             colony_id: colony.id,
                             building_type,
@@ -2253,11 +2345,13 @@ impl GameEngine {
                             .get(&building_type)
                             .copied()
                             .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
-                        out.buildings.push(colony::PlacedBuilding::with_priority(
+                        let placed = colony::PlacedBuilding::with_priority(
                             &building_type,
                             completed.slot_cost,
                             priority,
-                        ));
+                        )
+                        .numbered_within(&out.buildings);
+                        out.buildings.push(placed);
                         events.push(Event::OutpostBuildingConstructed {
                             outpost_id: out.id,
                             building_type,
@@ -3119,12 +3213,10 @@ impl GameEngine {
 
                 let mut events = Vec::with_capacity(buildings.len());
                 for (building_type, slot_cost) in buildings {
-                    self.state.colonies[idx]
-                        .buildings
-                        .push(colony::PlacedBuilding::new(
-                            building_type.clone(),
-                            *slot_cost,
-                        ));
+                    let existing = &self.state.colonies[idx].buildings;
+                    let placed = colony::PlacedBuilding::new(building_type.clone(), *slot_cost)
+                        .numbered_within(existing);
+                    self.state.colonies[idx].buildings.push(placed);
                     events.push(Event::BuildingConstructed {
                         colony_id: *colony_id,
                         building_type: building_type.clone(),
@@ -3153,6 +3245,132 @@ impl GameEngine {
                     colony_id: *colony_id,
                     project_id: *project_id,
                     refund,
+                }])
+            }
+
+            Command::SetBuildingPriority {
+                colony_id,
+                building_id,
+                priority,
+            } => {
+                if !(1..=content::types::MAX_BUILDING_PRIORITY).contains(priority) {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "priority must be 1..={}, got {priority}",
+                        content::types::MAX_BUILDING_PRIORITY
+                    )));
+                }
+                let idx = self.find_colony_index(*colony_id)?;
+                let building = self.state.colonies[idx]
+                    .buildings
+                    .iter_mut()
+                    .find(|b| b.id == *building_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "no building {building_id} in colony {colony_id}"
+                        ))
+                    })?;
+                building.priority = *priority;
+                Ok(vec![Event::BuildingPrioritySet {
+                    colony_id: *colony_id,
+                    building_id: *building_id,
+                    priority: *priority,
+                }])
+            }
+
+            Command::SetBuildingLabourLock {
+                colony_id,
+                building_id,
+                lock,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                // Resolve the building's authored worker slots before taking a
+                // mutable borrow of the colony, so the registry lookup can happen.
+                let building_type = self.state.colonies[idx]
+                    .buildings
+                    .iter()
+                    .find(|b| b.id == *building_id)
+                    .map(|b| b.building_type.clone())
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "no building {building_id} in colony {colony_id}"
+                        ))
+                    })?;
+
+                // Reject a lock the building cannot use. The allocator clamps
+                // anyway, so this is about telling the player their input was
+                // wrong rather than silently pinning 5 of the 50 they asked for.
+                // Only checkable with a registry loaded; without one, accept and
+                // let the allocator's clamp handle it.
+                if let (Some(requested), Some(registry)) = (*lock, self.state.registry.as_ref()) {
+                    if let Some(def) = registry.building(&building_type) {
+                        if requested > def.worker_slots {
+                            return Err(EngineError::InvalidArgument(format!(
+                                "cannot pin {requested} workers to {building_type}: it has {} worker slots",
+                                def.worker_slots
+                            )));
+                        }
+                    }
+                }
+
+                let building = self.state.colonies[idx]
+                    .buildings
+                    .iter_mut()
+                    .find(|b| b.id == *building_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "no building {building_id} in colony {colony_id}"
+                        ))
+                    })?;
+                building.labour_lock = *lock;
+                Ok(vec![Event::BuildingLabourLockSet {
+                    colony_id: *colony_id,
+                    building_id: *building_id,
+                    lock: *lock,
+                }])
+            }
+
+            Command::RenameBuilding {
+                colony_id,
+                building_id,
+                name,
+            } => {
+                // Validate before touching state so a rejected rename leaves
+                // nothing half-applied.
+                let cleaned = match name {
+                    Some(raw) => {
+                        let trimmed = raw.trim();
+                        if trimmed.is_empty() {
+                            return Err(EngineError::InvalidArgument(
+                                "building name must not be empty — pass None to revert to the default"
+                                    .into(),
+                            ));
+                        }
+                        if trimmed.chars().count() > colony::MAX_BUILDING_NAME_LEN {
+                            return Err(EngineError::InvalidArgument(format!(
+                                "building name must be at most {} characters",
+                                colony::MAX_BUILDING_NAME_LEN
+                            )));
+                        }
+                        Some(trimmed.to_owned())
+                    }
+                    None => None,
+                };
+
+                let idx = self.find_colony_index(*colony_id)?;
+                let building = self.state.colonies[idx]
+                    .buildings
+                    .iter_mut()
+                    .find(|b| b.id == *building_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "no building {building_id} in colony {colony_id}"
+                        ))
+                    })?;
+                building.name.clone_from(&cleaned);
+                Ok(vec![Event::BuildingRenamed {
+                    colony_id: *colony_id,
+                    building_id: *building_id,
+                    name: cleaned,
                 }])
             }
 
@@ -5036,9 +5254,28 @@ impl GameEngine {
                                 )
                             },
                         );
+                        // Staffing as production actually resolved it (#307),
+                        // not a recomputed estimate — see `Colony::last_labour`.
+                        let allocation = c
+                            .last_labour
+                            .as_ref()
+                            .and_then(|plan| plan.for_building(b.id));
+                        // The authored display name for the type, so "Mine 2"
+                        // reads as the player expects rather than "mine 2".
+                        let type_name = self
+                            .state
+                            .registry
+                            .as_ref()
+                            .and_then(|reg| reg.building(&b.building_type))
+                            .map_or(b.building_type.as_str(), |def| def.name.as_str());
                         ui::BuildingRow {
+                            building_id: b.id,
+                            name: b.display_name(type_name),
                             building_type: b.building_type.clone(),
-                            labour_assigned: 0,
+                            labour_assigned: allocation.map_or(0, |a| a.assigned),
+                            labour_demand: allocation.map_or(0, |a| a.demand),
+                            priority: b.priority,
+                            labour_lock: b.labour_lock,
                             slot_cost: b.slot_cost,
                             full_capacity: scale >= 1.0 - 1e-9,
                             scale,
@@ -7863,6 +8100,350 @@ mod tests {
         let result = &last_production["research_lab"];
         assert_eq!(result.building_type, "research_lab");
         assert!(result.scale > 0.0);
+    }
+
+    // ── Per-instance staffing commands (issue #307 stage 3) ──────────────────
+
+    #[test]
+    fn set_building_priority_persists_and_steers_the_next_sol() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("research_lab", 1));
+
+        let labs: Vec<uuid::Uuid> = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .filter(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .collect();
+        assert_eq!(labs.len(), 2);
+
+        // Favour the second lab, which is the one the deterministic tiebreak
+        // would otherwise pass over.
+        engine
+            .apply(&Command::SetBuildingPriority {
+                colony_id,
+                building_id: labs[1],
+                priority: 1,
+            })
+            .expect("priority accepted");
+        engine
+            .apply(&Command::SetBuildingPriority {
+                colony_id,
+                building_id: labs[0],
+                priority: 9,
+            })
+            .expect("priority accepted");
+
+        // Only enough labour for one of the two three-worker labs.
+        engine.state.populations[idx].count = 3.0;
+        engine.state.populations[idx].stability = 1.0;
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let plan = engine.state.colonies[idx]
+            .last_labour
+            .as_ref()
+            .expect("a plan after the sol");
+        assert_eq!(
+            plan.for_building(labs[1]).expect("favoured lab").assigned,
+            3,
+            "the priority-1 lab got the staff"
+        );
+        assert_eq!(
+            plan.for_building(labs[0]).expect("other lab").assigned,
+            0,
+            "the priority-9 lab got none"
+        );
+    }
+
+    /// A player action gets rejected, not silently clamped — unlike an authored
+    /// content default, where clamping keeps a bad pack loadable.
+    #[test]
+    fn set_building_priority_rejects_out_of_range_rather_than_clamping() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+        let before = engine.state.colonies[idx].buildings[0].priority;
+
+        for bad in [0_u8, 10, 255] {
+            let err = engine
+                .apply(&Command::SetBuildingPriority {
+                    colony_id,
+                    building_id,
+                    priority: bad,
+                })
+                .expect_err("out-of-range priority must be rejected");
+            assert!(
+                matches!(err, EngineError::InvalidArgument(_)),
+                "expected InvalidArgument for {bad}, got {err:?}"
+            );
+        }
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].buildings[0].priority, before,
+            "a rejected command must not have changed anything"
+        );
+    }
+
+    #[test]
+    fn per_building_commands_reject_an_unknown_building_id() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let ghost = uuid::Uuid::new_v4();
+
+        for cmd in [
+            Command::SetBuildingPriority {
+                colony_id,
+                building_id: ghost,
+                priority: 3,
+            },
+            Command::SetBuildingLabourLock {
+                colony_id,
+                building_id: ghost,
+                lock: Some(1),
+            },
+            Command::RenameBuilding {
+                colony_id,
+                building_id: ghost,
+                name: Some("Nowhere".into()),
+            },
+        ] {
+            let err = engine
+                .apply(&cmd)
+                .expect_err("a command for a nonexistent building must fail");
+            assert!(
+                matches!(err, EngineError::InvalidArgument(_)),
+                "got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn labour_lock_can_be_set_and_released() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+
+        engine
+            .apply(&Command::SetBuildingLabourLock {
+                colony_id,
+                building_id: lab,
+                lock: Some(2),
+            })
+            .expect("lock accepted");
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let held = |engine: &GameEngine, idx: usize| {
+            engine.state.colonies[idx]
+                .buildings
+                .iter()
+                .find(|b| b.id == lab)
+                .and_then(|b| b.labour_lock)
+        };
+        assert_eq!(held(&engine, idx), Some(2));
+
+        engine
+            .apply(&Command::SetBuildingLabourLock {
+                colony_id,
+                building_id: lab,
+                lock: None,
+            })
+            .expect("unlock accepted");
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            held(&engine, idx),
+            None,
+            "unlocking returns it to automatic"
+        );
+    }
+
+    /// Pinning more workers than the building has posts for is a mistake worth
+    /// reporting. The allocator clamps it anyway, so accepting would silently
+    /// honour something other than what was asked.
+    #[test]
+    fn a_labour_lock_beyond_the_buildings_worker_slots_is_rejected() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+
+        // research_lab authors 3 worker slots.
+        engine
+            .apply(&Command::SetBuildingLabourLock {
+                colony_id,
+                building_id: lab,
+                lock: Some(3),
+            })
+            .expect("a lock up to the slot count is fine");
+
+        let err = engine
+            .apply(&Command::SetBuildingLabourLock {
+                colony_id,
+                building_id: lab,
+                lock: Some(4),
+            })
+            .expect_err("a lock beyond the slot count must be rejected");
+        assert!(
+            matches!(err, EngineError::InvalidArgument(_)),
+            "got {err:?}"
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let still = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.id == lab)
+            .and_then(|b| b.labour_lock);
+        assert_eq!(
+            still,
+            Some(3),
+            "the rejected lock left the old one in place"
+        );
+    }
+
+    #[test]
+    fn renaming_trims_and_reverting_restores_the_numbered_default() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        // setup_science_colony pushes buildings directly, bypassing construction,
+        // so number this one as construction would.
+        engine.state.colonies[idx].buildings[0].ordinal = 1;
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+
+        engine
+            .apply(&Command::RenameBuilding {
+                colony_id,
+                building_id,
+                name: Some("  North Vein  ".into()),
+            })
+            .expect("rename accepted");
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].buildings[0].name.as_deref(),
+            Some("North Vein"),
+            "surrounding whitespace is trimmed"
+        );
+
+        engine
+            .apply(&Command::RenameBuilding {
+                colony_id,
+                building_id,
+                name: None,
+            })
+            .expect("revert accepted");
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let b = &engine.state.colonies[idx].buildings[0];
+        assert_eq!(b.name, None);
+        assert_eq!(
+            b.display_name("Solar Array"),
+            "Solar Array 1",
+            "reverts to the auto-numbered default"
+        );
+    }
+
+    #[test]
+    fn renaming_rejects_blank_and_overlong_names() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+
+        for blank in ["", "   ", "\t\n"] {
+            let err = engine
+                .apply(&Command::RenameBuilding {
+                    colony_id,
+                    building_id,
+                    name: Some(blank.into()),
+                })
+                .expect_err("a blank name must be rejected");
+            assert!(
+                matches!(err, EngineError::InvalidArgument(_)),
+                "got {err:?}"
+            );
+        }
+
+        let too_long = "x".repeat(colony::MAX_BUILDING_NAME_LEN + 1);
+        let err = engine
+            .apply(&Command::RenameBuilding {
+                colony_id,
+                building_id,
+                name: Some(too_long),
+            })
+            .expect_err("an overlong name must be rejected");
+        assert!(
+            matches!(err, EngineError::InvalidArgument(_)),
+            "got {err:?}"
+        );
+
+        // A name exactly at the limit is fine — the bound is inclusive.
+        engine
+            .apply(&Command::RenameBuilding {
+                colony_id,
+                building_id,
+                name: Some("x".repeat(colony::MAX_BUILDING_NAME_LEN)),
+            })
+            .expect("a name at the limit is accepted");
+    }
+
+    /// The colony screen has to carry instance ids, or the player has no way to
+    /// address the per-building commands at all.
+    #[test]
+    fn colony_screen_exposes_instance_identity_and_real_staffing() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab_id = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+
+        let QueryResult::ColonyScreen(screen) = engine
+            .query(&Query::ColonyScreen { colony_id })
+            .expect("colony screen")
+        else {
+            panic!("expected a ColonyScreen result")
+        };
+
+        let row = screen
+            .buildings
+            .iter()
+            .find(|r| r.building_id == lab_id)
+            .expect("the lab has a row, addressable by instance id");
+        assert_eq!(row.building_type, "research_lab");
+        assert!(
+            !row.name.is_empty(),
+            "a row always has something to display"
+        );
+        assert_eq!(row.priority, content::types::DEFAULT_BUILDING_PRIORITY);
+        assert_eq!(row.labour_lock, None);
+        assert!(
+            row.labour_assigned > 0,
+            "a staffed lab reports real assigned labour, not the old hardcoded 0"
+        );
+        assert_eq!(
+            row.labour_assigned, row.labour_demand,
+            "this colony has ample labour, so the lab is fully staffed"
+        );
     }
 
     /// Per-building labour steering works through the real `AdvanceColonySol`

@@ -119,6 +119,37 @@ pub enum ClientCommand {
         /// Recipe id to activate.
         recipe_id: String,
     },
+    /// Set one placed building's staffing priority (issue #307).
+    ///
+    /// Instance-scoped, unlike `SetActiveRecipe` above, which applies to every
+    /// building of a type.
+    SetBuildingPriority {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Placed-building instance UUID.
+        building_id: String,
+        /// New priority; `1` is staffed first.
+        priority: u8,
+    },
+    /// Pin (`Some`) or release (`None`) a placed building's labour (issue #307).
+    SetBuildingLabourLock {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Placed-building instance UUID.
+        building_id: String,
+        /// Workers to pin, or `null` to unlock.
+        lock: Option<u32>,
+    },
+    /// Name a placed building, or clear it back to the auto-numbered default
+    /// (issue #307).
+    RenameBuilding {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Placed-building instance UUID.
+        building_id: String,
+        /// New name, or `null` to revert to the default.
+        name: Option<String>,
+    },
     /// Found a new colony at a surveyed planet-map site (issue #220 — the
     /// founding wizard's primary command in browser mode).
     FoundColonyAtSite {

@@ -98,6 +98,28 @@ pub enum ClientCommand {
         building_type: String,
         recipe_id: String,
     },
+    /// Set one placed building's staffing priority (issue #307).
+    ///
+    /// Instance-scoped, unlike `SetActiveRecipe` above, which applies to every
+    /// building of a type.
+    SetBuildingPriority {
+        colony_id: String,
+        building_id: String,
+        priority: u8,
+    },
+    /// Pin (`Some`) or release (`None`) a placed building's labour (issue #307).
+    SetBuildingLabourLock {
+        colony_id: String,
+        building_id: String,
+        lock: Option<u32>,
+    },
+    /// Name a placed building, or clear it back to the auto-numbered default
+    /// (issue #307).
+    RenameBuilding {
+        colony_id: String,
+        building_id: String,
+        name: Option<String>,
+    },
     /// Cancel a queued construction project and receive a 50% partial refund.
     CancelConstruction {
         colony_id: String,
@@ -555,6 +577,11 @@ pub struct ColonyWire {
 
 fn parse_colony(id: &str) -> Result<ColonyId, CmdError> {
     ColonyId::from_str(id).map_err(|_| CmdError::InvalidArg(format!("bad colony id: {id}")))
+}
+
+/// Parse a placed-building instance id (issue #307).
+fn parse_building(id: &str) -> Result<uuid::Uuid, CmdError> {
+    uuid::Uuid::from_str(id).map_err(|_| CmdError::InvalidArg(format!("bad building id: {id}")))
 }
 
 /// Parse an interrupt-tier slug into [`outpost_core::interrupt::Tier`]
@@ -1174,6 +1201,33 @@ pub fn apply_command(
             colony_id: parse_colony(&colony_id)?,
             building_type,
             recipe_id,
+        },
+        ClientCommand::SetBuildingPriority {
+            colony_id,
+            building_id,
+            priority,
+        } => Command::SetBuildingPriority {
+            colony_id: parse_colony(&colony_id)?,
+            building_id: parse_building(&building_id)?,
+            priority,
+        },
+        ClientCommand::SetBuildingLabourLock {
+            colony_id,
+            building_id,
+            lock,
+        } => Command::SetBuildingLabourLock {
+            colony_id: parse_colony(&colony_id)?,
+            building_id: parse_building(&building_id)?,
+            lock,
+        },
+        ClientCommand::RenameBuilding {
+            colony_id,
+            building_id,
+            name,
+        } => Command::RenameBuilding {
+            colony_id: parse_colony(&colony_id)?,
+            building_id: parse_building(&building_id)?,
+            name,
         },
         ClientCommand::CancelConstruction {
             colony_id,

@@ -17,7 +17,9 @@ pub mod production;
 pub mod resource_pool;
 pub mod stores;
 
-pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
+pub use building::{
+    ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId, MAX_BUILDING_NAME_LEN,
+};
 pub use labour::{allocate_from, allocate_labour, LabourAllocation, LabourCandidate, LabourPlan};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{

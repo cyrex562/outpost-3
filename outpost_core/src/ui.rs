@@ -69,18 +69,38 @@ pub struct ColonyScreenData {
 /// A single building row for the colony management screen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildingRow {
+    /// Stable id of this placed instance (issue #307).
+    ///
+    /// What per-building commands are addressed to —
+    /// [`SetBuildingPriority`](crate::Command::SetBuildingPriority),
+    /// [`SetBuildingLabourLock`](crate::Command::SetBuildingLabourLock),
+    /// [`RenameBuilding`](crate::Command::RenameBuilding).
+    pub building_id: uuid::Uuid,
+    /// What to call this building: the player's name, else `"<Type Name> <n>"`.
+    pub name: String,
     /// Content-pack key for the building type.
     pub building_type: String,
     /// Labour units currently assigned to this building.
     ///
-    /// **Always `0` today**: per-building labour assignment has no backing
-    /// state — `PlacedBuilding` stores no labour, and `Command::AssignLabour`
-    /// validates and emits an event without persisting anything. Production is
-    /// gated by a *colony-wide* labour ratio instead
-    /// (`colony::production`), so this must not be used to infer whether a
-    /// building is working — read [`Self::scale`] for that. Real per-building
-    /// assignment arrives with automatic labour assignment (issue #307).
+    /// Real since #307: read from the plan the last production pass actually
+    /// used, so it reflects what the building was staffed with rather than what
+    /// it asked for. `0` on a building that genuinely got no workers, and on any
+    /// colony that hasn't run a sol yet.
+    ///
+    /// Still not the right field for "is it working?" — a building can be fully
+    /// staffed and idle for want of inputs. Read [`Self::scale`] for that.
     pub labour_assigned: u32,
+    /// Workers this building wants, gated on whether it could run at all
+    /// (issue #307).
+    ///
+    /// `labour_assigned < labour_demand` means understaffed. A building with no
+    /// recipe, or one that couldn't run this sol, demands `0` — it isn't
+    /// understaffed, it just has no jobs to offer.
+    pub labour_demand: u32,
+    /// Staffing priority: `1` is staffed first (issue #307).
+    pub priority: u8,
+    /// Workers pinned here by the player, or `None` if automatic (issue #307).
+    pub labour_lock: Option<u32>,
     /// Number of build slots consumed by this building.
     pub slot_cost: u32,
     /// Whether the building ran at full capacity last turn.
@@ -555,8 +575,13 @@ mod tests {
             labour_employed: 12.0,
             labour_unemployed: 28.0,
             buildings: vec![BuildingRow {
+                building_id: uuid::Uuid::nil(),
+                name: "Greenhouse 1".to_string(),
                 building_type: "greenhouse".to_string(),
                 labour_assigned: 10,
+                labour_demand: 10,
+                priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+                labour_lock: None,
                 slot_cost: 1,
                 full_capacity: true,
                 scale: 1.0,

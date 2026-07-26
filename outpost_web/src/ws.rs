@@ -281,6 +281,33 @@ pub(crate) fn client_command_to_core(
                 recipe_id,
             })
         }
+        ClientCommand::SetBuildingPriority {
+            colony_id,
+            building_id,
+            priority,
+        } => Ok(Command::SetBuildingPriority {
+            colony_id: parse_colony_id(&colony_id)?,
+            building_id: parse_building_id(&building_id)?,
+            priority,
+        }),
+        ClientCommand::SetBuildingLabourLock {
+            colony_id,
+            building_id,
+            lock,
+        } => Ok(Command::SetBuildingLabourLock {
+            colony_id: parse_colony_id(&colony_id)?,
+            building_id: parse_building_id(&building_id)?,
+            lock,
+        }),
+        ClientCommand::RenameBuilding {
+            colony_id,
+            building_id,
+            name,
+        } => Ok(Command::RenameBuilding {
+            colony_id: parse_colony_id(&colony_id)?,
+            building_id: parse_building_id(&building_id)?,
+            name,
+        }),
         ClientCommand::FoundColonyAtSite {
             name,
             starting_population,
@@ -537,6 +564,18 @@ pub(crate) fn client_command_to_core(
 }
 
 /// Convert a [`ClientQuery`] into a core [`Query`].
+/// Parse a colony UUID from the wire, or describe why it failed.
+fn parse_colony_id(id: &str) -> Result<outpost_core::colony::ColonyId, String> {
+    use std::str::FromStr;
+    outpost_core::colony::ColonyId::from_str(id).map_err(|_| format!("invalid colony_id: {id}"))
+}
+
+/// Parse a placed-building instance UUID from the wire (issue #307).
+fn parse_building_id(id: &str) -> Result<uuid::Uuid, String> {
+    use std::str::FromStr;
+    uuid::Uuid::from_str(id).map_err(|_| format!("invalid building_id: {id}"))
+}
+
 fn client_query_to_core(query: ClientQuery, _state: &AppState) -> Result<Query, String> {
     use outpost_core::colony::ColonyId;
     use std::str::FromStr;
@@ -2369,6 +2408,118 @@ mod tests {
             &state,
         );
         assert!(result.is_err());
+    }
+
+    /// The per-building staffing commands translate off the wire (issue #307).
+    ///
+    /// These are the commands that make per-building labour steerable at all, so
+    /// a mapping mistake would leave the mechanism live but unreachable.
+    #[test]
+    fn client_command_per_building_staffing_translates() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+        use outpost_core::colony::ColonyId;
+        use outpost_core::Command;
+        use uuid::Uuid;
+
+        let colony_id = ColonyId::new_v4();
+        let building_id = Uuid::new_v4();
+        let state = new_state(RuntimeConfig::default());
+
+        let priority = client_command_to_core(
+            ClientCommand::SetBuildingPriority {
+                colony_id: colony_id.to_string(),
+                building_id: building_id.to_string(),
+                priority: 2,
+            },
+            &state,
+        )
+        .expect("priority translates");
+        match priority {
+            Command::SetBuildingPriority {
+                colony_id: got_colony,
+                building_id: got_building,
+                priority: got,
+            } => {
+                assert_eq!(got_colony, colony_id);
+                assert_eq!(got_building, building_id);
+                assert_eq!(got, 2);
+            }
+            other => panic!("expected SetBuildingPriority, got {other:?}"),
+        }
+
+        let lock = client_command_to_core(
+            ClientCommand::SetBuildingLabourLock {
+                colony_id: colony_id.to_string(),
+                building_id: building_id.to_string(),
+                lock: Some(3),
+            },
+            &state,
+        )
+        .expect("lock translates");
+        match lock {
+            Command::SetBuildingLabourLock {
+                building_id: got_building,
+                lock: got,
+                ..
+            } => {
+                assert_eq!(got_building, building_id);
+                assert_eq!(got, Some(3));
+            }
+            other => panic!("expected SetBuildingLabourLock, got {other:?}"),
+        }
+
+        // `null` must survive as an unlock, not collapse into a zero-worker lock.
+        let unlock = client_command_to_core(
+            ClientCommand::SetBuildingLabourLock {
+                colony_id: colony_id.to_string(),
+                building_id: building_id.to_string(),
+                lock: None,
+            },
+            &state,
+        )
+        .expect("unlock translates");
+        match unlock {
+            Command::SetBuildingLabourLock { lock, .. } => {
+                assert_eq!(lock, None, "None is an unlock, not Some(0)");
+            }
+            other => panic!("expected SetBuildingLabourLock, got {other:?}"),
+        }
+
+        let rename = client_command_to_core(
+            ClientCommand::RenameBuilding {
+                colony_id: colony_id.to_string(),
+                building_id: building_id.to_string(),
+                name: Some("North Vein".into()),
+            },
+            &state,
+        )
+        .expect("rename translates");
+        match rename {
+            Command::RenameBuilding { name, .. } => {
+                assert_eq!(name.as_deref(), Some("North Vein"));
+            }
+            other => panic!("expected RenameBuilding, got {other:?}"),
+        }
+    }
+
+    /// A bad building UUID is reported, not panicked on.
+    #[test]
+    fn client_command_per_building_staffing_rejects_a_bad_building_id() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+        use outpost_core::colony::ColonyId;
+
+        let state = new_state(RuntimeConfig::default());
+        let result = client_command_to_core(
+            ClientCommand::SetBuildingPriority {
+                colony_id: ColonyId::new_v4().to_string(),
+                building_id: "not-a-uuid".into(),
+                priority: 1,
+            },
+            &state,
+        );
+        assert!(result.is_err(), "a malformed building id must be rejected");
     }
 
     /// After a `NewGame` sequence the engine has registry and needs_config loaded.

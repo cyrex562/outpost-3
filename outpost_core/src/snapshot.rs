@@ -240,9 +240,20 @@ impl FullStateBlob {
         }
     }
 
-    fn into_game_state(self) -> GameState {
+    fn into_game_state(mut self) -> GameState {
         let infra_routes: HashMap<(ColonyId, ColonyId), uuid::Uuid> =
             self.infra_routes.into_iter().collect();
+
+        // Backfill building instance numbers (issue #307). A pre-#307 save has
+        // every `ordinal` at 0, which would display as a bare type name and give
+        // the player no way to tell two mines apart. Numbering on load is a
+        // one-way migration: once assigned, the numbers are saved and stable.
+        for colony in &mut self.colonies {
+            backfill_ordinals(&mut colony.buildings);
+        }
+        for outpost in &mut self.outposts {
+            backfill_ordinals(&mut outpost.buildings);
+        }
 
         GameState {
             sol: self.sol,
@@ -292,6 +303,36 @@ impl FullStateBlob {
             tech_registry: None,
             hazard_config: None,
         }
+    }
+}
+
+/// Give every unnumbered building in `buildings` an instance number.
+///
+/// Numbers already assigned are left alone, and new ones continue after the
+/// highest in use per type, so a partially-numbered list (a save written after
+/// #307 but holding buildings placed before it) doesn't collide.
+///
+/// Ordered by `id` so the assignment is deterministic: the same save always
+/// backfills to the same numbers, which matters because those numbers then
+/// persist and the player sees them.
+fn backfill_ordinals(buildings: &mut [crate::colony::PlacedBuilding]) {
+    if buildings.iter().all(|b| b.ordinal != 0) {
+        return;
+    }
+
+    let mut next: HashMap<String, u32> = HashMap::new();
+    for b in buildings.iter() {
+        let slot = next.entry(b.building_type.clone()).or_insert(0);
+        *slot = (*slot).max(b.ordinal);
+    }
+
+    let mut unnumbered: Vec<&mut crate::colony::PlacedBuilding> =
+        buildings.iter_mut().filter(|b| b.ordinal == 0).collect();
+    unnumbered.sort_by_key(|b| b.id);
+    for b in unnumbered {
+        let slot = next.entry(b.building_type.clone()).or_insert(0);
+        *slot = slot.saturating_add(1);
+        b.ordinal = *slot;
     }
 }
 
@@ -448,6 +489,89 @@ mod tests {
     use crate::modifier::ModifiableQuantity;
     use crate::turn::GameState;
     use crate::{Command, GameEngine};
+
+    // ── Building instance-number backfill (issue #307) ───────────────────────
+
+    #[test]
+    fn backfill_numbers_unnumbered_buildings_per_type() {
+        let mut buildings = vec![
+            crate::colony::PlacedBuilding::new("mine", 1),
+            crate::colony::PlacedBuilding::new("mine", 1),
+            crate::colony::PlacedBuilding::new("farm", 1),
+        ];
+        assert!(
+            buildings.iter().all(|b| b.ordinal == 0),
+            "starts unnumbered"
+        );
+
+        backfill_ordinals(&mut buildings);
+
+        let mut mines: Vec<u32> = buildings
+            .iter()
+            .filter(|b| b.building_type == "mine")
+            .map(|b| b.ordinal)
+            .collect();
+        mines.sort_unstable();
+        assert_eq!(mines, vec![1, 2]);
+        let farm = buildings
+            .iter()
+            .find(|b| b.building_type == "farm")
+            .unwrap();
+        assert_eq!(farm.ordinal, 1, "each type numbers from one");
+    }
+
+    /// A save written after #307 can still hold buildings placed before it. The
+    /// backfill must continue past the numbers already in use rather than
+    /// colliding with them.
+    #[test]
+    fn backfill_does_not_collide_with_numbers_already_assigned() {
+        let mut numbered = crate::colony::PlacedBuilding::new("mine", 1);
+        numbered.ordinal = 7;
+        let mut buildings = vec![numbered, crate::colony::PlacedBuilding::new("mine", 1)];
+
+        backfill_ordinals(&mut buildings);
+
+        let mut ordinals: Vec<u32> = buildings.iter().map(|b| b.ordinal).collect();
+        ordinals.sort_unstable();
+        assert_eq!(ordinals, vec![7, 8], "continues past the highest in use");
+    }
+
+    /// The numbers get saved and shown to the player, so the same save must always
+    /// backfill identically — hence ordering by id rather than by vec position.
+    #[test]
+    fn backfill_is_deterministic_for_the_same_set_of_buildings() {
+        let a = crate::colony::PlacedBuilding::new("mine", 1);
+        let b = crate::colony::PlacedBuilding::new("mine", 1);
+        let c = crate::colony::PlacedBuilding::new("mine", 1);
+
+        let assign = |mut v: Vec<crate::colony::PlacedBuilding>| {
+            backfill_ordinals(&mut v);
+            let mut pairs: Vec<(uuid::Uuid, u32)> = v.iter().map(|x| (x.id, x.ordinal)).collect();
+            pairs.sort();
+            pairs
+        };
+
+        let forward = assign(vec![a.clone(), b.clone(), c.clone()]);
+        let reversed = assign(vec![c, b, a]);
+        assert_eq!(forward, reversed, "same buildings, same numbers");
+    }
+
+    #[test]
+    fn backfill_leaves_a_fully_numbered_list_alone() {
+        let mut one = crate::colony::PlacedBuilding::new("mine", 1);
+        one.ordinal = 3;
+        let mut two = crate::colony::PlacedBuilding::new("mine", 1);
+        two.ordinal = 9;
+        let mut buildings = vec![one, two];
+
+        backfill_ordinals(&mut buildings);
+
+        assert_eq!(
+            buildings.iter().map(|b| b.ordinal).collect::<Vec<_>>(),
+            vec![3, 9],
+            "nothing to backfill, nothing renumbered"
+        );
+    }
 
     fn make_state_with_colonies() -> GameState {
         let mut s = GameState::new();
