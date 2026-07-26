@@ -109,6 +109,18 @@ function statusLabel(status: 'idle' | 'running' | 'partial'): string {
 }
 
 /**
+ * `true` when the shortfall resolves on its own (issue #308).
+ *
+ * `awaiting_upstream` means the missing input *is* produced in this colony, so
+ * the chain is filling — production reads a start-of-turn snapshot, which costs
+ * one sol per stage before a new chain flows. Styling that identically to a real
+ * fault is what made every freshly-built chain look broken.
+ */
+function isTransientShortfall(b: BuildingRow): boolean {
+  return b.shortfall_kind === 'awaiting_upstream'
+}
+
+/**
  * Tooltip/aside text explaining a non-running status — the engine's shortfall
  * reason when it has one, so "Partial" and "Idle" say *why*.
  */
@@ -241,6 +253,12 @@ function displayName(b: BuildingRow): string {
           <span
             v-if="b.shortfall_reason && !b.full_capacity"
             class="building-reason"
+            :class="{ 'is-transient': isTransientShortfall(b) }"
+            :title="
+              isTransientShortfall(b)
+                ? 'The input is produced in this colony — the chain is still filling and will resolve on its own.'
+                : 'This needs attention.'
+            "
             :data-testid="`building-reason-${b.building_type}`"
           >{{ b.shortfall_reason }}</span>
           <span
@@ -458,6 +476,9 @@ function displayName(b: BuildingRow): string {
 }
 
 .building-reason { color: #a86; font-size: 0.7rem; font-style: italic; }
+/* A chain that is merely filling is information, not a warning — muted rather
+   than amber, so a new colony's first few sols don't read as a wall of faults. */
+.building-reason.is-transient { color: #678; }
 .building-badge {
   border: 1px solid #475;
   border-radius: 2px;

@@ -5449,9 +5449,14 @@ impl GameEngine {
                         // and a starved one no longer share a status.
                         let result = c.last_production_by_building.get(&b.id);
                         let scale = result.map_or(0.0, |r| r.scale);
-                        let shortfall_reason = result
-                            .and_then(|r| r.shortfalls.first())
-                            .map(|s| describe_shortfall(&s.reason));
+                        let first_shortfall = result.and_then(|r| r.shortfalls.first());
+                        let shortfall_reason = first_shortfall.map(describe_shortfall);
+                        // The machine-readable category alongside the phrase, so
+                        // the UI can style a chain that is merely filling
+                        // differently from one that is actually broken (#308).
+                        // Without it the panel only has prose and has to treat
+                        // every shortfall as equally alarming.
+                        let shortfall_kind = first_shortfall.map(|s| shortfall_kind(&s.reason));
                         // The building's real I/O footprint: the resolved
                         // pick-one recipe plus every always-on one, merged by
                         // commodity (issue #272). Without a registry there is
@@ -5495,6 +5500,7 @@ impl GameEngine {
                             full_capacity: scale >= 1.0 - 1e-9,
                             scale,
                             shortfall_reason,
+                            shortfall_kind: shortfall_kind.map(str::to_owned),
                             always_on: self.building_is_always_on(&b.building_type),
                             running_recipe_ids,
                             inputs,
@@ -6386,23 +6392,22 @@ impl GameEngine {
                     .shortfalls
                     .iter()
                     .map(|s| {
-                        let (kind, commodity_id) = match &s.reason {
-                            colony::ShortfallReason::InputShort { commodity_id } => {
-                                ("input_short", Some(commodity_id.clone()))
+                        let commodity_id = match &s.reason {
+                            colony::ShortfallReason::InputShort { commodity_id }
+                            | colony::ShortfallReason::AwaitingUpstream { commodity_id }
+                            | colony::ShortfallReason::MaintenanceShort { commodity_id }
+                            | colony::ShortfallReason::DepositShort { commodity_id } => {
+                                Some(commodity_id.clone())
                             }
-                            colony::ShortfallReason::PowerBrownout => ("power_brownout", None),
-                            colony::ShortfallReason::LaborShort => ("labor_short", None),
-                            colony::ShortfallReason::MaintenanceShort { commodity_id } => {
-                                ("maintenance_short", Some(commodity_id.clone()))
-                            }
-                            colony::ShortfallReason::DepositShort { commodity_id } => {
-                                ("deposit_short", Some(commodity_id.clone()))
-                            }
+                            colony::ShortfallReason::PowerBrownout
+                            | colony::ShortfallReason::LaborShort => None,
                         };
+                        let kind = shortfall_kind(&s.reason);
                         ui::ShortfallRow {
                             kind: kind.to_string(),
                             commodity_id,
                             effective_scale: s.effective_scale,
+                            deficit: s.deficit,
                         }
                     })
                     .collect(),
@@ -6545,16 +6550,57 @@ fn ingredient_row((commodity_id, quantity): (String, f64)) -> ui::IngredientRow 
     }
 }
 
-/// Render a [`colony::production::ShortfallReason`] as a short human-readable
-/// phrase for the colony screen (issue #303 — a building that fell short
-/// should say *why* rather than just reading as idle).
-fn describe_shortfall(reason: &colony::production::ShortfallReason) -> String {
+/// Render a [`colony::production::ProductionShortfall`] as a short
+/// human-readable phrase for the colony screen (issue #303 — a building that
+/// fell short should say *why* rather than just reading as idle).
+///
+/// Commodity shortfalls name the amount missing as well as the commodity
+/// (issue #308): "30 % output" does not tell the player whether they are two
+/// units short or two hundred, and that is the difference between waiting a sol
+/// and building another mine.
+///
+/// The input wording distinguishes the two cases #308 conflated. "no source of
+/// ore" means nothing here makes it — build a producer or open a route. "awaiting
+/// ore from upstream" means something here does make it and the chain has not
+/// filled yet, which resolves on its own.
+/// The machine-readable category for a shortfall, matching
+/// [`ui::ShortfallRow::kind`].
+///
+/// Split out from [`describe_shortfall`] so the buildings list and the building
+/// detail panel cannot disagree about what to call the same shortfall.
+fn shortfall_kind(reason: &colony::production::ShortfallReason) -> &'static str {
     use colony::production::ShortfallReason as R;
     match reason {
-        R::InputShort { commodity_id } => format!("input short: {commodity_id}"),
+        R::InputShort { .. } => "input_short",
+        R::AwaitingUpstream { .. } => "awaiting_upstream",
+        R::PowerBrownout => "power_brownout",
+        R::LaborShort => "labor_short",
+        R::MaintenanceShort { .. } => "maintenance_short",
+        R::DepositShort { .. } => "deposit_short",
+    }
+}
+
+fn describe_shortfall(shortfall: &colony::production::ProductionShortfall) -> String {
+    use colony::production::ShortfallReason as R;
+    // Trimmed to one decimal: these are display strings, and a raw f64 tail
+    // ("7.000000000000001 ore") reads as a bug rather than a quantity.
+    let short_by = |commodity_id: &str| {
+        if shortfall.deficit > 0.0 {
+            format!("{:.1} {commodity_id}", shortfall.deficit)
+        } else {
+            commodity_id.to_owned()
+        }
+    };
+    match &shortfall.reason {
+        R::InputShort { commodity_id } => format!("no source of {}", short_by(commodity_id)),
+        R::AwaitingUpstream { commodity_id } => {
+            format!("awaiting {} from upstream", short_by(commodity_id))
+        }
         R::PowerBrownout => "power brownout".to_string(),
         R::LaborShort => "labour short".to_string(),
-        R::MaintenanceShort { commodity_id } => format!("maintenance short: {commodity_id}"),
+        R::MaintenanceShort { commodity_id } => {
+            format!("maintenance short: {}", short_by(commodity_id))
+        }
         R::DepositShort { commodity_id } => format!("deposit short: {commodity_id}"),
     }
 }
@@ -12338,6 +12384,7 @@ mod tests {
                             commodity_id: "water".into(),
                         },
                         effective_scale: 0.6,
+                        deficit: 4.0,
                     }],
                     line_results: vec![],
                 },
@@ -12359,7 +12406,7 @@ mod tests {
         assert!(!hq.full_capacity);
         assert_eq!(
             hq.shortfall_reason.as_deref(),
-            Some("input short: water"),
+            Some("no source of 4.0 water"),
             "a building that fell short should say why"
         );
         // Flagged so the UI can explain the absent recipe picker.
