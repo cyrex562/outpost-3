@@ -479,7 +479,26 @@ pub fn process_production_scaled(
         0.0
     };
 
-    for input in buildings {
+    // Scarce inputs are claimed in **priority order** (issue #308), the same
+    // `(priority, building_type, id)` order the labour allocator uses — so one
+    // lever steers both, and a building the player ranked first isn't starved of
+    // feedstock by a building they ranked last.
+    //
+    // Without this, every building was judged against the whole pool
+    // independently: two buildings each needing the last 10 water both ran at
+    // full rate, the second producing a full batch from an empty pool.
+    let mut order: Vec<&ProductionInput> = buildings.iter().collect();
+    order.sort_by(|a, b| {
+        a.priority
+            .cmp(&b.priority)
+            .then_with(|| a.building_type.cmp(&b.building_type))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    // commodity id → quantity already claimed by a better-priority building.
+    let mut reserved: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+
+    for input in order {
         let building_type = &input.building_type;
         let Some(bdef) = registry.building(building_type) else {
             continue; // unknown building type — skip
@@ -531,14 +550,19 @@ pub fn process_production_scaled(
             // and for a building with a single line (every shipped building
             // today) that makes this identical to the pre-#272 calculation.
             // Upkeep is still *withdrawn* only once, below.
-            let (input_ratio, tight_commodity, tight_is_maintenance) =
-                compute_effective_input_ratio(
-                    stores,
-                    Some(line.selected),
-                    &[],
-                    maintenance_slice,
-                    maintenance_multiplier,
-                );
+            let afford = compute_effective_input_ratio(
+                stores,
+                &reserved,
+                Some(line.selected),
+                &[],
+                maintenance_slice,
+                maintenance_multiplier,
+            );
+            let (input_ratio, tight_commodity, tight_is_maintenance) = (
+                afford.ratio,
+                afford.tight.clone(),
+                afford.tight_is_maintenance,
+            );
 
             // Deposit gating (issue #239) — only applies to deposit-gated
             // recipes; inert (ratio 1.0) for everything else.
@@ -579,6 +603,19 @@ pub fn process_production_scaled(
                     effective_scale: deposit_ratio,
                 });
             }
+            // Claim what this line will actually draw, so the next building in
+            // priority order sees a pool that reflects it.
+            //
+            // Reserved at the **pre-labour** scale: labour is allocated later
+            // (Pass L) and can only reduce it, so this can over-claim for a
+            // building that later turns out to be understaffed. Erring toward the
+            // better-priority building is the intended bias, and Pass B still
+            // withdraws only the final amount, so nothing is over-drawn — the
+            // surplus is simply not re-offered to anyone else this sol.
+            for (id, qty) in &afford.recipe_demands {
+                reserve(&mut reserved, id, qty * scale);
+            }
+
             pending_lines.push(PendingLine {
                 line: line.line.clone(),
                 always_on: line.always_on,
@@ -595,15 +632,30 @@ pub fn process_production_scaled(
         let maintenance_only_scale = if has_any_recipe {
             None
         } else {
-            let (ratio, _, _) = compute_effective_input_ratio(
+            let afford = compute_effective_input_ratio(
                 stores,
+                &reserved,
                 None,
                 &[],
                 maintenance_slice,
                 maintenance_multiplier,
             );
-            Some(ratio.max(0.0))
+            Some(afford.ratio.max(0.0))
         };
+
+        // Upkeep is charged once per building, so reserve it once — at the
+        // busiest pre-labour line's scale, matching how it is charged in Pass B.
+        let upkeep_scale = maintenance_only_scale.unwrap_or_else(|| {
+            pending_lines
+                .iter()
+                .map(|l| l.scale)
+                .fold(0.0_f64, f64::max)
+        });
+        if upkeep_scale > 1e-9 {
+            for (id, qty) in maintenance_draws(maintenance_slice, maintenance_multiplier) {
+                reserve(&mut reserved, &id, qty * upkeep_scale);
+            }
+        }
 
         // What this building would want if it can run at all. A building whose
         // lines are all stalled — no inputs, no power, no deposit — offers no
@@ -925,13 +977,85 @@ fn compute_deposit_ratio(
 /// is `true` only when the tightest constraint is a commodity that appears
 /// exclusively in the maintenance list — this drives the `MaintenanceShort`
 /// vs. `InputShort` attribution.
+/// What a building can afford this sol, and the demands that answer was based on.
+struct InputAffordability {
+    /// Fraction of demand the pool can cover, in `[0.0, 1.0]`.
+    ratio: f64,
+    /// The commodity that bound the ratio, if any.
+    tight: Option<String>,
+    /// Whether the binding commodity was a maintenance draw rather than a recipe
+    /// input — they report as different shortfall reasons.
+    tight_is_maintenance: bool,
+    /// Merged recipe inputs at **full rate**, `(commodity_id, quantity)`.
+    ///
+    /// Returned so the caller can reserve exactly what it was judged against
+    /// (issue #308) — reserving a re-derived list risks the two drifting apart.
+    ///
+    /// Maintenance is deliberately *not* here: upkeep is charged once per
+    /// building while inputs are charged per line, and it is a pure function of
+    /// the building's authored list, so both this function and the reservation
+    /// site derive it from the shared [`maintenance_draws`].
+    recipe_demands: Vec<(String, f64)>,
+}
+
+/// A building's per-sol maintenance draws at full rate, scaled by `multiplier`.
+///
+/// Shared by the affordability check and the reservation pass so the two cannot
+/// disagree about what upkeep costs (issue #308).
+fn maintenance_draws(maintenance: &[Ingredient], multiplier: f64) -> Vec<(String, f64)> {
+    let mut out: Vec<(String, f64)> = Vec::new();
+    if multiplier <= 0.0 {
+        return out;
+    }
+    for ing in maintenance {
+        if ing.quantity <= 0.0 {
+            continue;
+        }
+        let scaled = ing.quantity * multiplier;
+        if let Some(existing) = out.iter_mut().find(|d| d.0 == ing.id) {
+            existing.1 += scaled;
+        } else {
+            out.push((ing.id.clone(), scaled));
+        }
+    }
+    out
+}
+
+/// How much of `commodity_id` is left after everything already reserved.
+fn unreserved(
+    stores: &ColonyStores<'_>,
+    reserved: &std::collections::HashMap<String, f64>,
+    commodity_id: &str,
+) -> f64 {
+    let held = stores.amount(commodity_id);
+    let claimed = reserved.get(commodity_id).copied().unwrap_or(0.0);
+    (held - claimed).max(0.0)
+}
+
+/// Add `amount` to the running reservation for `commodity_id`.
+fn reserve(reserved: &mut std::collections::HashMap<String, f64>, commodity_id: &str, amount: f64) {
+    if amount <= 0.0 {
+        return;
+    }
+    *reserved.entry(commodity_id.to_owned()).or_insert(0.0) += amount;
+}
+
+/// Judge what a building can run at, against the pool **minus what
+/// higher-priority buildings have already claimed** (issue #308).
+///
+/// `reserved` is what makes competing consumers honest. Before #308 every
+/// building was judged against the whole pool independently, so two buildings
+/// each needing the colony's last 10 water both concluded they could run at full
+/// rate — and both did, the second producing a full batch having consumed
+/// nothing, with no shortfall reported. Output was fabricated from an empty pool.
 fn compute_effective_input_ratio(
     stores: &ColonyStores<'_>,
+    reserved: &std::collections::HashMap<String, f64>,
     recipe: Option<&RecipeDef>,
     concurrent: &[&RecipeDef],
     maintenance: &[Ingredient],
     maintenance_multiplier: f64,
-) -> (f64, Option<String>, bool) {
+) -> InputAffordability {
     // Merged (id, quantity, has_recipe_demand) list, preserving deterministic
     // order: recipe inputs first (summed across the pick-one recipe and
     // every concurrent recipe — a multi-function building's simultaneous
@@ -951,17 +1075,11 @@ fn compute_effective_input_ratio(
             }
         }
     }
-    if maintenance_multiplier > 0.0 {
-        for ing in maintenance {
-            if ing.quantity <= 0.0 {
-                continue;
-            }
-            let scaled = ing.quantity * maintenance_multiplier;
-            if let Some(existing) = demands.iter_mut().find(|d| d.0 == ing.id) {
-                existing.1 += scaled;
-            } else {
-                demands.push((ing.id.clone(), scaled, false));
-            }
+    for (id, scaled) in maintenance_draws(maintenance, maintenance_multiplier) {
+        if let Some(existing) = demands.iter_mut().find(|d| d.0 == id) {
+            existing.1 += scaled;
+        } else {
+            demands.push((id, scaled, false));
         }
     }
 
@@ -970,7 +1088,7 @@ fn compute_effective_input_ratio(
     let mut tight_is_maintenance = false;
 
     for (id, qty, has_recipe_demand) in &demands {
-        let available = stores.amount(id);
+        let available = unreserved(stores, reserved, id);
         let r = (available / *qty).min(1.0);
         if r < ratio {
             ratio = r;
@@ -979,7 +1097,27 @@ fn compute_effective_input_ratio(
         }
     }
 
-    (ratio.max(0.0), tight, tight_is_maintenance)
+    // Split the merged list back out: inputs are charged per line, upkeep once
+    // per building, so they have to be reserved separately.
+    let mut recipe_demands: Vec<(String, f64)> = Vec::new();
+    for r in recipe.into_iter().chain(concurrent.iter().copied()) {
+        for ing in &r.inputs {
+            if ing.quantity <= 0.0 {
+                continue;
+            }
+            if let Some(existing) = recipe_demands.iter_mut().find(|d| d.0 == ing.id) {
+                existing.1 += ing.quantity;
+            } else {
+                recipe_demands.push((ing.id.clone(), ing.quantity));
+            }
+        }
+    }
+    InputAffordability {
+        ratio: ratio.max(0.0),
+        tight,
+        tight_is_maintenance,
+        recipe_demands,
+    }
 }
 
 /// Return the first **non-concurrent** (pick-one-eligible) recipe whose
@@ -1856,6 +1994,207 @@ mod tests {
             run_for(inputs[2].id).scale.abs() < 1e-6,
             "the unstaffed mine did not"
         );
+    }
+
+    // ── Competing consumers of one scarce input (issue #308) ─────────────────
+
+    /// Two buildings that each consume 10 water and produce 1 widget, plus a
+    /// generator so power is never the constraint.
+    fn make_registry_with_two_water_consumers() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        let building = |id: &str| BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: DEFAULT_BUILDING_PRIORITY,
+        };
+        for id in ["eater_a", "eater_b"] {
+            reg.insert_building(building(id));
+            reg.insert_recipe(RecipeDef {
+                id: format!("{id}_run"),
+                name: format!("{id}_run"),
+                building: id.into(),
+                cycle_sols: 1,
+                inputs: vec![Ingredient {
+                    id: "water".into(),
+                    quantity: 10.0,
+                }],
+                outputs: vec![Ingredient {
+                    id: "widget".into(),
+                    quantity: 1.0,
+                }],
+                concurrent: false,
+                line: None,
+                power_draw: 0.0,
+            });
+        }
+        reg
+    }
+
+    /// The bug #308 was really about: output fabricated from an empty pool.
+    ///
+    /// Both buildings used to be judged against the whole pool independently, so
+    /// each concluded it could run at full rate on the colony's last 10 water.
+    /// Both then ran at 1.0 and **two** widgets came out of enough water for one
+    /// — the second consuming nothing, with no shortfall reported.
+    #[test]
+    fn two_consumers_cannot_both_spend_the_same_scarce_input() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 10.0); // enough for exactly ONE of the two
+
+        let inputs = vec![
+            input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY),
+            input_at(1, "eater_b", DEFAULT_BUILDING_PRIORITY),
+        ];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        // The headline invariant: 10 water buys 1 widget, never 2.
+        assert!(
+            (pool.amount("widget") - 1.0).abs() < 1e-9,
+            "10 water must yield exactly 1 widget, got {}",
+            pool.amount("widget")
+        );
+        assert!(
+            pool.amount("water").abs() < 1e-9,
+            "all the water should be spent, got {} left",
+            pool.amount("water")
+        );
+
+        // And the scales agree with that: one ran, one didn't.
+        let scales: Vec<f64> = outcome.building_results.iter().map(|r| r.scale).collect();
+        let total: f64 = scales.iter().sum();
+        assert!(
+            (total - 1.0).abs() < 1e-9,
+            "combined scale must match the one batch the water affords, got {scales:?}"
+        );
+    }
+
+    /// The starved building says so, rather than reporting a silent zero.
+    #[test]
+    fn the_consumer_that_loses_the_input_reports_an_input_shortfall() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 10.0);
+
+        let inputs = vec![input_at(0, "eater_a", 1), input_at(1, "eater_b", 9)];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        let result = |bt: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == bt)
+                .expect("both buildings reported")
+        };
+        let starved = result("eater_b");
+        assert!(starved.scale.abs() < 1e-9);
+        assert!(
+            starved.shortfalls.iter().any(|s| matches!(
+                &s.reason,
+                ShortfallReason::InputShort { commodity_id } if commodity_id == "water"
+            )),
+            "expected an InputShort(water) on the starved building, got {:?}",
+            starved.shortfalls
+        );
+        // And the fed one is not falsely flagged.
+        assert!(result("eater_a").shortfalls.is_empty());
+    }
+
+    /// Priority decides who eats — the same lever that steers labour (#307).
+    ///
+    /// The better priority is given to the alphabetically-*later* building, so
+    /// passing requires priority to actually be read rather than the deterministic
+    /// name tiebreak producing the expected answer on its own.
+    #[test]
+    fn priority_decides_which_consumer_gets_the_scarce_input() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 10.0);
+
+        let inputs = vec![input_at(0, "eater_a", 9), input_at(1, "eater_b", 1)];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        let scale = |bt: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == bt)
+                .map(|r| r.scale)
+                .expect("present")
+        };
+        assert!(
+            (scale("eater_b") - 1.0).abs() < 1e-9,
+            "the priority-1 building runs, got {}",
+            scale("eater_b")
+        );
+        assert!(
+            scale("eater_a").abs() < 1e-9,
+            "the priority-9 building goes without, got {}",
+            scale("eater_a")
+        );
+    }
+
+    /// A shortage lands unevenly, but a partial remainder is still handed over —
+    /// the loser gets whatever the winner left rather than nothing.
+    #[test]
+    fn the_worse_priority_consumer_gets_the_remainder() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 15.0); // one full batch plus half of another
+
+        let inputs = vec![input_at(0, "eater_a", 1), input_at(1, "eater_b", 5)];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        let scale = |bt: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == bt)
+                .map(|r| r.scale)
+                .expect("present")
+        };
+        assert!((scale("eater_a") - 1.0).abs() < 1e-9);
+        assert!(
+            (scale("eater_b") - 0.5).abs() < 1e-9,
+            "the remainder is half a batch, got {}",
+            scale("eater_b")
+        );
+        assert!(
+            (pool.amount("widget") - 1.5).abs() < 1e-9,
+            "15 water buys 1.5 widgets, got {}",
+            pool.amount("widget")
+        );
+    }
+
+    /// Reservation must not throttle anything when there is plenty to go round.
+    #[test]
+    fn ample_input_still_lets_every_consumer_run_at_full_rate() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 1000.0);
+
+        let inputs = vec![
+            input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY),
+            input_at(1, "eater_b", DEFAULT_BUILDING_PRIORITY),
+        ];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        assert!(outcome
+            .building_results
+            .iter()
+            .all(|r| (r.scale - 1.0).abs() < 1e-9));
+        assert!((pool.amount("widget") - 2.0).abs() < 1e-9);
+        assert!((pool.amount("water") - 980.0).abs() < 1e-9);
     }
 
     // ── Deterministic for fixed seed ─────────────────────────────────────────
