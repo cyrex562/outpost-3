@@ -144,10 +144,11 @@ pub struct Colony {
     /// in [`Self::pool`] and shows in every readout; it is simply not offered to
     /// recipe inputs or building maintenance.
     ///
-    /// **Colonist needs are exempt.** Needs resolution runs in its own step
-    /// against the untouched pool, so a reserve withholds stock from industry
-    /// without ever starving the population — which is the whole point of
-    /// reserving food.
+    /// **Colonist needs are exempt.** Needs resolution is step 2 of the sol and
+    /// production is step 3, so colonists eat from the untouched pool *before* a
+    /// reserve throttles anything. A reserve therefore cannot starve the
+    /// population however large it is — which is the whole point of reserving
+    /// food.
     ///
     /// Absent or `0.0` means unreserved. `#[serde(default)]` so pre-#308 saves
     /// load with nothing withheld, matching their behaviour exactly.

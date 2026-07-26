@@ -2665,8 +2665,10 @@ impl GameEngine {
                         let deposits = colony_deposits.get(&colony.id).and_then(Option::as_ref);
                         let prod_outcome = colony::process_production_scaled(
                             // Player reserves ride in on the stores (#308): they
-                            // are a floor on what industry may draw, and the
-                            // needs step later this sol deliberately ignores them.
+                            // are a floor on what industry may draw. Step 2's
+                            // needs resolution above deliberately attaches none,
+                            // so colonists have already eaten from the untouched
+                            // pool by the time a reserve throttles anything.
                             &mut colony::ColonyStores::new(
                                 &mut colony.pool,
                                 &mut colony.resources,

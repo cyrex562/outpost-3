@@ -508,8 +508,11 @@ pub fn process_production_scaled(
     // reserve simply the first claim on the stockpile — one nobody outbids,
     // because nothing ever removes an entry from this map. That is why a reserve
     // needs no separate code path: it withholds stock from the whole production
-    // pass, recipe inputs and maintenance alike, while colonist needs run in
-    // their own later step against the untouched pool and can still eat it.
+    // pass, recipe inputs and maintenance alike, while colonist needs — resolved
+    // in step 2, *before* production even runs — see the untouched pool and can
+    // still eat it. Needs going first is what makes the reserve safe by
+    // construction: colonists are fed before industry is considered at all, so
+    // withholding stock can never starve them however large the reserve.
     let mut reserved: std::collections::HashMap<String, f64> = stores.reserve_claims();
 
     for input in order {
