@@ -466,4 +466,114 @@ mod tests {
             PackLoader::load(&raw).expect_err("self-referencing parent_body must be rejected");
         assert!(matches!(err, ContentError::UnknownParentBodyRef { .. }));
     }
+
+    // ── Authored staffing priorities (issue #307 stage 5) ────────────────────
+
+    /// Read the real `content/base/buildings.yaml`, or `None` when the
+    /// repository layout doesn't include `content/` beside the crate.
+    fn read_real_buildings_yaml() -> Option<String> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let root = std::path::Path::new(&manifest).parent()?.to_path_buf();
+        std::fs::read_to_string(root.join("content").join("base").join("buildings.yaml")).ok()
+    }
+
+    /// Every authored building carries an in-range staffing priority.
+    ///
+    /// `default_priority` is `#[serde(default)]`, so a missing one is silently
+    /// the middle band rather than an error — which means a new building can be
+    /// added without anyone deciding where it queues. This asserts the roster is
+    /// deliberately banded instead: several distinct values in use, none of them
+    /// out of range.
+    #[test]
+    fn every_authored_building_has_an_in_range_staffing_priority() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        assert!(
+            buildings.len() >= 40,
+            "expected the full authored roster, got {}",
+            buildings.len()
+        );
+
+        for b in &buildings {
+            assert!(
+                (1..=crate::content::types::MAX_BUILDING_PRIORITY).contains(&b.default_priority),
+                "{} has default_priority {} — outside 1..={}",
+                b.id,
+                b.default_priority,
+                crate::content::types::MAX_BUILDING_PRIORITY
+            );
+        }
+
+        let distinct: std::collections::BTreeSet<u8> =
+            buildings.iter().map(|b| b.default_priority).collect();
+        assert!(
+            distinct.len() >= 5,
+            "the roster should be spread across bands, not all one value; got {distinct:?}"
+        );
+    }
+
+    /// The authored ordering matches #307's stated intent: life support ahead of
+    /// research, research ahead of storage and housing.
+    ///
+    /// Pins the *relationships* rather than the exact numbers, so the bands can be
+    /// retuned freely but a change that puts a lab ahead of the oxygen scrubbers
+    /// fails here instead of quietly changing who starves in a shortage.
+    #[test]
+    fn authored_priorities_put_life_support_ahead_of_research() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let priority = |id: &str| {
+            buildings
+                .iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id} must exist in the roster"))
+                .default_priority
+        };
+
+        // Suffocation beats every other concern.
+        for life_support in ["life_support_module", "air_miner", "colony_hq"] {
+            assert!(
+                priority(life_support) < priority("greenhouse_dome"),
+                "{life_support} must be staffed before food"
+            );
+        }
+        // Starvation beats industry.
+        assert!(priority("greenhouse_dome") < priority("smelter"));
+        // Industry beats research — research is what you sacrifice in a crisis.
+        assert!(priority("smelter") < priority("research_lab"));
+        // And research still beats the crewless structures — #307's "a hab queues
+        // behind a lab", which holds precisely because these need no crew.
+        for passive in [
+            "warehouse",
+            "basic_habitat",
+            "habitat_pod",
+            "solar_array_mk1",
+        ] {
+            assert!(
+                priority("research_lab") < priority(passive),
+                "{passive} must queue behind research"
+            );
+        }
+
+        // But *staffed* housing is not a passive hab. A habitat_dome yields its 60
+        // housing only while crewed, so leaving it unstaffed evicts the population
+        // — it must not sit in the crewless band with the pods.
+        for staffed_housing in ["apartment_block", "habitat_dome"] {
+            assert!(
+                priority(staffed_housing) < priority("research_lab"),
+                "{staffed_housing} needs crew to provide housing at all, so it must \
+                 be staffed ahead of research"
+            );
+            assert!(
+                priority(staffed_housing) < priority("basic_habitat"),
+                "{staffed_housing} must outrank the crewless habs"
+            );
+        }
+    }
 }
