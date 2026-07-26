@@ -141,7 +141,41 @@ impl ModifierAccumulator {
 /// Applied after all tech bonuses: `effective = base × (1 + tech_sum) × difficulty`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DifficultyScalar {
+    /// Serialized as a flat list of `(quantity, scalar)` pairs, not as a JSON
+    /// object: [`ModifiableQuantity::ProductionRate`] is a newtype variant, and
+    /// `serde_json` — the save format — cannot use one as an object key. The
+    /// default grade table always seeds a `ProductionRate` entry, so every game
+    /// that set a difficulty failed to save with `"key must be a string"`
+    /// (issue #337).
+    #[serde(with = "scalars_serde")]
     scalars: std::collections::HashMap<ModifiableQuantity, f32>,
+}
+
+/// (De)serialize [`DifficultyScalar::scalars`] as a `Vec<(ModifiableQuantity, f32)>`.
+///
+/// See the field's doc comment for why the map form is unusable.
+mod scalars_serde {
+    use super::ModifiableQuantity;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub(super) fn serialize<S: Serializer>(
+        scalars: &HashMap<ModifiableQuantity, f32>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        // Sorted by debug form so save files stay byte-stable — `HashMap`
+        // iteration order is not stable across runs.
+        let mut pairs: Vec<(&ModifiableQuantity, &f32)> = scalars.iter().collect();
+        pairs.sort_by_key(|(q, _)| format!("{q:?}"));
+        pairs.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<ModifiableQuantity, f32>, D::Error> {
+        let pairs = Vec::<(ModifiableQuantity, f32)>::deserialize(deserializer)?;
+        Ok(pairs.into_iter().collect())
+    }
 }
 
 impl DifficultyScalar {

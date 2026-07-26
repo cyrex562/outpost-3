@@ -445,6 +445,7 @@ impl Snapshot {
 mod tests {
     use super::*;
     use crate::colony::Colony;
+    use crate::modifier::ModifiableQuantity;
     use crate::turn::GameState;
     use crate::{Command, GameEngine};
 
@@ -1045,6 +1046,15 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
             .expect("seed planet");
+        // Picking a difficulty is part of every real setup, and it seeds
+        // `DifficultyScalar` with a `ProductionRate(..)` key — the second
+        // unserializable-key bug in #337. Without this line the test passes
+        // while a real game still cannot be saved.
+        engine
+            .apply(&Command::SetDifficulty {
+                preset: DifficultyPreset::Hard,
+            })
+            .expect("set difficulty");
         engine.state.add_colony(Colony::new("Playtest"), 300);
         engine
             .apply(&Command::AdvanceColonySol)
@@ -1059,6 +1069,16 @@ mod tests {
         assert!(
             restored.planet_map.is_some_and(|m| !m.cells.is_empty()),
             "the seeded map must survive"
+        );
+        assert_eq!(
+            restored
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::ProductionRate("*".into())),
+            engine
+                .state
+                .difficulty_scalar
+                .scalar_for(&ModifiableQuantity::ProductionRate("*".into())),
+            "the difficulty scalar's newtype-variant key must round-trip"
         );
     }
 
