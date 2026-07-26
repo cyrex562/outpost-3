@@ -304,6 +304,13 @@ pub enum ServerEvent {
         added: u32,
         slot_capacity: u32,
     },
+    /// Construction blocked by the player's own commodity reserve (issue #355).
+    ConstructionStalledByReserve {
+        colony_id: String,
+        project_id: String,
+        building_type: String,
+        withheld: Vec<(String, f64)>,
+    },
     /// Construction made no progress for want of materials (issue #306).
     ConstructionStalled {
         colony_id: String,
@@ -506,6 +513,17 @@ impl ServerEvent {
                 building_type: building_type.clone(),
                 added: *added,
                 slot_capacity: *slot_capacity,
+            },
+            Event::ConstructionStalledByReserve {
+                colony_id,
+                project_id,
+                building_type,
+                withheld,
+            } => Self::ConstructionStalledByReserve {
+                colony_id: colony_id.to_string(),
+                project_id: project_id.to_string(),
+                building_type: building_type.clone(),
+                withheld: withheld.clone(),
             },
             Event::ConstructionStalled {
                 colony_id,

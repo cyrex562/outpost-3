@@ -193,12 +193,14 @@ pub enum Command {
         /// be empty.
         buildings: Vec<(String, u32)>,
     },
-    /// Withhold a quantity of one commodity from industry (issue #308).
+    /// Withhold a quantity of one commodity from discretionary use
+    /// (issues #308, #355).
     ///
     /// `amount` is a **floor on the stockpile**, not a transfer: reserved stock
-    /// stays in the colony pool and shows in every readout, but the production
-    /// pass will not draw the pool below it for recipe inputs or building
-    /// maintenance. `0.0` clears the reserve.
+    /// stays in the colony pool and shows in every readout, but nothing
+    /// discretionary will draw the pool below it — not recipe inputs, not
+    /// building maintenance, not construction instalments, and not trade export.
+    /// `0.0` clears the reserve.
     ///
     /// Colonist needs are exempt by design — reserving food is only meaningful
     /// if the colonists can still eat it while the fuel plant cannot.
@@ -1169,6 +1171,22 @@ pub enum Event {
         added: u32,
         /// The colony's total capacity after the expansion.
         slot_capacity: u32,
+    },
+    /// A colony's construction project made no progress because the player's own
+    /// commodity reserve withheld the materials (issue #355).
+    ///
+    /// Distinct from [`Event::ConstructionStalled`] because the advice is
+    /// opposite: the stock is *there*, behind a floor the player set. Reporting a
+    /// shortage would send them hunting for metal they already have.
+    ConstructionStalledByReserve {
+        /// Colony whose queue is blocked.
+        colony_id: ColonyId,
+        /// The project that could not be funded.
+        project_id: ProjectId,
+        /// Content-pack key of the building it would produce.
+        building_type: String,
+        /// Per-commodity amount the reserve withheld from this sol's instalment.
+        withheld: Vec<(String, f64)>,
     },
     /// A colony's active construction project made no progress this sol because
     /// the pool could not fund its materials instalment (issue #306).
@@ -2413,7 +2431,10 @@ impl GameEngine {
                     // Materials are drawn in per-sol instalments (issue #306);
                     // an unfunded sol stalls the project instead of advancing
                     // it for free.
-                    match colony.build_queue.tick_active_charging(&mut colony.pool) {
+                    match colony
+                        .build_queue
+                        .tick_active_charging(&mut colony.pool, &colony.commodity_reserves)
+                    {
                         colony::ConstructionTick::Idle => {}
                         colony::ConstructionTick::Progressed => {
                             colony.pool.withdraw("labor", labor);
@@ -2428,6 +2449,18 @@ impl GameEngine {
                                 project_id,
                                 building_type,
                                 missing,
+                            });
+                        }
+                        colony::ConstructionTick::StalledByReserve {
+                            project_id,
+                            building_type,
+                            withheld,
+                        } => {
+                            events.push(Event::ConstructionStalledByReserve {
+                                colony_id: colony.id,
+                                project_id,
+                                building_type,
+                                withheld,
                             });
                         }
                         colony::ConstructionTick::Completed(completed) => {
@@ -2472,8 +2505,17 @@ impl GameEngine {
                 // ── Step 1b: Outpost construction (issue #233) ──────────────
                 // No `labor` withdrawal — outposts have no population to fund
                 // one from; see `outpost::Outpost`'s module doc comment.
+                //
+                // No reserves either (#355): nothing addresses an outpost's stock
+                // with a player floor, and their pools exist to feed the parent
+                // colony rather than to be rationed against themselves.
+                let no_reserves: std::collections::HashMap<String, f64> =
+                    std::collections::HashMap::new();
                 for out in &mut self.state.outposts {
-                    match out.build_queue.tick_active_charging(&mut out.pool) {
+                    match out
+                        .build_queue
+                        .tick_active_charging(&mut out.pool, &no_reserves)
+                    {
                         colony::ConstructionTick::Idle | colony::ConstructionTick::Progressed => {}
                         colony::ConstructionTick::Stalled {
                             project_id,
@@ -2485,6 +2527,22 @@ impl GameEngine {
                                 project_id,
                                 building_type,
                                 missing,
+                            });
+                        }
+                        // Outposts are handed an empty reserve map above, so a
+                        // reserve can never be what stopped them. Reported as an
+                        // ordinary stall rather than dropped, so the queue still
+                        // explains itself if that ever changes.
+                        colony::ConstructionTick::StalledByReserve {
+                            project_id,
+                            building_type,
+                            withheld,
+                        } => {
+                            events.push(Event::OutpostConstructionStalled {
+                                outpost_id: out.id,
+                                project_id,
+                                building_type,
+                                missing: withheld,
                             });
                         }
                         colony::ConstructionTick::Completed(completed) => {
@@ -8023,24 +8081,18 @@ mod tests {
         );
     }
 
-    /// **Construction is not gated by a reserve** (issue #308 + #306).
+    /// A reserve now protects stock from the build queue too (issue #355).
     ///
-    /// Pins a real gap rather than asserting a virtue: `tick_active_charging`
-    /// draws construction materials straight from [`colony::ColonyPool`], never
-    /// through [`colony::ColonyStores`], so it never sees the reserve. A player
-    /// who reserves metal to protect their upkeep will still watch a build queue
-    /// eat it.
-    ///
-    /// That may well be the wrong call now that #306 made construction cost
-    /// materials at all, but it is the *current* call, and it should change
-    /// deliberately rather than by accident — so this test fails if the
-    /// behaviour drifts either way.
+    /// Until #355 the build queue drew straight from `ColonyPool`, never through
+    /// `ColonyStores`, so it never saw the floor — a player reserving metal for
+    /// upkeep watched a build queue spend it. This test previously pinned that
+    /// behaviour deliberately; it now pins the fix.
     #[test]
-    fn a_reserve_does_not_protect_stock_from_the_build_queue() {
+    fn a_reserve_protects_stock_from_the_build_queue() {
         let mut engine = GameEngine::new();
         let events = engine
             .apply(&Command::FoundColony {
-                name: "Building Anyway".into(),
+                name: "Rationed Build".into(),
                 starting_population: 100,
             })
             .unwrap();
@@ -8069,14 +8121,83 @@ mod tests {
             })
             .unwrap();
 
-        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
 
         let idx = engine.find_colony_index(colony_id).unwrap();
         assert!(
-            (engine.state.colonies[idx].pool.amount("steel") - 50.0).abs() < 1e-6,
-            "construction currently ignores the reserve and drew its instalment; \
-             got {} steel left",
+            (engine.state.colonies[idx].pool.amount("steel") - 100.0).abs() < 1e-9,
+            "the reserve must be intact, got {} steel left",
             engine.state.colonies[idx].pool.amount("steel")
+        );
+        assert_eq!(
+            engine.state.colonies[idx].build_queue.projects[0].turns_completed, 0,
+            "an unfunded sol must not advance the project"
+        );
+
+        // And it says the reserve is why — not that materials are missing, which
+        // would send the player hunting for steel they already have.
+        let withheld = evs
+            .iter()
+            .find_map(|e| match e {
+                Event::ConstructionStalledByReserve { withheld, .. } => Some(withheld),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected ConstructionStalledByReserve, got {evs:?}"));
+        let steel = withheld.iter().find(|(id, _)| id == "steel").unwrap();
+        assert!((steel.1 - 50.0).abs() < 1e-9, "withheld {}", steel.1);
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::ConstructionStalled { .. })),
+            "a reserve-caused stall must not also report as a plain shortage"
+        );
+    }
+
+    /// A genuine shortage still reports as one even when a reserve is also set —
+    /// the two causes must not collapse into each other.
+    #[test]
+    fn a_real_shortage_outranks_the_reserve_explanation() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Genuinely Short".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        // Nowhere near enough steel even ignoring the reserve.
+        engine.state.colonies[idx].pool.deposit("steel", 5.0);
+        engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "steel".into(),
+                amount: 2.0,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 100.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::ConstructionStalled { .. })),
+            "expected a plain ConstructionStalled, got {evs:?}"
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::ConstructionStalledByReserve { .. })),
+            "raw stock could not cover this, so the reserve is not the cause"
         );
     }
 

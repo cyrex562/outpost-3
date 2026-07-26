@@ -271,8 +271,25 @@ pub enum ConstructionTick {
         project_id: ProjectId,
         /// Content-pack key of the building it would produce.
         building_type: String,
-        /// Per-commodity amount still needed to fund this sol.
+        /// Per-commodity amount still needed to fund this sol, measured against
+        /// stock the build queue is actually allowed to spend.
         missing: Vec<(String, f64)>,
+    },
+    /// The instalment was affordable from raw stock but not from *unreserved*
+    /// stock, so the player's own commodity reserve is what stopped it
+    /// (issue #355).
+    ///
+    /// Split from [`Self::Stalled`] because the two need opposite advice. A
+    /// genuine shortage says "go get more"; this says "you asked me not to spend
+    /// this" — and reporting it as a shortage would have the player hunting for
+    /// metal while a full warehouse sits behind their own floor.
+    StalledByReserve {
+        /// The project that could not be funded.
+        project_id: ProjectId,
+        /// Content-pack key of the building it would produce.
+        building_type: String,
+        /// Per-commodity amount the reserve withheld from this sol's instalment.
+        withheld: Vec<(String, f64)>,
     },
     /// The instalment was paid and the project advanced but is not finished.
     Progressed,
@@ -321,19 +338,41 @@ impl ConstructionQueue {
     /// This is the production path; [`Self::tick_active`] is the unfunded
     /// primitive it delegates to. Prefer this everywhere a real colony or
     /// outpost queue advances, so that `construction_cost` is actually paid.
-    pub fn tick_active_charging(&mut self, pool: &mut super::ColonyPool) -> ConstructionTick {
+    pub fn tick_active_charging(
+        &mut self,
+        pool: &mut super::ColonyPool,
+        reserves: &std::collections::HashMap<String, f64>,
+    ) -> ConstructionTick {
         let Some(active) = self.projects.first() else {
             return ConstructionTick::Idle;
         };
         let instalment = active.materials_draw_per_turn();
+        // Spendable stock is what sits above the player's floor (issue #355).
+        let spendable = |id: &str| {
+            let floor = reserves.get(id).copied().unwrap_or(0.0).max(0.0);
+            (pool.amount(id) - floor).max(0.0)
+        };
         let missing: Vec<(String, f64)> = instalment
             .iter()
             .filter_map(|(id, qty)| {
-                let short = qty - pool.amount(id);
+                let short = qty - spendable(id);
                 (short > AFFORDABILITY_EPSILON).then(|| (id.clone(), short))
             })
             .collect();
         if !missing.is_empty() {
+            // Distinguish "you don't have it" from "you told me not to spend it"
+            // (#355): if raw stock would have covered every commodity, the floor
+            // is the only thing in the way.
+            let raw_covers_everything = instalment
+                .iter()
+                .all(|(id, qty)| qty - pool.amount(id) <= AFFORDABILITY_EPSILON);
+            if raw_covers_everything {
+                return ConstructionTick::StalledByReserve {
+                    project_id: active.id,
+                    building_type: active.building_type.clone(),
+                    withheld: missing,
+                };
+            }
             return ConstructionTick::Stalled {
                 project_id: active.id,
                 building_type: active.building_type.clone(),
@@ -372,6 +411,11 @@ impl ConstructionQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No player reserves — the default for tests that aren't about #355.
+    fn no_reserves() -> std::collections::HashMap<String, f64> {
+        std::collections::HashMap::new()
+    }
 
     fn sample_project(total_turns: u32) -> ConstructionProject {
         ConstructionProject::new(
@@ -447,12 +491,12 @@ mod tests {
         q.enqueue(sample_project(3)); // 3 turns → 33.333… steel per sol
 
         for turn in 1..=2 {
-            match q.tick_active_charging(&mut pool) {
+            match q.tick_active_charging(&mut pool, &no_reserves()) {
                 ConstructionTick::Progressed => {}
                 other => panic!("turn {turn} should progress, got {other:?}"),
             }
         }
-        match q.tick_active_charging(&mut pool) {
+        match q.tick_active_charging(&mut pool, &no_reserves()) {
             ConstructionTick::Completed(done) => assert_eq!(done.building_type, "greenhouse"),
             other => panic!("final turn should complete, got {other:?}"),
         }
@@ -474,7 +518,7 @@ mod tests {
         let mut q = ConstructionQueue::new();
         q.enqueue(sample_project(4)); // needs 25 steel + 12.5 glass per sol
 
-        match q.tick_active_charging(&mut pool) {
+        match q.tick_active_charging(&mut pool, &no_reserves()) {
             ConstructionTick::Stalled {
                 building_type,
                 missing,
@@ -503,7 +547,7 @@ mod tests {
         let mut pool = super::super::ColonyPool::new();
         let mut q = ConstructionQueue::new();
         assert!(matches!(
-            q.tick_active_charging(&mut pool),
+            q.tick_active_charging(&mut pool, &no_reserves()),
             ConstructionTick::Idle
         ));
     }
@@ -519,7 +563,7 @@ mod tests {
 
         for _ in 0..4 {
             assert!(matches!(
-                q.tick_active_charging(&mut pool),
+                q.tick_active_charging(&mut pool, &no_reserves()),
                 ConstructionTick::Stalled { .. }
             ));
         }
