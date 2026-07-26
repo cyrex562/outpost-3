@@ -219,14 +219,17 @@ pub fn default_grade_table() -> DifficultyGradeTable {
         brutal: 2.00,
     });
 
-    // Slot capacity — harder difficulty reduces available build slots.
+    // Construction cost — harder difficulty makes building more expensive in
+    // materials (issue #306). Normal is the authored baseline; the easy end
+    // scales down to a quarter cost rather than up, so the authored numbers
+    // read as the intended difficulty rather than as a discount.
     table.add_row(DifficultyGradeRow {
-        quantity: ModifiableQuantity::SlotCapacity,
-        sandbox: 1.50,
-        easy: 1.20,
+        quantity: ModifiableQuantity::ConstructionCost,
+        sandbox: 0.25,
+        easy: 0.60,
         normal: 1.00,
-        hard: 0.85,
-        brutal: 0.70,
+        hard: 1.30,
+        brutal: 1.60,
     });
 
     // Resource consumption — harder difficulty increases per-capita drain.
@@ -534,7 +537,7 @@ mod tests {
         let normal = table.build_scalar(DifficultyPreset::Normal);
         // Every new row should resolve to 1.0 at Normal (baseline).
         for q in [
-            ModifiableQuantity::SlotCapacity,
+            ModifiableQuantity::ConstructionCost,
             ModifiableQuantity::ResourceConsumption,
             ModifiableQuantity::ResearchCost,
             ModifiableQuantity::PowerRequirement,

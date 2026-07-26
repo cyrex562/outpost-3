@@ -163,7 +163,13 @@ pub struct ConstructionProject {
     pub slot_cost: u32,
     /// Labor units consumed from the colony pool each turn.
     pub labor_per_turn: u32,
-    /// Construction cost list for partial-refund calculation.
+    /// Total commodity cost of the project, drawn from the owning pool in
+    /// equal per-sol instalments as construction proceeds (issue #306).
+    ///
+    /// Also the basis for [`Self::cancel_refund`]. Costs are paid over time
+    /// rather than up front so that refund-on-cancel is coherent: refunding
+    /// half of the *progress-proportional* spend only means anything if spend
+    /// tracks progress.
     pub construction_cost: Vec<(String, f64)>,
     /// Total number of turns required to complete construction.
     pub total_turns: u32,
@@ -208,6 +214,27 @@ impl ConstructionProject {
         }
     }
 
+    /// The commodity instalment owed for one sol of construction (issue #306).
+    ///
+    /// Total cost spread evenly across [`Self::total_turns`], so after `n` sols
+    /// exactly `n / total_turns` of the cost has been drawn — which is what
+    /// makes [`Self::cancel_refund`]'s use of [`Self::progress_fraction`] as a
+    /// stand-in for "fraction spent" correct.
+    ///
+    /// A zero-turn project (completes on its first tick) owes the whole cost at
+    /// once rather than dividing by zero.
+    #[must_use]
+    pub fn materials_draw_per_turn(&self) -> Vec<(String, f64)> {
+        if self.total_turns == 0 {
+            return self.construction_cost.clone();
+        }
+        let turns = f64::from(self.total_turns);
+        self.construction_cost
+            .iter()
+            .map(|(id, qty)| (id.clone(), qty / turns))
+            .collect()
+    }
+
     /// Compute the 50 % commodity refund for cancelling this project.
     ///
     /// Only costs already spent (proportional to `turns_completed`) are
@@ -220,6 +247,38 @@ impl ConstructionProject {
             .map(|(id, qty)| (id.clone(), qty * fraction_spent * 0.5))
             .collect()
     }
+}
+
+/// Tolerance for "can this pool afford the instalment" checks.
+///
+/// An instalment is `total / turns`, so summing every instalment need not
+/// reproduce the total bit-for-bit. Without slack, a pool stocked with exactly
+/// the authored cost can stall on the final sol by a rounding crumb.
+const AFFORDABILITY_EPSILON: f64 = 1e-9;
+
+/// What one sol of construction did to the active project (issue #306).
+#[derive(Debug, Clone)]
+pub enum ConstructionTick {
+    /// The queue is empty; nothing was charged.
+    Idle,
+    /// The pool could not cover this sol's instalment, so **nothing** was
+    /// withdrawn and progress did not advance.
+    ///
+    /// All-or-nothing deliberately: a partial draw would consume materials
+    /// while buying no progress, which reads to the player as theft.
+    Stalled {
+        /// The project that could not be funded.
+        project_id: ProjectId,
+        /// Content-pack key of the building it would produce.
+        building_type: String,
+        /// Per-commodity amount still needed to fund this sol.
+        missing: Vec<(String, f64)>,
+    },
+    /// The instalment was paid and the project advanced but is not finished.
+    Progressed,
+    /// The instalment was paid and the project finished; the caller should
+    /// place the resulting building.
+    Completed(ConstructionProject),
 }
 
 /// The ordered queue of in-progress construction projects for one colony.
@@ -256,10 +315,49 @@ impl ConstructionQueue {
         }
     }
 
+    /// Charge one sol of construction materials to `pool`, then advance the
+    /// active project (issue #306).
+    ///
+    /// This is the production path; [`Self::tick_active`] is the unfunded
+    /// primitive it delegates to. Prefer this everywhere a real colony or
+    /// outpost queue advances, so that `construction_cost` is actually paid.
+    pub fn tick_active_charging(&mut self, pool: &mut super::ColonyPool) -> ConstructionTick {
+        let Some(active) = self.projects.first() else {
+            return ConstructionTick::Idle;
+        };
+        let instalment = active.materials_draw_per_turn();
+        let missing: Vec<(String, f64)> = instalment
+            .iter()
+            .filter_map(|(id, qty)| {
+                let short = qty - pool.amount(id);
+                (short > AFFORDABILITY_EPSILON).then(|| (id.clone(), short))
+            })
+            .collect();
+        if !missing.is_empty() {
+            return ConstructionTick::Stalled {
+                project_id: active.id,
+                building_type: active.building_type.clone(),
+                missing,
+            };
+        }
+        for (id, qty) in &instalment {
+            // `withdraw` clamps to what's held, which absorbs the epsilon of
+            // slack the affordability check above allows.
+            pool.withdraw(id, *qty);
+        }
+        match self.tick_active() {
+            Some(done) => ConstructionTick::Completed(done),
+            None => ConstructionTick::Progressed,
+        }
+    }
+
     /// Advance the active (first) project by one turn; return it if complete.
     ///
     /// Returns `Some(project)` when the project just finished (caller should
     /// add a [`PlacedBuilding`] and pop the queue), or `None` if not yet done.
+    ///
+    /// Charges nothing — see [`Self::tick_active_charging`] for the funded
+    /// version used by the turn processor.
     pub fn tick_active(&mut self) -> Option<ConstructionProject> {
         let active = self.projects.first_mut()?;
         active.turns_completed += 1;
@@ -316,6 +414,118 @@ mod tests {
         let refund = p.cancel_refund();
         for (_, qty) in &refund {
             assert!(*qty < 1e-9);
+        }
+    }
+
+    #[test]
+    fn materials_draw_splits_cost_across_turns() {
+        let p = sample_project(4);
+        let draw = p.materials_draw_per_turn();
+        let steel = draw.iter().find(|(id, _)| id == "steel").unwrap();
+        let glass = draw.iter().find(|(id, _)| id == "glass").unwrap();
+        assert!((steel.1 - 25.0).abs() < 1e-9);
+        assert!((glass.1 - 12.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn materials_draw_for_zero_turn_project_is_the_whole_cost() {
+        let p = sample_project(0);
+        let draw = p.materials_draw_per_turn();
+        let steel = draw.iter().find(|(id, _)| id == "steel").unwrap();
+        assert!((steel.1 - 100.0).abs() < 1e-9);
+    }
+
+    /// A pool stocked with exactly the authored cost must fund every sol,
+    /// including the last — the instalments need not re-sum to the total
+    /// bit-for-bit, which is what [`AFFORDABILITY_EPSILON`] absorbs.
+    #[test]
+    fn exact_stock_funds_construction_to_completion() {
+        let mut pool = super::super::ColonyPool::new();
+        pool.deposit("steel", 100.0);
+        pool.deposit("glass", 50.0);
+        let mut q = ConstructionQueue::new();
+        q.enqueue(sample_project(3)); // 3 turns → 33.333… steel per sol
+
+        for turn in 1..=2 {
+            match q.tick_active_charging(&mut pool) {
+                ConstructionTick::Progressed => {}
+                other => panic!("turn {turn} should progress, got {other:?}"),
+            }
+        }
+        match q.tick_active_charging(&mut pool) {
+            ConstructionTick::Completed(done) => assert_eq!(done.building_type, "greenhouse"),
+            other => panic!("final turn should complete, got {other:?}"),
+        }
+        assert!(
+            pool.amount("steel") < 1e-6,
+            "steel: {}",
+            pool.amount("steel")
+        );
+        assert!(q.projects.is_empty());
+    }
+
+    /// An unaffordable sol must withdraw **nothing** — a partial draw would
+    /// consume materials while buying no progress.
+    #[test]
+    fn stalled_tick_withdraws_nothing_and_makes_no_progress() {
+        let mut pool = super::super::ColonyPool::new();
+        pool.deposit("steel", 100.0); // plenty of steel …
+        pool.deposit("glass", 1.0); // … but nowhere near enough glass
+        let mut q = ConstructionQueue::new();
+        q.enqueue(sample_project(4)); // needs 25 steel + 12.5 glass per sol
+
+        match q.tick_active_charging(&mut pool) {
+            ConstructionTick::Stalled {
+                building_type,
+                missing,
+                ..
+            } => {
+                assert_eq!(building_type, "greenhouse");
+                let glass = missing.iter().find(|(id, _)| id == "glass").unwrap();
+                assert!((glass.1 - 11.5).abs() < 1e-9, "missing glass: {}", glass.1);
+                assert!(
+                    !missing.iter().any(|(id, _)| id == "steel"),
+                    "steel is in stock and must not be reported missing"
+                );
+            }
+            other => panic!("expected a stall, got {other:?}"),
+        }
+        assert!(
+            (pool.amount("steel") - 100.0).abs() < 1e-9,
+            "steel was spent"
+        );
+        assert!((pool.amount("glass") - 1.0).abs() < 1e-9, "glass was spent");
+        assert_eq!(q.projects[0].turns_completed, 0);
+    }
+
+    #[test]
+    fn charging_tick_on_empty_queue_is_idle() {
+        let mut pool = super::super::ColonyPool::new();
+        let mut q = ConstructionQueue::new();
+        assert!(matches!(
+            q.tick_active_charging(&mut pool),
+            ConstructionTick::Idle
+        ));
+    }
+
+    /// A project that stalls at 0 % must refund nothing, so cancelling it
+    /// cannot mint materials that were never paid.
+    #[test]
+    fn stalled_project_refunds_nothing_on_cancel() {
+        let mut pool = super::super::ColonyPool::new();
+        let mut q = ConstructionQueue::new();
+        q.enqueue(sample_project(4));
+        let project_id = q.projects[0].id;
+
+        for _ in 0..4 {
+            assert!(matches!(
+                q.tick_active_charging(&mut pool),
+                ConstructionTick::Stalled { .. }
+            ));
+        }
+        let cancelled = q.cancel(project_id).unwrap();
+        for (_, qty) in cancelled.cancel_refund() {
+            assert!(qty < 1e-9, "refund from an unpaid project: {qty}");
         }
     }
 

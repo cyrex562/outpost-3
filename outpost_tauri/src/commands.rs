@@ -284,6 +284,20 @@ pub enum ServerEvent {
         colony_id: String,
         building_type: String,
     },
+    /// Construction made no progress for want of materials (issue #306).
+    ConstructionStalled {
+        colony_id: String,
+        project_id: String,
+        building_type: String,
+        missing: Vec<(String, f64)>,
+    },
+    /// An outpost's construction made no progress for want of materials.
+    OutpostConstructionStalled {
+        outpost_id: String,
+        project_id: String,
+        building_type: String,
+        missing: Vec<(String, f64)>,
+    },
     LabourAssigned {
         colony_id: String,
         slot: String,
@@ -450,6 +464,28 @@ impl ServerEvent {
             } => Self::BuildingConstructed {
                 colony_id: colony_id.to_string(),
                 building_type: building_type.clone(),
+            },
+            Event::ConstructionStalled {
+                colony_id,
+                project_id,
+                building_type,
+                missing,
+            } => Self::ConstructionStalled {
+                colony_id: colony_id.to_string(),
+                project_id: project_id.to_string(),
+                building_type: building_type.clone(),
+                missing: missing.clone(),
+            },
+            Event::OutpostConstructionStalled {
+                outpost_id,
+                project_id,
+                building_type,
+                missing,
+            } => Self::OutpostConstructionStalled {
+                outpost_id: outpost_id.to_string(),
+                project_id: project_id.to_string(),
+                building_type: building_type.clone(),
+                missing: missing.clone(),
             },
             Event::LabourAssigned {
                 colony_id,
@@ -755,9 +791,9 @@ const SLIDER_KNOBS: &[(&str, &str, ModifiableQuantityKey)] = &[
         ModifiableQuantityKey::HazardProbability,
     ),
     (
-        "slot_capacity",
-        "Slot Capacity",
-        ModifiableQuantityKey::SlotCapacity,
+        "construction_cost",
+        "Construction Cost",
+        ModifiableQuantityKey::ConstructionCost,
     ),
     (
         "resource_consumption",
@@ -793,7 +829,7 @@ enum ModifiableQuantityKey {
     PopulationGrowth,
     StabilityRate,
     HazardProbability,
-    SlotCapacity,
+    ConstructionCost,
     ResourceConsumption,
     ResearchCost,
     PowerRequirement,
@@ -810,7 +846,7 @@ impl ModifiableQuantityKey {
             Self::PopulationGrowth => ModifiableQuantity::PopulationGrowth,
             Self::StabilityRate => ModifiableQuantity::StabilityRate,
             Self::HazardProbability => ModifiableQuantity::HazardProbability,
-            Self::SlotCapacity => ModifiableQuantity::SlotCapacity,
+            Self::ConstructionCost => ModifiableQuantity::ConstructionCost,
             Self::ResourceConsumption => ModifiableQuantity::ResourceConsumption,
             Self::ResearchCost => ModifiableQuantity::ResearchCost,
             Self::PowerRequirement => ModifiableQuantity::PowerRequirement,

@@ -46,6 +46,25 @@ export interface BuildingConstructedEvent {
   building_type: string
 }
 
+/** Construction made no progress for want of materials (issue #306). */
+export interface ConstructionStalledEvent {
+  kind: 'construction_stalled'
+  colony_id: string
+  project_id: string
+  building_type: string
+  /** Per-commodity amount still needed to fund this sol. */
+  missing: [string, number][]
+}
+
+/** An outpost's construction made no progress for want of materials. */
+export interface OutpostConstructionStalledEvent {
+  kind: 'outpost_construction_stalled'
+  outpost_id: string
+  project_id: string
+  building_type: string
+  missing: [string, number][]
+}
+
 export interface LabourAssignedEvent {
   kind: 'labour_assigned'
   colony_id: string
@@ -259,6 +278,8 @@ export type ServerEvent =
   | ConstructionQueuedEvent
   | ConstructionCancelledEvent
   | BuildingConstructedEvent
+  | ConstructionStalledEvent
+  | OutpostConstructionStalledEvent
   | LabourAssignedEvent
   | NeedsResolvedEvent
   | ResearchProducedEvent
