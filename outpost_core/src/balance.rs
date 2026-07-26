@@ -25,6 +25,7 @@
 //!     tech_prerequisite: None,
 //!     maintenance: vec![],
 //!     default_priority: 5,
+//!     grants_slot_capacity: 0,
 //! };
 //! let mine_recipe = RecipeDef {
 //!     id: "mine_ore".into(),
@@ -347,6 +348,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         }
     }
 

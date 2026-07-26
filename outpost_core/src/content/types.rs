@@ -222,6 +222,13 @@ pub enum BuildingCategory {
     /// Administrative, commercial, and other non-production colony services
     /// (issue #166).
     Services,
+    /// Site preparation that expands what the colony can physically host —
+    /// graded pads, roads, connecting tubes, buried utility runs (issue #306).
+    ///
+    /// Projects in this category typically complete into
+    /// [`BuildingDef::grants_slot_capacity`] rather than into a standing
+    /// building.
+    Infrastructure,
     /// Generic / uncategorised.
     Other,
 }
@@ -283,6 +290,25 @@ pub struct BuildingDef {
     /// unauthored building competes on equal footing.
     #[serde(default = "default_priority")]
     pub default_priority: u8,
+    /// Build slots this project adds to the colony on completion (issue #306).
+    ///
+    /// Non-zero makes this a **site-preparation project rather than a
+    /// building**: it completes into [`crate::colony::Colony::slot_capacity`]
+    /// and never becomes a [`PlacedBuilding`], so it occupies no slot, employs
+    /// nobody, and runs no recipe. This is how a colony grows past
+    /// [`BASE_SLOT_CAPACITY`] — capacity is bought with construction materials,
+    /// not handed out by difficulty preset.
+    ///
+    /// Such a project must be authored with `slot_cost: 0`. A slot-granting
+    /// project that consumed a slot would deadlock a full colony: the only way
+    /// to make room would need room it does not have.
+    ///
+    /// `0` — the default — leaves a building behaving exactly as before.
+    ///
+    /// [`PlacedBuilding`]: crate::colony::PlacedBuilding
+    /// [`BASE_SLOT_CAPACITY`]: crate::colony::BASE_SLOT_CAPACITY
+    #[serde(default)]
+    pub grants_slot_capacity: u32,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).

@@ -39,29 +39,45 @@ test('set a building’s staffing priority, rename it, and pin its labour', asyn
   await page.getByTestId('start-game-btn').click()
   await expect(page).toHaveURL(/#\/colony/)
 
-  // ── Seed one building on the newest colony (see the note above) ──
+  // ── Seed a colony of our own with one building on it (see the note above) ──
   //
-  // The server is reused between runs, so take the last colony rather than the
-  // first: that's the one this run just created.
-  const colonies = (await (await request.get(`${API}/api/colonies`)).json()) as {
+  // Founded here rather than reusing whichever colony the new-game bootstrap
+  // produced: the backend is shared across the run, `deploy_starter_kit` is
+  // one-shot per colony, and picking one out of `/api/colonies` by position made
+  // this depend on what earlier specs had already done to the server.
+  const preexisting = (await (await request.get(`${API}/api/colonies`)).json()) as {
     Colonies: { id: string }[]
   }
-  expect(colonies.Colonies.length).toBeGreaterThan(0)
-  const colonyId = colonies.Colonies[colonies.Colonies.length - 1].id
+  const known = new Set(preexisting.Colonies.map((c) => c.id))
+
+  const found = await request.post(`${API}/api/command`, {
+    data: { kind: 'found_colony', name: 'Staffing Fixture', starting_population: 100 },
+  })
+  expect(found.ok()).toBeTruthy()
+
+  const refreshed = (await (await request.get(`${API}/api/colonies`)).json()) as {
+    Colonies: { id: string }[]
+  }
+  const colonyId = refreshed.Colonies.map((c) => c.id).find((id) => !known.has(id))
+  expect(colonyId, 'the founded colony should be new to /api/colonies').toBeTruthy()
 
   const deploy = await request.post(`${API}/api/command`, {
     data: { kind: 'deploy_starter_kit', colony_id: colonyId, buildings: [['colony_hq', 1]] },
   })
   expect(deploy.ok()).toBeTruthy()
 
-  // ── Reload so the app refetches the colony screen and sees the seeded building ──
+  // ── Navigate to the seeded colony so the app refetches and sees the building ──
   //
-  // The new-game redirect already left us on this colony, but its screen was
-  // fetched before the seed landed. A reload is the cheapest way to refetch; it
-  // also proves the browser-mode `/api/colony-screen/:id` path works from a cold
-  // start rather than only after a command.
-  expect(page.url()).toContain(colonyId)
-  await page.reload()
+  // Addressed explicitly rather than by relying on the new-game redirect: the
+  // `colonyId` route param is optional, so that redirect can land on a bare
+  // `#/colony` showing whichever colony the view defaults to. With the backend
+  // shared across the whole spec file, that is not necessarily the colony seeded
+  // above — which made this order-dependent when other specs ran first.
+  //
+  // A fresh navigation also proves the browser-mode `/api/colony-screen/:id`
+  // path works from a cold start rather than only after a command.
+  await page.goto(`/#/colony/${colonyId}`)
+  await expect(page).toHaveURL(new RegExp(colonyId))
   await expect(page.getByTestId('buildings-panel')).toBeVisible({ timeout: 15_000 })
 
   const prioritySelects = page.locator('[data-testid^="building-priority-"]')

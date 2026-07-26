@@ -348,6 +348,29 @@
     - type: bonus
       category: construction_speed
       value: 0.15
+    # Panels arrive as prefabricated utility spines rather than being built
+    # up on site, so a site-prep pad needs less metal and less time (#306).
+    - type: reduce_infrastructure_project
+      cost_fraction: 0.15
+      time_fraction: 0.10
+
+- id: modular_site_works
+  name: Modular Site Works
+  description: >
+    Standardised pad templates and automated grading plant. Site preparation
+    stops being bespoke civil engineering and becomes a repeatable operation,
+    so every build-slot expansion costs less and lands sooner. Stacks
+    multiplicatively with structural_composites rather than adding to it, so
+    expansion approaches a floor instead of reaching zero.
+  category: engineering
+  tier: 3
+  research_cost: 850.0
+  prerequisites:
+    - basic_construction
+  effects:
+    - type: reduce_infrastructure_project
+      cost_fraction: 0.25
+      time_fraction: 0.25
 
 - id: theoretical_physics
   name: Theoretical Physics

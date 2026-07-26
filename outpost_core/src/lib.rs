@@ -1134,6 +1134,36 @@ pub enum Event {
         /// Content-pack key of the completed building.
         building_type: String,
     },
+    /// A site-preparation project completed and widened the colony's build-slot
+    /// capacity (issue #306).
+    ///
+    /// Fires *instead of* [`Event::BuildingConstructed`]: the project's product
+    /// is capacity, so nothing is placed.
+    SlotCapacityExpanded {
+        /// Colony that grew.
+        colony_id: ColonyId,
+        /// Content-pack key of the completed project.
+        building_type: String,
+        /// Slots the project added.
+        added: u32,
+        /// The colony's total capacity after the expansion.
+        slot_capacity: u32,
+    },
+    /// A colony's active construction project made no progress this sol because
+    /// the pool could not fund its materials instalment (issue #306).
+    ///
+    /// Nothing was withdrawn — the project resumes untouched once the missing
+    /// commodities are available.
+    ConstructionStalled {
+        /// Colony whose queue is blocked.
+        colony_id: ColonyId,
+        /// The project that could not be funded.
+        project_id: ProjectId,
+        /// Content-pack key of the building it would produce.
+        building_type: String,
+        /// Per-commodity amount still needed to fund this sol.
+        missing: Vec<(String, f64)>,
+    },
     /// Labour was assigned to a production slot in a colony.
     LabourAssigned {
         /// Target colony.
@@ -1792,6 +1822,30 @@ pub enum Event {
         /// Building type completed.
         building_type: String,
     },
+    /// An outpost's site preparation widened its build-slot capacity (mirrors
+    /// [`Event::SlotCapacityExpanded`], issue #306).
+    OutpostSlotCapacityExpanded {
+        /// Outpost that grew.
+        outpost_id: outpost::OutpostId,
+        /// Content-pack key of the completed project.
+        building_type: String,
+        /// Slots the project added.
+        added: u32,
+        /// The outpost's total capacity after the expansion.
+        slot_capacity: u32,
+    },
+    /// An outpost's construction stalled for want of materials (mirrors
+    /// [`Event::ConstructionStalled`], issue #306).
+    OutpostConstructionStalled {
+        /// Outpost whose queue is blocked.
+        outpost_id: outpost::OutpostId,
+        /// The project that could not be funded.
+        project_id: colony::ProjectId,
+        /// Building type it would produce.
+        building_type: String,
+        /// Per-commodity amount still needed to fund this sol.
+        missing: Vec<(String, f64)>,
+    },
     /// An outpost's per-building production shortfall (mirrors
     /// [`Event::ProductionShortfall`]).
     OutpostProductionShortfall {
@@ -2303,35 +2357,85 @@ impl GameEngine {
                             .collect()
                     })
                     .unwrap_or_default();
+                // Site-preparation projects, snapshotted for the same
+                // borrow reason (issue #306). Only slot-granting building types
+                // appear, so an absent key means "this is a normal building".
+                let slot_grants: std::collections::HashMap<String, u32> = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .map(|reg| {
+                        reg.buildings()
+                            .filter(|def| def.grants_slot_capacity > 0)
+                            .map(|def| (def.id.clone(), def.grants_slot_capacity))
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
                 for colony in &mut self.state.colonies {
-                    // Consume labor for the active project.
-                    if let Some(active) = colony.build_queue.projects.first() {
-                        let labor = f64::from(active.labor_per_turn);
-                        colony.pool.withdraw("labor", labor);
-                    }
-                    if let Some(completed) = colony.build_queue.tick_active() {
-                        let building_type = completed.building_type.clone();
-                        // Seed the staffing priority from the building's
-                        // authored default (issue #307), so a greenhouse comes
-                        // out of construction already ahead of an ore mine.
-                        let priority = authored_priorities
-                            .get(&building_type)
-                            .copied()
-                            .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
-                        // Numbered against what's already standing, so the
-                        // player can tell this mine from the last one (#307).
-                        let placed = colony::PlacedBuilding::with_priority(
-                            &building_type,
-                            completed.slot_cost,
-                            priority,
-                        )
-                        .numbered_within(&colony.buildings);
-                        colony.buildings.push(placed);
-                        events.push(Event::BuildingConstructed {
-                            colony_id: colony.id,
+                    // Labour for the sol the project is about to work, withdrawn
+                    // only if that sol actually happens — see the `Stalled` arm.
+                    let labor = colony
+                        .build_queue
+                        .projects
+                        .first()
+                        .map_or(0.0, |p| f64::from(p.labor_per_turn));
+                    // Materials are drawn in per-sol instalments (issue #306);
+                    // an unfunded sol stalls the project instead of advancing
+                    // it for free.
+                    match colony.build_queue.tick_active_charging(&mut colony.pool) {
+                        colony::ConstructionTick::Idle => {}
+                        colony::ConstructionTick::Progressed => {
+                            colony.pool.withdraw("labor", labor);
+                        }
+                        colony::ConstructionTick::Stalled {
+                            project_id,
                             building_type,
-                        });
+                            missing,
+                        } => {
+                            events.push(Event::ConstructionStalled {
+                                colony_id: colony.id,
+                                project_id,
+                                building_type,
+                                missing,
+                            });
+                        }
+                        colony::ConstructionTick::Completed(completed) => {
+                            colony.pool.withdraw("labor", labor);
+                            let building_type = completed.building_type.clone();
+                            // Site preparation completes into capacity, not into
+                            // a standing building (issue #306).
+                            if let Some(added) = slot_grants.get(&building_type).copied() {
+                                colony.slot_capacity = colony.slot_capacity.saturating_add(added);
+                                events.push(Event::SlotCapacityExpanded {
+                                    colony_id: colony.id,
+                                    building_type,
+                                    added,
+                                    slot_capacity: colony.slot_capacity,
+                                });
+                                continue;
+                            }
+                            // Seed the staffing priority from the building's
+                            // authored default (issue #307), so a greenhouse comes
+                            // out of construction already ahead of an ore mine.
+                            let priority = authored_priorities
+                                .get(&building_type)
+                                .copied()
+                                .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
+                            // Numbered against what's already standing, so the
+                            // player can tell this mine from the last one (#307).
+                            let placed = colony::PlacedBuilding::with_priority(
+                                &building_type,
+                                completed.slot_cost,
+                                priority,
+                            )
+                            .numbered_within(&colony.buildings);
+                            colony.buildings.push(placed);
+                            events.push(Event::BuildingConstructed {
+                                colony_id: colony.id,
+                                building_type,
+                            });
+                        }
                     }
                 }
 
@@ -2339,23 +2443,48 @@ impl GameEngine {
                 // No `labor` withdrawal — outposts have no population to fund
                 // one from; see `outpost::Outpost`'s module doc comment.
                 for out in &mut self.state.outposts {
-                    if let Some(completed) = out.build_queue.tick_active() {
-                        let building_type = completed.building_type.clone();
-                        let priority = authored_priorities
-                            .get(&building_type)
-                            .copied()
-                            .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
-                        let placed = colony::PlacedBuilding::with_priority(
-                            &building_type,
-                            completed.slot_cost,
-                            priority,
-                        )
-                        .numbered_within(&out.buildings);
-                        out.buildings.push(placed);
-                        events.push(Event::OutpostBuildingConstructed {
-                            outpost_id: out.id,
+                    match out.build_queue.tick_active_charging(&mut out.pool) {
+                        colony::ConstructionTick::Idle | colony::ConstructionTick::Progressed => {}
+                        colony::ConstructionTick::Stalled {
+                            project_id,
                             building_type,
-                        });
+                            missing,
+                        } => {
+                            events.push(Event::OutpostConstructionStalled {
+                                outpost_id: out.id,
+                                project_id,
+                                building_type,
+                                missing,
+                            });
+                        }
+                        colony::ConstructionTick::Completed(completed) => {
+                            let building_type = completed.building_type.clone();
+                            if let Some(added) = slot_grants.get(&building_type).copied() {
+                                out.slot_capacity = out.slot_capacity.saturating_add(added);
+                                events.push(Event::OutpostSlotCapacityExpanded {
+                                    outpost_id: out.id,
+                                    building_type,
+                                    added,
+                                    slot_capacity: out.slot_capacity,
+                                });
+                                continue;
+                            }
+                            let priority = authored_priorities
+                                .get(&building_type)
+                                .copied()
+                                .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
+                            let placed = colony::PlacedBuilding::with_priority(
+                                &building_type,
+                                completed.slot_cost,
+                                priority,
+                            )
+                            .numbered_within(&out.buildings);
+                            out.buildings.push(placed);
+                            events.push(Event::OutpostBuildingConstructed {
+                                outpost_id: out.id,
+                                building_type,
+                            });
+                        }
                     }
                 }
 
@@ -3148,20 +3277,23 @@ impl GameEngine {
                         }
                     }
                 }
+                let slot_cost = self.effective_slot_cost(building_type, *slot_cost);
+                let (cost, turns) =
+                    self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_colony_index(*colony_id)?;
                 let available = self.state.colonies[idx].slots_available();
-                if *slot_cost > available {
+                if slot_cost > available {
                     return Err(EngineError::SlotCapacityExceeded {
-                        needed: *slot_cost,
+                        needed: slot_cost,
                         available,
                     });
                 }
                 let project = colony::ConstructionProject::new(
                     building_type.clone(),
-                    *slot_cost,
+                    slot_cost,
                     *labor_per_turn,
-                    construction_cost.clone(),
-                    *construction_turns,
+                    cost,
+                    turns,
                 );
                 let project_id = project.id;
                 self.state.colonies[idx].build_queue.enqueue(project);
@@ -4132,20 +4264,23 @@ impl GameEngine {
                         }
                     }
                 }
+                let slot_cost = self.effective_slot_cost(building_type, *slot_cost);
+                let (cost, turns) =
+                    self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_outpost_index(*outpost_id)?;
                 let available = self.state.outposts[idx].slots_available();
-                if *slot_cost > available {
+                if slot_cost > available {
                     return Err(EngineError::SlotCapacityExceeded {
-                        needed: *slot_cost,
+                        needed: slot_cost,
                         available,
                     });
                 }
                 let project = colony::ConstructionProject::new(
                     building_type.clone(),
-                    *slot_cost,
+                    slot_cost,
                     *labor_per_turn,
-                    construction_cost.clone(),
-                    *construction_turns,
+                    cost,
+                    turns,
                 );
                 let project_id = project.id;
                 self.state.outposts[idx].build_queue.enqueue(project);
@@ -6024,6 +6159,81 @@ impl GameEngine {
             .max(trade::DEFAULT_TRANSIT_SOLS)
     }
 
+    /// Whether `building_type` is a site-preparation project — one whose
+    /// registry entry grants build-slot capacity (issue #306).
+    ///
+    /// `false` for a building the registry doesn't know, matching the
+    /// unregistered-`building_type` tolerance the tech gate already applies.
+    fn is_site_preparation(&self, building_type: &str) -> bool {
+        self.state
+            .registry
+            .as_ref()
+            .and_then(|reg| reg.building(building_type))
+            .is_some_and(|def| def.grants_slot_capacity > 0)
+    }
+
+    /// Price and schedule a queued project, folding in difficulty and — for
+    /// site preparation only — the researched infrastructure techs (issue #306).
+    ///
+    /// Returns `(construction_cost, construction_turns)`. Resolved once, at
+    /// queue time, so a project's terms are fixed when the player commits to it
+    /// rather than drifting as techs land mid-build.
+    fn project_terms(
+        &self,
+        building_type: &str,
+        authored_cost: &[(String, f64)],
+        authored_turns: u32,
+    ) -> (Vec<(String, f64)>, u32) {
+        let mut cost_scalar = f64::from(
+            self.state
+                .difficulty_scalar
+                .scalar_for(&modifier::ModifiableQuantity::ConstructionCost),
+        );
+        let mut turns = authored_turns;
+        if self.is_site_preparation(building_type) {
+            cost_scalar *= f64::from(self.state.infrastructure_cost_scalar);
+            // Rounded rather than truncated, and floored at one sol: a project
+            // that took zero turns would complete on the sol it was queued.
+            //
+            // The scalar is clamped into `[MIN_INFRASTRUCTURE_SCALAR, 1.0]`, so
+            // the product never exceeds `turns` and the cast cannot overflow.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let scaled = (f64::from(turns) * f64::from(self.state.infrastructure_time_scalar))
+                .round() as u32;
+            turns = scaled.max(1);
+        }
+        let cost = authored_cost
+            .iter()
+            .map(|(id, qty)| (id.clone(), qty * cost_scalar))
+            .collect();
+        (cost, turns)
+    }
+
+    /// The build slots a queued project actually reserves (issue #306).
+    ///
+    /// Always `0` for a site-preparation project — one whose registry entry sets
+    /// [`BuildingDef::grants_slot_capacity`] — however the caller priced it.
+    /// Forced rather than validated because the failure mode is a deadlock, not
+    /// a bad number: a slot-granting project that reserved a slot could not be
+    /// queued by the full colony that needs it, so the only route out of "no
+    /// slots left" would itself require a spare slot. Anything else passes the
+    /// caller's value through untouched.
+    ///
+    /// [`BuildingDef::grants_slot_capacity`]: content::types::BuildingDef::grants_slot_capacity
+    fn effective_slot_cost(&self, building_type: &str, requested: u32) -> u32 {
+        let grants = self
+            .state
+            .registry
+            .as_ref()
+            .and_then(|reg| reg.building(building_type))
+            .is_some_and(|def| def.grants_slot_capacity > 0);
+        if grants {
+            0
+        } else {
+            requested
+        }
+    }
+
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].
     fn find_colony_index(&self, id: ColonyId) -> Result<usize, EngineError> {
         self.state
@@ -6850,6 +7060,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -6894,6 +7105,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7034,6 +7246,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -7090,6 +7303,7 @@ mod tests {
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7271,6 +7485,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: 2,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -7385,6 +7600,11 @@ mod tests {
         };
         let colony_id = *colony_id;
 
+        // Stock the steel the project will draw down, or construction stalls
+        // and never reaches the 50 % mark the refund is measured against (#306).
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 100.0);
+
         // Queue a 4-turn build with steel cost.
         let cost = vec![("steel".to_string(), 100.0)];
         let evs = engine
@@ -7422,6 +7642,455 @@ mod tests {
             "expected 25.0 steel refund, got {}",
             steel_refund.1
         );
+    }
+
+    // ── Construction materials (issue #306) ──
+
+    /// Queue a project and return `(engine, colony_id, project_id)`.
+    fn engine_with_queued_project(
+        stock: f64,
+        cost: f64,
+        turns: u32,
+        labor_per_turn: u32,
+    ) -> (GameEngine, ColonyId, ProjectId) {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Materials".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", stock);
+        engine.state.colonies[idx].pool.deposit("labor", 1000.0);
+        let evs = engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn,
+                construction_cost: vec![("steel".to_string(), cost)],
+                construction_turns: turns,
+            })
+            .unwrap();
+        let Event::ConstructionQueued { project_id, .. } = &evs[0] else {
+            panic!("expected ConstructionQueued")
+        };
+        (engine, colony_id, *project_id)
+    }
+
+    fn steel(engine: &GameEngine, colony_id: ColonyId) -> f64 {
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.amount("steel")
+    }
+
+    /// Regression: construction used to consume no materials at all — a project
+    /// with a 100-steel cost completed with the pool untouched.
+    #[test]
+    fn construction_draws_its_materials_in_per_sol_instalments() {
+        let (mut engine, colony_id, _) = engine_with_queued_project(100.0, 100.0, 4, 0);
+        assert!((steel(&engine, colony_id) - 100.0).abs() < 1e-9);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            (steel(&engine, colony_id) - 75.0).abs() < 1e-9,
+            "after one of four sols, got {}",
+            steel(&engine, colony_id)
+        );
+
+        for _ in 0..3 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        assert!(
+            steel(&engine, colony_id) < 1e-6,
+            "the full cost should be paid by completion, {} left",
+            steel(&engine, colony_id)
+        );
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(engine.state.colonies[idx].buildings.len(), 1);
+    }
+
+    #[test]
+    fn construction_stalls_and_reports_the_shortfall_when_materials_run_out() {
+        // Enough for two of four sols, then the project starves.
+        let (mut engine, colony_id, project_id) = engine_with_queued_project(50.0, 100.0, 4, 0);
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+        let stall = evs
+            .iter()
+            .find_map(|e| match e {
+                Event::ConstructionStalled {
+                    project_id: pid,
+                    missing,
+                    ..
+                } if *pid == project_id => Some(missing),
+                _ => None,
+            })
+            .expect("expected a ConstructionStalled event");
+        let short = stall.iter().find(|(id, _)| id == "steel").unwrap();
+        assert!((short.1 - 25.0).abs() < 1e-9, "shortfall was {}", short.1);
+
+        // No progress, and nothing withdrawn on the stalled sol.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let project = &engine.state.colonies[idx].build_queue.projects[0];
+        assert_eq!(project.turns_completed, 2);
+        assert!(steel(&engine, colony_id) < 1e-9);
+        assert!(engine.state.colonies[idx].buildings.is_empty());
+    }
+
+    #[test]
+    fn stalled_construction_does_not_burn_labour() {
+        let (mut engine, colony_id, _) = engine_with_queued_project(0.0, 100.0, 4, 10);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let before = engine.state.colonies[idx].pool.amount("labor");
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let after = engine.state.colonies[idx].pool.amount("labor");
+        assert!(
+            (before - after).abs() < 1e-9,
+            "labour was spent on a sol that made no progress: {before} → {after}"
+        );
+    }
+
+    /// Regression: with materials never charged, letting a project reach 50 %
+    /// and cancelling deposited 25 % of a cost that was never paid — a
+    /// repeatable materials printer starting from an empty pool.
+    #[test]
+    fn cancelling_an_unfunded_project_refunds_nothing() {
+        let (mut engine, colony_id, project_id) = engine_with_queued_project(0.0, 100.0, 4, 0);
+        for _ in 0..2 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        let evs = engine
+            .apply(&Command::CancelConstruction {
+                colony_id,
+                project_id,
+            })
+            .unwrap();
+        let Event::ConstructionCancelled { refund, .. } = &evs[0] else {
+            panic!("expected ConstructionCancelled")
+        };
+        for (id, qty) in refund {
+            assert!(*qty < 1e-9, "refunded {qty} {id} from an unpaid project");
+        }
+        assert!(steel(&engine, colony_id) < 1e-9);
+    }
+
+    /// The authored cost is the Normal-difficulty cost; presets scale it in
+    /// both directions (issue #306). Regression against the retired
+    /// `SlotCapacity` row, which was authored with a full grade table and never
+    /// resolved anywhere.
+    #[test]
+    fn difficulty_scales_the_stored_construction_cost() {
+        for (preset, expected) in [
+            (difficulty::DifficultyPreset::Sandbox, 25.0),
+            (difficulty::DifficultyPreset::Normal, 100.0),
+            (difficulty::DifficultyPreset::Brutal, 160.0),
+        ] {
+            let mut engine = GameEngine::new();
+            engine.apply(&Command::SetDifficulty { preset }).unwrap();
+            let events = engine
+                .apply(&Command::FoundColony {
+                    name: "Priced".into(),
+                    starting_population: 100,
+                })
+                .unwrap();
+            let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+                panic!("expected ColonyFounded")
+            };
+            engine
+                .apply(&Command::QueueConstruction {
+                    colony_id: *colony_id,
+                    building_type: "smelter".into(),
+                    slot_cost: 1,
+                    labor_per_turn: 0,
+                    construction_cost: vec![("steel".to_string(), 100.0)],
+                    construction_turns: 4,
+                })
+                .unwrap();
+            let idx = engine.find_colony_index(*colony_id).unwrap();
+            let stored = &engine.state.colonies[idx].build_queue.projects[0].construction_cost;
+            let steel = stored.iter().find(|(id, _)| id == "steel").unwrap();
+            assert!(
+                // The scalar is an `f32`, so allow a wider band than an `f64`
+                // comparison would need.
+                (steel.1 - expected).abs() < 1e-4,
+                "{preset:?} should price 100 steel at {expected}, got {}",
+                steel.1
+            );
+        }
+    }
+
+    // ── Site preparation (issue #306) ──
+
+    /// A registry holding one normal building and one two-slot site-prep
+    /// project.
+    fn registry_with_site_prep() -> content::ContentRegistry {
+        let mut reg = content::ContentRegistry::default();
+        let base = |id: &str| content::types::BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: content::BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 2,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+        };
+        reg.insert_building(base("smelter"));
+        reg.insert_building(content::types::BuildingDef {
+            category: content::BuildingCategory::Infrastructure,
+            grants_slot_capacity: 2,
+            slot_cost: 0,
+            ..base("site_preparation")
+        });
+        reg
+    }
+
+    #[test]
+    fn a_completed_site_prep_project_widens_capacity_instead_of_placing_a_building() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Growing".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 40.0);
+        let base_capacity = engine.state.colonies[idx].slot_capacity;
+
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "site_preparation".into(),
+                slot_cost: 0,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 40.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let expanded = evs
+            .iter()
+            .find_map(|e| match e {
+                Event::SlotCapacityExpanded {
+                    added,
+                    slot_capacity,
+                    ..
+                } => Some((*added, *slot_capacity)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected SlotCapacityExpanded, got {evs:?}"));
+        assert_eq!(expanded.0, 2);
+        assert_eq!(expanded.1, base_capacity + 2);
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::BuildingConstructed { .. })),
+            "site preparation must not place a building"
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(engine.state.colonies[idx].slot_capacity, base_capacity + 2);
+        assert!(engine.state.colonies[idx].buildings.is_empty());
+        assert!(engine.state.colonies[idx].pool.amount("steel") < 1e-6);
+    }
+
+    /// The deadlock guard: a colony with every slot spoken for can still queue
+    /// the project that would free it up, whatever `slot_cost` the caller sends.
+    #[test]
+    fn site_prep_can_be_queued_by_a_colony_with_no_free_slots() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Packed".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let capacity = engine.state.colonies[idx].slot_capacity;
+        for _ in 0..capacity {
+            engine.state.colonies[idx]
+                .buildings
+                .push(colony::PlacedBuilding::new("smelter", 1));
+        }
+        assert_eq!(engine.state.colonies[idx].slots_available(), 0);
+
+        // A normal building is correctly refused.
+        assert!(matches!(
+            engine.apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            }),
+            Err(EngineError::SlotCapacityExceeded { .. })
+        ));
+
+        // Site preparation is not — even when the caller wrongly prices it at 1.
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "site_preparation".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .expect("site preparation must be queueable with no slots free");
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].build_queue.projects[0].slot_cost, 0,
+            "the caller's slot_cost must be overridden to 0"
+        );
+    }
+
+    /// Researched infrastructure techs cut a site-prep project's cost and turns,
+    /// and leave ordinary construction alone.
+    #[test]
+    fn infrastructure_techs_discount_site_prep_but_not_normal_buildings() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        // Two techs' worth of reduction, stacked multiplicatively: 0.5 x 0.5.
+        engine.state.infrastructure_cost_scalar = 0.5;
+        engine.state.infrastructure_time_scalar = 0.5;
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Practised".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+
+        for building_type in ["site_preparation", "smelter"] {
+            engine
+                .apply(&Command::QueueConstruction {
+                    colony_id,
+                    building_type: building_type.into(),
+                    slot_cost: 0,
+                    labor_per_turn: 0,
+                    construction_cost: vec![("steel".to_string(), 100.0)],
+                    construction_turns: 8,
+                })
+                .unwrap();
+        }
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let queue = &engine.state.colonies[idx].build_queue.projects;
+        let prep = queue
+            .iter()
+            .find(|p| p.building_type == "site_preparation")
+            .unwrap();
+        let smelter = queue.iter().find(|p| p.building_type == "smelter").unwrap();
+
+        assert!(
+            (prep.construction_cost[0].1 - 50.0).abs() < 1e-6,
+            "site prep should be half price, got {}",
+            prep.construction_cost[0].1
+        );
+        assert_eq!(prep.total_turns, 4, "site prep should take half the sols");
+        assert!(
+            (smelter.construction_cost[0].1 - 100.0).abs() < 1e-6,
+            "an ordinary building must be untouched, got {}",
+            smelter.construction_cost[0].1
+        );
+        assert_eq!(smelter.total_turns, 8);
+    }
+
+    /// The turn floor: however deep the discount, a project still takes a sol.
+    #[test]
+    fn site_prep_never_completes_in_zero_sols() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_site_prep());
+        engine.state.infrastructure_time_scalar = turn::MIN_INFRASTRUCTURE_SCALAR;
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Instant".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id: *colony_id,
+                building_type: "site_preparation".into(),
+                slot_cost: 0,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].build_queue.projects[0].total_turns, 1,
+            "1 sol x 0.25 rounds to 0, which must be floored to 1"
+        );
+    }
+
+    /// The tech effect itself: fractions compound on the remaining scalar and
+    /// stop at the floor rather than reaching zero.
+    #[test]
+    fn infrastructure_tech_effects_stack_multiplicatively_to_a_floor() {
+        let mut state = turn::GameState::new();
+        assert!((state.infrastructure_cost_scalar - 1.0).abs() < 1e-6);
+
+        let effects = vec![tech::TechEffect::ReduceInfrastructureProject {
+            cost_fraction: 0.5,
+            time_fraction: 0.5,
+        }];
+        turn::TurnProcessor::apply_tech_effects(&mut state, &effects);
+        assert!((state.infrastructure_cost_scalar - 0.5).abs() < 1e-6);
+
+        // Compounding, not additive: a second 50 % lands on the remaining half.
+        turn::TurnProcessor::apply_tech_effects(&mut state, &effects);
+        assert!(
+            (state.infrastructure_cost_scalar - 0.25).abs() < 1e-6,
+            "expected 0.25, got {}",
+            state.infrastructure_cost_scalar
+        );
+
+        // And it stops there rather than continuing toward free.
+        for _ in 0..5 {
+            turn::TurnProcessor::apply_tech_effects(&mut state, &effects);
+        }
+        assert!(
+            (state.infrastructure_cost_scalar - turn::MIN_INFRASTRUCTURE_SCALAR).abs() < 1e-6,
+            "expected the floor, got {}",
+            state.infrastructure_cost_scalar
+        );
+        assert!(state.infrastructure_time_scalar >= turn::MIN_INFRASTRUCTURE_SCALAR);
     }
 
     // ── AssignLabour ──
@@ -7509,6 +8178,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -7952,6 +8622,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -7969,6 +8640,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_building(BuildingDef {
@@ -7985,6 +8657,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -9787,6 +10460,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -10041,6 +10715,7 @@ mod tests {
             tech_prerequisite: Some("advanced_outpost_tech".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
 
@@ -10094,6 +10769,7 @@ mod tests {
             tech_prerequisite: Some("advanced_outpost_tech".into()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -10405,6 +11081,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -10460,6 +11137,59 @@ mod tests {
             outpost.pool.amount("structural_ore") < 10.0,
             "output should be scaled down by the power shortfall, got {}",
             outpost.pool.amount("structural_ore")
+        );
+    }
+
+    /// Outposts pay for construction out of their own pool, and stall the same
+    /// way a colony does when it runs dry (issue #306).
+    #[test]
+    fn outpost_construction_draws_materials_and_stalls_when_short() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_mining_outpost_building());
+        let (colony_id, body_id) = setup_colony_and_body(&mut engine);
+        let events = engine
+            .apply(&Command::EstablishOutpost {
+                name: "Camp".into(),
+                colony_id,
+                body_id,
+            })
+            .unwrap();
+        let Event::OutpostEstablished { outpost_id, .. } = &events[0] else {
+            panic!("expected OutpostEstablished")
+        };
+        let outpost_id = *outpost_id;
+        // Funds one of two sols.
+        engine.state.outposts[0].pool.deposit("steel", 10.0);
+
+        engine
+            .apply(&Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type: "mining_outpost".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 20.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.outposts[0].pool.amount("steel") < 1e-9,
+            "the first instalment should have drained the stock, {} left",
+            engine.state.outposts[0].pool.amount("steel")
+        );
+
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::OutpostConstructionStalled { outpost_id: o, .. } if *o == outpost_id
+            )),
+            "expected OutpostConstructionStalled, got {evs:?}"
+        );
+        assert!(
+            engine.state.outposts[0].buildings.is_empty(),
+            "an unfunded outpost project must not complete"
         );
     }
 
@@ -11030,6 +11760,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -11109,6 +11840,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -11179,6 +11911,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -12669,6 +13402,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -12760,6 +13494,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -13494,6 +14229,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_building(BuildingDef {
@@ -13510,6 +14246,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {

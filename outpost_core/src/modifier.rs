@@ -17,8 +17,20 @@ use serde::{Deserialize, Serialize};
 pub enum ModifiableQuantity {
     /// Production rate of a specific building (identified by content-pack id string).
     ProductionRate(String),
-    /// Number of available building slots.
-    SlotCapacity,
+    /// Commodity cost multiplier applied to every construction project's
+    /// authored `construction_cost` (issue #306).
+    ///
+    /// Higher values make building more expensive in materials. Applied once,
+    /// when the project is queued, so the stored cost — and therefore the
+    /// per-sol instalment, the UI readout, and the cancellation refund — all
+    /// agree on one number.
+    ///
+    /// Replaced the `SlotCapacity` variant, which was authored in
+    /// `content/difficulty.yaml` with a full grade row but never resolved
+    /// anywhere: the difficulty selector promised fewer build slots and
+    /// delivered nothing. Slot capacity is now bought with the
+    /// colony-infrastructure project instead of handed out by preset.
+    ConstructionCost,
     /// Labour efficiency multiplier.
     LaborEfficiency,
     /// Research point generation rate.
@@ -357,7 +369,7 @@ mod tests {
         );
         assert!((back.scalar_for(&ModifiableQuantity::ResearchRate) - 1.2).abs() < 1e-6);
         // An unset key still falls back rather than being invented.
-        assert!((back.scalar_for(&ModifiableQuantity::SlotCapacity) - 1.0).abs() < 1e-6);
+        assert!((back.scalar_for(&ModifiableQuantity::ConstructionCost) - 1.0).abs() < 1e-6);
     }
 
     /// A populated legacy object cannot exist, but if one turns up it must be

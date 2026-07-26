@@ -923,3 +923,87 @@
       quantity: 45.0
     - id: components
       quantity: 15.0
+
+# ── Site preparation (issue #306) ────────────────────────────────────────────
+#
+# `grants_slot_capacity` marks a project whose product is *build-slot capacity*
+# rather than a standing building: on completion it widens the colony's
+# capacity and nothing is placed. It is how a colony grows past its base five
+# slots — capacity is bought with construction materials, not handed out by
+# difficulty preset.
+#
+# Every such project must be authored `slot_cost: 0`. A slot-granting project
+# that consumed a slot would deadlock a full colony: the only way to make room
+# would itself need room. The engine does not trust the pack on this — it
+# coerces the slot cost of any slot-granting project to 0 at queue time, so a
+# misauthored non-zero value here is silently ignored rather than rejected.
+# `authored_site_preparation_projects_are_slot_free_and_cost_materials` in
+# content/loader.rs is what actually fails if one of these grows a slot cost.
+#
+# `worker_slots: 0` and no recipe: the crews are notionally part of the
+# construction labour the project already draws, not a standing post.
+#
+# Three tiers, each buying more capacity per sol of work and per tonne of
+# material than the last, so expansion gets cheaper per slot as the colony's
+# supply chain matures rather than scaling linearly forever.
+
+- id: site_preparation
+  name: Site Preparation
+  description: >
+    Grade a new pad, run a connecting tube to it, and bury the utility
+    trunk — power, water, and atmosphere feeds — so a building can stand
+    there at all. Adds one build slot; nothing occupies a slot itself.
+  category: infrastructure
+  grants_slot_capacity: 1
+  slot_cost: 0
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 2
+  construction_turns: 4
+  construction_cost:
+    - id: structural_metal
+      quantity: 40.0
+
+- id: colony_infrastructure
+  name: Colony Infrastructure
+  description: >
+    A surveyed expansion district rather than a single pad: graded roads,
+    a trunk utility spine, and three serviced pads branching off it. Adds
+    three build slots.
+  category: infrastructure
+  grants_slot_capacity: 3
+  slot_cost: 0
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 3
+  construction_turns: 8
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 90.0
+    - id: ceramics
+      quantity: 20.0
+
+- id: arcology_foundation
+  name: Arcology Foundation
+  description: >
+    Deep-piled structural raft with integrated services, sized for stacked
+    construction. Adds eight build slots.
+  category: infrastructure
+  grants_slot_capacity: 8
+  slot_cost: 0
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 4
+  construction_turns: 14
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 200.0
+    - id: composites
+      quantity: 60.0
+    - id: components
+      quantity: 30.0

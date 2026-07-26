@@ -496,6 +496,51 @@ pub enum ServerEvent {
         /// Building type key.
         building_type: String,
     },
+    /// A site-preparation project widened the colony's build-slot capacity
+    /// (issue #306).
+    SlotCapacityExpanded {
+        /// Colony UUID.
+        colony_id: String,
+        /// Building type key of the completed project.
+        building_type: String,
+        /// Slots added.
+        added: u32,
+        /// Total capacity after the expansion.
+        slot_capacity: u32,
+    },
+    /// An outpost's site preparation widened its build-slot capacity.
+    OutpostSlotCapacityExpanded {
+        /// Outpost UUID.
+        outpost_id: String,
+        /// Building type key of the completed project.
+        building_type: String,
+        /// Slots added.
+        added: u32,
+        /// Total capacity after the expansion.
+        slot_capacity: u32,
+    },
+    /// Construction made no progress for want of materials (issue #306).
+    ConstructionStalled {
+        /// Colony UUID.
+        colony_id: String,
+        /// Project UUID.
+        project_id: String,
+        /// Building type key.
+        building_type: String,
+        /// Per-commodity amount still needed to fund this sol.
+        missing: Vec<(String, f64)>,
+    },
+    /// An outpost's construction made no progress for want of materials.
+    OutpostConstructionStalled {
+        /// Outpost UUID.
+        outpost_id: String,
+        /// Project UUID.
+        project_id: String,
+        /// Building type key.
+        building_type: String,
+        /// Per-commodity amount still needed to fund this sol.
+        missing: Vec<(String, f64)>,
+    },
     /// Labour was assigned.
     LabourAssigned {
         /// Colony UUID.
@@ -780,6 +825,50 @@ impl ServerEvent {
             } => Self::BuildingConstructed {
                 colony_id: colony_id.to_string(),
                 building_type: building_type.clone(),
+            },
+            Event::SlotCapacityExpanded {
+                colony_id,
+                building_type,
+                added,
+                slot_capacity,
+            } => Self::SlotCapacityExpanded {
+                colony_id: colony_id.to_string(),
+                building_type: building_type.clone(),
+                added: *added,
+                slot_capacity: *slot_capacity,
+            },
+            Event::OutpostSlotCapacityExpanded {
+                outpost_id,
+                building_type,
+                added,
+                slot_capacity,
+            } => Self::OutpostSlotCapacityExpanded {
+                outpost_id: outpost_id.to_string(),
+                building_type: building_type.clone(),
+                added: *added,
+                slot_capacity: *slot_capacity,
+            },
+            Event::ConstructionStalled {
+                colony_id,
+                project_id,
+                building_type,
+                missing,
+            } => Self::ConstructionStalled {
+                colony_id: colony_id.to_string(),
+                project_id: project_id.to_string(),
+                building_type: building_type.clone(),
+                missing: missing.clone(),
+            },
+            Event::OutpostConstructionStalled {
+                outpost_id,
+                project_id,
+                building_type,
+                missing,
+            } => Self::OutpostConstructionStalled {
+                outpost_id: outpost_id.to_string(),
+                project_id: project_id.to_string(),
+                building_type: building_type.clone(),
+                missing: missing.clone(),
             },
             Event::LabourAssigned {
                 colony_id,

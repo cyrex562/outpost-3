@@ -52,7 +52,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 7: `expedition_registry` field added to `FullStateBlob` (issue #235).
 /// Schema version 8: `tech_survey_modifiers`/`propulsion_transit_scalar` fields added (issue #236).
 /// Schema version 9: `outpost_range_bonus_au` field added (issue #241).
-pub const SCHEMA_VERSION: u32 = 9;
+/// Schema version 10: `infrastructure_cost_scalar`/`infrastructure_time_scalar` fields added (issue #306).
+pub const SCHEMA_VERSION: u32 = 10;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -180,6 +181,16 @@ struct FullStateBlob {
     // ── #241 Outpost tech/range gating ───────────────────────────────────────
     #[serde(default)]
     outpost_range_bonus_au: f32,
+
+    // ── #306 Site-preparation tech modifiers ─────────────────────────────────
+    #[serde(default = "default_infrastructure_scalar")]
+    infrastructure_cost_scalar: f32,
+    #[serde(default = "default_infrastructure_scalar")]
+    infrastructure_time_scalar: f32,
+}
+
+fn default_infrastructure_scalar() -> f32 {
+    1.0
 }
 
 fn default_transit_scalar() -> f32 {
@@ -236,6 +247,8 @@ impl FullStateBlob {
             expedition_registry: state.expedition_registry.clone(),
             tech_survey_modifiers: state.tech_survey_modifiers.clone(),
             propulsion_transit_scalar: state.propulsion_transit_scalar,
+            infrastructure_cost_scalar: state.infrastructure_cost_scalar,
+            infrastructure_time_scalar: state.infrastructure_time_scalar,
             outpost_range_bonus_au: state.outpost_range_bonus_au,
         }
     }
@@ -296,6 +309,8 @@ impl FullStateBlob {
             expedition_registry: self.expedition_registry,
             tech_survey_modifiers: self.tech_survey_modifiers,
             propulsion_transit_scalar: self.propulsion_transit_scalar,
+            infrastructure_cost_scalar: self.infrastructure_cost_scalar,
+            infrastructure_time_scalar: self.infrastructure_time_scalar,
             outpost_range_bonus_au: self.outpost_range_bonus_au,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,

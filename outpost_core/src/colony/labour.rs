@@ -266,6 +266,7 @@ mod tests {
             tech_prerequisite: None,
             maintenance: vec![],
             default_priority: DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         };
         for (id, slots) in [("farm", 5), ("mine", 5), ("lab", 3), ("scrubber", 2)] {
             reg.insert_building(building(id, slots));

@@ -41,6 +41,13 @@ use crate::research::SystemResearchPool;
 use crate::system::SystemState;
 use crate::tech::TechEffect;
 use crate::tech::{TechRegistry, TechState};
+
+/// Floor on the site-preparation cost and time scalars (issue #306).
+///
+/// Compounding tech reductions approach this without crossing it, so expansion
+/// stays a real decision however deep the tech tree runs.
+pub const MIN_INFRASTRUCTURE_SCALAR: f32 = 0.25;
+
 use crate::trade::TradeNetwork;
 use crate::victory::{VictoryCondition, VictoryState};
 
@@ -293,6 +300,21 @@ pub struct GameState {
     /// `system_state.node_map.propulsion_level` (see
     /// [`crate::outpost::max_outpost_range_au`]).
     pub outpost_range_bonus_au: f32,
+
+    // ── Site-preparation tech modifiers (issue #306) ───────────────────────
+    /// Multiplicative scalar applied to a site-preparation project's material
+    /// cost when it is queued, driven down from `1.0` by every researched tech
+    /// carrying [`TechEffect::ReduceInfrastructureProject`].
+    ///
+    /// Floored, so expansion never becomes free however deep the tech tree runs.
+    pub infrastructure_cost_scalar: f32,
+    /// Multiplicative scalar applied to a site-preparation project's
+    /// construction turns, accumulated the same way as
+    /// [`Self::infrastructure_cost_scalar`].
+    ///
+    /// The resulting turn count is floored at `1` separately — a project that
+    /// took zero turns would complete before the sol it was queued in.
+    pub infrastructure_time_scalar: f32,
 }
 
 impl GameState {
@@ -345,6 +367,8 @@ impl GameState {
             tech_survey_modifiers: crate::expedition::SurveyModifiers::default(),
             propulsion_transit_scalar: 1.0,
             outpost_range_bonus_au: 0.0,
+            infrastructure_cost_scalar: 1.0,
+            infrastructure_time_scalar: 1.0,
         }
     }
 
@@ -562,6 +586,17 @@ impl TurnProcessor {
                 }
                 TechEffect::ExtendOutpostRange { bonus_au } => {
                     state.outpost_range_bonus_au += bonus_au.max(0.0);
+                }
+                TechEffect::ReduceInfrastructureProject {
+                    cost_fraction,
+                    time_fraction,
+                } => {
+                    state.infrastructure_cost_scalar = (state.infrastructure_cost_scalar
+                        * (1.0 - cost_fraction.clamp(0.0, 0.95)))
+                    .max(MIN_INFRASTRUCTURE_SCALAR);
+                    state.infrastructure_time_scalar = (state.infrastructure_time_scalar
+                        * (1.0 - time_fraction.clamp(0.0, 0.95)))
+                    .max(MIN_INFRASTRUCTURE_SCALAR);
                 }
             }
         }
@@ -1125,6 +1160,7 @@ mod tests {
             tech_prerequisite: Some("adv_lab_tech".to_string()),
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
         }];
 
         let empty: HashSet<String> = HashSet::new();
