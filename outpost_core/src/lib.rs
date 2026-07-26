@@ -6546,6 +6546,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         engine.state.registry = Some(reg);
 
@@ -6589,6 +6590,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         engine.state.registry = Some(reg);
         engine
@@ -6728,6 +6730,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         engine.state.registry = Some(reg);
 
@@ -6783,6 +6786,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: Some("fusion_engineering".into()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7128,6 +7132,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -7570,6 +7575,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -7586,6 +7592,7 @@ mod tests {
             construction_turns: 4,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         reg.insert_building(BuildingDef {
@@ -7601,6 +7608,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -8934,6 +8942,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -9187,6 +9196,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: Some("advanced_outpost_tech".into()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         engine.state.registry = Some(reg);
 
@@ -9239,6 +9249,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: Some("advanced_outpost_tech".into()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         engine.state.registry = Some(reg);
         engine
@@ -9310,11 +9321,7 @@ mod tests {
             .pool
             .deposit("structural_ore", 250.0);
         engine.state.outposts[0].slot_capacity = 7;
-        let placed = colony::PlacedBuilding {
-            id: uuid::Uuid::new_v4(),
-            building_type: "mining_outpost".into(),
-            slot_cost: 1,
-        };
+        let placed = colony::PlacedBuilding::new("mining_outpost", 1);
         engine.state.outposts[0].buildings.push(placed);
 
         let colonies_before = engine.state.colonies.len();
@@ -9553,6 +9560,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -10177,6 +10185,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -10255,6 +10264,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -10324,6 +10334,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -11802,6 +11813,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -11892,6 +11904,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -12619,6 +12632,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         reg.insert_building(BuildingDef {
@@ -12634,6 +12648,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {

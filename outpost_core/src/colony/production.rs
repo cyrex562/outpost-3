@@ -1076,7 +1076,7 @@ pub fn lines_for_building<'r, S: std::hash::BuildHasher>(
 
 /// Returns true if there is at least one recipe (pick-one or concurrent)
 /// for the given building type.
-fn has_recipe(building_type: &str, registry: &ContentRegistry) -> bool {
+pub(crate) fn has_recipe(building_type: &str, registry: &ContentRegistry) -> bool {
     first_recipe_for_building(building_type, registry).is_some()
         || !concurrent_recipes_for_building(building_type, registry).is_empty()
 }
@@ -1195,6 +1195,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         // Mine: extracts ore; needs 30 kW; 2 workers
@@ -1211,6 +1212,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_ore".into(),
@@ -1241,6 +1243,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "smelt_iron".into(),
@@ -1527,6 +1530,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         reg.insert_building(BuildingDef {
@@ -1545,6 +1549,7 @@ mod tests {
                 id: "spare_parts".into(),
                 quantity: 0.5,
             }],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "advanced_smelt".into(),
@@ -1741,6 +1746,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
 
         reg.insert_building(BuildingDef {
@@ -1760,6 +1766,7 @@ mod tests {
                 id: "scrap".into(),
                 quantity: 0.5,
             }],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "recycle".into(),
@@ -2109,6 +2116,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "refine_alloy".into(),
@@ -2241,6 +2249,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore".into(),
@@ -2271,6 +2280,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "pump_water".into(),
@@ -2480,6 +2490,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "hq_generate_power".into(),
@@ -2618,6 +2629,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         reg.insert_recipe(RecipeDef {
             id: "hybrid_alt_a".into(),
@@ -2716,6 +2728,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         };
         reg.insert_building(building("hq"));
         reg.insert_building(building("refinery"));
@@ -2906,6 +2919,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         let recipe = |id: &str, line: &str, inputs: Vec<(&str, f64)>, outputs: Vec<(&str, f64)>| {
             let ing = |v: Vec<(&str, f64)>| {
@@ -3008,6 +3022,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         };
         reg.insert_building(b("complex"));
         reg.insert_building(b("legacy"));
@@ -3223,6 +3238,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         assert!(lines_for_building("silo", &empty, &reg).is_empty());
@@ -3247,6 +3263,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         });
         let r = |id: &str, line: Option<&str>, con: bool, i: &[(&str, f64)], o: &[(&str, f64)]| {
             RecipeDef {

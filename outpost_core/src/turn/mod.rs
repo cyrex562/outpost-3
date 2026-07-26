@@ -1124,6 +1124,7 @@ mod tests {
             construction_turns: 3,
             tech_prerequisite: Some("adv_lab_tech".to_string()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         }];
 
         let empty: HashSet<String> = HashSet::new();

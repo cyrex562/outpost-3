@@ -814,6 +814,7 @@ mod tests {
             construction_turns: 1,
             tech_prerequisite: None,
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         }];
         let researched = HashSet::new();
         let result = unlocked_buildings(buildings.iter(), &researched);
@@ -836,6 +837,7 @@ mod tests {
             construction_turns: 3,
             tech_prerequisite: Some("science_tier2".to_string()),
             maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
         }];
 
         let empty: HashSet<TechId> = HashSet::new();

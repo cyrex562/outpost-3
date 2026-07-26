@@ -270,6 +270,34 @@ pub struct BuildingDef {
     /// the sol after `BuildingConstructed` fires.
     #[serde(default)]
     pub maintenance: Vec<Ingredient>,
+    /// Default staffing priority for instances of this building (issue #307).
+    ///
+    /// `1` is staffed first, [`MAX_BUILDING_PRIORITY`] last. Labour is allocated
+    /// in priority order, so a lower number means "keep this running when
+    /// workers are short" — author life support and food production ahead of
+    /// industry, and storage or housing behind it.
+    ///
+    /// This is the *initial* priority a newly placed instance takes; the player
+    /// can change it per building afterwards. Defaults to
+    /// [`DEFAULT_BUILDING_PRIORITY`] so existing packs load unchanged and every
+    /// unauthored building competes on equal footing.
+    #[serde(default = "default_priority")]
+    pub default_priority: u8,
+}
+
+/// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).
+///
+/// Nine bands is a starting point rather than a hard design constraint — widen
+/// it if play shows the granularity is too coarse.
+pub const MAX_BUILDING_PRIORITY: u8 = 9;
+
+/// Staffing priority a building takes when its content pack doesn't say
+/// (issue #307) — the middle of the range, so unauthored buildings neither
+/// starve nor pre-empt anything.
+pub const DEFAULT_BUILDING_PRIORITY: u8 = 5;
+
+fn default_priority() -> u8 {
+    DEFAULT_BUILDING_PRIORITY
 }
 
 fn default_labor() -> u32 {
