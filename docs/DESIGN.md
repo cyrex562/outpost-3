@@ -293,6 +293,12 @@ A **hex map** of the planet showing terrain, biome, and resource deposits. Colon
 
 **Hex color layering (playtest feedback, resolved).** `PlanetHexMap.vue`'s fill color is a layered pipeline, in order: **terrain** (`outpost_core::map::Terrain` — the physical landform: Plains/Hills/Mountains/Wetlands/Ocean/Volcanic) sets the base ground color; a **vegetation overlay** derived from biome (Forest/Jungle/Grassland get a green tint of increasing strength, everything else none) blends on top; then the existing elevation-shading and temperature-tint layers apply unchanged. This replaced biome-only coloring (originally terrain wasn't a color input at all, only shown in the tooltip). There's no independent vegetation-density field today — deriving the overlay from biome (a category) rather than adding a real per-hex gradient was a deliberate scope call to ship without new core/wire work; a genuine `vegetation_density: f32` field is a natural follow-up if the approximation reads wrong in practice.
 
+**Hex scale and map projection (issue #340) — decided, not yet implemented.** A hex is **~100 km across**. This is the scale that makes both halves of the design above work at once: a site is large enough to hold a substantial number of buildings, while a colony still occupies a small dot on the planet, so regional variety in terrain and climate is real and specialization emerges from geography rather than being asserted. The two ends were weighed explicitly. *Civ-scale hexes* (200–500 km) would make a hex a region rather than a site — big enough that a colony simply owns whatever deposits fall inside it, which dissolves the reach problem without new systems but leaves the hex map as a place-names layer carrying almost no gameplay. *Very fine hexes* (5–25 km) put hundreds of thousands to millions of hexes on a planet: simulation-only, never player-facing. 100 km sits at the coarse end of the *Emperor of the Fading Suns* band — the map is a real board, with adjacency, terrain, and routing that matter, while the count stays renderable.
+
+The surface map is a **rectangle that wraps horizontally** (east edge joins west; poles are the top and bottom rows), and its hex count **derives from body radius** rather than being authored per body. Hex count is therefore a consequence of physical size, not a tuning knob: at 100 km, a Mars-sized body (145M km²) is roughly 17,000 hexes, a Ceres-sized body a few hundred, a super-Earth on the order of 60,000. That ~200× spread across bodies is the load-bearing constraint on this design — the same mechanics and the same UI have to hold at both ends, which is why nothing in the reach model may assume a particular map size. A player realistically interacts with a few dozen hexes over a campaign; the rest is terrain they fly over.
+
+**This is a change from what `outpost_core::map` does today, not a description of it.** `PlanetMap::generate(seed, radius)` currently builds a **hexagonal disc** via `HexCoord::origin().within_radius(radius)`, with `radius` supplied by the caller and no linkage to the parent body's physical size at all. Implementing the above means: a wrapping-rectangle cell set in place of the disc, a derivation of grid dimensions from `Body` radius, and wrap-aware neighbour/distance math (a hex one step east of the east edge is on the west edge — every path, range, and adjacency query has to respect that, and `HexCoord`'s current axial arithmetic does not).
+
 **Deposit rendering, corrected + upgraded.** Deposits now render as a small colored box with a two-letter code (e.g. `SO` for `structural_ore`, `FI` for `fissile_ore`) rather than a plain colored dot — the code/color lookup table (`DEPOSIT_STYLE`) also fixed a real latent bug: the previous table's keys (`iron`, `rare_metals`, `water_ice`, ...) didn't match any of `outpost_core::map::VEIN_COMMODITIES`'s actual 9 entries (`structural_ore`/`conductive_ore`/`precious_ore`/`refractory_ore`/`semiconductor_ore`/`fissile_ore`/`silicates`/`hydrocarbons`/`biomass`), so every deposit had silently been falling back to a generic grey dot. Codes and colors are hand-picked client-side (no backend `short_code` field) with a first-two-letters-uppercased fallback for anything not in the table, so new commodities never render blank.
 
 ### 8.2 Orbital zoom
@@ -416,6 +422,24 @@ An **outpost** is a lightweight, single-purpose off-world presence that extends 
 
 ---
 
+### 8.3F Settlement tiers: expedition / outpost / colony (issue #340)
+
+Three distinct kinds of presence, in increasing permanence and capability. This is the canonical hierarchy; the tiers are a deliberate progression, not three names for one mechanic.
+
+| | **Expedition** | **Outpost** | **Colony** |
+|---|---|---|---|
+| What it is | a temporary camp | a satellite facility tied to a parent colony | a full-fledged city |
+| Function | exactly **one** — extract a resource, or one other single job | limited, but may hold buildings of **more than one type** | unrestricted |
+| Built on site | nothing | buildings | buildings |
+| Population | a crew, no `PopulationPool` | skeleton crew (`outpost::OUTPOST_BASE_LABOR`) | a real `PopulationPool`, 1:1 with the `Colony` |
+| Ends by | being recalled | being decommissioned (or promoted, §8.3D) | — |
+
+The distinction earns its keep economically: an expedition is how you exploit something opportunistically or early, an outpost is how you commit to a location for a narrow purpose, a colony is a place people live. Nothing about an expedition is constructed, so nothing is lost by recalling one; an outpost represents real invested construction.
+
+**Why this needed writing down.** "A remote thing on another hex that feeds a parent colony continuously" describes an expedition *and* an outpost, so without the table above the two would have drifted into duplicating each other — exactly the "fourth parallel thing that produces stuff on a body" failure §8.3B was written to avoid. The separating rules are: **an expedition builds nothing and does exactly one job; an outpost builds buildings and may do several.**
+
+---
+
 ## 9. Expeditions & Exploration
 
 A **schematic system node map** (planets, moons, asteroid belt as nodes; travel time by distance and propulsion tech). Exploration is **textured, not abstracted**: journeys and surveys trigger events, encounters, and mid-mission decisions that affect the outcome. Surveys reveal candidate colony sites and resource locations (full / partial / failed reveals).
@@ -433,6 +457,26 @@ Implements the schematic-survey model above: `Command::LaunchSurveyExpedition` t
 **Anomalies fire through the interrupt system, as designed.** Each `Surveying`-phase expedition is checked once per sol against every loaded `expedition::AnomalyDef` (content-pack data, `content/base/anomalies.yaml`); a trigger halts the survey countdown, builds a `MidMissionEvent` (Investigate / Ignore), and moves the expedition to `ExpeditionPhase::AwaitingDecision`. The event is surfaced via the *existing* interrupt collection (`InterruptSource::EventFired`, tier taken from the event itself) rather than a new interrupt variant — the module doc's original intent ("mid-mission interrupts that reuse the interrupt + predicate system") is honored literally, not just in spirit. `Command::ResolveMissionDecision` resolves the pending choice; investigating rolls a weighted `AnomalyOutcome` (`expedition::resolve_anomaly_outcome`) and applies its `research_bonus` into `SystemResearchPool`, `resource_reward` into the origin colony's pool, and `unlocks_tech` (if any) via the same `TurnProcessor::apply_tech_effects` path normal research completion uses — not a shortcut that skips tech-effect application.
 
 **Survey completion reveals state, it doesn't gate anything.** `resolve_survey`'s outcome (`FullReveal`/`PartialReveal`/`Failed`) sets `Body.surveyed = true` (and `Body.candidate_site_name` on a full reveal) — new, UI-facing world state, not a new mechanical gate. Deposits themselves (`Body.deposits`, #232) were already always-true world state with no fog-of-war; #235 deliberately does **not** retrofit deposit visibility gating onto that model — `surveyed` only marks that an expedition *looked*, matching #232's explicit "coverage guarantee, not a gate" precedent rather than inventing a new one here.
+
+---
+
+### 9B. Surface expeditions — reaching off-colony deposits (issue #340)
+
+The problem this solves: `#232` gave bodies real per-hex deposits and mining recipes read deposit richness, but a colony can only work the hex it occupies, so a deposit one hex away is as good as absent. A colony not founded on a vein was permanently cut off from that ore chain, which loaded the founding-site decision far past its intended weight and left the whole map inert.
+
+**The mechanic.** A colony *builds* an expedition (see §8.3F for what an expedition is), and the player picks a target hex within its range. Once deployed it **returns resources every sol from the deposit it sits on, continuously, until recalled** — not a one-off haul. Its **cost is entirely up front, in resources**: there is no per-sol crew upkeep, so a deployed expedition needs no ongoing accounting beyond its yield tick, and recall returns the expedition rather than the outlay.
+
+**Range is a radius derived from terrain and technology**, not a flat constant — terrain difficulty on the path plus the colony's unlocked tech together set how far it can reach.
+
+**Contention is per resource, not per hex.** Two expeditions may target the same hex provided they extract *different* resources. Since an expedition performs exactly one function, one expedition means one resource, so this needs no special-casing.
+
+**Terrain's effect on yield lives in the deposit, not the extraction path.** Terrain does influence how much a deposit gives up, but that influence is baked into the deposit's own properties at generation time rather than applied as a second multiplier when extracting. This keeps the per-sol extraction arithmetic identical to a colony's — the existing deposit-richness path in `colony::process_production_scaled` is reused unchanged — and puts terrain in exactly one place. It follows §8.3's precedent, where `#184`'s body modifiers already fold into yields rather than being applied at the point of use.
+
+**Failure resolves from a content-authored effect table** — loss of colonists, loss of resources, and so on — reusing the `AnomalyDef`/`AnomalyOutcome` mechanism §9A already established (`content/`-authored, weighted, resolved in `expedition.rs`) rather than hardcoding failure effects in the kernel.
+
+**Why not vehicles, and why not a deposit floor.** Two alternatives were weighed and rejected. *Free-roaming mining vehicles* — a colony builds vehicles that drive to a hex, extract, and return — give more logistics texture but constitute a **third** parallel logistics layer alongside trade convoys (§7/#332) and infrastructure edges (§8.1/#26), for gameplay the expedition model already delivers; the reach, the cost, and the risk are all expressible without per-vehicle state, dispatch scheduling, or movement rendering. *A low-richness surface-deposit floor on every hex* would make mining always work with a one-line generation change, but drains the meaning out of the deposit map entirely, which is the opposite of what the 100 km hex scale (§8.1) was chosen to achieve.
+
+**Unresolved tension with §9A's deposit-visibility stance.** The decision here is that **founding a colony reveals a certain number of deposits around it**, with deposits beyond that neighbourhood hidden until surveyed. That is a fog-of-war model, and §9A explicitly declined to build one: `#235` set `Body.surveyed` as a marker that "an expedition *looked*" and deliberately did **not** retrofit visibility gating onto `Body.deposits`, following `#232`'s "coverage guarantee, not a gate" precedent. §9B needs hidden-until-revealed deposits for the targeting UI to have any tension; §9A/#232 asserted deposits are always-true world state. **These cannot both hold.** Resolving it is a prerequisite for implementing §9B, and the resolution should be explicit — either per-hex planet-map deposits gain a revealed flag (leaving `Body.deposits`' system-scale semantics alone, which is the narrower change), or the always-visible precedent is dropped outright. Not yet decided; flagged here rather than silently contradicted.
 
 ---
 
@@ -585,6 +629,7 @@ A **headless tool** (runs the pure core, no UI) that takes a proposed colony/net
 7. **Balance numbers** — all scalars, to be tuned against the harness.
 8. ~~**Migration mechanics detail**~~ — **RESOLVED, see §6A** (hybrid auto+directed, time/capacity/willingness friction, cascading evacuations tuned by difficulty). Remaining TBD: friction *numbers* (harness).
 9. ~~**Existential-clock specifics**~~ — **RESOLVED, see §10A** (menace-as-data, escalating/phased/telegraphed, degrading failure, optional). Remaining TBD: authoring the actual menace definitions and phase timings (content + harness).
+10. ~~**Hex scale & off-colony resource reach**~~ — **RESOLVED, see §8.1, §8.3F, §9B** (100 km hexes, wrapping rectangle sized from body radius, expedition/outpost/colony tiers, continuous-yield recallable surface expeditions). Remaining TBD, both blocking implementation: **deposit visibility** — §9B needs hidden-until-revealed deposits while §9A/#232 asserted they're always visible, and these contradict (see §9B's closing paragraph); and the **range/yield numbers** themselves (harness).
 
 ---
 
