@@ -6550,19 +6550,6 @@ fn ingredient_row((commodity_id, quantity): (String, f64)) -> ui::IngredientRow 
     }
 }
 
-/// Render a [`colony::production::ProductionShortfall`] as a short
-/// human-readable phrase for the colony screen (issue #303 — a building that
-/// fell short should say *why* rather than just reading as idle).
-///
-/// Commodity shortfalls name the amount missing as well as the commodity
-/// (issue #308): "30 % output" does not tell the player whether they are two
-/// units short or two hundred, and that is the difference between waiting a sol
-/// and building another mine.
-///
-/// The input wording distinguishes the two cases #308 conflated. "no source of
-/// ore" means nothing here makes it — build a producer or open a route. "awaiting
-/// ore from upstream" means something here does make it and the chain has not
-/// filled yet, which resolves on its own.
 /// The machine-readable category for a shortfall, matching
 /// [`ui::ShortfallRow::kind`].
 ///
@@ -6580,6 +6567,19 @@ fn shortfall_kind(reason: &colony::production::ShortfallReason) -> &'static str 
     }
 }
 
+/// Render a [`colony::production::ProductionShortfall`] as a short
+/// human-readable phrase for the colony screen (issue #303 — a building that
+/// fell short should say *why* rather than just reading as idle).
+///
+/// Commodity shortfalls name the amount missing as well as the commodity
+/// (issue #308): "30 % output" does not tell the player whether they are two
+/// units short or two hundred, and that is the difference between waiting a sol
+/// and building another mine.
+///
+/// The input wording distinguishes the two cases #308 conflated. "no source of
+/// ore" means nothing here makes it — build a producer or open a route. "awaiting
+/// ore from upstream" means something here does make it and the chain has not
+/// filled yet, which resolves on its own.
 fn describe_shortfall(shortfall: &colony::production::ProductionShortfall) -> String {
     use colony::production::ShortfallReason as R;
     // Trimmed to one decimal: these are display strings, and a raw f64 tail

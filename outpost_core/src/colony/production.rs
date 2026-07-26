@@ -539,6 +539,25 @@ pub fn process_production_scaled(
             .then_with(|| a.id.cmp(&b.id))
     });
 
+    // Recipe lines resolved once per **distinct building type**, not once per
+    // placed instance.
+    //
+    // `lines_for_building` scans every recipe in the registry and builds a
+    // `BTreeMap` to group them, and this is the per-turn hot path — so calling it
+    // for each of a colony's twelve mines twelve times over was already wasteful
+    // before #308 needed the same answer a second time for `locally_produced`
+    // below. Memoising by type collapses both into one pass per type.
+    let mut lines_by_type: std::collections::HashMap<&str, Vec<RecipeLine<'_>>> =
+        std::collections::HashMap::new();
+    for input in buildings {
+        if !lines_by_type.contains_key(input.building_type.as_str()) {
+            lines_by_type.insert(
+                input.building_type.as_str(),
+                lines_for_building(&input.building_type, active_recipes, registry),
+            );
+        }
+    }
+
     // Every commodity some building here is set up to produce (issue #308).
     //
     // Membership is what separates "this pipeline hasn't filled yet" from "you
@@ -547,14 +566,10 @@ pub fn process_production_scaled(
     // sol: a mine that itself sat idle is still the answer to "where does ore
     // come from here", and reporting `InputShort` at the smelter would send the
     // player looking in the wrong place.
-    let locally_produced: std::collections::HashSet<&str> = buildings
-        .iter()
-        .flat_map(|input| {
-            lines_for_building(&input.building_type, active_recipes, registry)
-                .into_iter()
-                .flat_map(|line| line.selected.outputs.iter().map(|out| out.id.as_str()))
-                .collect::<Vec<_>>()
-        })
+    let locally_produced: std::collections::HashSet<&str> = lines_by_type
+        .values()
+        .flatten()
+        .flat_map(|line| line.selected.outputs.iter().map(|out| out.id.as_str()))
         .collect();
 
     // commodity id → quantity already claimed by a better-priority building.
@@ -577,7 +592,10 @@ pub fn process_production_scaled(
         };
         // Each line throttles on its own inputs (issue #272), so a starved
         // smelting line no longer drags the machining line beside it down.
-        let building_lines = lines_for_building(building_type, active_recipes, registry);
+        // Resolved once per type above rather than recomputed per instance.
+        let building_lines = lines_by_type
+            .get(building_type.as_str())
+            .map_or(&[][..], Vec::as_slice);
         let has_any_recipe = !building_lines.is_empty();
         let has_maintenance = maintenance_enabled && !bdef.maintenance.is_empty();
 
@@ -614,7 +632,7 @@ pub fn process_production_scaled(
 
         // A maintenance-only building still needs an entry so its upkeep is
         // charged; it just has no lines to run.
-        for line in &building_lines {
+        for line in building_lines {
             // Per-line demand: this line's own recipe inputs, pooled with the
             // building's maintenance. Maintenance is pooled into every line
             // rather than split between them because it is a building-level
