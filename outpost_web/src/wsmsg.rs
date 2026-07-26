@@ -119,6 +119,18 @@ pub enum ClientCommand {
         /// Recipe id to activate.
         recipe_id: String,
     },
+    /// Withhold a quantity of one commodity from industry (issue #308).
+    ///
+    /// A floor on the stockpile, not a transfer; `0.0` clears it. Colonist needs
+    /// are exempt.
+    SetCommodityReserve {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Commodity to withhold.
+        commodity_id: String,
+        /// Quantity to keep out of industry's reach; `0.0` clears.
+        amount: f64,
+    },
     /// Set one placed building's staffing priority (issue #307).
     ///
     /// Instance-scoped, unlike `SetActiveRecipe` above, which applies to every

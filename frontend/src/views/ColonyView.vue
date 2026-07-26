@@ -257,6 +257,24 @@ async function setBuildingLock(buildingId: string, lock: number | null): Promise
   })
 }
 
+/**
+ * Withhold `amount` of a commodity from industry, or clear it with `0` (#308).
+ *
+ * Same intent-up/dispatch-here split as the staffing controls above, and the
+ * same error path: `sendCommand` refreshes the screen and toasts an engine
+ * rejection, so a bad amount tells the player rather than silently reverting.
+ */
+async function setCommodityReserve(commodityId: string, amount: number): Promise<void> {
+  const col = selectedColony.value
+  if (!col) return
+  await gameStore.sendCommand({
+    kind: 'set_commodity_reserve',
+    colony_id: col.id,
+    commodity_id: commodityId,
+    amount,
+  })
+}
+
 async function renameBuilding(buildingId: string, name: string | null): Promise<void> {
   const col = selectedColony.value
   if (!col) return
@@ -384,7 +402,10 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                 <UtilitiesPanel :resources="screen ? screen.resources : null" />
               </Pane>
               <Pane :size="leftSizes[2]" min-size="10">
-                <CommoditiesPanel :stockpile="screen ? screen.stockpile : null" />
+                <CommoditiesPanel
+                  :stockpile="screen ? screen.stockpile : null"
+                  @set-reserve="setCommodityReserve"
+                />
               </Pane>
             </Splitpanes>
           </Pane>

@@ -20,10 +20,13 @@ pub struct ColonyStores<'a> {
     commodities: &'a mut ColonyPool,
     resources: &'a mut ColonyResourcePool,
     registry: &'a ContentRegistry,
+    reserves: Option<&'a std::collections::HashMap<String, f64>>,
 }
 
 impl<'a> ColonyStores<'a> {
     /// Borrow both stores alongside the registry that classifies ids.
+    ///
+    /// No player reserves are applied — see [`Self::with_reserves`].
     pub fn new(
         commodities: &'a mut ColonyPool,
         resources: &'a mut ColonyResourcePool,
@@ -33,7 +36,51 @@ impl<'a> ColonyStores<'a> {
             commodities,
             resources,
             registry,
+            reserves: None,
         }
+    }
+
+    /// Attach the colony's player-set commodity reserves (issue #308).
+    ///
+    /// Builder-style rather than a `new` parameter so the many call sites that
+    /// have no reserves to declare — tests, the balance harness, needs
+    /// resolution — stay unchanged.
+    #[must_use]
+    pub fn with_reserves(mut self, reserves: &'a std::collections::HashMap<String, f64>) -> Self {
+        self.reserves = Some(reserves);
+        self
+    }
+
+    /// How much of `id` the player has withheld from industry (issue #308).
+    ///
+    /// `0.0` when nothing is reserved. This is a *floor on the stockpile*, not a
+    /// separate bucket: the reserved amount stays in the pool and is visible in
+    /// every readout, it simply is not offered to recipe inputs or maintenance.
+    #[must_use]
+    pub fn reserved_floor(&self, id: &str) -> f64 {
+        self.reserves
+            .and_then(|r| r.get(id))
+            .copied()
+            .unwrap_or(0.0)
+            .max(0.0)
+    }
+
+    /// The player's reserves as an opening set of claims for the production
+    /// pass's reservation ledger (issue #308).
+    ///
+    /// Non-positive and zero entries are dropped so the ledger only carries real
+    /// claims. Empty when no reserves are attached, which is what makes the
+    /// feature inert for every caller that doesn't opt in.
+    #[must_use]
+    pub fn reserve_claims(&self) -> std::collections::HashMap<String, f64> {
+        self.reserves
+            .map(|r| {
+                r.iter()
+                    .filter(|(_, amount)| **amount > 0.0)
+                    .map(|(id, amount)| (id.clone(), *amount))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Whether `id` routes to the resource pool.

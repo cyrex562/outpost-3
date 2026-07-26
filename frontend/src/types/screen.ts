@@ -78,6 +78,14 @@ export interface StockpileRow {
   capacity: number | null
   /** Net change last turn (positive = surplus, negative = deficit). */
   net_per_turn: number
+  /**
+   * Amount the player has withheld from industry (issue #308); `0` if none.
+   *
+   * A floor *within* `amount`, not a separate quantity — reserved stock is
+   * included in `amount` and stays visible. Recipe inputs and maintenance cannot
+   * draw below it; colonist needs still can.
+   */
+  reserved: number
 }
 
 /**

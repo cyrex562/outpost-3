@@ -503,7 +503,14 @@ pub fn process_production_scaled(
     });
 
     // commodity id → quantity already claimed by a better-priority building.
-    let mut reserved: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    //
+    // Pre-seeded with the player's commodity reserves (issue #308), which makes a
+    // reserve simply the first claim on the stockpile — one nobody outbids,
+    // because nothing ever removes an entry from this map. That is why a reserve
+    // needs no separate code path: it withholds stock from the whole production
+    // pass, recipe inputs and maintenance alike, while colonist needs run in
+    // their own later step against the untouched pool and can still eat it.
+    let mut reserved: std::collections::HashMap<String, f64> = stores.reserve_claims();
 
     for input in order {
         let building_type = &input.building_type;
@@ -2153,6 +2160,154 @@ mod tests {
             "the priority-9 building goes without, got {}",
             scale("eater_a")
         );
+    }
+
+    // ── Player commodity reserves (issue #308) ───────────────────────────────
+
+    fn run_with_reserves(
+        pool: &mut ColonyPool,
+        inputs: &[ProductionInput],
+        reg: &ContentRegistry,
+        reserves: &std::collections::HashMap<String, f64>,
+    ) -> ProductionStepOutcome {
+        let mut resources = ColonyResourcePool::new();
+        super::process_production_scaled(
+            &mut ColonyStores::new(pool, &mut resources, reg).with_reserves(reserves),
+            inputs,
+            100.0,
+            reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
+        )
+    }
+
+    /// A reserve withholds stock from industry: the consumer sees only what is
+    /// above the floor, and the reserved amount is still in the pool afterwards.
+    #[test]
+    fn a_reserve_keeps_stock_out_of_production() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 10.0); // exactly one batch's worth
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("water".to_string(), 10.0); // …all of it withheld
+
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        assert!(
+            outcome.building_results[0].scale.abs() < 1e-9,
+            "a fully reserved input must leave the consumer idle, got {}",
+            outcome.building_results[0].scale
+        );
+        assert!(
+            (pool.amount("water") - 10.0).abs() < 1e-9,
+            "reserved water must remain in the pool, got {}",
+            pool.amount("water")
+        );
+        assert!(
+            pool.amount("widget").abs() < 1e-9,
+            "nothing should have been produced from reserved stock"
+        );
+        assert!(
+            outcome.building_results[0]
+                .shortfalls
+                .iter()
+                .any(|s| matches!(
+                    &s.reason,
+                    ShortfallReason::InputShort { commodity_id } if commodity_id == "water"
+                )),
+            "the idled building must say which input it lacked, got {:?}",
+            outcome.building_results[0].shortfalls
+        );
+    }
+
+    /// Only the amount above the floor is spendable — a reserve is a floor, not
+    /// an all-or-nothing switch.
+    #[test]
+    fn a_partial_reserve_leaves_the_surplus_spendable() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 30.0);
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("water".to_string(), 20.0); // 10 spendable = one batch
+
+        let inputs = vec![
+            input_at(0, "eater_a", 1),
+            input_at(1, "eater_b", 9), // should go without
+        ];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        assert!(
+            (pool.amount("widget") - 1.0).abs() < 1e-9,
+            "the 10 unreserved water buys exactly one widget, got {}",
+            pool.amount("widget")
+        );
+        assert!(
+            (pool.amount("water") - 20.0).abs() < 1e-9,
+            "the floor must be intact, got {}",
+            pool.amount("water")
+        );
+        let scale = |bt: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == bt)
+                .map(|r| r.scale)
+                .expect("both reported")
+        };
+        assert!((scale("eater_a") - 1.0).abs() < 1e-9);
+        assert!(scale("eater_b").abs() < 1e-9);
+    }
+
+    /// Regression guard on the opt-in: a caller that attaches no reserves must
+    /// behave exactly as before the feature existed.
+    #[test]
+    fn no_reserves_attached_changes_nothing() {
+        let reg = make_registry_with_two_water_consumers();
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+
+        let mut without = ColonyPool::new();
+        without.deposit("water", 10.0);
+        let plain = run_inputs(&mut without, &inputs, 100.0, &reg);
+
+        let mut with_empty = ColonyPool::new();
+        with_empty.deposit("water", 10.0);
+        let empty_reserves = std::collections::HashMap::new();
+        let seeded = run_with_reserves(&mut with_empty, &inputs, &reg, &empty_reserves);
+
+        assert!((plain.building_results[0].scale - 1.0).abs() < 1e-9);
+        assert!(
+            (plain.building_results[0].scale - seeded.building_results[0].scale).abs() < 1e-9,
+            "an empty reserve map must be indistinguishable from none"
+        );
+        assert!((without.amount("widget") - with_empty.amount("widget")).abs() < 1e-9);
+    }
+
+    /// A reserve that exceeds what is held is clamped by the availability
+    /// arithmetic rather than producing a negative allowance.
+    #[test]
+    fn a_reserve_larger_than_the_stockpile_is_harmless() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 5.0);
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("water".to_string(), 1_000.0);
+
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        assert!(outcome.building_results[0].scale.abs() < 1e-9);
+        assert!((pool.amount("water") - 5.0).abs() < 1e-9);
     }
 
     /// A shortage lands unevenly, but a partial remainder is still handed over —

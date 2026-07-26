@@ -136,6 +136,23 @@ pub struct Colony {
     /// no entry here at all.
     #[serde(default)]
     pub active_recipes: std::collections::HashMap<String, String>,
+    /// Player-set floors that industry may not draw the stockpile below,
+    /// keyed by commodity id (issue #308).
+    ///
+    /// The motivating case is a commodity two chains compete for — keep biomass
+    /// for food rather than letting the fuel plant burn it. Reserved stock stays
+    /// in [`Self::pool`] and shows in every readout; it is simply not offered to
+    /// recipe inputs or building maintenance.
+    ///
+    /// **Colonist needs are exempt.** Needs resolution runs in its own step
+    /// against the untouched pool, so a reserve withholds stock from industry
+    /// without ever starving the population — which is the whole point of
+    /// reserving food.
+    ///
+    /// Absent or `0.0` means unreserved. `#[serde(default)]` so pre-#308 saves
+    /// load with nothing withheld, matching their behaviour exactly.
+    #[serde(default)]
+    pub commodity_reserves: std::collections::HashMap<String, f64>,
     /// Whether [`crate::Command::DeployStarterKit`] has already been used on
     /// this colony (issue: playtest feedback round 2 — starter buildings
     /// should land instantly, "like a lander", rather than sit in the
@@ -172,6 +189,7 @@ impl Colony {
             last_production_by_building: std::collections::HashMap::new(),
             last_labour: None,
             active_recipes: std::collections::HashMap::new(),
+            commodity_reserves: std::collections::HashMap::new(),
             starter_kit_deployed: false,
         }
     }

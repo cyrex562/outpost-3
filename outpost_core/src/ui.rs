@@ -168,6 +168,14 @@ pub struct StockpileRow {
     pub capacity: Option<f64>,
     /// Net change last turn (positive = production surplus, negative = deficit).
     pub net_per_turn: f64,
+    /// Amount the player has withheld from industry (issue #308).
+    ///
+    /// `0.0` when unreserved. This is a floor within [`Self::amount`], not a
+    /// separate quantity — the reserved stock is included in `amount` and stays
+    /// visible; it is simply not offered to recipe inputs or maintenance.
+    /// Colonist needs draw from it regardless.
+    #[serde(default)]
+    pub reserved: f64,
 }
 
 /// A single colony-local resource row (issue #304).
@@ -613,6 +621,7 @@ mod tests {
                 amount: 200.0,
                 capacity: Some(500.0),
                 net_per_turn: 10.0,
+                reserved: 50.0,
             }],
             construction_queue: vec![],
             manual_override: false,

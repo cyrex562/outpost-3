@@ -42,6 +42,23 @@ export type Command =
     }
   | {
       /**
+       * Withhold a quantity of one commodity from industry (issue #308).
+       *
+       * A floor on the stockpile, not a transfer: the reserved stock stays in
+       * the pool and stays visible, but recipe inputs and building maintenance
+       * cannot draw the pool below it. `0` clears the reserve. Colonist needs
+       * are exempt — reserving food is only useful if the colonists can still
+       * eat it while the fuel plant cannot.
+       *
+       * A negative or non-finite amount is rejected, not clamped.
+       */
+      kind: 'set_commodity_reserve'
+      colony_id: string
+      commodity_id: string
+      amount: number
+    }
+  | {
+      /**
        * Set one building's staffing priority (issue #307). `1` is staffed
        * first, `9` last; the engine rejects anything outside that range rather
        * than clamping.
