@@ -487,6 +487,13 @@ pub fn process_production_scaled(
     // Without this, every building was judged against the whole pool
     // independently: two buildings each needing the last 10 water both ran at
     // full rate, the second producing a full batch from an empty pool.
+    // Consequence worth knowing: `building_results` — and therefore the
+    // `ProductionShortfall` events built from it — now come out in priority order
+    // rather than placement order. That makes the sequence independent of the
+    // order buildings happened to be built in, but it does change what a player
+    // watching a shortfall log sees. Nothing reads these positionally:
+    // `last_production_by_building` is keyed by instance id, and `ui::BuildingRow`
+    // iterates the colony's own building list and looks results up by that key.
     let mut order: Vec<&ProductionInput> = buildings.iter().collect();
     order.sort_by(|a, b| {
         a.priority
