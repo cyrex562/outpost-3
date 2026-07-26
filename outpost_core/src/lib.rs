@@ -2201,6 +2201,21 @@ impl GameEngine {
                     }
                 }
                 // ── Step 1: Construction ────────────────────────────────────
+                // Authored staffing priorities, snapshotted before the
+                // mutable loops below (issue #307) — the registry lives in
+                // `self.state`, so it can't be borrowed while colonies are
+                // mutably held.
+                let authored_priorities: std::collections::HashMap<String, u8> = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .map(|reg| {
+                        reg.buildings()
+                            .map(|def| (def.id.clone(), def.default_priority))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
                 for colony in &mut self.state.colonies {
                     // Consume labor for the active project.
                     if let Some(active) = colony.build_queue.projects.first() {
@@ -2209,9 +2224,17 @@ impl GameEngine {
                     }
                     if let Some(completed) = colony.build_queue.tick_active() {
                         let building_type = completed.building_type.clone();
-                        colony.buildings.push(colony::PlacedBuilding::new(
+                        // Seed the staffing priority from the building's
+                        // authored default (issue #307), so a greenhouse comes
+                        // out of construction already ahead of an ore mine.
+                        let priority = authored_priorities
+                            .get(&building_type)
+                            .copied()
+                            .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
+                        colony.buildings.push(colony::PlacedBuilding::with_priority(
                             &building_type,
                             completed.slot_cost,
+                            priority,
                         ));
                         events.push(Event::BuildingConstructed {
                             colony_id: colony.id,
@@ -2226,9 +2249,14 @@ impl GameEngine {
                 for out in &mut self.state.outposts {
                     if let Some(completed) = out.build_queue.tick_active() {
                         let building_type = completed.building_type.clone();
-                        out.buildings.push(colony::PlacedBuilding::new(
+                        let priority = authored_priorities
+                            .get(&building_type)
+                            .copied()
+                            .unwrap_or(content::types::DEFAULT_BUILDING_PRIORITY);
+                        out.buildings.push(colony::PlacedBuilding::with_priority(
                             &building_type,
                             completed.slot_cost,
+                            priority,
                         ));
                         events.push(Event::OutpostBuildingConstructed {
                             outpost_id: out.id,
@@ -6939,6 +6967,79 @@ mod tests {
         assert!(
             matches!(err, EngineError::SlotCapacityExceeded { .. }),
             "expected SlotCapacityExceeded, got {err:?}"
+        );
+    }
+
+    /// A finished building must come out of construction at the priority its
+    /// content pack authored, not at the generic default (issue #307).
+    ///
+    /// Without this, `PlacedBuilding::priority`'s doc comment ("seeded from the
+    /// building's `default_priority` at placement") would be a false claim, and
+    /// every building would compete on equal footing however the pack was
+    /// authored — which is the whole point of the field.
+    #[test]
+    fn construction_seeds_the_authored_staffing_priority() {
+        let mut engine = GameEngine::new();
+
+        let mut reg = content::ContentRegistry::default();
+        reg.insert_building(content::types::BuildingDef {
+            id: "greenhouse".into(),
+            name: "Greenhouse".into(),
+            description: String::new(),
+            category: content::types::BuildingCategory::Extraction,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 3,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: 2,
+        });
+        engine.state.registry = Some(reg);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Priority Test".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "greenhouse".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let colony = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.id == colony_id)
+            .expect("colony");
+        let built = colony
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "greenhouse")
+            .expect("greenhouse was built");
+        assert_eq!(
+            built.priority, 2,
+            "expected the authored priority, got the generic default"
+        );
+        assert_eq!(
+            built.labour_lock, None,
+            "not locked until the player says so"
         );
     }
 
