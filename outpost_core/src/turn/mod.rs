@@ -630,39 +630,58 @@ impl TurnProcessor {
     }
 
     /// Strategic-month sub-pipeline.
-    /// Per-colony stock that must be held back from trade for local needs.
+    /// Per-colony stock that must be held back from trade export (issue #355).
     ///
-    /// `water`, `oxygen`, and `food_ration` are tradeable cargo *and* survival
-    /// consumables. Without a reserve, the flow pass — which equalises stock
-    /// between route endpoints — happily ships away the water a colony's own
-    /// colonists are about to drink. Commodities no need consumes (ores,
-    /// components) get no entry here and so reserve nothing, trading freely.
+    /// Combines two independent floors:
     ///
-    /// Housing is skipped: it's a colony *resource* now, not pool stock, so it
-    /// is never reachable from trade in the first place (issue #304).
+    /// 1. **The automatic need reserve.** `water`, `oxygen`, and `food_ration` are
+    ///    tradeable cargo *and* survival consumables. Without a reserve, the flow
+    ///    pass — which equalises stock between route endpoints — happily ships
+    ///    away the water a colony's own colonists are about to drink. Sized at
+    ///    [`TRADE_RESERVE_SOLS`] sols of consumption. Commodities no need consumes
+    ///    (ores, components) get no entry from this half.
     ///
-    /// Returns an empty vec when no needs config is loaded — nothing is
-    /// consumed, so nothing needs holding back.
-    fn compute_need_reserves(state: &GameState) -> Vec<std::collections::HashMap<String, f64>> {
-        let Some(config) = state.needs_config.as_ref() else {
-            return Vec::new();
-        };
+    ///    Housing is skipped: it's a colony *resource* now, not pool stock, so it
+    ///    is never reachable from trade in the first place (issue #304).
+    ///
+    /// 2. **The player's `commodity_reserves`** (issue #308). Withholding stock
+    ///    from industry but not from export made the control a half-measure — a
+    ///    reserve read as "protect this" and protected it from one of three
+    ///    discretionary consumers.
+    ///
+    /// The two combine by **maximum, not sum**. Both are floors on what remains,
+    /// so the binding one is whichever is higher; adding them would withhold 800
+    /// from a player who asked for 500 on top of a 300 need reserve, which is not
+    /// what either party asked for.
+    fn compute_trade_reserves(state: &GameState) -> Vec<std::collections::HashMap<String, f64>> {
         state
-            .populations
+            .colonies
             .iter()
-            .map(|pop| {
+            .enumerate()
+            .map(|(idx, colony)| {
+                // Start from what the player asked to keep — present regardless of
+                // whether a needs config is loaded, so the control works in a
+                // bare-`GameState` game too.
+                let mut floors = colony.commodity_reserves.clone();
+                let Some(config) = state.needs_config.as_ref() else {
+                    return floors;
+                };
+                // `populations` is index-aligned with `colonies`, the same
+                // assumption the trade caller makes when it zips them.
+                let Some(pop) = state.populations.get(idx) else {
+                    return floors;
+                };
                 let population = f64::from(pop.count);
-                config
+                for need in config
                     .needs
                     .iter()
                     .filter(|need| !matches!(need.scaling, crate::needs::NeedScaling::Housing))
-                    .map(|need| {
-                        (
-                            need.commodity_id.clone(),
-                            need.required_amount(population) * f64::from(TRADE_RESERVE_SOLS),
-                        )
-                    })
-                    .collect()
+                {
+                    let needed = need.required_amount(population) * f64::from(TRADE_RESERVE_SOLS);
+                    let slot = floors.entry(need.commodity_id.clone()).or_insert(0.0);
+                    *slot = slot.max(needed);
+                }
+                floors
             })
             .collect()
     }
@@ -772,7 +791,7 @@ impl TurnProcessor {
             let colony_ids: Vec<ColonyId> = state.colonies.iter().map(|c| c.id).collect();
             let mut pools: Vec<_> = state.colonies.iter().map(|c| c.pool.clone()).collect();
 
-            let reserves = Self::compute_need_reserves(state);
+            let reserves = Self::compute_trade_reserves(state);
 
             let flow = crate::trade::run_trade_flow(
                 &state.trade_network,
@@ -1555,6 +1574,144 @@ mod tests {
              have exported any — it would have starved itself"
         );
     }
+    // ── Player reserves gate export too (issue #355) ─────────────────────────
+
+    /// A registry + two colonies joined by a fat route, for export tests.
+    fn two_colonies_on_a_route(commodity: &str) -> GameState {
+        use crate::content::types::{CommodityDef, Phase};
+        use crate::content::{CommodityTier, ContentRegistry};
+        use crate::trade::TradeRoute;
+
+        let mut registry = ContentRegistry::default();
+        registry.insert_commodity(CommodityDef {
+            id: commodity.into(),
+            name: commodity.into(),
+            description: String::new(),
+            category: "material".into(),
+            phase: Phase::Solid,
+            base_value: 5.0,
+            tradeable: true,
+            tier: CommodityTier::default(),
+            weight: 1.0,
+        });
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Source"), 100);
+        state.add_colony(Colony::new("Sink"), 100);
+        state.registry = Some(registry);
+        let (a, b) = (state.colonies[0].id, state.colonies[1].id);
+        state.trade_network.add_route(TradeRoute::new(a, b, 500.0));
+        state
+    }
+
+    /// The gap #355 was filed for: a player reserve stopped industry but not
+    /// export, so reserved stock was shipped to a neighbour regardless.
+    ///
+    /// `biomass` is deliberately *not* a population need here, so the automatic
+    /// need reserve is zero and the player's floor is the only thing that can
+    /// hold the stock.
+    #[test]
+    fn a_player_reserve_is_not_exported() {
+        let mut state = two_colonies_on_a_route("biomass");
+        state.colonies[0].pool.deposit("biomass", 500.0);
+        state.colonies[0]
+            .commodity_reserves
+            .insert("biomass".to_string(), 500.0);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+        proc.advance(&mut state); // dispatch sol, then arrival sol
+
+        assert_eq!(
+            state.colonies[1].pool.amount("biomass"),
+            0.0,
+            "the whole stock was reserved, so nothing was exportable"
+        );
+        assert!(
+            (state.colonies[0].pool.amount("biomass") - 500.0).abs() < 1e-9,
+            "the reserve must be intact, got {}",
+            state.colonies[0].pool.amount("biomass")
+        );
+    }
+
+    /// Only the surplus above the floor ships — a reserve is a floor, not an
+    /// export ban.
+    #[test]
+    fn only_stock_above_the_reserve_is_exportable() {
+        let mut state = two_colonies_on_a_route("biomass");
+        state.colonies[0].pool.deposit("biomass", 500.0);
+        state.colonies[0]
+            .commodity_reserves
+            .insert("biomass".to_string(), 300.0);
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+        proc.advance(&mut state);
+
+        assert!(
+            state.colonies[1].pool.amount("biomass") > 0.0,
+            "200 was above the floor and should have moved"
+        );
+        assert!(
+            state.colonies[0].pool.amount("biomass") >= 300.0 - 1e-9,
+            "export must not dip below the floor, got {}",
+            state.colonies[0].pool.amount("biomass")
+        );
+    }
+
+    /// The player floor and the automatic need reserve combine by **maximum**,
+    /// not by sum.
+    ///
+    /// Both are floors on what remains, so the binding one is whichever is
+    /// higher. Summing them would withhold 450 from a player who asked for 300
+    /// on top of a 150 need reserve — more than either party asked for.
+    #[test]
+    fn the_two_reserve_kinds_take_the_maximum_not_the_sum() {
+        use crate::needs::{NeedDef, NeedScaling, NeedsConfig};
+
+        let mut state = two_colonies_on_a_route("water");
+        let mut config = NeedsConfig::default_survival();
+        config.needs = vec![NeedDef {
+            commodity_id: "water".into(),
+            scaling: NeedScaling::PerCapita { rate: 0.05 },
+            weight: 1.0,
+        }];
+        state.needs_config = Some(config);
+
+        // Need reserve: 100 colonists × 0.05 × TRADE_RESERVE_SOLS.
+        let need_reserve = 100.0 * 0.05 * f64::from(TRADE_RESERVE_SOLS);
+        let player_reserve = need_reserve * 2.0;
+        state.colonies[0]
+            .commodity_reserves
+            .insert("water".to_string(), player_reserve);
+
+        let floors = TurnProcessor::compute_trade_reserves(&state);
+        let combined = floors[0]["water"];
+        assert!(
+            (combined - player_reserve).abs() < 1e-9,
+            "expected max({need_reserve}, {player_reserve}) = {player_reserve}, got {combined}"
+        );
+        assert!(
+            combined < need_reserve + player_reserve - 1e-9,
+            "must not be the sum"
+        );
+    }
+
+    /// With no needs config the player's floor still applies — the control must
+    /// not depend on survival needs being authored.
+    #[test]
+    fn a_player_reserve_applies_without_a_needs_config() {
+        let mut state = two_colonies_on_a_route("biomass");
+        assert!(state.needs_config.is_none());
+        state.colonies[0]
+            .commodity_reserves
+            .insert("biomass".to_string(), 42.0);
+
+        let floors = TurnProcessor::compute_trade_reserves(&state);
+        assert!((floors[0]["biomass"] - 42.0).abs() < 1e-9);
+        assert!(floors[1].is_empty(), "the other colony reserved nothing");
+    }
+
     // ── One cadence (issue #332) ─────────────────────────────────────────────
 
     /// Research, trade, and shipment delivery run every sol, not every 30.

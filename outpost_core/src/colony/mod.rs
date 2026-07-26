@@ -150,14 +150,17 @@ pub struct Colony {
     /// population however large it is — which is the whole point of reserving
     /// food.
     ///
-    /// **Construction is also exempt, which is arguably wrong.** Build-queue
-    /// material instalments are drawn straight from [`Self::pool`] by
-    /// [`ConstructionQueue::tick_active_charging`], never through
-    /// [`ColonyStores`], so they do not see this floor: a player reserving metal
-    /// to protect their upkeep will still watch a build queue spend it. That
-    /// mattered less when construction was free (before issue #306) and may want
-    /// revisiting; `a_reserve_does_not_protect_stock_from_the_build_queue` pins
-    /// the current behaviour so it changes on purpose rather than by accident.
+    /// **Construction and trade export respect it too** (issue #355). The build
+    /// queue's per-sol instalments are drawn above this floor, and a project
+    /// blocked by it reports
+    /// [`Event::ConstructionStalledByReserve`](crate::Event::ConstructionStalledByReserve)
+    /// rather than a materials shortage — the stock is there, so telling the
+    /// player they are short would send them hunting for what they already have.
+    /// Export combines this floor with the automatic need reserve by *maximum*;
+    /// see `TurnProcessor::compute_trade_reserves`.
+    ///
+    /// So of the consumers that can draw this stock, only colonist needs ignore
+    /// the floor. Everything discretionary honours it.
     ///
     /// **Maintenance is not exempt.** Reserving the commodity your upkeep runs on
     /// can stall your own buildings, reported as

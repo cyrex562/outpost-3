@@ -531,6 +531,18 @@ pub enum ServerEvent {
         /// Total capacity after the expansion.
         slot_capacity: u32,
     },
+    /// Construction made no progress because the player's own reserve withheld
+    /// the materials (issue #355) — the stock is there, behind their floor.
+    ConstructionStalledByReserve {
+        /// Colony UUID.
+        colony_id: String,
+        /// Project UUID.
+        project_id: String,
+        /// Building type key.
+        building_type: String,
+        /// Per-commodity amount the reserve withheld.
+        withheld: Vec<(String, f64)>,
+    },
     /// Construction made no progress for want of materials (issue #306).
     ConstructionStalled {
         /// Colony UUID.
@@ -859,6 +871,17 @@ impl ServerEvent {
                 building_type: building_type.clone(),
                 added: *added,
                 slot_capacity: *slot_capacity,
+            },
+            Event::ConstructionStalledByReserve {
+                colony_id,
+                project_id,
+                building_type,
+                withheld,
+            } => Self::ConstructionStalledByReserve {
+                colony_id: colony_id.to_string(),
+                project_id: project_id.to_string(),
+                building_type: building_type.clone(),
+                withheld: withheld.clone(),
             },
             Event::ConstructionStalled {
                 colony_id,

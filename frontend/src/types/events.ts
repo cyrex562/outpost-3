@@ -64,6 +64,22 @@ export interface OutpostSlotCapacityExpandedEvent {
   slot_capacity: number
 }
 
+/**
+ * Construction blocked by the player's own commodity reserve (issue #355).
+ *
+ * Distinct from `construction_stalled` because the advice is opposite: the stock
+ * is present, behind a floor the player set. A shortage message would send them
+ * hunting for materials they already have.
+ */
+export interface ConstructionStalledByReserveEvent {
+  kind: 'construction_stalled_by_reserve'
+  colony_id: string
+  project_id: string
+  building_type: string
+  /** Per-commodity amount the reserve withheld from this sol's instalment. */
+  withheld: [string, number][]
+}
+
 /** Construction made no progress for want of materials (issue #306). */
 export interface ConstructionStalledEvent {
   kind: 'construction_stalled'
@@ -299,6 +315,7 @@ export type ServerEvent =
   | SlotCapacityExpandedEvent
   | OutpostSlotCapacityExpandedEvent
   | ConstructionStalledEvent
+  | ConstructionStalledByReserveEvent
   | OutpostConstructionStalledEvent
   | LabourAssignedEvent
   | NeedsResolvedEvent
