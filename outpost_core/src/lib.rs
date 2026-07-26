@@ -6584,8 +6584,14 @@ fn describe_shortfall(shortfall: &colony::production::ProductionShortfall) -> St
     use colony::production::ShortfallReason as R;
     // Trimmed to one decimal: these are display strings, and a raw f64 tail
     // ("7.000000000000001 ore") reads as a bug rather than a quantity.
+    //
+    // Below half a display unit the quantity is dropped rather than rounded, so a
+    // 0.04 deficit reads "no source of ore" instead of the self-contradictory "no
+    // source of 0.0 ore". Anything that small is a rounding crumb the player
+    // cannot act on anyway.
+    const MIN_SHOWN_DEFICIT: f64 = 0.05;
     let short_by = |commodity_id: &str| {
-        if shortfall.deficit > 0.0 {
+        if shortfall.deficit >= MIN_SHOWN_DEFICIT {
             format!("{:.1} {commodity_id}", shortfall.deficit)
         } else {
             commodity_id.to_owned()
@@ -7768,6 +7774,76 @@ mod tests {
             (steel_refund.1 - 25.0).abs() < 1e-9,
             "expected 25.0 steel refund, got {}",
             steel_refund.1
+        );
+    }
+
+    /// The readout names the missing quantity, and drops it rather than rounding
+    /// a rounding crumb to a self-contradictory `"no source of 0.0 ore"`.
+    #[test]
+    fn shortfall_phrasing_names_the_quantity_and_hides_meaningless_ones() {
+        use colony::production::{ProductionShortfall, ShortfallReason};
+        let phrase = |reason: ShortfallReason, deficit: f64| {
+            describe_shortfall(&ProductionShortfall {
+                reason,
+                effective_scale: 0.3,
+                deficit,
+            })
+        };
+        let ore = || "ore".to_string();
+
+        // The two input cases read as different advice, not different phrasings.
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                7.0
+            ),
+            "no source of 7.0 ore"
+        );
+        assert_eq!(
+            phrase(
+                ShortfallReason::AwaitingUpstream {
+                    commodity_id: ore()
+                },
+                7.0
+            ),
+            "awaiting 7.0 ore from upstream"
+        );
+        // A float tail is trimmed rather than dumped raw.
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                7.000_000_000_000_1
+            ),
+            "no source of 7.0 ore"
+        );
+        // Below half a display unit the quantity is omitted entirely.
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                0.04
+            ),
+            "no source of ore"
+        );
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                0.0
+            ),
+            "no source of ore"
+        );
+        // Non-commodity shortfalls are unaffected.
+        assert_eq!(phrase(ShortfallReason::LaborShort, 0.0), "labour short");
+        assert_eq!(
+            phrase(ShortfallReason::PowerBrownout, 0.0),
+            "power brownout"
         );
     }
 
