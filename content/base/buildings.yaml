@@ -934,8 +934,11 @@
 #
 # Every such project must be authored `slot_cost: 0`. A slot-granting project
 # that consumed a slot would deadlock a full colony: the only way to make room
-# would itself need room. The engine rejects a non-zero `slot_cost` here rather
-# than letting a pack ship that trap.
+# would itself need room. The engine does not trust the pack on this — it
+# coerces the slot cost of any slot-granting project to 0 at queue time, so a
+# misauthored non-zero value here is silently ignored rather than rejected.
+# `authored_site_preparation_projects_are_slot_free_and_cost_materials` in
+# content/loader.rs is what actually fails if one of these grows a slot cost.
 #
 # `worker_slots: 0` and no recipe: the crews are notionally part of the
 # construction labour the project already draws, not a standing post.
