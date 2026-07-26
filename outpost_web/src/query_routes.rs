@@ -260,6 +260,36 @@ pub struct InfraEdgeWire {
     pub cost: f32,
 }
 
+/// `GET /api/colony-screen/:id` — the full colony management screen bundle.
+///
+/// Mirrors the Tauri `colony_screen` query against the shared engine. Browser
+/// mode previously had no way to fetch this at all, so every panel driven by it
+/// — buildings, stockpile, colony resources — rendered empty there (issue #307
+/// stage 4 needed the buildings panel to work in a browser to be testable).
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_colony_screen(
+    State(state): State<AppState>,
+    Path(colony_id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    match engine.query(&outpost_core::Query::ColonyScreen { colony_id }) {
+        Ok(outpost_core::QueryResult::ColonyScreen(data)) => Json(data).into_response(),
+        Ok(other) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("unexpected query result: {other:?}") })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("{e:?}") })),
+        )
+            .into_response(),
+    }
+}
+
 /// `GET /api/planet-map` — the current planet's hex map with per-cell
 /// metadata.
 ///

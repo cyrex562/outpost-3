@@ -12,7 +12,7 @@ import type { Command } from '@/types/commands'
 import type { GameEvent } from '@/types/gameEvents'
 import type { ColonyScreenData } from '@/types/screen'
 import { createSession, applySharedCommand, deleteSession } from '@/api/client'
-import { isTauri, apply as tauriApply, query as tauriQuery } from '@/services/tauriBridge'
+import { isTauri, apply as tauriApply, getColonyScreen } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
 
 export interface PendingCommand {
@@ -58,20 +58,20 @@ export const useGameStore = defineStore('game', () => {
 
   /**
    * Fetch fresh `colony_screen` data for the given colony (or the currently
-   * selected one) and store it on `colonyScreen`. No-op in browser mode.
+   * selected one) and store it on `colonyScreen`.
+   *
+   * Works in **both** hosts since #307 stage 4 — it used to bail out in browser
+   * mode, which left `colonyScreen` permanently null there and every panel driven
+   * by it (buildings, stockpile, colony resources) rendering empty.
    *
    * Errors are swallowed on purpose — a missing colony_screen shouldn't crash
    * the UI (may happen briefly after founding while the engine catches up).
    */
   async function refreshColonyScreen(colonyId?: string | null): Promise<void> {
-    if (!isTauri) return
     const id = colonyId ?? selectedColonyId.value
     if (!id) return
     try {
-      const q = await tauriQuery({ kind: 'colony_screen', colony_id: id })
-      if (q.kind === 'colony_screen' && q.data) {
-        colonyScreen.value = q.data as ColonyScreenData
-      }
+      colonyScreen.value = await getColonyScreen(id)
     } catch {
       // ignore — see doc comment
     }
@@ -80,11 +80,9 @@ export const useGameStore = defineStore('game', () => {
   // Auto-refresh whenever the selection changes in Tauri mode. This covers
   // tab clicks in ColonyView and the wizard's `selectedColonyId = founded.id`
   // handoff, so consumers never have to remember to fetch.
-  if (isTauri) {
-    watch(selectedColonyId, (next) => {
-      if (next) void refreshColonyScreen(next)
-    })
-  }
+  watch(selectedColonyId, (next) => {
+    if (next) void refreshColonyScreen(next)
+  })
 
   /**
    * Enqueue a command and dispatch it.
@@ -110,11 +108,6 @@ export const useGameStore = defineStore('game', () => {
         for (const ev of events) {
           worldStore.handleServerMessage({ type: 'event', event: ev as unknown as import('@/types/events').ServerEvent })
         }
-        // Post-command refresh: even if selection didn't change, this catches
-        // per-turn commodity movement, construction progress, etc.
-        if (selectedColonyId.value) {
-          await refreshColonyScreen(selectedColonyId.value)
-        }
       } else {
         // Browser mode dispatches against the shared engine (the same one
         // the WebSocket `new_game` flow bootstraps content/planet/colony
@@ -125,6 +118,12 @@ export const useGameStore = defineStore('game', () => {
         for (const ev of events) {
           worldStore.handleServerMessage({ type: 'event', event: ev as unknown as import('@/types/events').ServerEvent })
         }
+      }
+      // Post-command refresh, both hosts: even if selection didn't change, this
+      // catches per-turn commodity movement, construction progress, and
+      // per-building staffing changes (#307).
+      if (selectedColonyId.value) {
+        await refreshColonyScreen(selectedColonyId.value)
       }
       lastEvents.value = events
       toastMessage.value = summariseEvents(events)

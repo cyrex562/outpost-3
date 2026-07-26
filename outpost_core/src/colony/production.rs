@@ -817,37 +817,6 @@ fn workforce(labor_available: f32) -> u32 {
     }
 }
 
-/// Collapse per-instance production results into one entry per building type,
-/// keeping the **worst-scaling** instance of each.
-///
-/// `Colony::last_production` and `Outpost::last_production` are keyed by building
-/// type, but since #307 two instances of a type can run at different scales, so
-/// the mapping is genuinely lossy. Keeping the worst makes the summary answer "is
-/// anything wrong with my mines?" correctly — the same convention
-/// [`BuildingProductionResult::scale`] already uses to summarise independent
-/// lines. Picking arbitrarily (whichever instance happened to be last) would let
-/// a starved building hide behind a healthy sibling.
-///
-/// The per-instance detail is still available on
-/// [`ProductionStepOutcome::building_results`]; re-keying the stored map by
-/// [`BuildingProductionResult::building_id`] waits on the per-instance building UI.
-#[must_use]
-pub fn summarize_by_type(
-    results: Vec<BuildingProductionResult>,
-) -> std::collections::HashMap<String, BuildingProductionResult> {
-    let mut by_type: std::collections::HashMap<String, BuildingProductionResult> =
-        std::collections::HashMap::new();
-    for result in results {
-        match by_type.get(&result.building_type) {
-            Some(existing) if existing.scale <= result.scale => {}
-            _ => {
-                by_type.insert(result.building_type.clone(), result);
-            }
-        }
-    }
-    by_type
-}
-
 /// Compute the colony power grid, scaling consumer power draws by
 /// `power_scalar` (issue #161). Generators are unaffected. Pass `1.0` for
 /// the neutral (no-difficulty) case.
@@ -1873,39 +1842,20 @@ mod tests {
         );
         assert_eq!(second.assigned, 0, "its sibling gets nothing");
 
-        // The type-keyed summary keeps the *worst* of the two, so a starved
-        // instance can't hide behind a healthy sibling.
-        let summary = summarize_by_type(outcome.building_results);
-        assert!(
-            summary["mine"].scale.abs() < 1e-6,
-            "the summary reports the starved instance, got {}",
-            summary["mine"].scale
-        );
-    }
-
-    #[test]
-    fn summarize_by_type_keeps_the_worst_instance_of_each_type() {
-        let result = |building_type: &str, scale: f64| BuildingProductionResult {
-            building_id: Uuid::new_v4(),
-            building_type: building_type.to_owned(),
-            recipe_id: String::new(),
-            concurrent_recipe_ids: vec![],
-            scale,
-            shortfalls: vec![],
-            line_results: vec![],
+        // And the results keep them apart too, keyed by instance — one mine ran,
+        // the other didn't. A type-keyed map could not express this.
+        let run_for = |id| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_id == id)
+                .expect("a result per instance")
         };
-        // Deliberately not in ascending order, so "keep the worst" can't be
-        // satisfied by accident by whichever entry happened to land last.
-        let summary = summarize_by_type(vec![
-            result("mine", 0.5),
-            result("mine", 0.1),
-            result("mine", 0.9),
-            result("farm", 1.0),
-        ]);
-
-        assert_eq!(summary.len(), 2);
-        assert!((summary["mine"].scale - 0.1).abs() < 1e-9);
-        assert!((summary["farm"].scale - 1.0).abs() < 1e-9);
+        assert!(run_for(inputs[1].id).scale > 0.0, "the staffed mine ran");
+        assert!(
+            run_for(inputs[2].id).scale.abs() < 1e-6,
+            "the unstaffed mine did not"
+        );
     }
 
     // ── Deterministic for fixed seed ─────────────────────────────────────────

@@ -24,6 +24,48 @@
 #
 # Buildings with no recipe are intentionally passive (pure power_delta/slot
 # infrastructure) — each one below says why in its description.
+#
+# ── Staffing priority (issue #307) ──────────────────────────────────────────
+#
+# `default_priority` seeds each placed instance's staffing priority: 1 is
+# staffed first, 9 last. When the colony can't fill every post, labour goes to
+# the better priority and the worse one goes without — it is not spread thinly
+# across everything. Players can re-rank any individual building afterwards;
+# this is only where each one starts.
+#
+# The bands, and why they sit where they do:
+#
+#   1  Life support and water. Losing these kills colonists, so they are
+#      staffed before anything else. Includes colony_hq (its concurrent
+#      recipes ARE the starter colony's power, water, and oxygen) and
+#      ice_miner (bulk water, whatever its `extraction` category says).
+#   2  Food. Starvation is slower than suffocation, so just behind.
+#   3  Infrastructure that needs crew to keep people alive: staffed reactors,
+#      and staffed housing. Note the split — a `habitat_dome` yields 60 housing
+#      only while someone is running it, so leaving it unstaffed evicts the
+#      population. The passive habs at 9 have no such failure mode.
+#   4  Foundational extraction — the ores and feedstock everything else is
+#      built from.
+#   5  Primary processing and the specialised mines feeding it. This is also
+#      the engine's own default, so an unauthored building lands here.
+#   6  Secondary processing, and mines for materials the colony wants rather
+#      than needs.
+#   7  Manufacturing and trade — valuable, but a sol's pause costs progress,
+#      not lives.
+#   8  Research. The classic thing to sacrifice in a crisis.
+#   9  Crewless structures: passive habs, storage, passive power, sensors. All
+#      have `worker_slots: 0`, so their priority is inert — authored anyway so
+#      that if one ever gains a post it queues last by default rather than
+#      silently landing mid-table on the engine default.
+#
+#      #307 suggested a hab should queue behind a lab, and that holds for these:
+#      a `basic_habitat` provides its capacity with nobody working it, so it
+#      genuinely never competes for labour. It does *not* hold for the staffed
+#      habitats, which is why they sit at 3 instead.
+#
+# Ordering intent is asserted in outpost_core's
+# `authored_priorities_put_life_support_ahead_of_research` test, so a careless
+# retune here fails a test rather than quietly changing who starves.
 
 # ── Starter set (no tech_prerequisite) ──────────────────────────────────────
 
@@ -43,6 +85,7 @@
   category: services
   power_delta: -13.0
   worker_slots: 2
+  default_priority: 1
   labor_required: 2
   slot_cost: 1
   construction_turns: 3
@@ -59,6 +102,7 @@
   category: extraction
   power_delta: -2.0
   worker_slots: 1
+  default_priority: 1
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -75,6 +119,7 @@
   category: extraction
   power_delta: -2.0
   worker_slots: 1
+  default_priority: 4
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -93,6 +138,7 @@
   category: processing
   power_delta: -2.0
   worker_slots: 2
+  default_priority: 7
   labor_required: 2
   slot_cost: 1
   construction_turns: 3
@@ -108,6 +154,7 @@
   category: life_support
   power_delta: -2.0
   worker_slots: 1
+  default_priority: 1
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -123,6 +170,7 @@
   category: processing
   power_delta: -2.0
   worker_slots: 1
+  default_priority: 5
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -138,6 +186,7 @@
   category: extraction
   power_delta: -2.0
   worker_slots: 1
+  default_priority: 2
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -153,6 +202,7 @@
   category: housing
   power_delta: -2.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -173,6 +223,7 @@
   category: extraction
   power_delta: 4.0
   worker_slots: 1
+  default_priority: 1
   slot_cost: 1
   construction_turns: 2
   tech_prerequisite: resource_extraction
@@ -188,6 +239,7 @@
   category: extraction
   power_delta: 5.0
   worker_slots: 1
+  default_priority: 2
   tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
@@ -199,6 +251,7 @@
   category: processing
   power_delta: 10.0
   worker_slots: 2
+  default_priority: 5
   tech_prerequisite: resource_extraction
   construction_cost:
     - id: structural_metal
@@ -213,6 +266,7 @@
   category: research
   power_delta: 8.0
   worker_slots: 3
+  default_priority: 8
   slot_cost: 1
   construction_turns: 4
   tech_prerequisite: basic_construction
@@ -228,6 +282,7 @@
   category: housing
   power_delta: 1.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -242,6 +297,7 @@
   category: power
   power_delta: -20.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -259,6 +315,7 @@
   category: life_support
   power_delta: 3.0
   worker_slots: 1
+  default_priority: 1
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -275,6 +332,7 @@
   category: extraction
   power_delta: 6.0
   worker_slots: 2
+  default_priority: 4
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -289,6 +347,7 @@
   category: power
   power_delta: -6.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -305,6 +364,7 @@
   category: extraction
   power_delta: 6.0
   worker_slots: 2
+  default_priority: 5
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -321,6 +381,7 @@
   category: storage
   power_delta: 0.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
@@ -337,6 +398,7 @@
   category: extraction
   power_delta: 7.0
   worker_slots: 2
+  default_priority: 4
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -357,6 +419,7 @@
   category: extraction
   power_delta: 6.0
   worker_slots: 2
+  default_priority: 4
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -373,6 +436,7 @@
   category: extraction
   power_delta: 7.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -390,6 +454,7 @@
   category: extraction
   power_delta: 7.0
   worker_slots: 2
+  default_priority: 5
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -406,6 +471,7 @@
   category: extraction
   power_delta: 6.0
   worker_slots: 2
+  default_priority: 4
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -422,6 +488,7 @@
   category: housing
   power_delta: 4.0
   worker_slots: 1
+  default_priority: 3
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -443,6 +510,7 @@
   category: processing
   power_delta: 12.0
   worker_slots: 2
+  default_priority: 5
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -459,6 +527,7 @@
   category: extraction
   power_delta: 8.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 1
   construction_turns: 4
@@ -475,6 +544,7 @@
   category: processing
   power_delta: 10.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 1
   construction_turns: 4
@@ -491,6 +561,7 @@
   category: life_support
   power_delta: 6.0
   worker_slots: 1
+  default_priority: 1
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -509,6 +580,7 @@
   category: extraction
   power_delta: 7.0
   worker_slots: 1
+  default_priority: 2
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -523,6 +595,7 @@
   category: power
   power_delta: -20.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -542,6 +615,7 @@
   category: processing
   power_delta: 13.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -560,6 +634,7 @@
   category: processing
   power_delta: 14.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -580,6 +655,7 @@
   category: power
   power_delta: -40.0
   worker_slots: 1
+  default_priority: 3
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -601,6 +677,7 @@
   category: extraction
   power_delta: 10.0
   worker_slots: 2
+  default_priority: 5
   labor_required: 2
   slot_cost: 1
   construction_turns: 4
@@ -622,6 +699,7 @@
   category: processing
   power_delta: 16.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -641,6 +719,7 @@
   category: processing
   power_delta: 18.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -661,6 +740,7 @@
   category: processing
   power_delta: 16.0
   worker_slots: 2
+  default_priority: 6
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -681,6 +761,7 @@
   category: processing
   power_delta: 12.0
   worker_slots: 1
+  default_priority: 6
   labor_required: 2
   slot_cost: 2
   construction_turns: 4
@@ -700,6 +781,7 @@
   category: processing
   power_delta: 14.0
   worker_slots: 2
+  default_priority: 7
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -720,6 +802,7 @@
   category: processing
   power_delta: 16.0
   worker_slots: 3
+  default_priority: 7
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
@@ -736,6 +819,7 @@
   category: power
   power_delta: -60.0
   worker_slots: 1
+  default_priority: 3
   labor_required: 2
   slot_cost: 2
   construction_turns: 6
@@ -752,6 +836,7 @@
   category: housing
   power_delta: 10.0
   worker_slots: 1
+  default_priority: 3
   labor_required: 2
   slot_cost: 2
   construction_turns: 6
@@ -771,6 +856,7 @@
   category: life_support
   power_delta: 8.0
   worker_slots: 1
+  default_priority: 1
   labor_required: 1
   slot_cost: 1
   construction_turns: 4
@@ -790,6 +876,7 @@
   category: services
   power_delta: 3.0
   worker_slots: 1
+  default_priority: 7
   labor_required: 1
   slot_cost: 1
   construction_turns: 4
@@ -807,6 +894,7 @@
   category: defense
   power_delta: 5.0
   worker_slots: 0
+  default_priority: 9
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
@@ -825,6 +913,7 @@
   category: research
   power_delta: 16.0
   worker_slots: 3
+  default_priority: 8
   labor_required: 2
   slot_cost: 2
   construction_turns: 5

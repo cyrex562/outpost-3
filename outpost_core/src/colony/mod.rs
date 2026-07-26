@@ -17,14 +17,16 @@ pub mod production;
 pub mod resource_pool;
 pub mod stores;
 
-pub use building::{ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId};
+pub use building::{
+    ConstructionProject, ConstructionQueue, PlacedBuilding, ProjectId, MAX_BUILDING_NAME_LEN,
+};
 pub use labour::{allocate_from, allocate_labour, LabourAllocation, LabourCandidate, LabourPlan};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{
     building_io_summary, line_selection_key, lines_for_building, process_production,
-    process_production_scaled, summarize_by_type, BuildingIoSummary, BuildingProductionResult,
-    LineProductionResult, PowerGrid, ProductionInput, ProductionShortfall, ProductionStepOutcome,
-    RecipeLine, ShortfallReason,
+    process_production_scaled, BuildingIoSummary, BuildingProductionResult, LineProductionResult,
+    PowerGrid, ProductionInput, ProductionShortfall, ProductionStepOutcome, RecipeLine,
+    ShortfallReason,
 };
 pub use resource_pool::ColonyResourcePool;
 pub use stores::ColonyStores;
@@ -95,17 +97,23 @@ pub struct Colony {
     #[serde(default)]
     pub category_modifiers: Vec<crate::system::BodyModifier>,
     /// Each operational building's most recent production outcome, keyed by
-    /// `building_type` (issue #182).
+    /// **placed-instance id** (issues #182, #307).
     ///
     /// Overwritten every sol by the turn processor's production step;
     /// buildings with no matching recipe (pure storage/habitat) are absent.
     ///
-    /// Since per-building labour (#307), instances of one type can run at
-    /// different scales, so this type-keyed map holds the **worst** instance of
-    /// each — see [`summarize_by_type`]. Read
-    /// [`ProductionStepOutcome::building_results`] for per-instance detail.
+    /// Keyed by instance rather than by `building_type` since #307: per-building
+    /// labour means two mines can run at different scales, and a type key forced
+    /// them to share one entry — so a starved building hid behind a healthy
+    /// sibling, and anything summing this map counted one instance per type.
+    ///
+    /// The pre-#307 field was `last_production`, keyed by `building_type`. It is
+    /// deliberately **not** migrated: a `String`-keyed map cannot deserialize
+    /// into a `Uuid`-keyed one, and this is per-sol derived data that the next
+    /// advance regenerates in full. Old saves load with this empty.
     #[serde(default)]
-    pub last_production: std::collections::HashMap<String, BuildingProductionResult>,
+    pub last_production_by_building:
+        std::collections::HashMap<uuid::Uuid, BuildingProductionResult>,
     /// How the workforce was distributed on the most recent sol (issue #307).
     ///
     /// Stored rather than recomputed so between-sol readouts (employed vs
@@ -160,7 +168,7 @@ impl Colony {
             home_body_id: None,
             habitability_modifier: default_habitability_modifier(),
             category_modifiers: Vec::new(),
-            last_production: std::collections::HashMap::new(),
+            last_production_by_building: std::collections::HashMap::new(),
             last_labour: None,
             active_recipes: std::collections::HashMap::new(),
             starter_kit_deployed: false,

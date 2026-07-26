@@ -41,11 +41,39 @@ pub struct PlacedBuilding {
     /// short the colony gets.
     #[serde(default)]
     pub labour_lock: Option<u32>,
+    /// Per-type instance number, `1`-based, assigned at construction (issue #307).
+    ///
+    /// Gives the player something to tell two mines apart by, which per-instance
+    /// staffing needs — ranking three mines against each other is meaningless if
+    /// they all read as "Mine".
+    ///
+    /// **Numbers are never reused.** Demolishing "Mine 2" of three leaves
+    /// `1, 3`, and the next mine built is `4`. Gaps are deliberate: the
+    /// alternative renumbers surviving buildings behind the player's back, so the
+    /// building they set to priority 1 silently becomes a different label.
+    ///
+    /// `0` means unassigned — a pre-#307 save loads that way and is backfilled
+    /// on load (see `snapshot`). Treat `0` as "no number to show".
+    #[serde(default)]
+    pub ordinal: u32,
+    /// Player-chosen name, overriding the auto-numbered default (issue #307).
+    ///
+    /// `None` — the default — displays as `"<Type Name> <ordinal>"`. Naming is
+    /// opt-in so there's no friction at build time, but a building that matters
+    /// can be labelled ("North Vein Mine").
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 fn default_placed_priority() -> u8 {
     crate::content::types::DEFAULT_BUILDING_PRIORITY
 }
+
+/// Longest accepted player-supplied building name.
+///
+/// Generous enough for any reasonable label while keeping a pathological name out
+/// of saves and UI layout.
+pub const MAX_BUILDING_NAME_LEN: usize = 64;
 
 impl PlacedBuilding {
     /// Create a new placed building instance at the default staffing priority.
@@ -61,6 +89,8 @@ impl PlacedBuilding {
             slot_cost,
             priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             labour_lock: None,
+            ordinal: 0,
+            name: None,
         }
     }
 
@@ -78,6 +108,47 @@ impl PlacedBuilding {
             priority: priority.clamp(1, crate::content::types::MAX_BUILDING_PRIORITY),
             ..Self::new(building_type, slot_cost)
         }
+    }
+
+    /// The next unused instance number for `building_type` among `existing`.
+    ///
+    /// One past the highest already in use, so numbers are never reused — see
+    /// [`Self::ordinal`] for why that matters. Returns `1` for the first of a type.
+    #[must_use]
+    pub fn next_ordinal(existing: &[Self], building_type: &str) -> u32 {
+        existing
+            .iter()
+            .filter(|b| b.building_type == building_type)
+            .map(|b| b.ordinal)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Assign this building the next unused instance number for its type.
+    #[must_use]
+    pub fn numbered_within(mut self, existing: &[Self]) -> Self {
+        self.ordinal = Self::next_ordinal(existing, &self.building_type);
+        self
+    }
+
+    /// What to call this building in the UI.
+    ///
+    /// The player's name if they set one, else `"<type_name> <ordinal>"` — pass
+    /// the authored [`BuildingDef::name`] as `type_name`. An unnumbered building
+    /// (ordinal `0`, i.e. a pre-#307 save not yet backfilled) falls back to the
+    /// bare type name rather than showing a meaningless "Mine 0".
+    ///
+    /// [`BuildingDef::name`]: crate::content::types::BuildingDef::name
+    #[must_use]
+    pub fn display_name(&self, type_name: &str) -> String {
+        if let Some(name) = &self.name {
+            return name.clone();
+        }
+        if self.ordinal == 0 {
+            return type_name.to_owned();
+        }
+        format!("{type_name} {}", self.ordinal)
     }
 }
 
@@ -292,5 +363,71 @@ mod tests {
         let mut q = ConstructionQueue::new();
         q.enqueue(sample_project(3));
         assert!(q.cancel(Uuid::new_v4()).is_none());
+    }
+
+    // ── Instance identity (issue #307) ───────────────────────────────────────
+
+    #[test]
+    fn instance_numbers_start_at_one_and_count_up_per_type() {
+        let mut placed: Vec<PlacedBuilding> = Vec::new();
+        for expected in 1..=3 {
+            let b = PlacedBuilding::new("mine", 1).numbered_within(&placed);
+            assert_eq!(b.ordinal, expected);
+            placed.push(b);
+        }
+        // A different type numbers independently, not continuing the mine count.
+        let farm = PlacedBuilding::new("farm", 1).numbered_within(&placed);
+        assert_eq!(farm.ordinal, 1, "each type counts from one");
+    }
+
+    /// Numbers are never recycled. Renumbering survivors would silently relabel
+    /// the building the player set to priority 1.
+    #[test]
+    fn a_demolished_buildings_number_is_not_reused() {
+        let mut placed: Vec<PlacedBuilding> = Vec::new();
+        for _ in 0..3 {
+            let b = PlacedBuilding::new("mine", 1).numbered_within(&placed);
+            placed.push(b);
+        }
+        assert_eq!(
+            placed.iter().map(|b| b.ordinal).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        // Demolish "Mine 2".
+        placed.retain(|b| b.ordinal != 2);
+        assert_eq!(
+            placed.iter().map(|b| b.ordinal).collect::<Vec<_>>(),
+            vec![1, 3],
+            "survivors keep their numbers rather than closing the gap"
+        );
+
+        let next = PlacedBuilding::new("mine", 1).numbered_within(&placed);
+        assert_eq!(
+            next.ordinal, 4,
+            "continues past the highest, not into the gap"
+        );
+    }
+
+    #[test]
+    fn display_name_falls_back_to_the_type_name_and_number() {
+        let b = PlacedBuilding::new("mine", 1).numbered_within(&[]);
+        assert_eq!(b.display_name("Ore Mine"), "Ore Mine 1");
+    }
+
+    #[test]
+    fn a_player_name_overrides_the_numbered_default() {
+        let mut b = PlacedBuilding::new("mine", 1).numbered_within(&[]);
+        b.name = Some("North Vein".into());
+        assert_eq!(b.display_name("Ore Mine"), "North Vein");
+    }
+
+    /// A pre-#307 save loads unnumbered. Showing "Ore Mine 0" would be worse than
+    /// showing no number, and the backfill on load fixes it properly.
+    #[test]
+    fn an_unnumbered_building_shows_the_bare_type_name() {
+        let b = PlacedBuilding::new("mine", 1);
+        assert_eq!(b.ordinal, 0);
+        assert_eq!(b.display_name("Ore Mine"), "Ore Mine");
     }
 }

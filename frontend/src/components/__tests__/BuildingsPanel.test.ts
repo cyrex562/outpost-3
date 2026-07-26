@@ -5,8 +5,13 @@ import type { BuildingRow } from '@/types/screen'
 
 function makeRow(overrides: Partial<BuildingRow>): BuildingRow {
   return {
+    building_id: 'b-1',
+    name: 'Smelter 1',
     building_type: 'smelter',
     labour_assigned: 5,
+    labour_demand: 5,
+    priority: 5,
+    labour_lock: null,
     slot_cost: 2,
     full_capacity: true,
     scale: 1.0,
@@ -298,5 +303,145 @@ describe('BuildingsPanel I/O honesty and resilience (#272 review)', () => {
     expect(wrapper.find('[data-testid="building-row-legacy_shed"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="building-io-legacy_shed"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="building-recipe-count-legacy_shed"]').exists()).toBe(false)
+  })
+})
+
+describe('BuildingsPanel per-building staffing (#307 stage 4)', () => {
+  function mountRows(rows: Partial<BuildingRow>[]) {
+    return mount(BuildingsPanel, {
+      props: {
+        buildings: rows.map(makeRow),
+        slotsUsed: 2,
+        slotCapacity: 10,
+        labourAvailable: 8,
+        labourTotal: 10,
+      },
+    })
+  }
+
+  /**
+   * Regression: rows are per placed instance, but were keyed by `building_type`.
+   * Two mines therefore shared a Vue key, so Vue treated them as one element and
+   * reused the wrong DOM node between them.
+   */
+  it('gives two instances of one type distinct rows', () => {
+    const wrapper = mountRows([
+      { building_id: 'mine-a', name: 'Mine 1', building_type: 'mine' },
+      { building_id: 'mine-b', name: 'Mine 2', building_type: 'mine' },
+    ])
+
+    const ids = wrapper
+      .findAll('[data-building-id]')
+      .map((el) => el.attributes('data-building-id'))
+    expect(ids).toEqual(['mine-a', 'mine-b'])
+    expect(new Set(ids).size).toBe(2)
+
+    // And each renders its own controls, addressable by instance.
+    expect(wrapper.find('[data-testid="building-priority-mine-a"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="building-priority-mine-b"]').exists()).toBe(true)
+  })
+
+  it('shows the instance name rather than the bare type key', () => {
+    const wrapper = mountRows([{ building_id: 'm1', name: 'North Vein', building_type: 'mine' }])
+    expect(wrapper.find('[data-testid="view-details-mine"]').text()).toBe('North Vein')
+  })
+
+  it('falls back to the type when a host omits the newer name field', () => {
+    const wrapper = mountRows([
+      { building_id: 'm1', name: undefined as unknown as string, building_type: 'mine' },
+    ])
+    expect(wrapper.find('[data-testid="view-details-mine"]').text()).toBe('mine')
+  })
+
+  it('emits the new priority when the selector changes', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', priority: 5 }])
+    const select = wrapper.get('[data-testid="building-priority-m1"]')
+    await select.setValue('2')
+    expect(wrapper.emitted('set-priority')).toEqual([['m1', 2]])
+  })
+
+  it('does not emit when the selector is set to the value it already has', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', priority: 5 }])
+    await wrapper.get('[data-testid="building-priority-m1"]').setValue('5')
+    expect(wrapper.emitted('set-priority')).toBeUndefined()
+  })
+
+  it('pins at the building’s current demand', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', labour_demand: 4, labour_lock: null }])
+    await wrapper.get('[data-testid="building-pin-m1"]').trigger('click')
+    expect(wrapper.emitted('set-lock')).toEqual([['m1', 4]])
+  })
+
+  /**
+   * A building that couldn't run reports demand 0. Pinning 0 would be a no-op the
+   * player didn't ask for, so the floor is one worker.
+   */
+  it('pins at least one worker even when the building reports no demand', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', labour_demand: 0, labour_lock: null }])
+    await wrapper.get('[data-testid="building-pin-m1"]').trigger('click')
+    expect(wrapper.emitted('set-lock')).toEqual([['m1', 1]])
+  })
+
+  it('shows the pinned count and unpins with null', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', labour_lock: 3 }])
+    expect(wrapper.find('[data-testid="building-locked-m1"]').text()).toContain('3')
+    // The pin button is replaced by unpin while locked.
+    expect(wrapper.find('[data-testid="building-pin-m1"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="building-unpin-m1"]').trigger('click')
+    expect(wrapper.emitted('set-lock')).toEqual([['m1', null]])
+  })
+
+  it('renames with the surrounding whitespace trimmed', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', name: 'Mine 1' }])
+    await wrapper.get('[data-testid="building-rename-m1"]').trigger('click')
+    const input = wrapper.get('[data-testid="building-rename-input-m1"]')
+    await input.setValue('  North Vein  ')
+    await wrapper.get('[data-testid="building-rename-save-m1"]').trigger('click')
+    expect(wrapper.emitted('rename')).toEqual([['m1', 'North Vein']])
+  })
+
+  /**
+   * Clearing the box is the natural way to ask for the default name back, so it
+   * sends `null` rather than an empty string the engine would reject.
+   */
+  it('treats a cleared name as a request to revert to the default', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', name: 'North Vein' }])
+    await wrapper.get('[data-testid="building-rename-m1"]').trigger('click')
+    await wrapper.get('[data-testid="building-rename-input-m1"]').setValue('   ')
+    await wrapper.get('[data-testid="building-rename-save-m1"]').trigger('click')
+    expect(wrapper.emitted('rename')).toEqual([['m1', null]])
+  })
+
+  it('cancelling a rename emits nothing and closes the editor', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', name: 'Mine 1' }])
+    await wrapper.get('[data-testid="building-rename-m1"]').trigger('click')
+    await wrapper.get('[data-testid="building-rename-input-m1"]').setValue('Discarded')
+    await wrapper.get('[data-testid="building-rename-cancel-m1"]').trigger('click')
+
+    expect(wrapper.emitted('rename')).toBeUndefined()
+    expect(wrapper.find('[data-testid="building-rename-input-m1"]').exists()).toBe(false)
+  })
+
+  it('flags a building that wanted workers and did not get them all', () => {
+    const wrapper = mountRows([{ building_id: 'm1', labour_assigned: 2, labour_demand: 5 }])
+    expect(wrapper.find('[data-testid="building-understaffed-m1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="building-staffed-m1"]').text()).toBe('2/5 staffed')
+  })
+
+  it('does not flag a fully staffed building', () => {
+    const wrapper = mountRows([{ building_id: 'm1', labour_assigned: 5, labour_demand: 5 }])
+    expect(wrapper.find('[data-testid="building-understaffed-m1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="building-staffed-m1"]').text()).toBe('5/5 staffed')
+  })
+
+  /**
+   * A silo offers no jobs. Reporting it as understaffed would flag every storage
+   * structure in the colony.
+   */
+  it('does not flag a building with no jobs to offer', () => {
+    const wrapper = mountRows([{ building_id: 's1', labour_assigned: 0, labour_demand: 0 }])
+    expect(wrapper.find('[data-testid="building-understaffed-s1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="building-staffed-s1"]').text()).toBe('no jobs')
   })
 })

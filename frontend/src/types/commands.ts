@@ -29,7 +29,52 @@ export type Command =
       construction_cost: [string, number][]
       construction_turns: number
     }
-  | { kind: 'assign_labour'; colony_id: string; slot: string; labour: number }
+  | {
+      /**
+       * Vestigial (issue #307) — the engine validates this and emits an event
+       * but persists nothing, and production ignores it. The real per-building
+       * override is `set_building_labour_lock`.
+       */
+      kind: 'assign_labour'
+      colony_id: string
+      slot: string
+      labour: number
+    }
+  | {
+      /**
+       * Set one building's staffing priority (issue #307). `1` is staffed
+       * first, `9` last; the engine rejects anything outside that range rather
+       * than clamping.
+       *
+       * Addressed to a placed **instance**, unlike `set_active_recipe`, which
+       * applies to every building of a type.
+       */
+      kind: 'set_building_priority'
+      colony_id: string
+      building_id: string
+      priority: number
+    }
+  | {
+      /**
+       * Pin workers to a building, or release it back to automatic assignment
+       * with `null` (issue #307). A lock larger than the building's worker slots
+       * is rejected, not clamped.
+       */
+      kind: 'set_building_labour_lock'
+      colony_id: string
+      building_id: string
+      lock: number | null
+    }
+  | {
+      /**
+       * Name a building, or clear it back to the auto-numbered default with
+       * `null` (issue #307). Names are trimmed; blank and overlong are rejected.
+       */
+      kind: 'rename_building'
+      colony_id: string
+      building_id: string
+      name: string | null
+    }
   | { kind: 'cancel_construction'; colony_id: string; project_id: string }
   | {
       kind: 'deploy_starter_kit'

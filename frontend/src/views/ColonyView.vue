@@ -228,6 +228,46 @@ function openBuildingDetails(buildingType: string): void {
   void router.push({ name: 'facility', params: { colonyId: col.id, buildingType } })
 }
 
+// ─── Per-building staffing (issue #307) ────────────────────────────────────────
+//
+// The panel raises intents; dispatch lives here. `gameStore.sendCommand` already
+// refreshes the colony screen and surfaces engine rejections as a toast, so a
+// rejected priority or an over-sized pin tells the player why rather than
+// failing silently.
+
+async function setBuildingPriority(buildingId: string, priority: number): Promise<void> {
+  const col = selectedColony.value
+  if (!col) return
+  await gameStore.sendCommand({
+    kind: 'set_building_priority',
+    colony_id: col.id,
+    building_id: buildingId,
+    priority,
+  })
+}
+
+async function setBuildingLock(buildingId: string, lock: number | null): Promise<void> {
+  const col = selectedColony.value
+  if (!col) return
+  await gameStore.sendCommand({
+    kind: 'set_building_labour_lock',
+    colony_id: col.id,
+    building_id: buildingId,
+    lock,
+  })
+}
+
+async function renameBuilding(buildingId: string, name: string | null): Promise<void> {
+  const col = selectedColony.value
+  if (!col) return
+  await gameStore.sendCommand({
+    kind: 'rename_building',
+    colony_id: col.id,
+    building_id: buildingId,
+    name,
+  })
+}
+
 // ─── Panel layout persistence ───────────────────────────────────────────────────
 
 interface PersistedLayout {
@@ -360,6 +400,9 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                   :labour-available="screen?.labour_available ?? 0"
                   :labour-total="screen?.labour_total ?? 0"
                   @view-details="openBuildingDetails"
+                  @set-priority="setBuildingPriority"
+                  @set-lock="setBuildingLock"
+                  @rename="renameBuilding"
                 />
               </Pane>
               <Pane :size="centerSizes[1]" min-size="10">
