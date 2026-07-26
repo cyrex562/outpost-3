@@ -74,14 +74,51 @@ pub struct ProductionShortfall {
     pub reason: ShortfallReason,
     /// The scale factor that was actually applied (`< 1.0` when short).
     pub effective_scale: f64,
+    /// How much more of the binding commodity full output would have needed
+    /// (issues #303, #308).
+    ///
+    /// `0.0` for shortfalls with no commodity to quantify — a power brownout or
+    /// a labour shortage. `#[serde(default)]` so pre-#308 saves and stored
+    /// results load with `0.0` rather than failing; this is per-sol derived data
+    /// that the next advance regenerates.
+    ///
+    /// Carried because [`Self::effective_scale`] on its own says "30 %" without
+    /// saying whether that is two units short or two hundred.
+    #[serde(default)]
+    pub deficit: f64,
 }
 
 /// Category of shortfall limiting a building's production.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind")]
 pub enum ShortfallReason {
-    /// One or more input commodities were insufficient.
+    /// One or more input commodities were insufficient, and **nothing in this
+    /// colony produces the binding one**.
+    ///
+    /// This is the "you have no supply line" case: build a producer, open a trade
+    /// route, or stop running this recipe. Contrast
+    /// [`ShortfallReason::AwaitingUpstream`].
     InputShort {
+        /// The commodity id that was the tightest constraint.
+        commodity_id: String,
+    },
+    /// The binding input **is** produced by a building in this colony, so the
+    /// shortage is a pipeline that has not filled rather than a missing supply
+    /// line (issue #308).
+    ///
+    /// Production reads a start-of-turn snapshot on purpose — that is what keeps
+    /// the pass order-independent — so a chain costs one sol per stage to fill
+    /// before it flows at full rate. During that fill every downstream building
+    /// is genuinely short, but telling the player "input short" invites them to
+    /// go build a second mine they do not need.
+    ///
+    /// Follow this up the chain to find the real cause: each level that has a
+    /// local producer reports `AwaitingUpstream`, and the level that reports
+    /// something else — [`ShortfallReason::InputShort`],
+    /// [`ShortfallReason::DepositShort`], [`ShortfallReason::LaborShort`] — is
+    /// where the problem actually is. If every level reports `AwaitingUpstream`,
+    /// the pipeline is simply still filling and will resolve on its own.
+    AwaitingUpstream {
         /// The commodity id that was the tightest constraint.
         commodity_id: String,
     },
@@ -502,8 +539,51 @@ pub fn process_production_scaled(
             .then_with(|| a.id.cmp(&b.id))
     });
 
+    // Recipe lines resolved once per **distinct building type**, not once per
+    // placed instance.
+    //
+    // `lines_for_building` scans every recipe in the registry and builds a
+    // `BTreeMap` to group them, and this is the per-turn hot path — so calling it
+    // for each of a colony's twelve mines twelve times over was already wasteful
+    // before #308 needed the same answer a second time for `locally_produced`
+    // below. Memoising by type collapses both into one pass per type.
+    let mut lines_by_type: std::collections::HashMap<&str, Vec<RecipeLine<'_>>> =
+        std::collections::HashMap::new();
+    for input in buildings {
+        if !lines_by_type.contains_key(input.building_type.as_str()) {
+            lines_by_type.insert(
+                input.building_type.as_str(),
+                lines_for_building(&input.building_type, active_recipes, registry),
+            );
+        }
+    }
+
+    // Every commodity some building here is set up to produce (issue #308).
+    //
+    // Membership is what separates "this pipeline hasn't filled yet" from "you
+    // have no supply line" in the shortfall readout. Deliberately based on what
+    // the colony is *configured* to make, not on what it managed to make this
+    // sol: a mine that itself sat idle is still the answer to "where does ore
+    // come from here", and reporting `InputShort` at the smelter would send the
+    // player looking in the wrong place.
+    let locally_produced: std::collections::HashSet<&str> = lines_by_type
+        .values()
+        .flatten()
+        .flat_map(|line| line.selected.outputs.iter().map(|out| out.id.as_str()))
+        .collect();
+
     // commodity id → quantity already claimed by a better-priority building.
-    let mut reserved: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    //
+    // Pre-seeded with the player's commodity reserves (issue #308), which makes a
+    // reserve simply the first claim on the stockpile — one nobody outbids,
+    // because nothing ever removes an entry from this map. That is why a reserve
+    // needs no separate code path: it withholds stock from the whole production
+    // pass, recipe inputs and maintenance alike, while colonist needs — resolved
+    // in step 2, *before* production even runs — see the untouched pool and can
+    // still eat it. Needs going first is what makes the reserve safe by
+    // construction: colonists are fed before industry is considered at all, so
+    // withholding stock can never starve them however large the reserve.
+    let mut reserved: std::collections::HashMap<String, f64> = stores.reserve_claims();
 
     for input in order {
         let building_type = &input.building_type;
@@ -512,7 +592,10 @@ pub fn process_production_scaled(
         };
         // Each line throttles on its own inputs (issue #272), so a starved
         // smelting line no longer drags the machining line beside it down.
-        let building_lines = lines_for_building(building_type, active_recipes, registry);
+        // Resolved once per type above rather than recomputed per instance.
+        let building_lines = lines_by_type
+            .get(building_type.as_str())
+            .map_or(&[][..], Vec::as_slice);
         let has_any_recipe = !building_lines.is_empty();
         let has_maintenance = maintenance_enabled && !bdef.maintenance.is_empty();
 
@@ -549,7 +632,7 @@ pub fn process_production_scaled(
 
         // A maintenance-only building still needs an entry so its upkeep is
         // charged; it just has no lines to run.
-        for line in &building_lines {
+        for line in building_lines {
             // Per-line demand: this line's own recipe inputs, pooled with the
             // building's maintenance. Maintenance is pooled into every line
             // rather than split between them because it is a building-level
@@ -588,18 +671,26 @@ pub fn process_production_scaled(
                 let commodity_id = tight_commodity.unwrap_or_default();
                 let reason = if tight_is_maintenance {
                     ShortfallReason::MaintenanceShort { commodity_id }
+                } else if locally_produced.contains(commodity_id.as_str()) {
+                    // Something here makes this — the chain is filling or the
+                    // real fault is further upstream (#308).
+                    ShortfallReason::AwaitingUpstream { commodity_id }
                 } else {
                     ShortfallReason::InputShort { commodity_id }
                 };
                 shortfalls.push(ProductionShortfall {
                     reason,
                     effective_scale: input_ratio,
+                    deficit: afford.tight_deficit,
                 });
             }
             if power_ratio < 1.0 - 1e-9 {
                 shortfalls.push(ProductionShortfall {
                     reason: ShortfallReason::PowerBrownout,
                     effective_scale: power_ratio,
+                    // Power is a ratio across the whole grid, not a per-building
+                    // commodity draw, so there is no single deficit to name here.
+                    deficit: 0.0,
                 });
             }
             if deposit_ratio < 1.0 - 1e-9 {
@@ -608,6 +699,9 @@ pub fn process_production_scaled(
                         commodity_id: deposit_tight.unwrap_or_default(),
                     },
                     effective_scale: deposit_ratio,
+                    // Deposit richness scales yield; nothing was withheld from a
+                    // stockpile, so a deficit quantity would be meaningless.
+                    deficit: 0.0,
                 });
             }
             // Claim what this line will actually draw, so the next building in
@@ -731,6 +825,8 @@ pub fn process_production_scaled(
                 line.shortfalls.push(ProductionShortfall {
                     reason: ShortfallReason::LaborShort,
                     effective_scale: labour_ratio,
+                    // Workers, not a commodity draw — no stockpile deficit to name.
+                    deficit: 0.0,
                 });
                 line.scale = line.scale.min(labour_ratio).max(0.0);
             }
@@ -993,6 +1089,12 @@ struct InputAffordability {
     /// Whether the binding commodity was a maintenance draw rather than a recipe
     /// input — they report as different shortfall reasons.
     tight_is_maintenance: bool,
+    /// How much more of the binding commodity full output would have needed.
+    ///
+    /// `0.0` when nothing bound. Carried alongside `ratio` because a percentage
+    /// on its own does not tell the player whether they are two units short or
+    /// two hundred (issues #303, #308).
+    tight_deficit: f64,
     /// Merged recipe inputs at **full rate**, `(commodity_id, quantity)`.
     ///
     /// Returned so the caller can reserve exactly what it was judged against
@@ -1093,6 +1195,7 @@ fn compute_effective_input_ratio(
     let mut ratio = 1.0f64;
     let mut tight: Option<String> = None;
     let mut tight_is_maintenance = false;
+    let mut tight_deficit = 0.0f64;
 
     for (id, qty, has_recipe_demand) in &demands {
         let available = unreserved(stores, reserved, id);
@@ -1101,6 +1204,10 @@ fn compute_effective_input_ratio(
             ratio = r;
             tight = Some(id.clone());
             tight_is_maintenance = !*has_recipe_demand;
+            // How much more of the binding commodity full output would have
+            // needed. `effective_scale` alone tells the player they are at 30 %
+            // but not whether they are 2 units short or 200 (issue #303/#308).
+            tight_deficit = (*qty - available).max(0.0);
         }
     }
 
@@ -1123,6 +1230,7 @@ fn compute_effective_input_ratio(
         ratio: ratio.max(0.0),
         tight,
         tight_is_maintenance,
+        tight_deficit,
         recipe_demands,
     }
 }
@@ -2152,6 +2260,414 @@ mod tests {
             scale("eater_a").abs() < 1e-9,
             "the priority-9 building goes without, got {}",
             scale("eater_a")
+        );
+    }
+
+    // ── Filling vs starved (issue #308) ──────────────────────────────────────
+
+    /// A miner producing `ore` and a smelter consuming it.
+    fn make_registry_with_a_chain() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        let building = |id: &str| BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+        };
+        reg.insert_building(building("miner"));
+        reg.insert_recipe(RecipeDef {
+            id: "mine".into(),
+            name: "mine".into(),
+            building: "miner".into(),
+            cycle_sols: 1,
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "ore".into(),
+                quantity: 10.0,
+            }],
+            concurrent: false,
+            line: None,
+            power_draw: 0.0,
+        });
+        reg.insert_building(building("smelter"));
+        reg.insert_recipe(RecipeDef {
+            id: "smelt".into(),
+            name: "smelt".into(),
+            building: "smelter".into(),
+            cycle_sols: 1,
+            inputs: vec![Ingredient {
+                id: "ore".into(),
+                quantity: 10.0,
+            }],
+            outputs: vec![Ingredient {
+                id: "metal".into(),
+                quantity: 1.0,
+            }],
+            concurrent: false,
+            line: None,
+            power_draw: 0.0,
+        });
+        reg
+    }
+
+    fn reason_for(outcome: &ProductionStepOutcome, building_type: &str) -> ShortfallReason {
+        outcome
+            .building_results
+            .iter()
+            .find(|r| r.building_type == building_type)
+            .expect("building reported")
+            .shortfalls
+            .first()
+            .expect("a shortfall was recorded")
+            .reason
+            .clone()
+    }
+
+    /// Sol 1 of a fresh chain: the smelter is short, but the ore is produced
+    /// here, so this is a pipeline filling — not a missing supply line.
+    ///
+    /// Production reads a start-of-turn snapshot on purpose, so the first sol of
+    /// any chain looks like a shortage. Reporting `InputShort` there invited the
+    /// player to build a second mine they did not need.
+    #[test]
+    fn a_filling_pipeline_reports_awaiting_upstream_not_input_short() {
+        let reg = make_registry_with_a_chain();
+        let mut pool = ColonyPool::new();
+        let inputs = vec![input_at(0, "miner", 5), input_at(1, "smelter", 5)];
+
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        assert!(
+            matches!(
+                reason_for(&outcome, "smelter"),
+                ShortfallReason::AwaitingUpstream { ref commodity_id } if commodity_id == "ore"
+            ),
+            "expected AwaitingUpstream(ore), got {:?}",
+            reason_for(&outcome, "smelter")
+        );
+        // And it resolves on its own: sol 2 runs at full rate with no shortfall.
+        let next = run_inputs(&mut pool, &inputs, 100.0, &reg);
+        let smelter = next
+            .building_results
+            .iter()
+            .find(|r| r.building_type == "smelter")
+            .unwrap();
+        assert!((smelter.scale - 1.0).abs() < 1e-9);
+        assert!(smelter.shortfalls.is_empty());
+    }
+
+    /// With no local producer of the input, the same shortage is a real supply
+    /// problem and still says so.
+    #[test]
+    fn a_consumer_with_no_local_producer_still_reports_input_short() {
+        let reg = make_registry_with_a_chain();
+        let mut pool = ColonyPool::new();
+        // The smelter stands alone — nothing here makes ore.
+        let inputs = vec![input_at(0, "smelter", 5)];
+
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        assert!(
+            matches!(
+                reason_for(&outcome, "smelter"),
+                ShortfallReason::InputShort { ref commodity_id } if commodity_id == "ore"
+            ),
+            "expected InputShort(ore), got {:?}",
+            reason_for(&outcome, "smelter")
+        );
+    }
+
+    /// Membership is based on what the colony is *configured* to produce, not on
+    /// what it managed to produce this sol.
+    ///
+    /// A mine that is itself starved is still the answer to "where does ore come
+    /// from here", so the smelter should point upstream rather than claim there is
+    /// no source. Following `AwaitingUpstream` up the chain is how the player
+    /// finds the level that reports the real cause.
+    #[test]
+    fn an_idle_local_producer_still_counts_as_the_source() {
+        let mut reg = make_registry_with_a_chain();
+        // Re-point the miner at a recipe it cannot run: now it needs fuel that
+        // nothing here makes, so it produces no ore at all.
+        reg.insert_recipe(RecipeDef {
+            id: "mine".into(),
+            name: "mine".into(),
+            building: "miner".into(),
+            cycle_sols: 1,
+            inputs: vec![Ingredient {
+                id: "fuel".into(),
+                quantity: 5.0,
+            }],
+            outputs: vec![Ingredient {
+                id: "ore".into(),
+                quantity: 10.0,
+            }],
+            concurrent: false,
+            line: None,
+            power_draw: 0.0,
+        });
+
+        let mut pool = ColonyPool::new();
+        let inputs = vec![input_at(0, "miner", 5), input_at(1, "smelter", 5)];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        // The smelter points upstream …
+        assert!(
+            matches!(
+                reason_for(&outcome, "smelter"),
+                ShortfallReason::AwaitingUpstream { ref commodity_id } if commodity_id == "ore"
+            ),
+            "expected AwaitingUpstream(ore) at the smelter, got {:?}",
+            reason_for(&outcome, "smelter")
+        );
+        // … and the miner is where the chain stops, naming the real cause.
+        assert!(
+            matches!(
+                reason_for(&outcome, "miner"),
+                ShortfallReason::InputShort { ref commodity_id } if commodity_id == "fuel"
+            ),
+            "expected InputShort(fuel) at the miner, got {:?}",
+            reason_for(&outcome, "miner")
+        );
+    }
+
+    /// The shortfall says *how much* is missing, not just how far output fell.
+    #[test]
+    fn a_shortfall_names_the_missing_quantity() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 3.0); // recipe wants 10
+
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_inputs(&mut pool, &inputs, 100.0, &reg);
+
+        let shortfall = &outcome.building_results[0].shortfalls[0];
+        assert!(
+            (shortfall.deficit - 7.0).abs() < 1e-9,
+            "10 demanded against 3 held is a deficit of 7, got {}",
+            shortfall.deficit
+        );
+        assert!((shortfall.effective_scale - 0.3).abs() < 1e-9);
+    }
+
+    /// Shortfalls with no commodity to quantify carry no deficit rather than a
+    /// misleading zero-that-means-something.
+    #[test]
+    fn non_commodity_shortfalls_carry_no_deficit() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 100.0);
+
+        // Zero workforce: the building is labour-starved, not input-starved.
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_inputs(&mut pool, &inputs, 0.0, &reg);
+
+        for s in &outcome.building_results[0].shortfalls {
+            if matches!(s.reason, ShortfallReason::LaborShort) {
+                assert!(
+                    s.deficit.abs() < f64::EPSILON,
+                    "labour shortfalls have no commodity deficit, got {}",
+                    s.deficit
+                );
+            }
+        }
+    }
+
+    // ── Player commodity reserves (issue #308) ───────────────────────────────
+
+    fn run_with_reserves(
+        pool: &mut ColonyPool,
+        inputs: &[ProductionInput],
+        reg: &ContentRegistry,
+        reserves: &std::collections::HashMap<String, f64>,
+    ) -> ProductionStepOutcome {
+        let mut resources = ColonyResourcePool::new();
+        super::process_production_scaled(
+            &mut ColonyStores::new(pool, &mut resources, reg).with_reserves(reserves),
+            inputs,
+            100.0,
+            reg,
+            1.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
+        )
+    }
+
+    /// A reserve withholds stock from industry: the consumer sees only what is
+    /// above the floor, and the reserved amount is still in the pool afterwards.
+    #[test]
+    fn a_reserve_keeps_stock_out_of_production() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 10.0); // exactly one batch's worth
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("water".to_string(), 10.0); // …all of it withheld
+
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        assert!(
+            outcome.building_results[0].scale.abs() < 1e-9,
+            "a fully reserved input must leave the consumer idle, got {}",
+            outcome.building_results[0].scale
+        );
+        assert!(
+            (pool.amount("water") - 10.0).abs() < 1e-9,
+            "reserved water must remain in the pool, got {}",
+            pool.amount("water")
+        );
+        assert!(
+            pool.amount("widget").abs() < 1e-9,
+            "nothing should have been produced from reserved stock"
+        );
+        assert!(
+            outcome.building_results[0]
+                .shortfalls
+                .iter()
+                .any(|s| matches!(
+                    &s.reason,
+                    ShortfallReason::InputShort { commodity_id } if commodity_id == "water"
+                )),
+            "the idled building must say which input it lacked, got {:?}",
+            outcome.building_results[0].shortfalls
+        );
+    }
+
+    /// Only the amount above the floor is spendable — a reserve is a floor, not
+    /// an all-or-nothing switch.
+    #[test]
+    fn a_partial_reserve_leaves_the_surplus_spendable() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 30.0);
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("water".to_string(), 20.0); // 10 spendable = one batch
+
+        let inputs = vec![
+            input_at(0, "eater_a", 1),
+            input_at(1, "eater_b", 9), // should go without
+        ];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        assert!(
+            (pool.amount("widget") - 1.0).abs() < 1e-9,
+            "the 10 unreserved water buys exactly one widget, got {}",
+            pool.amount("widget")
+        );
+        assert!(
+            (pool.amount("water") - 20.0).abs() < 1e-9,
+            "the floor must be intact, got {}",
+            pool.amount("water")
+        );
+        let scale = |bt: &str| {
+            outcome
+                .building_results
+                .iter()
+                .find(|r| r.building_type == bt)
+                .map(|r| r.scale)
+                .expect("both reported")
+        };
+        assert!((scale("eater_a") - 1.0).abs() < 1e-9);
+        assert!(scale("eater_b").abs() < 1e-9);
+    }
+
+    /// Regression guard on the opt-in: a caller that attaches no reserves must
+    /// behave exactly as before the feature existed.
+    #[test]
+    fn no_reserves_attached_changes_nothing() {
+        let reg = make_registry_with_two_water_consumers();
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+
+        let mut without = ColonyPool::new();
+        without.deposit("water", 10.0);
+        let plain = run_inputs(&mut without, &inputs, 100.0, &reg);
+
+        let mut with_empty = ColonyPool::new();
+        with_empty.deposit("water", 10.0);
+        let empty_reserves = std::collections::HashMap::new();
+        let seeded = run_with_reserves(&mut with_empty, &inputs, &reg, &empty_reserves);
+
+        assert!((plain.building_results[0].scale - 1.0).abs() < 1e-9);
+        assert!(
+            (plain.building_results[0].scale - seeded.building_results[0].scale).abs() < 1e-9,
+            "an empty reserve map must be indistinguishable from none"
+        );
+        assert!((without.amount("widget") - with_empty.amount("widget")).abs() < 1e-9);
+    }
+
+    /// A reserve that exceeds what is held is clamped by the availability
+    /// arithmetic rather than producing a negative allowance.
+    #[test]
+    fn a_reserve_larger_than_the_stockpile_is_harmless() {
+        let reg = make_registry_with_two_water_consumers();
+        let mut pool = ColonyPool::new();
+        pool.deposit("water", 5.0);
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("water".to_string(), 1_000.0);
+
+        let inputs = vec![input_at(0, "eater_a", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        assert!(outcome.building_results[0].scale.abs() < 1e-9);
+        assert!((pool.amount("water") - 5.0).abs() < 1e-9);
+    }
+
+    /// Maintenance is deliberately **not** exempt from a reserve.
+    ///
+    /// A player who reserves the commodity their upkeep runs on can stall their
+    /// own buildings. That is a real choice with a `MaintenanceShort` shortfall to
+    /// explain it — exempting maintenance would mean two different "available"
+    /// figures inside one affordability ratio. Pinned here because the behaviour
+    /// is asserted in prose elsewhere and would otherwise be free to drift.
+    #[test]
+    fn a_reserve_can_stall_maintenance_and_says_so() {
+        let reg = make_registry_with_maintenance();
+        let mut pool = ColonyPool::new();
+        pool.deposit("spare_parts", 10.0); // ample upkeep …
+
+        let mut reserves = std::collections::HashMap::new();
+        reserves.insert("spare_parts".to_string(), 10.0); // … all of it withheld
+
+        let inputs = vec![input_at(0, "advanced_smelter", DEFAULT_BUILDING_PRIORITY)];
+        let outcome = run_with_reserves(&mut pool, &inputs, &reg, &reserves);
+
+        let result = &outcome.building_results[0];
+        assert!(
+            result.scale.abs() < 1e-9,
+            "upkeep it cannot reach must stop the building, got scale {}",
+            result.scale
+        );
+        assert!(
+            result.shortfalls.iter().any(|s| matches!(
+                &s.reason,
+                ShortfallReason::MaintenanceShort { commodity_id } if commodity_id == "spare_parts"
+            )),
+            "expected MaintenanceShort(spare_parts), got {:?}",
+            result.shortfalls
+        );
+        assert!(
+            (pool.amount("spare_parts") - 10.0).abs() < 1e-9,
+            "the reserve must be intact, got {}",
+            pool.amount("spare_parts")
         );
     }
 

@@ -77,7 +77,7 @@ describe('BuildingDetailsHud (#182)', () => {
         last_run: {
           scale: 0.4,
           is_full_production: false,
-          shortfalls: [{ kind: 'maintenance_short', commodity_id: 'spare_parts', effective_scale: 0.4 }],
+          shortfalls: [{ kind: 'maintenance_short', commodity_id: 'spare_parts', effective_scale: 0.4, deficit: 0.3 }],
         },
       }),
     )

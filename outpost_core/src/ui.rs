@@ -118,8 +118,20 @@ pub struct BuildingRow {
     /// each now reports its own scale.
     pub scale: f64,
     /// Why the building fell short of full output last turn, if it did — a
-    /// short human-readable reason (e.g. `"input short: water"`).
+    /// short human-readable reason (e.g. `"no source of 4.0 water"`).
     pub shortfall_reason: Option<String>,
+    /// The same shortfall's machine-readable category, so the UI can style it
+    /// (issue #308).
+    ///
+    /// One of `input_short`, `awaiting_upstream`, `power_brownout`,
+    /// `labor_short`, `maintenance_short`, `deposit_short` — see
+    /// [`ShortfallRow::kind`]. `awaiting_upstream` in particular is transient
+    /// (a chain still filling) and should not be dressed as a fault the player
+    /// must act on, which prose alone cannot convey.
+    ///
+    /// `#[serde(default)]` for pre-#308 payloads.
+    #[serde(default)]
+    pub shortfall_kind: Option<String>,
     /// Whether this building only has always-on ([`concurrent`]) recipes and
     /// therefore has no recipe for the player to choose.
     ///
@@ -168,6 +180,14 @@ pub struct StockpileRow {
     pub capacity: Option<f64>,
     /// Net change last turn (positive = production surplus, negative = deficit).
     pub net_per_turn: f64,
+    /// Amount the player has withheld from industry (issue #308).
+    ///
+    /// `0.0` when unreserved. This is a floor within [`Self::amount`], not a
+    /// separate quantity — the reserved stock is included in `amount` and stays
+    /// visible; it is simply not offered to recipe inputs or maintenance.
+    /// Colonist needs draw from it regardless.
+    #[serde(default)]
+    pub reserved: f64,
 }
 
 /// A single colony-local resource row (issue #304).
@@ -313,12 +333,24 @@ pub struct BuildingRunRow {
 /// A single shortfall reason + severity, shaped for direct UI display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShortfallRow {
-    /// Shortfall category: `input_short`, `power_brownout`, `labor_short`, or `maintenance_short`.
+    /// Shortfall category: `input_short`, `awaiting_upstream`, `power_brownout`,
+    /// `labor_short`, `maintenance_short`, or `deposit_short`.
+    ///
+    /// `input_short` and `awaiting_upstream` are the same *shortage* with
+    /// different advice (issue #308): the first means nothing in this colony
+    /// produces the commodity, so a producer or trade route is needed; the second
+    /// means something here does, so the chain is filling and will resolve.
     pub kind: String,
     /// The commodity id that was the tightest constraint, if applicable.
     pub commodity_id: Option<String>,
     /// The scale factor that was actually applied (`< 1.0` when short).
     pub effective_scale: f64,
+    /// How much more of [`Self::commodity_id`] full output needed (issue #308).
+    ///
+    /// `0.0` for shortfalls with no commodity to quantify. `#[serde(default)]` for
+    /// pre-#308 payloads.
+    #[serde(default)]
+    pub deficit: f64,
 }
 
 // ─── Planet hex map ───────────────────────────────────────────────────────────
@@ -590,6 +622,7 @@ mod tests {
                 full_capacity: true,
                 scale: 1.0,
                 shortfall_reason: None,
+                shortfall_kind: None,
                 always_on: false,
                 running_recipe_ids: vec!["grow_food".into()],
                 inputs: vec![IngredientRow {
@@ -613,6 +646,7 @@ mod tests {
                 amount: 200.0,
                 capacity: Some(500.0),
                 net_per_turn: 10.0,
+                reserved: 50.0,
             }],
             construction_queue: vec![],
             manual_override: false,

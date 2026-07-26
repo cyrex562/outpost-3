@@ -16,6 +16,7 @@ function makeRow(overrides: Partial<BuildingRow>): BuildingRow {
     full_capacity: true,
     scale: 1.0,
     shortfall_reason: null,
+    shortfall_kind: null,
     always_on: false,
     running_recipe_ids: ['smelt_iron'],
     inputs: [{ commodity_id: 'structural_ore', quantity: 2 }],
@@ -65,10 +66,37 @@ describe('BuildingsPanel status derivation (#169, corrected in #303)', () => {
       full_capacity: false,
       scale: 0.6,
       shortfall_reason: 'input short: water',
+      shortfall_kind: null,
     })
     expect(wrapper.find('[data-testid="building-reason-smelter"]').text()).toBe(
       'input short: water',
     )
+  })
+
+  // ── Transient vs real shortfalls (issue #308) ──
+
+  it('styles a pipeline still filling as information, not a fault', () => {
+    const wrapper = mountWith({
+      full_capacity: false,
+      scale: 0,
+      shortfall_reason: 'awaiting 10.0 ore from upstream',
+      shortfall_kind: 'awaiting_upstream',
+    })
+    const reason = wrapper.get('[data-testid="building-reason-smelter"]')
+    expect(reason.classes()).toContain('is-transient')
+    expect(reason.attributes('title')).toContain('resolve on its own')
+  })
+
+  it('leaves a real supply problem styled as a fault', () => {
+    const wrapper = mountWith({
+      full_capacity: false,
+      scale: 0,
+      shortfall_reason: 'no source of 10.0 ore',
+      shortfall_kind: 'input_short',
+    })
+    const reason = wrapper.get('[data-testid="building-reason-smelter"]')
+    expect(reason.classes()).not.toContain('is-transient')
+    expect(reason.attributes('title')).toContain('needs attention')
   })
 
   it('badges an always-on building so the absent recipe picker is explained', () => {
@@ -286,6 +314,7 @@ describe('BuildingsPanel I/O honesty and resilience (#272 review)', () => {
       full_capacity: true,
       scale: 1,
       shortfall_reason: null,
+      shortfall_kind: null,
       always_on: false,
     } as unknown as BuildingRow
 

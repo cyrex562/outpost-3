@@ -98,6 +98,12 @@ pub enum ClientCommand {
         building_type: String,
         recipe_id: String,
     },
+    /// Withhold a quantity of one commodity from industry (issue #308).
+    SetCommodityReserve {
+        colony_id: String,
+        commodity_id: String,
+        amount: f64,
+    },
     /// Set one placed building's staffing priority (issue #307).
     ///
     /// Instance-scoped, unlike `SetActiveRecipe` above, which applies to every
@@ -1273,6 +1279,15 @@ pub fn apply_command(
             colony_id: parse_colony(&colony_id)?,
             building_type,
             recipe_id,
+        },
+        ClientCommand::SetCommodityReserve {
+            colony_id,
+            commodity_id,
+            amount,
+        } => Command::SetCommodityReserve {
+            colony_id: parse_colony(&colony_id)?,
+            commodity_id,
+            amount,
         },
         ClientCommand::SetBuildingPriority {
             colony_id,

@@ -40,6 +40,17 @@ export interface BuildingRow {
   scale: number
   /** Why output fell short last turn, if it did (e.g. `"input short: water"`). */
   shortfall_reason: string | null
+  /**
+   * The same shortfall's machine-readable category (issue #308): one of
+   * `input_short`, `awaiting_upstream`, `power_brownout`, `labor_short`,
+   * `maintenance_short`, `deposit_short`.
+   *
+   * `awaiting_upstream` is **transient** — the input is produced in this colony
+   * and the chain is still filling, which resolves on its own. Everything else
+   * wants the player to do something. Styling them alike is what made a
+   * brand-new production chain look broken.
+   */
+  shortfall_kind: string | null
   /** Building has only always-on recipes, so there is no recipe to choose. */
   always_on: boolean
   /**
@@ -78,6 +89,14 @@ export interface StockpileRow {
   capacity: number | null
   /** Net change last turn (positive = surplus, negative = deficit). */
   net_per_turn: number
+  /**
+   * Amount the player has withheld from industry (issue #308); `0` if none.
+   *
+   * A floor *within* `amount`, not a separate quantity — reserved stock is
+   * included in `amount` and stays visible. Recipe inputs and maintenance cannot
+   * draw below it; colonist needs still can.
+   */
+  reserved: number
 }
 
 /**

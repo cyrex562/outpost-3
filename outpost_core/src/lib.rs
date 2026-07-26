@@ -193,6 +193,27 @@ pub enum Command {
         /// be empty.
         buildings: Vec<(String, u32)>,
     },
+    /// Withhold a quantity of one commodity from industry (issue #308).
+    ///
+    /// `amount` is a **floor on the stockpile**, not a transfer: reserved stock
+    /// stays in the colony pool and shows in every readout, but the production
+    /// pass will not draw the pool below it for recipe inputs or building
+    /// maintenance. `0.0` clears the reserve.
+    ///
+    /// Colonist needs are exempt by design — reserving food is only meaningful
+    /// if the colonists can still eat it while the fuel plant cannot.
+    ///
+    /// Rejects a negative amount rather than clamping, for the same reason
+    /// [`Command::SetBuildingPriority`] does: this is a player action, and
+    /// silently doing something other than what was asked hides the mistake.
+    SetCommodityReserve {
+        /// Colony whose stockpile is being protected.
+        colony_id: ColonyId,
+        /// Commodity to withhold.
+        commodity_id: String,
+        /// Quantity to keep out of industry's reach; `0.0` clears.
+        amount: f64,
+    },
     /// Set one placed building's staffing priority (issue #307).
     ///
     /// Scoped to a **building instance**, not a type — three mines can be ranked
@@ -1172,6 +1193,15 @@ pub enum Event {
         slot: String,
         /// Number of labour units assigned.
         labour: u64,
+    },
+    /// A commodity reserve was set or cleared (issue #308).
+    CommodityReserveSet {
+        /// Colony whose stockpile is affected.
+        colony_id: ColonyId,
+        /// The commodity.
+        commodity_id: String,
+        /// Quantity now withheld from industry; `0.0` means the reserve was cleared.
+        amount: f64,
     },
     /// A placed building's staffing priority changed (issue #307).
     BuildingPrioritySet {
@@ -2634,11 +2664,17 @@ impl GameEngine {
                         colony.pool.reset_deltas();
                         let deposits = colony_deposits.get(&colony.id).and_then(Option::as_ref);
                         let prod_outcome = colony::process_production_scaled(
+                            // Player reserves ride in on the stores (#308): they
+                            // are a floor on what industry may draw. Step 2's
+                            // needs resolution above deliberately attaches none,
+                            // so colonists have already eaten from the untouched
+                            // pool by the time a reserve throttles anything.
                             &mut colony::ColonyStores::new(
                                 &mut colony.pool,
                                 &mut colony.resources,
                                 registry,
-                            ),
+                            )
+                            .with_reserves(&colony.commodity_reserves),
                             &placed,
                             labor,
                             registry,
@@ -3386,6 +3422,39 @@ impl GameEngine {
                     colony_id: *colony_id,
                     project_id: *project_id,
                     refund,
+                }])
+            }
+
+            Command::SetCommodityReserve {
+                colony_id,
+                commodity_id,
+                amount,
+            } => {
+                if commodity_id.trim().is_empty() {
+                    return Err(EngineError::InvalidArgument(
+                        "commodity_id must not be empty".into(),
+                    ));
+                }
+                if !amount.is_finite() || *amount < 0.0 {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "reserve amount must be finite and >= 0, got {amount}"
+                    )));
+                }
+                let idx = self.find_colony_index(*colony_id)?;
+                let colony = &mut self.state.colonies[idx];
+                // Zero clears rather than storing a no-op entry, so the map only
+                // ever holds live reserves and readouts need no filtering.
+                if *amount <= 0.0 {
+                    colony.commodity_reserves.remove(commodity_id);
+                } else {
+                    colony
+                        .commodity_reserves
+                        .insert(commodity_id.clone(), *amount);
+                }
+                Ok(vec![Event::CommodityReserveSet {
+                    colony_id: *colony_id,
+                    commodity_id: commodity_id.clone(),
+                    amount: *amount,
                 }])
             }
 
@@ -5380,9 +5449,14 @@ impl GameEngine {
                         // and a starved one no longer share a status.
                         let result = c.last_production_by_building.get(&b.id);
                         let scale = result.map_or(0.0, |r| r.scale);
-                        let shortfall_reason = result
-                            .and_then(|r| r.shortfalls.first())
-                            .map(|s| describe_shortfall(&s.reason));
+                        let first_shortfall = result.and_then(|r| r.shortfalls.first());
+                        let shortfall_reason = first_shortfall.map(describe_shortfall);
+                        // The machine-readable category alongside the phrase, so
+                        // the UI can style a chain that is merely filling
+                        // differently from one that is actually broken (#308).
+                        // Without it the panel only has prose and has to treat
+                        // every shortfall as equally alarming.
+                        let shortfall_kind = first_shortfall.map(|s| shortfall_kind(&s.reason));
                         // The building's real I/O footprint: the resolved
                         // pick-one recipe plus every always-on one, merged by
                         // commodity (issue #272). Without a registry there is
@@ -5426,6 +5500,7 @@ impl GameEngine {
                             full_capacity: scale >= 1.0 - 1e-9,
                             scale,
                             shortfall_reason,
+                            shortfall_kind: shortfall_kind.map(str::to_owned),
                             always_on: self.building_is_always_on(&b.building_type),
                             running_recipe_ids,
                             inputs,
@@ -5440,15 +5515,26 @@ impl GameEngine {
                 // this panel forever as phantom stock. Filtering to ids the
                 // pack actually declares as commodities drops them, and keeps
                 // any future leak out of the tradeable view too.
-                let stockpile = c
+                //
+                // Reserved commodities are unioned in even at zero stock (#308):
+                // a reserve the player set on something they have since run out
+                // of would otherwise vanish from this panel, leaving a setting
+                // that still throttles industry with no way to see or clear it.
+                let mut stockpile_ids: Vec<&str> = c
                     .pool
                     .commodity_ids()
+                    .chain(c.commodity_reserves.keys().map(String::as_str))
                     .filter(|cid| {
                         self.state
                             .registry
                             .as_ref()
                             .is_none_or(|reg| reg.commodity(cid).is_some())
                     })
+                    .collect();
+                stockpile_ids.sort_unstable();
+                stockpile_ids.dedup();
+                let stockpile = stockpile_ids
+                    .into_iter()
                     .map(|cid| {
                         let cap = c.pool.capacity(cid);
                         ui::StockpileRow {
@@ -5456,6 +5542,7 @@ impl GameEngine {
                             amount: c.pool.amount(cid),
                             capacity: if cap.is_finite() { Some(cap) } else { None },
                             net_per_turn: c.pool.delta(cid),
+                            reserved: c.commodity_reserves.get(cid).copied().unwrap_or(0.0),
                         }
                     })
                     .collect();
@@ -6305,23 +6392,22 @@ impl GameEngine {
                     .shortfalls
                     .iter()
                     .map(|s| {
-                        let (kind, commodity_id) = match &s.reason {
-                            colony::ShortfallReason::InputShort { commodity_id } => {
-                                ("input_short", Some(commodity_id.clone()))
+                        let commodity_id = match &s.reason {
+                            colony::ShortfallReason::InputShort { commodity_id }
+                            | colony::ShortfallReason::AwaitingUpstream { commodity_id }
+                            | colony::ShortfallReason::MaintenanceShort { commodity_id }
+                            | colony::ShortfallReason::DepositShort { commodity_id } => {
+                                Some(commodity_id.clone())
                             }
-                            colony::ShortfallReason::PowerBrownout => ("power_brownout", None),
-                            colony::ShortfallReason::LaborShort => ("labor_short", None),
-                            colony::ShortfallReason::MaintenanceShort { commodity_id } => {
-                                ("maintenance_short", Some(commodity_id.clone()))
-                            }
-                            colony::ShortfallReason::DepositShort { commodity_id } => {
-                                ("deposit_short", Some(commodity_id.clone()))
-                            }
+                            colony::ShortfallReason::PowerBrownout
+                            | colony::ShortfallReason::LaborShort => None,
                         };
+                        let kind = shortfall_kind(&s.reason);
                         ui::ShortfallRow {
                             kind: kind.to_string(),
                             commodity_id,
                             effective_scale: s.effective_scale,
+                            deficit: s.deficit,
                         }
                     })
                     .collect(),
@@ -6464,16 +6550,63 @@ fn ingredient_row((commodity_id, quantity): (String, f64)) -> ui::IngredientRow 
     }
 }
 
-/// Render a [`colony::production::ShortfallReason`] as a short human-readable
-/// phrase for the colony screen (issue #303 — a building that fell short
-/// should say *why* rather than just reading as idle).
-fn describe_shortfall(reason: &colony::production::ShortfallReason) -> String {
+/// The machine-readable category for a shortfall, matching
+/// [`ui::ShortfallRow::kind`].
+///
+/// Split out from [`describe_shortfall`] so the buildings list and the building
+/// detail panel cannot disagree about what to call the same shortfall.
+fn shortfall_kind(reason: &colony::production::ShortfallReason) -> &'static str {
     use colony::production::ShortfallReason as R;
     match reason {
-        R::InputShort { commodity_id } => format!("input short: {commodity_id}"),
+        R::InputShort { .. } => "input_short",
+        R::AwaitingUpstream { .. } => "awaiting_upstream",
+        R::PowerBrownout => "power_brownout",
+        R::LaborShort => "labor_short",
+        R::MaintenanceShort { .. } => "maintenance_short",
+        R::DepositShort { .. } => "deposit_short",
+    }
+}
+
+/// Render a [`colony::production::ProductionShortfall`] as a short
+/// human-readable phrase for the colony screen (issue #303 — a building that
+/// fell short should say *why* rather than just reading as idle).
+///
+/// Commodity shortfalls name the amount missing as well as the commodity
+/// (issue #308): "30 % output" does not tell the player whether they are two
+/// units short or two hundred, and that is the difference between waiting a sol
+/// and building another mine.
+///
+/// The input wording distinguishes the two cases #308 conflated. "no source of
+/// ore" means nothing here makes it — build a producer or open a route. "awaiting
+/// ore from upstream" means something here does make it and the chain has not
+/// filled yet, which resolves on its own.
+fn describe_shortfall(shortfall: &colony::production::ProductionShortfall) -> String {
+    use colony::production::ShortfallReason as R;
+    // Trimmed to one decimal: these are display strings, and a raw f64 tail
+    // ("7.000000000000001 ore") reads as a bug rather than a quantity.
+    //
+    // Below half a display unit the quantity is dropped rather than rounded, so a
+    // 0.04 deficit reads "no source of ore" instead of the self-contradictory "no
+    // source of 0.0 ore". Anything that small is a rounding crumb the player
+    // cannot act on anyway.
+    const MIN_SHOWN_DEFICIT: f64 = 0.05;
+    let short_by = |commodity_id: &str| {
+        if shortfall.deficit >= MIN_SHOWN_DEFICIT {
+            format!("{:.1} {commodity_id}", shortfall.deficit)
+        } else {
+            commodity_id.to_owned()
+        }
+    };
+    match &shortfall.reason {
+        R::InputShort { commodity_id } => format!("no source of {}", short_by(commodity_id)),
+        R::AwaitingUpstream { commodity_id } => {
+            format!("awaiting {} from upstream", short_by(commodity_id))
+        }
         R::PowerBrownout => "power brownout".to_string(),
         R::LaborShort => "labour short".to_string(),
-        R::MaintenanceShort { commodity_id } => format!("maintenance short: {commodity_id}"),
+        R::MaintenanceShort { commodity_id } => {
+            format!("maintenance short: {}", short_by(commodity_id))
+        }
         R::DepositShort { commodity_id } => format!("deposit short: {commodity_id}"),
     }
 }
@@ -7641,6 +7774,374 @@ mod tests {
             (steel_refund.1 - 25.0).abs() < 1e-9,
             "expected 25.0 steel refund, got {}",
             steel_refund.1
+        );
+    }
+
+    /// The readout names the missing quantity, and drops it rather than rounding
+    /// a rounding crumb to a self-contradictory `"no source of 0.0 ore"`.
+    #[test]
+    fn shortfall_phrasing_names_the_quantity_and_hides_meaningless_ones() {
+        use colony::production::{ProductionShortfall, ShortfallReason};
+        let phrase = |reason: ShortfallReason, deficit: f64| {
+            describe_shortfall(&ProductionShortfall {
+                reason,
+                effective_scale: 0.3,
+                deficit,
+            })
+        };
+        let ore = || "ore".to_string();
+
+        // The two input cases read as different advice, not different phrasings.
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                7.0
+            ),
+            "no source of 7.0 ore"
+        );
+        assert_eq!(
+            phrase(
+                ShortfallReason::AwaitingUpstream {
+                    commodity_id: ore()
+                },
+                7.0
+            ),
+            "awaiting 7.0 ore from upstream"
+        );
+        // A float tail is trimmed rather than dumped raw.
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                7.000_000_000_000_1
+            ),
+            "no source of 7.0 ore"
+        );
+        // Below half a display unit the quantity is omitted entirely.
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                0.04
+            ),
+            "no source of ore"
+        );
+        assert_eq!(
+            phrase(
+                ShortfallReason::InputShort {
+                    commodity_id: ore()
+                },
+                0.0
+            ),
+            "no source of ore"
+        );
+        // Non-commodity shortfalls are unaffected.
+        assert_eq!(phrase(ShortfallReason::LaborShort, 0.0), "labour short");
+        assert_eq!(
+            phrase(ShortfallReason::PowerBrownout, 0.0),
+            "power brownout"
+        );
+    }
+
+    // ── Commodity reserves (issue #308) ──
+
+    #[test]
+    fn set_commodity_reserve_stores_clears_and_validates() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Reserved".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let reserves = |e: &GameEngine| {
+            let idx = e.find_colony_index(colony_id).unwrap();
+            e.state.colonies[idx].commodity_reserves.clone()
+        };
+
+        let evs = engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "biomass".into(),
+                amount: 250.0,
+            })
+            .unwrap();
+        assert!(matches!(
+            &evs[0],
+            Event::CommodityReserveSet { commodity_id, amount, .. }
+                if commodity_id == "biomass" && (*amount - 250.0).abs() < 1e-9
+        ));
+        assert!((reserves(&engine)["biomass"] - 250.0).abs() < 1e-9);
+
+        // Zero clears rather than storing a no-op entry.
+        engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "biomass".into(),
+                amount: 0.0,
+            })
+            .unwrap();
+        assert!(
+            !reserves(&engine).contains_key("biomass"),
+            "a zero reserve must be removed, not stored"
+        );
+
+        // Rejected rather than clamped — this is a player action.
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                engine
+                    .apply(&Command::SetCommodityReserve {
+                        colony_id,
+                        commodity_id: "biomass".into(),
+                        amount: bad,
+                    })
+                    .is_err(),
+                "amount {bad} must be rejected"
+            );
+        }
+        assert!(engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "  ".into(),
+                amount: 5.0,
+            })
+            .is_err());
+    }
+
+    /// The motivating case, end to end: reserved food is off-limits to industry
+    /// but colonists still eat it.
+    ///
+    /// This is the invariant that justifies the design — a reserve that also
+    /// starved the population would be useless for exactly the job it exists to
+    /// do ("keep biomass for food, not fuel").
+    #[test]
+    fn a_reserve_withholds_food_from_industry_but_not_from_colonists() {
+        use crate::needs::{NeedDef, NeedScaling, NeedsConfig};
+
+        // A plant that burns food into fuel — the competing consumer.
+        let mut reg = content::ContentRegistry::default();
+        reg.insert_building(content::types::BuildingDef {
+            id: "burner".into(),
+            name: "burner".into(),
+            description: String::new(),
+            category: content::BuildingCategory::Processing,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+        });
+        reg.insert_recipe(content::RecipeDef {
+            id: "burn".into(),
+            name: "burn".into(),
+            building: "burner".into(),
+            cycle_sols: 1,
+            inputs: vec![content::types::Ingredient {
+                id: "food".into(),
+                quantity: 100.0,
+            }],
+            outputs: vec![content::types::Ingredient {
+                id: "fuel".into(),
+                quantity: 1.0,
+            }],
+            concurrent: false,
+            line: None,
+            power_draw: 0.0,
+        });
+
+        let mut engine = GameEngine::with_seed(42);
+        engine.state.registry = Some(reg);
+        engine.state.needs_config = Some(NeedsConfig {
+            needs: vec![NeedDef {
+                commodity_id: "food".into(),
+                scaling: NeedScaling::PerCapita { rate: 0.1 },
+                weight: 1.0,
+            }],
+            stability_recovery_rate: 0.05,
+            stability_decay_rate: 0.10,
+            growth_stability_threshold: 0.70,
+            growth_rate: 0.005,
+            decline_stability_threshold: 0.30,
+            decline_rate: 0.001,
+            emigration_stability_floor: 0.25,
+            voluntary_emigration_rate: 0.03,
+        });
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Rationed".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("food", 100.0);
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("burner", 1));
+        // 100 colonists at 0.1/head = 10 food of demand this sol.
+        let pop = engine.state.populations[idx].count;
+
+        engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "food".into(),
+                amount: 100.0,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let colony = &engine.state.colonies[idx];
+        assert!(
+            colony.pool.amount("fuel").abs() < 1e-9,
+            "industry must not have touched the reserved food, got {} fuel",
+            colony.pool.amount("fuel")
+        );
+        // Needs ran against the untouched pool, so the colonists' ration is gone.
+        let expected = 100.0 - f64::from(pop) * 0.1;
+        assert!(
+            (colony.pool.amount("food") - expected).abs() < 1e-6,
+            "colonists should still have eaten from the reserve: expected {expected}, got {}",
+            colony.pool.amount("food")
+        );
+    }
+
+    /// **Construction is not gated by a reserve** (issue #308 + #306).
+    ///
+    /// Pins a real gap rather than asserting a virtue: `tick_active_charging`
+    /// draws construction materials straight from [`colony::ColonyPool`], never
+    /// through [`colony::ColonyStores`], so it never sees the reserve. A player
+    /// who reserves metal to protect their upkeep will still watch a build queue
+    /// eat it.
+    ///
+    /// That may well be the wrong call now that #306 made construction cost
+    /// materials at all, but it is the *current* call, and it should change
+    /// deliberately rather than by accident — so this test fails if the
+    /// behaviour drifts either way.
+    #[test]
+    fn a_reserve_does_not_protect_stock_from_the_build_queue() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Building Anyway".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 100.0);
+
+        engine
+            .apply(&Command::SetCommodityReserve {
+                colony_id,
+                commodity_id: "steel".into(),
+                amount: 100.0,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "smelter".into(),
+                slot_cost: 1,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 100.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            (engine.state.colonies[idx].pool.amount("steel") - 50.0).abs() < 1e-6,
+            "construction currently ignores the reserve and drew its instalment; \
+             got {} steel left",
+            engine.state.colonies[idx].pool.amount("steel")
+        );
+    }
+
+    /// Without the reserve, the same setup burns the food — proving the test
+    /// above is measuring the reserve and not some unrelated idleness.
+    #[test]
+    fn without_a_reserve_industry_does_consume_the_food() {
+        let mut engine = GameEngine::new();
+        let mut reg = content::ContentRegistry::default();
+        reg.insert_building(content::types::BuildingDef {
+            id: "burner".into(),
+            name: "burner".into(),
+            description: String::new(),
+            category: content::BuildingCategory::Processing,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+        });
+        reg.insert_recipe(content::RecipeDef {
+            id: "burn".into(),
+            name: "burn".into(),
+            building: "burner".into(),
+            cycle_sols: 1,
+            inputs: vec![content::types::Ingredient {
+                id: "food".into(),
+                quantity: 100.0,
+            }],
+            outputs: vec![content::types::Ingredient {
+                id: "fuel".into(),
+                quantity: 1.0,
+            }],
+            concurrent: false,
+            line: None,
+            power_draw: 0.0,
+        });
+        engine.state.registry = Some(reg);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Unrationed".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("food", 100.0);
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("burner", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        assert!(
+            (engine.state.colonies[idx].pool.amount("fuel") - 1.0).abs() < 1e-9,
+            "unreserved food should have been burned, got {} fuel",
+            engine.state.colonies[idx].pool.amount("fuel")
         );
     }
 
@@ -11959,6 +12460,7 @@ mod tests {
                             commodity_id: "water".into(),
                         },
                         effective_scale: 0.6,
+                        deficit: 4.0,
                     }],
                     line_results: vec![],
                 },
@@ -11980,7 +12482,7 @@ mod tests {
         assert!(!hq.full_capacity);
         assert_eq!(
             hq.shortfall_reason.as_deref(),
-            Some("input short: water"),
+            Some("no source of 4.0 water"),
             "a building that fell short should say why"
         );
         // Flagged so the UI can explain the absent recipe picker.

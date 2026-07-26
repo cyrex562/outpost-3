@@ -136,6 +136,43 @@ pub struct Colony {
     /// no entry here at all.
     #[serde(default)]
     pub active_recipes: std::collections::HashMap<String, String>,
+    /// Player-set floors that industry may not draw the stockpile below,
+    /// keyed by commodity id (issue #308).
+    ///
+    /// The motivating case is a commodity two chains compete for — keep biomass
+    /// for food rather than letting the fuel plant burn it. Reserved stock stays
+    /// in [`Self::pool`] and shows in every readout; it is simply not offered to
+    /// recipe inputs or building maintenance.
+    ///
+    /// **Colonist needs are exempt.** Needs resolution is step 2 of the sol and
+    /// production is step 3, so colonists eat from the untouched pool *before* a
+    /// reserve throttles anything. A reserve therefore cannot starve the
+    /// population however large it is — which is the whole point of reserving
+    /// food.
+    ///
+    /// **Construction is also exempt, which is arguably wrong.** Build-queue
+    /// material instalments are drawn straight from [`Self::pool`] by
+    /// [`ConstructionQueue::tick_active_charging`], never through
+    /// [`ColonyStores`], so they do not see this floor: a player reserving metal
+    /// to protect their upkeep will still watch a build queue spend it. That
+    /// mattered less when construction was free (before issue #306) and may want
+    /// revisiting; `a_reserve_does_not_protect_stock_from_the_build_queue` pins
+    /// the current behaviour so it changes on purpose rather than by accident.
+    ///
+    /// **Maintenance is not exempt.** Reserving the commodity your upkeep runs on
+    /// can stall your own buildings, reported as
+    /// [`ShortfallReason::MaintenanceShort`]. Splitting inputs from maintenance
+    /// would need two different "available" figures inside one affordability
+    /// ratio, so the reserve applies to the whole production pass.
+    ///
+    /// [`ConstructionQueue::tick_active_charging`]: ConstructionQueue::tick_active_charging
+    /// [`ColonyStores`]: ColonyStores
+    /// [`ShortfallReason::MaintenanceShort`]: production::ShortfallReason::MaintenanceShort
+    ///
+    /// Absent or `0.0` means unreserved. `#[serde(default)]` so pre-#308 saves
+    /// load with nothing withheld, matching their behaviour exactly.
+    #[serde(default)]
+    pub commodity_reserves: std::collections::HashMap<String, f64>,
     /// Whether [`crate::Command::DeployStarterKit`] has already been used on
     /// this colony (issue: playtest feedback round 2 — starter buildings
     /// should land instantly, "like a lander", rather than sit in the
@@ -172,6 +209,7 @@ impl Colony {
             last_production_by_building: std::collections::HashMap::new(),
             last_labour: None,
             active_recipes: std::collections::HashMap::new(),
+            commodity_reserves: std::collections::HashMap::new(),
             starter_kit_deployed: false,
         }
     }

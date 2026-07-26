@@ -147,6 +147,7 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
           full_capacity: true,
           scale: 1.0,
           shortfall_reason: null,
+          shortfall_kind: null,
           always_on: true,
           running_recipe_ids: ['hq_generate_power', 'hq_pump_water'],
           inputs: [],

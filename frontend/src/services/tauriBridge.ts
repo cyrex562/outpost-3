@@ -386,9 +386,17 @@ export interface RecipeRow {
 }
 
 export interface ShortfallRow {
-  kind: 'input_short' | 'power_brownout' | 'labor_short' | 'maintenance_short'
+  kind:
+    | 'input_short'
+    | 'awaiting_upstream'
+    | 'power_brownout'
+    | 'labor_short'
+    | 'maintenance_short'
+    | 'deposit_short'
   commodity_id: string | null
   effective_scale: number
+  /** How much more of `commodity_id` full output needed; `0` when not applicable. */
+  deficit: number
 }
 
 export interface BuildingRunRow {

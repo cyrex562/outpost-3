@@ -281,6 +281,15 @@ pub(crate) fn client_command_to_core(
                 recipe_id,
             })
         }
+        ClientCommand::SetCommodityReserve {
+            colony_id,
+            commodity_id,
+            amount,
+        } => Ok(Command::SetCommodityReserve {
+            colony_id: parse_colony_id(&colony_id)?,
+            commodity_id,
+            amount,
+        }),
         ClientCommand::SetBuildingPriority {
             colony_id,
             building_id,
