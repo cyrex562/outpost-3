@@ -73,16 +73,19 @@ describe('TurnControlBar (UI-rework PR3)', () => {
     expect(wrapper.get('[data-testid="turn-indicator"]').text()).toContain('Month 3')
   })
 
-  it('advances the turn on click', async () => {
+  // Advance Turn was removed: play, fast-forward, and it were three triggers
+  // for one mechanic, and the slowest play speed already does what it did.
+  it('has no Advance Turn button — play and fast-forward are the only clocks', () => {
     const wrapper = mount(TurnControlBar)
-    await wrapper.get('[data-testid="btn-advance-turn"]').trigger('click')
-    expect(sendCommand).toHaveBeenCalledWith({ kind: 'advance_sol' })
+    expect(wrapper.find('[data-testid="btn-advance-turn"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="btn-play-pause"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="btn-fast-forward"]').exists()).toBe(true)
   })
 
-  it('disables Advance Turn while the engine is busy', () => {
+  it('disables the remaining clock controls while the engine is busy', () => {
     gameStoreMock.busy = true
     const wrapper = mount(TurnControlBar)
-    expect(wrapper.get('[data-testid="btn-advance-turn"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="btn-fast-forward"]').attributes('disabled')).toBeDefined()
   })
 
   it('shows and dismisses the global event toast', async () => {
