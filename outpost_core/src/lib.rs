@@ -2535,8 +2535,14 @@ impl GameEngine {
                             }
                         }
                         colony.last_labour = Some(prod_outcome.labour);
-                        colony.last_production =
-                            colony::summarize_by_type(prod_outcome.building_results);
+                        // Keyed by instance (#307 stage 4): two buildings of one
+                        // type can run at different scales, so collapsing by type
+                        // hid the starved one and undercounted total output.
+                        colony.last_production_by_building = prod_outcome
+                            .building_results
+                            .into_iter()
+                            .map(|r| (r.building_id, r))
+                            .collect();
                     }
 
                     // ── Step 3b: Outpost production (issue #233) ────────────
@@ -2596,8 +2602,11 @@ impl GameEngine {
                                 });
                             }
                         }
-                        out.last_production =
-                            colony::summarize_by_type(prod_outcome.building_results);
+                        out.last_production_by_building = prod_outcome
+                            .building_results
+                            .into_iter()
+                            .map(|r| (r.building_id, r))
+                            .collect();
                     }
                 }
 
@@ -4079,7 +4088,7 @@ impl GameEngine {
                 colony.habitability_modifier = habitability_modifier;
                 colony.category_modifiers = category_modifiers;
                 colony.active_recipes = old_outpost.active_recipes;
-                colony.last_production = old_outpost.last_production;
+                colony.last_production_by_building = old_outpost.last_production_by_building;
 
                 let colony_id = colony.id;
                 self.state.add_colony(colony, *starting_population);
@@ -5232,7 +5241,9 @@ impl GameEngine {
                     .buildings
                     .iter()
                     .map(|b| {
-                        let result = c.last_production.get(&b.building_type);
+                        // Per-instance since #307 stage 4: a fully-staffed mine
+                        // and a starved one no longer share a status.
+                        let result = c.last_production_by_building.get(&b.id);
                         let scale = result.map_or(0.0, |r| r.scale);
                         let shortfall_reason = result
                             .and_then(|r| r.shortfalls.first())
@@ -5492,7 +5503,7 @@ impl GameEngine {
                 let data = self.build_building_detail_data(
                     building_type,
                     &colony.active_recipes,
-                    &colony.last_production,
+                    &colony.last_production_by_building,
                 )?;
                 Ok(QueryResult::BuildingDetail(data))
             }
@@ -5506,7 +5517,7 @@ impl GameEngine {
                 let data = self.build_building_detail_data(
                     building_type,
                     &post.active_recipes,
-                    &post.last_production,
+                    &post.last_production_by_building,
                 )?;
                 Ok(QueryResult::BuildingDetail(data))
             }
@@ -5885,7 +5896,7 @@ impl GameEngine {
             self.state
                 .colonies
                 .iter()
-                .flat_map(|colony| colony.last_production.values())
+                .flat_map(|colony| colony.last_production_by_building.values())
                 .filter_map(|result| registry.recipe(&result.recipe_id).map(|r| (result, r)))
                 .map(|(result, recipe)| {
                     recipe
@@ -6040,7 +6051,7 @@ impl GameEngine {
         &self,
         building_type: &str,
         active_recipes: &std::collections::HashMap<String, String>,
-        last_production: &std::collections::HashMap<String, colony::BuildingProductionResult>,
+        last_production: &std::collections::HashMap<uuid::Uuid, colony::BuildingProductionResult>,
     ) -> Result<ui::BuildingDetailData, EngineError> {
         let registry = self
             .state
@@ -6069,8 +6080,14 @@ impl GameEngine {
             Vec::new()
         };
 
+        // The details page is type-scoped (#339 will revisit that), but results are
+        // now per-instance — so summarise across this type's instances, keeping the
+        // worst. Picking arbitrarily would let a starved building hide behind a
+        // healthy sibling.
         let last_run = last_production
-            .get(building_type)
+            .values()
+            .filter(|r| r.building_type == building_type)
+            .min_by(|a, b| a.scale.total_cmp(&b.scale))
             .map(|r| ui::BuildingRunRow {
                 scale: r.scale,
                 is_full_production: r.is_full_production(),
@@ -8092,13 +8109,18 @@ mod tests {
         engine.apply(&Command::AdvanceColonySol).unwrap();
 
         let idx = engine.find_colony_index(colony_id).unwrap();
-        let last_production = &engine.state.colonies[idx].last_production;
-        assert!(
-            last_production.contains_key("research_lab"),
-            "expected last_production to contain an entry for research_lab, got {last_production:?}"
-        );
-        let result = &last_production["research_lab"];
+        let lab_id = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+        let runs = &engine.state.colonies[idx].last_production_by_building;
+        let result = runs
+            .get(&lab_id)
+            .unwrap_or_else(|| panic!("expected a run recorded for the lab, got {runs:?}"));
         assert_eq!(result.building_type, "research_lab");
+        assert_eq!(result.building_id, lab_id);
         assert!(result.scale > 0.0);
     }
 
@@ -8491,21 +8513,36 @@ mod tests {
 
         engine.apply(&Command::AdvanceColonySol).unwrap();
 
-        // The type-keyed summary keeps the worst instance, so it should report the
-        // starved lab rather than hiding it behind its fully-staffed sibling.
-        let summary = &engine.state.colonies[idx].last_production["research_lab"];
+        // Results are keyed by instance (#307 stage 4), so the two labs report
+        // separately — the whole point. Before the re-key they shared one entry.
+        let runs = &engine.state.colonies[idx].last_production_by_building;
+        let favoured = runs.get(&labs[0]).expect("run for the priority-1 lab");
+        let starved = runs.get(&labs[1]).expect("run for the priority-9 lab");
+
         assert!(
-            summary.scale.abs() < 1e-6,
-            "expected the summary to surface the unstaffed lab, got scale {}",
-            summary.scale
+            favoured.scale > 0.0,
+            "the staffed lab ran, got scale {}",
+            favoured.scale
         );
         assert!(
-            summary
+            starved.scale.abs() < 1e-6,
+            "the unstaffed lab did not, got scale {}",
+            starved.scale
+        );
+        assert!(
+            starved
                 .shortfalls
                 .iter()
                 .any(|s| s.reason == colony::ShortfallReason::LaborShort),
-            "expected a LaborShort shortfall, got {:?}",
-            summary.shortfalls
+            "expected a LaborShort shortfall on the starved lab, got {:?}",
+            starved.shortfalls
+        );
+        assert!(
+            !favoured
+                .shortfalls
+                .iter()
+                .any(|s| s.reason == colony::ShortfallReason::LaborShort),
+            "the staffed lab must not report labour-short"
         );
     }
 
@@ -11166,25 +11203,33 @@ mod tests {
         engine.state.colonies[idx]
             .buildings
             .push(colony::PlacedBuilding::new("hq", 1));
+        let hq_id = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "hq")
+            .map(|b| b.id)
+            .expect("the hq just pushed");
         // Stand in for last turn's result: the building ran at 60% and was
         // short on water.
-        engine.state.colonies[idx].last_production.insert(
-            "hq".to_string(),
-            colony::BuildingProductionResult {
-                building_id: uuid::Uuid::nil(),
-                building_type: "hq".to_string(),
-                recipe_id: String::new(),
-                concurrent_recipe_ids: vec!["hq_power".into(), "hq_water".into()],
-                scale: 0.6,
-                shortfalls: vec![colony::production::ProductionShortfall {
-                    reason: colony::production::ShortfallReason::InputShort {
-                        commodity_id: "water".into(),
-                    },
-                    effective_scale: 0.6,
-                }],
-                line_results: vec![],
-            },
-        );
+        engine.state.colonies[idx]
+            .last_production_by_building
+            .insert(
+                hq_id,
+                colony::BuildingProductionResult {
+                    building_id: hq_id,
+                    building_type: "hq".to_string(),
+                    recipe_id: String::new(),
+                    concurrent_recipe_ids: vec!["hq_power".into(), "hq_water".into()],
+                    scale: 0.6,
+                    shortfalls: vec![colony::production::ProductionShortfall {
+                        reason: colony::production::ShortfallReason::InputShort {
+                            commodity_id: "water".into(),
+                        },
+                        effective_scale: 0.6,
+                    }],
+                    line_results: vec![],
+                },
+            );
 
         let QueryResult::ColonyScreen(screen) =
             engine.query(&Query::ColonyScreen { colony_id }).unwrap()
@@ -11219,7 +11264,9 @@ mod tests {
         engine.state.colonies[idx]
             .buildings
             .push(colony::PlacedBuilding::new("research_lab", 1));
-        engine.state.colonies[idx].last_production.clear();
+        engine.state.colonies[idx]
+            .last_production_by_building
+            .clear();
 
         let QueryResult::ColonyScreen(screen) =
             engine.query(&Query::ColonyScreen { colony_id }).unwrap()
@@ -12758,10 +12805,16 @@ mod tests {
             "colony with no matching deposit must get zero structural_ore \
              from a structural_mine under deposit gating"
         );
+        let mine_id = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "structural_mine")
+            .map(|b| b.id)
+            .expect("a structural_mine");
         assert_eq!(
             engine.state.colonies[idx]
-                .last_production
-                .get("structural_mine")
+                .last_production_by_building
+                .get(&mine_id)
                 .unwrap()
                 .scale,
             0.0
@@ -13546,6 +13599,82 @@ mod tests {
             economic.current >= 120,
             "expected total_output >= 120 (24 water * 5.0 base_value), got {}",
             economic.current
+        );
+    }
+
+    /// Every producing instance counts toward `total_output`, not one per type
+    /// (issue #307 stage 4).
+    ///
+    /// `last_production` used to be keyed by `building_type`, so a colony with two
+    /// water wells recorded **one** entry and the economic milestone counted one
+    /// well's output. That silently undercounted any colony with duplicates — a
+    /// victory-condition figure, so worth pinning down.
+    #[test]
+    fn economic_milestone_counts_every_instance_not_one_per_type() {
+        let build = |well_count: usize| {
+            let mut engine = GameEngine::with_seed(0);
+            engine.state.registry = Some(economic_output_registry());
+            let events = engine
+                .apply(&Command::FoundColony {
+                    name: "Duplicate Wells".into(),
+                    starting_population: 200,
+                })
+                .unwrap();
+            let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+                panic!()
+            };
+            let colony_id = *colony_id;
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            engine.state.colonies[idx]
+                .buildings
+                .push(colony::PlacedBuilding::new("solar_array", 1));
+            for _ in 0..well_count {
+                engine.state.colonies[idx]
+                    .buildings
+                    .push(colony::PlacedBuilding::new("water_well", 1));
+            }
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            // One recorded run per instance, which is what makes the sum correct.
+            let runs = engine.state.colonies[idx]
+                .last_production_by_building
+                .values()
+                .filter(|r| r.building_type == "water_well")
+                .count();
+            assert_eq!(
+                runs, well_count,
+                "expected one recorded run per well instance"
+            );
+
+            engine.state.victory_state =
+                victory::VictoryState::new(vec![victory::VictoryCondition::EconomicMilestone {
+                    target_output: u64::MAX,
+                }]);
+            engine.apply(&Command::EvaluateVictory).unwrap();
+            let QueryResult::VictoryStatus(progress) = engine.query(&Query::VictoryStatus).unwrap()
+            else {
+                panic!("expected VictoryStatus result");
+            };
+            progress
+                .iter()
+                .find(|p| {
+                    matches!(
+                        p.condition,
+                        victory::VictoryCondition::EconomicMilestone { .. }
+                    )
+                })
+                .expect("EconomicMilestone tracked")
+                .current
+        };
+
+        let one = build(1);
+        let two = build(2);
+        assert!(one > 0, "the single-well baseline must produce something");
+        assert!(
+            two > one,
+            "two wells must out-produce one ({two} vs {one}) — under the old \
+             type-keyed map they reported identically"
         );
     }
 

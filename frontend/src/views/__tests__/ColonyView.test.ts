@@ -136,8 +136,13 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
       ],
       buildings: [
         {
+          building_id: 'hq-instance-1',
+          name: 'Colony HQ 1',
           building_type: 'colony_hq',
           labour_assigned: 0,
+          labour_demand: 0,
+          priority: 5,
+          labour_lock: null,
           slot_cost: 1,
           full_capacity: true,
           scale: 1.0,

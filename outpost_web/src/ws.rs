@@ -1800,9 +1800,11 @@ mod tests {
             "research should be drained out of the colony pool, not stockpiled"
         );
 
+        // Keyed by placed-instance id since #307 stage 4, not by building type.
         let hq_result = engine.state.colonies[idx]
-            .last_production
-            .get("colony_hq")
+            .last_production_by_building
+            .values()
+            .find(|r| r.building_type == "colony_hq")
             .expect("colony_hq should have a recorded production result");
         let mut ids = hq_result.concurrent_recipe_ids.clone();
         ids.sort();

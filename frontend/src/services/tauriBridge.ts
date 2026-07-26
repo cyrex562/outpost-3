@@ -6,6 +6,7 @@
  */
 
 import type { Command, InterruptTier } from '@/types/commands'
+import type { ColonyScreenData } from '@/types/screen'
 import type { GameEvent } from '@/types/gameEvents'
 
 const globalWindow = typeof window === 'undefined' ? null : (window as unknown as { __TAURI_INTERNALS__?: unknown })
@@ -433,6 +434,22 @@ export interface RecipeLineRow {
   selected_recipe_id: string
   /** Every recipe on this line. Length 1 means there is nothing to choose. */
   alternatives: RecipeRow[]
+}
+
+/**
+ * The colony management screen bundle for one colony.
+ *
+ * Browser mode had no way to fetch this, so every panel driven by it — buildings,
+ * stockpile, colony resources — rendered empty there. `/api/colony-screen/:id`
+ * closes that gap (issue #307 stage 4).
+ */
+export async function getColonyScreen(colonyId: string): Promise<ColonyScreenData> {
+  if (!isTauri) return fetchJson<ColonyScreenData>(`/api/colony-screen/${colonyId}`)
+  const q = await query({ kind: 'colony_screen', colony_id: colonyId })
+  if (q.kind !== 'colony_screen' || !q.data) {
+    throw new Error(`unexpected query result for colony_screen: ${JSON.stringify(q)}`)
+  }
+  return q.data as ColonyScreenData
 }
 
 /** Full detail for one building type within a colony (issue #182). */

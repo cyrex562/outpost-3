@@ -108,10 +108,14 @@ pub struct BuildingRow {
     /// Scale the building actually produced at last turn, in `[0.0, 1.0]`.
     ///
     /// `0.0` means it genuinely produced nothing; `1.0` means full output.
-    /// Sourced from `Colony::last_production`, so this is the authoritative
-    /// "is it working?" signal (issue #303 — the colony screen used to infer
-    /// status from the always-zero [`Self::labour_assigned`] and therefore
-    /// reported *every* building as idle).
+    /// Sourced from `Colony::last_production_by_building`, so this is the
+    /// authoritative "is it working?" signal (issue #303 — the colony screen used
+    /// to infer status from the always-zero [`Self::labour_assigned`] and
+    /// therefore reported *every* building as idle).
+    ///
+    /// **Per-instance since #307.** Two buildings of one type previously shared a
+    /// single result, so a fully-staffed mine and a starved one read identically;
+    /// each now reports its own scale.
     pub scale: f64,
     /// Why the building fell short of full output last turn, if it did — a
     /// short human-readable reason (e.g. `"input short: water"`).

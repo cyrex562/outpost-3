@@ -7,14 +7,33 @@
 
 /** A single building row shown on the colony screen. */
 export interface BuildingRow {
+  /**
+   * Stable id of this placed instance (issue #307) — what the per-building
+   * commands are addressed to, and the right key for a `v-for`. Two buildings of
+   * one type are distinct rows, so `building_type` is **not** unique.
+   */
+  building_id: string
+  /** Display name: the player's, else `"<Type Name> <n>"`. */
+  name: string
   building_type: string
   /**
-   * Always 0 — per-building labour assignment has no backing state yet
-   * (production is gated by a colony-wide labour ratio). Do not infer working
-   * status from this; use `scale` (issue #303). Real assignment lands with
-   * automatic labour assignment (#307).
+   * Labour actually assigned last sol, read from the plan production used
+   * (issue #307). Real now — it was hardcoded 0 before.
+   *
+   * Still not the "is it working?" signal: a fully-staffed building can be idle
+   * for want of inputs. Use `scale` for that (issue #303).
    */
   labour_assigned: number
+  /**
+   * Workers wanted, gated on whether the building could run at all. Less than
+   * `labour_assigned` is impossible; `labour_assigned < labour_demand` means
+   * understaffed. `0` for a building with no jobs to offer.
+   */
+  labour_demand: number
+  /** Staffing priority: 1 is staffed first, 9 last (issue #307). */
+  priority: number
+  /** Workers pinned by the player, or `null` when automatic (issue #307). */
+  labour_lock: number | null
   slot_cost: number
   full_capacity: boolean
   /** Production scale achieved last turn, 0.0–1.0. `0` = produced nothing. */

@@ -99,7 +99,8 @@ pub struct Outpost {
     /// [`crate::colony::Colony::active_recipes`]).
     pub active_recipes: std::collections::HashMap<String, String>,
     /// Each operational building's most recent production outcome.
-    pub last_production: std::collections::HashMap<String, BuildingProductionResult>,
+    pub last_production_by_building:
+        std::collections::HashMap<uuid::Uuid, BuildingProductionResult>,
 }
 
 impl Outpost {
@@ -118,7 +119,7 @@ impl Outpost {
             slot_capacity: OUTPOST_BASE_SLOT_CAPACITY,
             category_modifiers: Vec::new(),
             active_recipes: std::collections::HashMap::new(),
-            last_production: std::collections::HashMap::new(),
+            last_production_by_building: std::collections::HashMap::new(),
         }
     }
 
