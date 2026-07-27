@@ -11608,7 +11608,7 @@ mod tests {
 
     #[test]
     fn promote_outpost_to_colony_carries_over_low_slot_capacity_up_to_colony_base() {
-        // An outpost's slot capacity (2) is below BASE_SLOT_CAPACITY (5); the
+        // An outpost's slot capacity (2) is below BASE_SLOT_CAPACITY; the
         // promoted colony must not be stuck below the normal colony floor.
         let mut engine = GameEngine::new();
         let (colony_id, body_id) = setup_colony_and_body(&mut engine);
