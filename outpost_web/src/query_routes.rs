@@ -98,6 +98,9 @@ pub struct BuildingOptionWire {
     pub construction_cost: Vec<(String, f64)>,
     /// Tech id required before this building can be queued, if any.
     pub tech_prerequisite: Option<String>,
+    /// Whether this building is part of the default landing kit (issue #317) —
+    /// lets the founding wizard pre-select it as the recommended loadout.
+    pub starter_kit: bool,
 }
 
 /// `GET /api/buildings` — every building type in the loaded content pack.
@@ -133,6 +136,7 @@ pub async fn list_buildings(State(state): State<AppState>) -> impl IntoResponse 
                 .map(|i| (i.id.clone(), i.quantity))
                 .collect(),
             tech_prerequisite: b.tech_prerequisite.clone(),
+            starter_kit: b.starter_kit,
         })
         .collect();
     out.sort_by(|a, b| {

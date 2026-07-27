@@ -1180,6 +1180,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         }];
 
         let empty: HashSet<String> = HashSet::new();

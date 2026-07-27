@@ -577,6 +577,88 @@ mod tests {
         }
     }
 
+    // ── Authored landing kit (issue #317) ────────────────────────────────────
+
+    /// Read the real `content/base/recipes.yaml`, or `None` when the repository
+    /// layout doesn't include `content/` beside the crate.
+    fn read_real_recipes_yaml() -> Option<String> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let root = std::path::Path::new(&manifest).parent()?.to_path_buf();
+        std::fs::read_to_string(root.join("content").join("base").join("recipes.yaml")).ok()
+    }
+
+    /// The authored landing kit fits inside a new colony's slot budget with room
+    /// left over.
+    ///
+    /// A kit that exactly filled the base capacity would make site preparation a
+    /// mandatory first build before the player could ever place anything of their
+    /// own — the opposite of what the kit is for.
+    #[test]
+    fn the_authored_landing_kit_fits_base_slot_capacity_with_room_spare() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let kit: Vec<_> = buildings.iter().filter(|b| b.starter_kit).collect();
+        assert!(
+            !kit.is_empty(),
+            "the roster must flag a landing kit, or founding places nothing"
+        );
+
+        let total: u32 = kit.iter().map(|b| b.slot_cost).sum();
+        assert!(
+            total < crate::colony::BASE_SLOT_CAPACITY,
+            "landing kit costs {total} slots but base capacity is {} — the player \
+             must have slots left for their own first build",
+            crate::colony::BASE_SLOT_CAPACITY
+        );
+    }
+
+    /// The landing kit can actually produce every basic resource.
+    ///
+    /// This is the substance of #317's second half: "one of every building
+    /// necessary to produce all basic resources". Flagging eight plausible-looking
+    /// buildings isn't enough — their recipes have to close the loop, so this
+    /// checks the outputs rather than the roster.
+    #[test]
+    fn the_authored_landing_kit_covers_every_basic_resource() {
+        let (Some(byaml), Some(ryaml)) = (read_real_buildings_yaml(), read_real_recipes_yaml())
+        else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let recipes: Vec<crate::content::types::RecipeDef> =
+            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
+
+        let kit: std::collections::BTreeSet<&str> = buildings
+            .iter()
+            .filter(|b| b.starter_kit)
+            .map(|b| b.id.as_str())
+            .collect();
+        let outputs: std::collections::BTreeSet<&str> = recipes
+            .iter()
+            .filter(|r| kit.contains(r.building.as_str()))
+            .flat_map(|r| r.outputs.iter().map(|o| o.id.as_str()))
+            .collect();
+
+        for basic in [
+            "housing",
+            "oxygen",
+            "power",
+            "water",
+            "food_ration",
+            "structural_metal",
+            "research",
+        ] {
+            assert!(
+                outputs.contains(basic),
+                "no landing-kit building produces {basic}; kit covers {outputs:?}"
+            );
+        }
+    }
+
     // ── Site preparation (issue #306) ────────────────────────────────────────
 
     /// The authored slot-granting projects exist, are free of slot cost, and

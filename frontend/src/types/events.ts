@@ -26,6 +26,18 @@ export interface ColonyFoundedEvent {
   starting_population: number
 }
 
+/**
+ * A colony founded through the planet-map site path — what the founding wizard
+ * uses (issue #317). Carries the same fields as `colony_founded` plus the site.
+ */
+export interface ColonyFoundedAtSiteEvent {
+  kind: 'colony_founded_at_site'
+  colony_id: string
+  name: string
+  starting_population: number
+  site_id: string
+}
+
 export interface ConstructionQueuedEvent {
   kind: 'construction_queued'
   colony_id: string
@@ -309,6 +321,7 @@ export type ServerEvent =
   | ColonySolAdvancedEvent
   | StrategicMonthAdvancedEvent
   | ColonyFoundedEvent
+  | ColonyFoundedAtSiteEvent
   | ConstructionQueuedEvent
   | ConstructionCancelledEvent
   | BuildingConstructedEvent

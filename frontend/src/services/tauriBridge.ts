@@ -329,6 +329,12 @@ export interface BuildingOption {
   construction_turns: number
   construction_cost: [string, number][]
   tech_prerequisite: string | null
+  /**
+   * Whether this building is part of the engine's default landing kit (issue
+   * #317). The founding wizard pre-selects these so the recommended loadout
+   * matches what the engine would place on its own.
+   */
+  starter_kit: boolean
 }
 
 export async function listBuildings(): Promise<BuildingOption[]> {

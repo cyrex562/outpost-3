@@ -139,9 +139,15 @@ pub enum ShortfallReason {
     },
     /// A deposit-gated extraction recipe ran below full output because no
     /// matching deposit (or only a low-richness one) was found at the
-    /// colony's site/body (issue #239). `effective_scale` on the enclosing
-    /// [`ProductionShortfall`] distinguishes a total absence (`0.0`) from a
-    /// merely scarce deposit (`0.0 < scale < 1.0`).
+    /// colony's site/body (issue #239).
+    ///
+    /// `effective_scale` on the enclosing [`ProductionShortfall`] says which case
+    /// it is. Since #317 a total absence is no longer `0.0` but
+    /// [`TRACE_DEPOSIT_RATIO`] — scraping bare ground — so the readable bands are:
+    ///
+    /// - `== TRACE_DEPOSIT_RATIO`: no deposit here at all; prospect, or accept the
+    ///   trickle.
+    /// - `0.5..1.0`: a real but sub-maximal deposit; richer ground exists.
     DepositShort {
         /// The deposit-gated commodity id that was the tightest constraint.
         commodity_id: String,
@@ -1008,6 +1014,20 @@ fn compute_power_grid_scaled(
     PowerGrid { capacity, demand }
 }
 
+/// Yield fraction an extraction recipe manages with **no matching deposit**
+/// present (issue #317).
+///
+/// Answers #317's first open question — "do you want a local fallback so a colony
+/// is never hard-blocked?" — with yes. Deposits are sparse and clustered, so
+/// without this a colony founded away from a vein simply cannot enter a chain,
+/// and the only remedy is an outpost or a trade route it may not be able to
+/// build yet.
+///
+/// Deliberately well below the `0.5` floor a real deposit guarantees: bare ground
+/// keeps a chain *alive*, it does not make prospecting pointless. Balance dial;
+/// expect the harness and playtesting to retune it.
+pub const TRACE_DEPOSIT_RATIO: f64 = 0.15;
+
 /// Compute the deposit-availability scale factor for a recipe (issue #239).
 ///
 /// Only recipes with at least one output in [`crate::map::VEIN_COMMODITIES`]
@@ -1025,12 +1045,19 @@ fn compute_power_grid_scaled(
 /// richness), not "gating doesn't apply."
 ///
 /// When gating applies, the *worst* richness among the recipe's
-/// deposit-gated outputs sets the ratio: total absence (`0.0` richness,
-/// i.e. no matching deposit at all) drops the ratio to `0.0`; presence of
-/// any deposit guarantees a `0.5` floor, scaling linearly up to `1.0` at
-/// richness `1.0` — so a guaranteed-placed but low-richness deposit
-/// (#232's coverage guarantee) still produces something, while richness
-/// genuinely matters rather than being a pure presence/absence toggle.
+/// deposit-gated outputs sets the ratio:
+///
+/// - **No matching deposit at all** yields [`TRACE_DEPOSIT_RATIO`] rather than
+///   zero (issue #317). Scraping a trace yield out of unremarkable ground is the
+///   early-game fallback that stops a colony being hard-blocked out of a
+///   production chain by where it happened to land.
+/// - **Any deposit** guarantees a `0.5` floor, scaling linearly to `1.0` at
+///   richness `1.0` — so a guaranteed-placed but low-richness deposit (#232's
+///   coverage guarantee) still produces meaningfully more than bare ground, and
+///   richness matters rather than being a presence/absence toggle.
+///
+/// The gap between the trace floor and the deposit floor is what makes finding a
+/// deposit worth doing: a real deposit is at least three times the yield.
 fn compute_deposit_ratio(
     recipe: Option<&RecipeDef>,
     concurrent: &[&RecipeDef],
@@ -1060,7 +1087,8 @@ fn compute_deposit_ratio(
     }
 
     if worst_richness <= 0.0 {
-        return (0.0, Some(worst_commodity.to_string()));
+        // Bare ground: a trace yield, not nothing (#317).
+        return (TRACE_DEPOSIT_RATIO, Some(worst_commodity.to_string()));
     }
     let ratio = f64::from(0.5 + worst_richness.clamp(0.0, 1.0) * 0.5);
     if ratio < 1.0 - 1e-9 {
@@ -1631,6 +1659,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         // Mine: extracts ore; needs 30 kW; 2 workers
@@ -1649,6 +1678,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_ore".into(),
@@ -1681,6 +1711,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "smelt_iron".into(),
@@ -2135,6 +2166,7 @@ mod tests {
             maintenance: vec![],
             default_priority: DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         };
         for id in ["eater_a", "eater_b"] {
             reg.insert_building(building(id));
@@ -2283,6 +2315,7 @@ mod tests {
             maintenance: vec![],
             default_priority: DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         };
         reg.insert_building(building("miner"));
         reg.insert_recipe(RecipeDef {
@@ -2830,6 +2863,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         reg.insert_building(BuildingDef {
@@ -2850,6 +2884,7 @@ mod tests {
             }],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "advanced_smelt".into(),
@@ -3048,6 +3083,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         reg.insert_building(BuildingDef {
@@ -3069,6 +3105,7 @@ mod tests {
             }],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "recycle".into(),
@@ -3420,6 +3457,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "refine_alloy".into(),
@@ -3554,6 +3592,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore".into(),
@@ -3586,6 +3625,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "pump_water".into(),
@@ -3635,8 +3675,57 @@ mod tests {
         assert!((pool.amount("structural_ore") - 10.0).abs() < 1e-9);
     }
 
+    /// A prospected deposit must still be strictly better than bare ground.
+    ///
+    /// The trace band added in #317 is the whole reason this needs pinning: if
+    /// `TRACE_DEPOSIT_RATIO` were ever tuned up to or past the 0.5 deposit floor,
+    /// prospecting would stop paying for itself and the mechanic would be dead
+    /// content, with nothing else in the suite noticing.
     #[test]
-    fn deposit_gating_zeroes_output_with_no_matching_deposit() {
+    fn a_real_deposit_outproduces_bare_ground() {
+        let reg = make_registry_with_vein_mine();
+        let placed = buildings(&["structural_mine"]);
+
+        let run = |deposits: std::collections::HashMap<String, f32>| {
+            let mut pool = ColonyPool::new();
+            process_production_scaled(
+                &mut pool,
+                &placed,
+                10.0,
+                &reg,
+                1.0,
+                1.0,
+                true,
+                1.0,
+                &std::collections::HashMap::new(),
+                &[],
+                Some(&deposits),
+                &crate::modifier::ModifierAccumulator::new(),
+                &crate::modifier::DifficultyScalar::new(),
+            );
+            pool.amount("structural_ore")
+        };
+
+        let mut bare = std::collections::HashMap::new();
+        bare.insert("conductive_ore".to_string(), 0.8_f32);
+        let mut leanest_real = std::collections::HashMap::new();
+        leanest_real.insert("structural_ore".to_string(), 0.0001_f32);
+
+        let bare_yield = run(bare);
+        let deposit_yield = run(leanest_real);
+        assert!(
+            bare_yield > 0.0,
+            "bare ground must yield a trickle, not nothing"
+        );
+        assert!(
+            deposit_yield > bare_yield,
+            "even the leanest real deposit ({deposit_yield}) must beat bare ground \
+             ({bare_yield}), or prospecting is pointless"
+        );
+    }
+
+    #[test]
+    fn deposit_gating_throttles_output_to_trace_with_no_matching_deposit() {
         // Non-empty richness map (colony IS spatially placed) but no entry
         // for structural_ore — no matching deposit at all.
         let reg = make_registry_with_vein_mine();
@@ -3661,17 +3750,19 @@ mod tests {
             &crate::modifier::DifficultyScalar::new(),
         );
 
+        // Bare ground still yields a trickle (#317): prospecting is optional in
+        // the early game, not a hard prerequisite for extraction.
         let mine = &outcome.building_results[0];
         assert!(
-            mine.scale.abs() < 1e-9,
-            "expected scale 0.0, got {}",
+            (mine.scale - TRACE_DEPOSIT_RATIO).abs() < 1e-9,
+            "expected trace scale {TRACE_DEPOSIT_RATIO}, got {}",
             mine.scale
         );
         assert!(mine.shortfalls.iter().any(|s| matches!(
             &s.reason,
             ShortfallReason::DepositShort { commodity_id } if commodity_id == "structural_ore"
         )));
-        assert!(pool.amount("structural_ore").abs() < 1e-9);
+        assert!((pool.amount("structural_ore") - 10.0 * TRACE_DEPOSIT_RATIO).abs() < 1e-9);
     }
 
     #[test]
@@ -3797,6 +3888,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "hq_generate_power".into(),
@@ -3937,6 +4029,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "hybrid_alt_a".into(),
@@ -4037,6 +4130,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         };
         reg.insert_building(building("hq"));
         reg.insert_building(building("refinery"));
@@ -4229,6 +4323,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         let recipe = |id: &str, line: &str, inputs: Vec<(&str, f64)>, outputs: Vec<(&str, f64)>| {
             let ing = |v: Vec<(&str, f64)>| {
@@ -4333,6 +4428,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         };
         reg.insert_building(b("complex"));
         reg.insert_building(b("legacy"));
@@ -4550,6 +4646,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         assert!(lines_for_building("silo", &empty, &reg).is_empty());
@@ -4576,6 +4673,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         let r = |id: &str, line: Option<&str>, con: bool, i: &[(&str, f64)], o: &[(&str, f64)]| {
             RecipeDef {

@@ -154,21 +154,45 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     expect((water.element as HTMLInputElement).value).toBe('100')
   })
 
+  it('pre-selects the landing kit so the default loadout matches what the engine would place', async () => {
+    getColonizeTargets.mockResolvedValue([BODY])
+    getSystemBodies.mockResolvedValue([])
+    // hydroponic_bay is flagged as landing-kit content, water_well is not.
+    listBuildings.mockResolvedValue([BUILDING_A, { ...BUILDING_B, starter_kit: true }])
+    getPlanetMap.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
+    listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
+
+    const wrapper = mount(FoundColonyWizardView, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    await wrapper.find('[data-testid="body-card-mars"]').trigger('click')
+    await wrapper.find('.btn.primary').trigger('click')
+    await wrapper.find('g').trigger('click')
+    await wrapper.find('.btn.primary').trigger('click')
+
+    // Only the flagged building is pre-selected, and its 2 slots are already
+    // spent — so the step-3 gate is satisfied without the player touching it.
+    const preview = wrapper.find('[data-testid="budget-preview"]')
+    expect(preview.text()).toContain('2 / 10')
+    expect(preview.classes()).not.toContain('over')
+    const wellCount = wrapper.find('[data-testid="building-count-water_well"]')
+    expect((wellCount.element as HTMLInputElement).value).toBe('0')
+  })
+
   it('updates the budget preview as building counts change, and flags over-budget', async () => {
     const wrapper = await mountAtStep3()
 
     await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
     let preview = wrapper.find('[data-testid="budget-preview"]')
-    expect(preview.text()).toContain('1 / 5')
+    expect(preview.text()).toContain('1 / 10')
     expect(preview.classes()).not.toContain('over')
 
-    // 1 water_well (1 slot) + 3 hydroponic_bay (2 slots each) = 7 > 5.
-    await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
-    await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
-    await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
+    // 1 water_well (1 slot) + 6 hydroponic_bay (2 slots each) = 13 > 10.
+    for (let i = 0; i < 6; i += 1) {
+      await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
+    }
 
     preview = wrapper.find('[data-testid="budget-preview"]')
-    expect(preview.text()).toContain('7 / 5')
+    expect(preview.text()).toContain('13 / 10')
     expect(preview.classes()).toContain('over')
   })
 

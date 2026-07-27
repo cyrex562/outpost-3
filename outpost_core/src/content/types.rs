@@ -309,6 +309,18 @@ pub struct BuildingDef {
     /// [`BASE_SLOT_CAPACITY`]: crate::colony::BASE_SLOT_CAPACITY
     #[serde(default)]
     pub grants_slot_capacity: u32,
+    /// Whether this building is part of the **landing kit** every colony starts
+    /// with (issue #317).
+    ///
+    /// The kit is meant to cover every *basic* resource — housing, life support,
+    /// power, water, food, building materials, research — so a new colony can
+    /// always run its own bootstrap loop rather than discovering on sol 1 that it
+    /// cannot make oxygen. Which buildings those are is a curation decision, so it
+    /// lives here in content rather than being inferred from categories.
+    ///
+    /// `false` — the default — leaves a building to be built normally.
+    #[serde(default)]
+    pub starter_kit: bool,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).
