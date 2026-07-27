@@ -83,6 +83,7 @@
     building's power/labor/input scale each turn (see
     outpost_core/src/colony/production.rs's module doc comment).
   category: services
+  starter_kit: true
   power_delta: -13.0
   worker_slots: 2
   default_priority: 1
@@ -100,6 +101,7 @@
     primary bulk water source, alongside colony_hq's smaller recycling
     output. Self-powered.
   category: extraction
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 1
   default_priority: 1
@@ -117,6 +119,7 @@
     structural ore from local deposits. Output scales with local deposit
     richness (issue #232). Self-powered.
   category: extraction
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 1
   default_priority: 4
@@ -136,6 +139,7 @@
     components. An ore shortage throttles the foundry without stopping the
     machine shop. Self-powered.
   category: processing
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 2
   default_priority: 7
@@ -152,6 +156,7 @@
     Draws in and cracks the local atmosphere for oxygen, with elemental
     carbon as a byproduct feedstock for chem_plant. Self-powered.
   category: life_support
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 1
   default_priority: 1
@@ -168,6 +173,7 @@
     Synthesizes basic industrial chemicals from air_miner's carbon
     byproduct and water. Self-powered.
   category: processing
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 1
   default_priority: 5
@@ -184,6 +190,7 @@
     Sealed growing chamber that produces food rations from water under
     artificial lighting — the landing kit's food source. Self-powered.
   category: extraction
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 1
   default_priority: 2
@@ -200,6 +207,7 @@
     Pressurized bunks — the colony's first housing, available at founding
     so a landing party always has somewhere to shelter. Self-powered.
   category: housing
+  starter_kit: true
   power_delta: -2.0
   worker_slots: 0
   default_priority: 9

@@ -36,7 +36,18 @@ pub use stores::ColonyStores;
 pub type ColonyId = uuid::Uuid;
 
 /// Base number of build slots every new colony starts with.
-pub const BASE_SLOT_CAPACITY: u32 = 5;
+///
+/// Sized to fit the landing kit — one building for each basic resource — with a
+/// little room to spare, so a new colony can produce everything it needs and
+/// still make a choice or two before it has to buy more capacity with a
+/// site-preparation project (issues #306, #317).
+///
+/// Raised from 5 when the kit became a guaranteed full loadout: 5 could not hold
+/// it, and `DeployStarterKit` refused the batch outright. Leaving spare slots
+/// rather than starting exactly full is deliberate — site preparation should read
+/// as an early decision, not a mandatory first build before anything else is
+/// possible.
+pub const BASE_SLOT_CAPACITY: u32 = 10;
 
 /// A colony: the primary player-managed simulation entity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -187,6 +198,22 @@ pub struct Colony {
     /// standing bypass of the normal construction-turn cost.
     #[serde(default)]
     pub starter_kit_deployed: bool,
+
+    /// Whether the buildings on this colony are the engine's default landing
+    /// kit rather than a loadout the player chose (issue #317).
+    ///
+    /// Founding auto-places the kit so that *every* host's founding path yields
+    /// a colony that can produce the basics — the browser-mode wizard used to
+    /// place nothing at all. But the Tauri wizard does let the player pick a
+    /// loadout, and that choice has to win over the default. So while this flag
+    /// is set, a single [`crate::Command::DeployStarterKit`] may still supersede
+    /// the auto-placed kit, replacing it wholesale.
+    ///
+    /// Cleared on the first sol advance, which closes the window to the founding
+    /// moment: once the colony has actually run, `DeployStarterKit` is barred
+    /// again and can't be used as a standing free-construction bypass.
+    #[serde(default)]
+    pub auto_landing_kit: bool,
 }
 
 fn default_habitability_modifier() -> f32 {
@@ -214,6 +241,7 @@ impl Colony {
             active_recipes: std::collections::HashMap::new(),
             commodity_reserves: std::collections::HashMap::new(),
             starter_kit_deployed: false,
+            auto_landing_kit: false,
         }
     }
 

@@ -49,12 +49,17 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   await expect(page.locator('.site-details h4')).toHaveText('Selected site')
   await primaryAction.click()
 
-  // ── Step 3: loadout ── queue one starter building so canAdvance is satisfied.
+  // ── Step 3: loadout ── the landing kit is pre-selected (issue #317), so the
+  // step's gate is already satisfied without the player touching anything.
   await expect(wizard.locator('[data-testid^="building-plus-"]').first()).toBeVisible()
-  await wizard.locator('[data-testid^="building-plus-"]').first().click()
+  const budget = wizard.getByTestId('budget-preview')
+  await expect(budget).not.toHaveClass(/over/)
+  await expect(budget).not.toContainText('0 / ')
   await primaryAction.click()
 
-  // ── Step 4: founding ── default colony name is already set.
+  // ── Step 4: founding ── name it distinctly; the bootstrap colony is also
+  // called "Alpha Base", so the default would be ambiguous to select later.
+  await page.getByTestId('colony-name-input').fill('Kitted Landing')
   await primaryAction.click()
 
   // A successful `found_colony_at_site` command routes back to /colony with
@@ -128,4 +133,13 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   await card.click()
   await expect(page).toHaveURL(/#\/colony\//)
   await expect(page.locator('[data-testid^="colony-detail-"]')).toBeVisible({ timeout: 15_000 })
+
+  // Issue #317: the colony founded through the wizard is operational on sol 1 —
+  // its landing kit is already standing, not sitting in the build queue.
+  await page.getByRole('link', { name: 'Colonies', exact: true }).click()
+  await page.locator('[data-testid^="colony-card-"]', { hasText: 'Kitted Landing' }).first().click()
+  await expect(page.getByTestId('buildings-panel')).toBeVisible()
+  await expect
+    .poll(async () => page.locator('[data-testid^="building-row-"]').count(), { timeout: 15_000 })
+    .toBeGreaterThan(1)
 })

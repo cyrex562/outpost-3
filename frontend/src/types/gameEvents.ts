@@ -17,6 +17,20 @@ export interface ColonyFoundedEvent {
   starting_population: number
 }
 
+/**
+ * A colony founded through the planet-map site path (what the founding wizard
+ * uses), as opposed to the bare `colony_founded`. Browser mode had no wire
+ * representation for this at all, so it never learned which colony the wizard
+ * had just created (issue #317).
+ */
+export interface ColonyFoundedAtSiteEvent {
+  kind: 'colony_founded_at_site'
+  colony_id: string
+  name: string
+  starting_population: number
+  site_id: string
+}
+
 export interface StrategicMonthAdvancedEvent {
   kind: 'strategic_month_advanced'
   month: number
@@ -108,6 +122,7 @@ export interface FastForwardEndedEvent {
 export type GameEvent =
   | ColonySolAdvancedEvent
   | ColonyFoundedEvent
+  | ColonyFoundedAtSiteEvent
   | StrategicMonthAdvancedEvent
   | NeedsResolvedEvent
   | ResearchProducedEvent

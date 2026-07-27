@@ -2129,6 +2129,12 @@ impl GameEngine {
             }
 
             Command::AdvanceColonySol => {
+                // The founding-moment window for superseding the auto-placed
+                // landing kit closes as soon as the colony actually runs
+                // (issue #317) — see `Colony::auto_landing_kit`.
+                for colony in &mut self.state.colonies {
+                    colony.auto_landing_kit = false;
+                }
                 let month_before = self.state.month;
                 let outcome = self.processor.advance(&mut self.state);
                 let hazard_outcomes = outcome.hazard_outcomes.clone();
@@ -3403,7 +3409,11 @@ impl GameEngine {
                 buildings,
             } => {
                 let idx = self.find_colony_index(*colony_id)?;
-                if self.state.colonies[idx].starter_kit_deployed {
+                // An auto-placed landing kit is a default, not the player's
+                // choice — a wizard loadout supersedes it wholesale (issue
+                // #317). Anything else already deployed is final.
+                let supersedes_auto_kit = self.state.colonies[idx].auto_landing_kit;
+                if self.state.colonies[idx].starter_kit_deployed && !supersedes_auto_kit {
                     return Err(EngineError::InvalidArgument(
                         "starter kit already deployed for this colony".into(),
                     ));
@@ -3438,7 +3448,20 @@ impl GameEngine {
                     }
                     total_slots = total_slots.saturating_add(*slot_cost);
                 }
-                let available = self.state.colonies[idx].slots_available();
+                // The auto kit is about to be removed, so its slots are part of
+                // the budget this batch gets to spend.
+                let reclaimed: u32 = if supersedes_auto_kit {
+                    self.state.colonies[idx]
+                        .buildings
+                        .iter()
+                        .map(|b| b.slot_cost)
+                        .sum()
+                } else {
+                    0
+                };
+                let available = self.state.colonies[idx]
+                    .slots_available()
+                    .saturating_add(reclaimed);
                 if total_slots > available {
                     return Err(EngineError::SlotCapacityExceeded {
                         needed: total_slots,
@@ -3446,6 +3469,11 @@ impl GameEngine {
                     });
                 }
 
+                // Validation passed, so the swap is safe to perform now.
+                if supersedes_auto_kit {
+                    self.state.colonies[idx].buildings.clear();
+                    self.state.colonies[idx].auto_landing_kit = false;
+                }
                 let mut events = Vec::with_capacity(buildings.len());
                 for (building_type, slot_cost) in buildings {
                     let existing = &self.state.colonies[idx].buildings;
@@ -3962,6 +3990,58 @@ impl GameEngine {
                         r: coord.r,
                     },
                 ];
+                // Place the landing kit — one building for each basic resource
+                // (issue #317).
+                //
+                // Done here in the engine rather than by each host's founding
+                // wizard so it is a property of founding a colony rather than of
+                // which UI you used. The browser-mode wizard never placed
+                // buildings at all, so a colony founded there started with
+                // nothing and no route to anything.
+                //
+                // The player can still bring a different loadout explicitly via
+                // `Command::DeployStarterKit`; `starter_kit_deployed` is set here
+                // so the two can't stack into a double kit.
+                if let Some(kit) = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .map(|reg| {
+                        reg.starter_kit()
+                            .into_iter()
+                            .map(|def| (def.id.clone(), def.slot_cost))
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|kit: &Vec<(String, u32)>| !kit.is_empty())
+                {
+                    let idx = self
+                        .find_colony_index(colony_id)
+                        .expect("colony was just inserted");
+                    for (building_type, slot_cost) in kit {
+                        let existing = &self.state.colonies[idx].buildings;
+                        let priority = self
+                            .state
+                            .registry
+                            .as_ref()
+                            .and_then(|reg| reg.building(&building_type))
+                            .map_or(content::types::DEFAULT_BUILDING_PRIORITY, |d| {
+                                d.default_priority
+                            });
+                        let placed = colony::PlacedBuilding::with_priority(
+                            &building_type,
+                            slot_cost,
+                            priority,
+                        )
+                        .numbered_within(existing);
+                        self.state.colonies[idx].buildings.push(placed);
+                        events.push(Event::BuildingConstructed {
+                            colony_id,
+                            building_type,
+                        });
+                    }
+                    self.state.colonies[idx].starter_kit_deployed = true;
+                    self.state.colonies[idx].auto_landing_kit = true;
+                }
                 // Auto-link the home body now that the gate has passed —
                 // equivalent to a follow-up Command::AssignColonyHomeBody,
                 // which remains separately callable but is no longer
@@ -7252,6 +7332,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
 
@@ -7297,6 +7378,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7438,6 +7520,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
 
@@ -7495,6 +7578,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
         engine
@@ -7567,16 +7651,12 @@ mod tests {
         };
         let colony_id = *colony_id;
 
-        // BASE_SLOT_CAPACITY is 5; request a batch totalling 6.
+        // Request a batch costing one slot more than the colony base.
         let result = engine.apply(&Command::DeployStarterKit {
             colony_id,
             buildings: vec![
                 ("colony_hq".into(), 1),
-                ("habitat_dome".into(), 1),
-                ("power_plant".into(), 1),
-                ("factory".into(), 1),
-                ("mine".into(), 1),
-                ("extra".into(), 1),
+                ("habitat_dome".into(), colony::BASE_SLOT_CAPACITY),
             ],
         });
         assert!(
@@ -7677,6 +7757,7 @@ mod tests {
             maintenance: vec![],
             default_priority: 2,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
 
@@ -8001,6 +8082,7 @@ mod tests {
             maintenance: vec![],
             default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -8222,6 +8304,7 @@ mod tests {
             maintenance: vec![],
             default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -8470,6 +8553,7 @@ mod tests {
             maintenance: vec![],
             default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -8801,6 +8885,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -9245,6 +9330,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -9263,6 +9349,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         reg.insert_building(BuildingDef {
@@ -9280,6 +9367,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -11083,6 +11171,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -11338,6 +11427,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
 
@@ -11392,6 +11482,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         engine.state.registry = Some(reg);
         engine
@@ -11462,7 +11553,8 @@ mod tests {
         engine.state.outposts[0]
             .pool
             .deposit("structural_ore", 250.0);
-        engine.state.outposts[0].slot_capacity = 7;
+        // Above the colony base so the carry-over is the value actually kept.
+        engine.state.outposts[0].slot_capacity = colony::BASE_SLOT_CAPACITY + 2;
         let placed = colony::PlacedBuilding::new("mining_outpost", 1);
         engine.state.outposts[0].buildings.push(placed);
 
@@ -11499,7 +11591,7 @@ mod tests {
         assert_eq!(colony.home_body_id, Some(body_id));
         assert!((colony.pool.amount("structural_ore") - 250.0).abs() < 1e-6);
         assert_eq!(colony.buildings.len(), 1);
-        assert_eq!(colony.slot_capacity, 7);
+        assert_eq!(colony.slot_capacity, colony::BASE_SLOT_CAPACITY + 2);
 
         // colonies/populations stay index-aligned.
         assert!((engine.state.populations[idx].count - 50.0).abs() < 1e-6);
@@ -11704,6 +11796,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -12383,6 +12476,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -12463,6 +12557,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -12534,6 +12629,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -14026,6 +14122,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -14074,7 +14171,7 @@ mod tests {
     /// deposit gating actually blocks extraction when nothing is there,
     /// not just a decorative flag.
     #[test]
-    fn founding_site_without_matching_deposit_blocks_gated_extraction() {
+    fn founding_site_without_matching_deposit_yields_only_trace_extraction() {
         let mut engine = GameEngine::new();
         engine
             .apply(&Command::SeedPlanet {
@@ -14118,6 +14215,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -14154,14 +14252,14 @@ mod tests {
 
         engine.apply(&Command::AdvanceColonySol).unwrap();
 
+        // #317: bare ground is a trickle, not a wall. The recipe yields 10/sol
+        // at full scale, so a deposit-free site must bank exactly the trace
+        // fraction of that.
+        let trace_yield = 10.0 * colony::production::TRACE_DEPOSIT_RATIO;
         assert!(
-            engine.state.colonies[idx]
-                .pool
-                .amount("structural_ore")
-                .abs()
-                < 1e-9,
-            "colony with no matching deposit must get zero structural_ore \
-             from a structural_mine under deposit gating"
+            (engine.state.colonies[idx].pool.amount("structural_ore") - trace_yield).abs() < 1e-9,
+            "colony with no matching deposit must still get a trace yield, got {}",
+            engine.state.colonies[idx].pool.amount("structural_ore")
         );
         let mine_id = engine.state.colonies[idx]
             .buildings
@@ -14175,8 +14273,168 @@ mod tests {
                 .get(&mine_id)
                 .unwrap()
                 .scale,
-            0.0
+            colony::production::TRACE_DEPOSIT_RATIO
         );
+    }
+
+    /// Founding a colony at a site auto-places the authored landing kit.
+    ///
+    /// Issue #317: the kit is a property of founding, not of which host's wizard
+    /// you used — the browser-mode wizard placed nothing at all, so a colony
+    /// founded there started with no route to any resource.
+    #[test]
+    fn founding_at_a_site_places_one_of_every_landing_kit_building() {
+        // The authored fixture flags two of its three buildings, so the filter
+        // is doing real work rather than placing the whole roster.
+        let (engine, _colony_id, events) = engine_with_auto_kitted_colony();
+
+        let colony = &engine.state.colonies[0];
+        let placed: Vec<&str> = colony
+            .buildings
+            .iter()
+            .map(|b| b.building_type.as_str())
+            .collect();
+        assert_eq!(placed, vec!["kit_a", "kit_b"]);
+        assert_eq!(
+            colony.buildings[0].priority, 3,
+            "placement must honour the authored staffing priority"
+        );
+        assert!(colony.buildings.len() < colony.slot_capacity as usize);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::BuildingConstructed { .. }))
+                .count(),
+            2,
+            "each kit building must be announced, got {events:?}"
+        );
+        assert!(colony.starter_kit_deployed);
+        assert!(colony.auto_landing_kit);
+    }
+
+    /// A wizard loadout supersedes the auto-placed kit rather than being rejected.
+    ///
+    /// The Tauri founding wizard has a loadout step, so the player's choice has
+    /// to win over the engine's default — but as a *replacement*, not a second
+    /// kit stacked on top of the first.
+    #[test]
+    fn an_explicit_starter_kit_replaces_the_auto_placed_landing_kit() {
+        let (mut engine, colony_id, _) = engine_with_auto_kitted_colony();
+
+        engine
+            .apply(&Command::DeployStarterKit {
+                colony_id,
+                buildings: vec![("not_in_kit".into(), 1)],
+            })
+            .expect("a wizard loadout must supersede the default kit");
+
+        let colony = &engine.state.colonies[0];
+        let after: Vec<&str> = colony
+            .buildings
+            .iter()
+            .map(|b| b.building_type.as_str())
+            .collect();
+        assert_eq!(
+            after,
+            vec!["not_in_kit"],
+            "the auto kit must be replaced, not added to"
+        );
+        assert!(
+            !colony.auto_landing_kit,
+            "the supersede window must close after it is used"
+        );
+
+        // And it really is one-shot from there.
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("kit_a".into(), 1)],
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected the one-shot guard to bite, got {result:?}"
+        );
+    }
+
+    /// Once the colony has run a sol, the auto kit is settled and final.
+    #[test]
+    fn advancing_a_sol_closes_the_auto_landing_kit_supersede_window() {
+        let (mut engine, colony_id, _) = engine_with_auto_kitted_colony();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(!engine.state.colonies[0].auto_landing_kit);
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("not_in_kit".into(), 1)],
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "DeployStarterKit must not be a free-construction bypass mid-game, \
+             got {result:?}"
+        );
+        let placed: Vec<&str> = engine.state.colonies[0]
+            .buildings
+            .iter()
+            .map(|b| b.building_type.as_str())
+            .collect();
+        assert_eq!(placed, vec!["kit_a", "kit_b"]);
+    }
+
+    /// Seed an engine whose sole colony was founded at a site with a two-building
+    /// authored landing kit auto-placed. Returns `(engine, colony_id, founding events)`.
+    fn engine_with_auto_kitted_colony() -> (GameEngine, ColonyId, Vec<Event>) {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 77,
+                radius: 4,
+            })
+            .unwrap();
+        let pm = engine.state.planet_map.as_ref().unwrap();
+        let site_id = pm
+            .sites
+            .iter()
+            .find(|(_, coord)| pm.cells.get(coord).is_some_and(|c| c.is_habitable()))
+            .map(|(&id, _)| id)
+            .expect("a habitable site");
+
+        let mut registry = content::ContentRegistry::default();
+        for (id, in_kit) in [("kit_a", true), ("kit_b", true), ("not_in_kit", false)] {
+            registry.insert_building(content::types::BuildingDef {
+                id: id.into(),
+                name: id.into(),
+                description: String::new(),
+                category: content::types::BuildingCategory::Production,
+                construction_cost: vec![],
+                power_delta: 0.0,
+                worker_slots: 0,
+                labor_required: 0,
+                slot_cost: 1,
+                construction_turns: 1,
+                tech_prerequisite: None,
+                maintenance: vec![],
+                default_priority: 3,
+                grants_slot_capacity: 0,
+                starter_kit: in_kit,
+            });
+        }
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Kitted".into(),
+                starting_population: 40,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: None,
+            })
+            .unwrap();
+        let Event::ColonyFoundedAtSite { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFoundedAtSite, got {:?}", events[0]);
+        };
+        let colony_id = *colony_id;
+        (engine, colony_id, events)
     }
 
     /// Shared setup for the habitability-gate tests (issue #183): seed a
@@ -14853,6 +15111,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         reg.insert_building(BuildingDef {
@@ -14870,6 +15129,7 @@ mod tests {
             maintenance: vec![],
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
+            starter_kit: false,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {

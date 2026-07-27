@@ -72,7 +72,7 @@ const supplyAmounts = ref<Record<string, number>>({})
  * source of truth and independently rejects over-budget `QueueConstruction`
  * calls with `EngineError::SlotCapacityExceeded`.
  */
-const BASE_SLOT_CAPACITY = 5
+const BASE_SLOT_CAPACITY = 10
 
 // Colonist headcount, seeded into the new colony's population pool.
 const colonyName = ref('Alpha Base')
@@ -120,6 +120,13 @@ onMounted(async () => {
     bodies.value = await getColonizeTargets()
     systemBodies.value = await getSystemBodies()
     buildings.value = await listBuildings()
+    // Pre-select the landing kit as the recommended loadout (issue #317). The
+    // engine auto-places the same set at founding, so this makes the wizard's
+    // default agree with the engine's rather than starting empty; the player is
+    // free to adjust it, and whatever they submit replaces the auto kit.
+    buildingCounts.value = Object.fromEntries(
+      buildings.value.filter((b) => b.starter_kit).map((b) => [b.id, 1]),
+    )
     planetMap.value = await getPlanetMap()
     supplyPackages.value = await listSupplyPackages()
     // Default the supply pick to a "Standard"-named package if present, else the first.
@@ -260,9 +267,13 @@ async function finish(): Promise<void> {
     error.value = gameStore.toastMessage ?? 'Colony founding rejected — check engine state.'
     return
   }
-  const founded = events.find((e) => e.kind === 'colony_founded') as
-    | { kind: 'colony_founded'; colony_id: string }
-    | undefined
+  // Either founding event carries the new colony's id. The site path emits
+  // `colony_founded_at_site`, and matching only the bare `colony_founded` is
+  // what left browser mode never selecting the colony it had just created
+  // (issue #317).
+  const founded = events.find(
+    (e) => e.kind === 'colony_founded' || e.kind === 'colony_founded_at_site',
+  ) as { colony_id: string } | undefined
   if (founded) {
     // Point the selection at the new colony BEFORE the construction commands
     // land, so the per-command colony_screen refresh reflects the queued
@@ -559,7 +570,7 @@ async function finish(): Promise<void> {
       <p class="hint">Confirm colony details and found the colony.</p>
       <label class="field">
         Name
-        <input v-model="colonyName" class="input" />
+        <input v-model="colonyName" class="input" data-testid="colony-name-input" />
       </label>
       <div class="summary">
         <div>Body: <strong>{{ chosenBody?.body_name }}</strong></div>

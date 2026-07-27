@@ -2096,6 +2096,9 @@ pub struct BuildingOptionWire {
     pub construction_turns: u32,
     pub construction_cost: Vec<(String, f64)>,
     pub tech_prerequisite: Option<String>,
+    /// Whether this building is part of the default landing kit (issue #317) —
+    /// lets the founding wizard pre-select it as the recommended loadout.
+    pub starter_kit: bool,
 }
 
 #[tauri::command]
@@ -2123,6 +2126,7 @@ pub fn list_buildings(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Bui
                 .map(|i| (i.id.clone(), i.quantity))
                 .collect(),
             tech_prerequisite: b.tech_prerequisite.clone(),
+            starter_kit: b.starter_kit,
         })
         .collect();
     out.sort_by(|a, b| {

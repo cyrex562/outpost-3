@@ -111,6 +111,23 @@ impl ContentRegistry {
         self.buildings.values()
     }
 
+    /// The landing kit: buildings every colony starts with, id-sorted
+    /// (issue #317).
+    ///
+    /// Sorted so the placed instances come out in a stable order — buildings are
+    /// stored in a `HashMap`, and an arbitrary order would make the starting
+    /// colony's building list differ between runs of the same seed.
+    ///
+    /// Empty when no pack marks anything, which keeps every existing test and
+    /// harness fixture behaving as it did.
+    #[must_use]
+    pub fn starter_kit(&self) -> Vec<&BuildingDef> {
+        let mut kit: Vec<&BuildingDef> =
+            self.buildings.values().filter(|b| b.starter_kit).collect();
+        kit.sort_by(|a, b| a.id.cmp(&b.id));
+        kit
+    }
+
     /// Insert or replace a building definition (used in tests and harness tooling).
     pub fn insert_building(&mut self, def: BuildingDef) {
         self.buildings.insert(def.id.clone(), def);

@@ -57,7 +57,10 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
     case 'strategic_month_advanced':
       return { ...state, month: event.month }
 
-    case 'colony_founded': {
+    // Both founding paths add the colony to the world model; the site path
+    // carries an extra site_id the model has no use for (issue #317).
+    case 'colony_founded':
+    case 'colony_founded_at_site': {
       const newColony: ColonyState = {
         id: event.colony_id,
         name: event.name,

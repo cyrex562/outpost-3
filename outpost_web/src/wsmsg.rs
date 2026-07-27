@@ -483,6 +483,21 @@ pub enum ServerEvent {
         /// Starting population.
         starting_population: u64,
     },
+    /// A colony was founded at a specific planet-map site.
+    ///
+    /// Distinct from [`Self::ColonyFounded`]: the site path is what the founding
+    /// wizard uses, and it had no wire representation at all before, so browser
+    /// mode never learned which colony it had just created (issue #317).
+    ColonyFoundedAtSite {
+        /// Colony UUID.
+        colony_id: String,
+        /// Colony display name.
+        name: String,
+        /// Starting population.
+        starting_population: u64,
+        /// Planet-map site UUID the colony was placed on.
+        site_id: String,
+    },
     /// A construction project was queued.
     ConstructionQueued {
         /// Colony UUID.
@@ -824,6 +839,18 @@ impl ServerEvent {
                 colony_id: colony_id.to_string(),
                 name: name.clone(),
                 starting_population: *starting_population,
+            },
+            Event::ColonyFoundedAtSite {
+                colony_id,
+                name,
+                starting_population,
+                site_id,
+                ..
+            } => Self::ColonyFoundedAtSite {
+                colony_id: colony_id.to_string(),
+                name: name.clone(),
+                starting_population: *starting_population,
+                site_id: site_id.to_string(),
             },
             Event::ConstructionQueued {
                 colony_id,

@@ -14,6 +14,7 @@ function makeBuildingOption(overrides: Partial<BuildingOption>): BuildingOption 
     construction_turns: 5,
     construction_cost: [],
     tech_prerequisite: null,
+    starter_kit: false,
     ...overrides,
   }
 }
