@@ -18,6 +18,48 @@ use uuid::Uuid;
 pub struct BodyId(pub Uuid);
 
 impl BodyId {
+    /// Stand-in id for a founding map that has no real body behind it.
+    ///
+    /// Two cases produce one (issue #300): `SeedPlanet` applied with no
+    /// generated system (most engine tests, and the balance harness), and a
+    /// pre-#300 save whose founding map was stored unkeyed. Both still need a
+    /// key for [`crate::turn::GameState::planet_maps`] so that map stays the
+    /// single source of truth.
+    ///
+    /// A body under this id is deliberately *not* in
+    /// [`NodeMap::bodies`] — anything resolving a body from the system will
+    /// miss, which is the intended signal that the association is absent
+    /// rather than merely unread.
+    #[must_use]
+    pub fn placeholder_home() -> Self {
+        Self(Uuid::nil())
+    }
+
+    /// Whether this is [`Self::placeholder_home`] rather than a real body.
+    #[must_use]
+    pub fn is_placeholder_home(&self) -> bool {
+        self.0.is_nil()
+    }
+
+    /// Stable surface-generation seed for this body (issue #300).
+    ///
+    /// Hashes the body's UUID down to a `u64` so the same body always
+    /// generates the same surface, and different bodies differ. A
+    /// wrapping-multiply combine (not XOR) keeps the two halves
+    /// order-sensitive, so swapped-half UUIDs don't collide on one seed.
+    ///
+    /// The single source of this derivation: both
+    /// `GameEngine::body_surface_preview` and the persisted map a body gains
+    /// when it is first settled go through here, which is what guarantees the
+    /// surface a player previewed is the surface they land on.
+    #[must_use]
+    pub fn surface_seed(&self) -> u64 {
+        let (hi, lo) = self.0.as_u64_pair();
+        hi.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(lo)
+    }
+}
+
+impl BodyId {
     /// Create a new random [`BodyId`].
     #[must_use]
     pub fn new() -> Self {

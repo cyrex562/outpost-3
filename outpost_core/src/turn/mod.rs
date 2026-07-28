@@ -38,7 +38,7 @@ use crate::needs::NeedsConfig;
 use crate::orbital::OrbitalRegistry;
 use crate::population::Population;
 use crate::research::SystemResearchPool;
-use crate::system::SystemState;
+use crate::system::{BodyId, SystemState};
 use crate::tech::TechEffect;
 use crate::tech::{TechRegistry, TechState};
 
@@ -217,9 +217,23 @@ pub struct GameState {
     /// `true` after [`Command::ContinueSandbox`] or [`Command::ContinueAfterVictory`]
     /// is applied post-victory.  Mirrors `victory_state.sandbox_continue`.
     pub sandbox_mode: bool,
-    // ── M1: Planet map ────────────────────────────────────────────────────
-    /// Planet hex map, populated by `Command::SeedPlanet`. `None` until seeded.
-    pub planet_map: Option<PlanetMap>,
+    // ── M1: Planet maps ───────────────────────────────────────────────────
+    /// Surface hex maps, keyed by the body they belong to (issue #300).
+    ///
+    /// Empty until the first `Command::SeedPlanet`. Before #300 this was a
+    /// single unkeyed `Option<PlanetMap>` with no body association at all,
+    /// which meant every colony — wherever the player aimed it — landed on
+    /// the one founding-planet map.
+    ///
+    /// A body gains an entry the first time its surface is needed, seeded
+    /// deterministically from its own id (see [`BodyId::surface_seed`]), so a
+    /// body's stored surface always matches the one `body_surface_preview`
+    /// showed for it.
+    pub planet_maps: HashMap<BodyId, PlanetMap>,
+    /// The founding planet — which key in [`Self::planet_maps`] is "home".
+    ///
+    /// `None` until the first `Command::SeedPlanet`.
+    pub home_body_id: Option<BodyId>,
 
     // ── Phase M1: Tech effects wired to live state ────────────────────────
     /// Building IDs unlocked by completed tech nodes.
@@ -318,6 +332,49 @@ pub struct GameState {
 }
 
 impl GameState {
+    /// The founding planet's hex map, if one has been seeded.
+    ///
+    /// Shorthand for looking [`Self::home_body_id`] up in
+    /// [`Self::planet_maps`] — the pre-#300 `planet_map` field's meaning,
+    /// now derived rather than stored separately.
+    #[must_use]
+    pub fn home_map(&self) -> Option<&PlanetMap> {
+        self.planet_maps.get(self.home_body_id.as_ref()?)
+    }
+
+    /// Mutable form of [`Self::home_map`].
+    #[must_use]
+    pub fn home_map_mut(&mut self) -> Option<&mut PlanetMap> {
+        let home = self.home_body_id.clone()?;
+        self.planet_maps.get_mut(&home)
+    }
+
+    /// The surface map for `body_id`, if that body has one.
+    #[must_use]
+    pub fn map_for_body(&self, body_id: &BodyId) -> Option<&PlanetMap> {
+        self.planet_maps.get(body_id)
+    }
+
+    /// Mutable form of [`Self::map_for_body`].
+    #[must_use]
+    pub fn map_for_body_mut(&mut self, body_id: &BodyId) -> Option<&mut PlanetMap> {
+        self.planet_maps.get_mut(body_id)
+    }
+
+    /// Which body owns `site_id`, searching every seeded surface.
+    ///
+    /// Site ids are allocated per-map, so the same numeric id can exist on
+    /// more than one body. Callers that already know the intended body must
+    /// prefer [`Self::map_for_body`]; this is for resolving a bare site id
+    /// (and for detecting the ambiguity in tests).
+    #[must_use]
+    pub fn body_for_site(&self, site_id: crate::trade::SiteId) -> Option<BodyId> {
+        self.planet_maps
+            .iter()
+            .find(|(_, pm)| pm.coord_for_site(site_id).is_some())
+            .map(|(body_id, _)| body_id.clone())
+    }
+
     /// Construct a fresh `GameState` with no colonies and no content registry.
     #[must_use]
     pub fn new() -> Self {
@@ -347,7 +404,8 @@ impl GameState {
             victory_state: VictoryState::capstone_only(),
             cumulative_research: 0,
             expedition_launched: false,
-            planet_map: None,
+            planet_maps: HashMap::new(),
+            home_body_id: None,
             victory: None,
             sandbox_mode: false,
             unlocked_buildings: HashSet::new(),

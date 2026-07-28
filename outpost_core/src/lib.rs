@@ -3812,22 +3812,19 @@ impl GameEngine {
                     ));
                 }
                 // Require a seeded planet map.
+                //
+                // Still resolves against the founding planet's map regardless
+                // of `body_id` — the #300 stage-2 seam. Retargeting this to
+                // the caller's body is what makes off-world founding real (and
+                // fixes #358, where a colony aimed elsewhere lands here).
                 let coord = {
-                    let pm = self
-                        .state
-                        .planet_map
-                        .as_ref()
-                        .ok_or(EngineError::NoPlanetMap)?;
+                    let pm = self.state.home_map().ok_or(EngineError::NoPlanetMap)?;
                     pm.coord_for_site(*site_id)
                         .ok_or(EngineError::SiteNotFound(*site_id))?
                 };
                 // Validate habitability and occupancy before mutating state.
-                // planet_map is guaranteed Some here (we just resolved coord from it).
-                let pm = self
-                    .state
-                    .planet_map
-                    .as_ref()
-                    .ok_or(EngineError::NoPlanetMap)?;
+                // The home map is guaranteed present (we just resolved coord from it).
+                let pm = self.state.home_map().ok_or(EngineError::NoPlanetMap)?;
                 let cell = pm
                     .cells
                     .get(&coord)
@@ -3947,11 +3944,7 @@ impl GameEngine {
                 // Insert default directives from the loaded content registry.
                 self.insert_default_directives(colony_id);
                 // Place colony node on the map.
-                let pm_mut = self
-                    .state
-                    .planet_map
-                    .as_mut()
-                    .ok_or(EngineError::NoPlanetMap)?;
+                let pm_mut = self.state.home_map_mut().ok_or(EngineError::NoPlanetMap)?;
                 pm_mut
                     .place_colony(colony_id, coord)
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
@@ -5238,7 +5231,12 @@ impl GameEngine {
             Command::SeedPlanet { seed, radius } => {
                 let map = PlanetMap::generate(*seed, *radius);
                 let cell_count = map.cells.len();
-                self.state.planet_map = Some(map);
+                // Attach the founding map to a real body (issue #300). Before
+                // #300 the map floated free of the system entirely, which is
+                // why colonies aimed at any body all landed on this one map.
+                let home_id = self.designate_home_body();
+                self.state.home_body_id = Some(home_id.clone());
+                self.state.planet_maps.insert(home_id, map);
                 Ok(vec![Event::PlanetSeeded {
                     seed: *seed,
                     radius: *radius,
@@ -5389,11 +5387,9 @@ impl GameEngine {
                 self.find_colony_index(*from_colony)?;
                 self.find_colony_index(*to_colony)?;
                 // Require a planet map and that both colonies are placed on it.
-                let pm = self
-                    .state
-                    .planet_map
-                    .as_mut()
-                    .ok_or(EngineError::NoPlanetMap)?;
+                // Home-map-scoped for now; #300 stage 2 resolves the edge
+                // against whichever body the two colonies actually share.
+                let pm = self.state.home_map_mut().ok_or(EngineError::NoPlanetMap)?;
                 let edge = pm
                     .add_edge(*from_colony, *to_colony, *infra_type)
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
@@ -5434,7 +5430,7 @@ impl GameEngine {
                     ))
                 })?;
                 // Remove the edge from the planet map if one is seeded.
-                if let Some(pm) = self.state.planet_map.as_mut() {
+                if let Some(pm) = self.state.home_map_mut() {
                     pm.edges.retain(|e| {
                         !(e.from == *from_colony && e.to == *to_colony
                             || e.from == *to_colony && e.to == *from_colony)
@@ -5456,7 +5452,7 @@ impl GameEngine {
     /// the body's id-hashed seed plus its temperature and subtype; it is NOT
     /// persisted and carries no colonies or infrastructure — a scouting look
     /// at what a world's surface would be, distinct from the live
-    /// founding-planet map in [`GameState::planet_map`].
+    /// founding-planet map in [`GameState::planet_maps`].
     ///
     /// # Errors
     ///
@@ -5480,18 +5476,42 @@ impl GameEngine {
                 body_id.0, body.kind
             )));
         }
-        // Hash the body's UUID down to a stable u64 seed so the same body
-        // always previews the same surface, and different bodies differ. A
-        // wrapping-multiply combine (not XOR) keeps the two halves order-
-        // sensitive so swapped-half UUIDs don't collide on the same seed.
-        let (hi, lo) = body.id.0.as_u64_pair();
-        let seed = hi.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(lo);
+        // Shared with the persisted map a body gains when settled, so the
+        // previewed surface is the surface the player lands on (issue #300).
+        let seed = body.id.surface_seed();
         Ok(map::PlanetMap::generate_for_body_and_subtype(
             seed,
             BODY_SURFACE_PREVIEW_RADIUS,
             body.temperature,
             body.subtype,
         ))
+    }
+
+    /// Choose which body the founding map belongs to (issue #300).
+    ///
+    /// Prefers the most habitable body clearing
+    /// [`system::HABITABILITY_FOUNDING_THRESHOLD`] — `system_gen` guarantees
+    /// at least one exists in a generated system. Ties break on body id so the
+    /// choice is deterministic: `node_map.bodies` is a `HashMap`, so iteration
+    /// order alone would vary run to run.
+    ///
+    /// Falls back to [`system::BodyId::placeholder_home`] when no system has
+    /// been generated or none of its bodies is founding-viable — many engine
+    /// tests and the balance harness seed a planet with no system at all, and
+    /// the founding map still needs a key to live under.
+    fn designate_home_body(&self) -> system::BodyId {
+        self.state
+            .system_state
+            .node_map
+            .bodies
+            .values()
+            .filter(|b| b.kind.has_surface() && b.meets_founding_threshold())
+            .max_by(|a, b| {
+                a.habitability()
+                    .cmp(&b.habitability())
+                    .then_with(|| b.id.0.cmp(&a.id.0))
+            })
+            .map_or_else(system::BodyId::placeholder_home, |b| b.id.clone())
     }
 
     /// Evaluate a read-only [`Query`] and return a [`QueryResult`].
@@ -5786,7 +5806,7 @@ impl GameEngine {
             }
 
             Query::PlanetMap => {
-                let Some(pm) = self.state.planet_map.as_ref() else {
+                let Some(pm) = self.state.home_map() else {
                     // No planet seeded yet — return an empty map.
                     return Ok(QueryResult::PlanetMap(ui::PlanetMapData {
                         planet_name: "Unknown Planet".to_string(),
@@ -6328,7 +6348,7 @@ impl GameEngine {
     ) -> Option<std::collections::HashMap<String, f32>> {
         let mut out = std::collections::HashMap::new();
         let mut placed = false;
-        if let Some(pm) = &self.state.planet_map {
+        if let Some(pm) = self.state.home_map() {
             if let Some(node) = pm.colonies.iter().find(|n| n.colony_id == colony_id) {
                 placed = true;
                 if let Some(cell) = pm.cells.get(&node.coord) {
@@ -12859,7 +12879,7 @@ mod tests {
             .unwrap();
 
         // Pick two distinct habitable sites.
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let mut habitable_sites: Vec<trade::SiteId> = pm
             .sites
             .iter()
@@ -13057,7 +13077,7 @@ mod tests {
                 radius: 3,
             })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let best = pm.best_landing_site().unwrap();
         let site = *pm
             .sites
@@ -13906,7 +13926,7 @@ mod tests {
     #[test]
     fn seed_planet_stores_map_in_game_state() {
         let mut engine = GameEngine::new();
-        assert!(engine.state.planet_map.is_none());
+        assert!(engine.state.home_map().is_none());
         let events = engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
@@ -13914,7 +13934,7 @@ mod tests {
             })
             .unwrap();
         assert!(
-            engine.state.planet_map.is_some(),
+            engine.state.home_map().is_some(),
             "planet_map must be Some after SeedPlanet"
         );
         assert!(
@@ -13926,6 +13946,218 @@ mod tests {
         // Cell count = 3r²+3r+1 = 3*9+9+1 = 37
         if let Event::PlanetSeeded { cell_count, .. } = &events[0] {
             assert_eq!(*cell_count, 37);
+        }
+    }
+
+    /// Issue #300: the founding map must be reachable *through a body key*,
+    /// not floating free of the system. This is the association the whole
+    /// per-body-map feature is built on — without it, "which body is this
+    /// map?" has no answer and every colony lands on the same surface.
+    #[test]
+    fn seed_planet_attaches_the_founding_map_to_the_designated_home_body() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::System(system::SystemCommand::GenerateSystem {
+                seed: 9_001,
+                abundance_scalar: 1.0,
+                habitable_zone_center_au: 1.0,
+                min_inner_planets: 3,
+                max_inner_planets: 5,
+            }))
+            .unwrap();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                radius: 3,
+            })
+            .unwrap();
+
+        let home = engine
+            .state
+            .home_body_id
+            .clone()
+            .expect("SeedPlanet must designate a home body");
+        assert!(
+            !home.is_placeholder_home(),
+            "with a generated system the home body must be a real body, not the placeholder"
+        );
+        assert!(
+            engine
+                .state
+                .system_state
+                .node_map
+                .bodies
+                .contains_key(&home),
+            "the home body must exist in the generated system"
+        );
+        // Reachable both ways: as "home", and by its body key.
+        assert!(engine.state.home_map().is_some());
+        assert!(engine.state.map_for_body(&home).is_some());
+    }
+
+    /// Home designation must not depend on `HashMap` iteration order.
+    ///
+    /// `node_map.bodies` is a `HashMap`, so "first founding-viable body" would
+    /// vary between runs over an identical set of bodies. Re-seeding the *same*
+    /// generated system therefore has to keep choosing the same home, and that
+    /// home has to be a maximally habitable founding-viable world rather than
+    /// whichever one iteration happened to reach first.
+    ///
+    /// Note this fixes the body set deliberately: a fresh `GenerateSystem` with
+    /// the same seed produces *different* body ids each run, because ids come
+    /// from `Uuid::new_v4()`. See `docs/DESIGN.md` — the system seed does not
+    /// currently reproduce a system's bodies.
+    #[test]
+    fn home_body_designation_does_not_depend_on_hashmap_order() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::System(system::SystemCommand::GenerateSystem {
+                seed: 4_242,
+                abundance_scalar: 1.0,
+                habitable_zone_center_au: 1.0,
+                min_inner_planets: 3,
+                max_inner_planets: 5,
+            }))
+            .unwrap();
+
+        let best = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .values()
+            .filter(|b| b.kind.has_surface() && b.meets_founding_threshold())
+            .map(system::Body::habitability)
+            .max()
+            .expect("system_gen guarantees a founding-viable body");
+
+        let mut chosen = None;
+        for _ in 0..16 {
+            engine
+                .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+                .unwrap();
+            let home = engine.state.home_body_id.clone().unwrap();
+            assert_eq!(
+                engine.state.system_state.node_map.bodies[&home].habitability(),
+                best,
+                "home must be a maximally habitable founding-viable body"
+            );
+            match &chosen {
+                None => chosen = Some(home),
+                Some(prev) => assert_eq!(
+                    &home, prev,
+                    "re-seeding the same system must designate the same home body"
+                ),
+            }
+        }
+    }
+
+    /// The home body must clear the same habitability bar the founding wizard
+    /// enforces — designating an uninhabitable world as home would hand the
+    /// player a start they could never legally have chosen.
+    #[test]
+    fn designated_home_body_clears_the_founding_threshold() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::System(system::SystemCommand::GenerateSystem {
+                seed: 31_337,
+                abundance_scalar: 1.0,
+                habitable_zone_center_au: 1.0,
+                min_inner_planets: 3,
+                max_inner_planets: 5,
+            }))
+            .unwrap();
+        engine
+            .apply(&Command::SeedPlanet { seed: 1, radius: 3 })
+            .unwrap();
+        let home = engine.state.home_body_id.clone().unwrap();
+        let body = &engine.state.system_state.node_map.bodies[&home];
+        assert!(body.kind.has_surface(), "home body must have a surface");
+        assert!(
+            body.meets_founding_threshold(),
+            "home body habitability {} must clear the founding threshold {}",
+            body.habitability(),
+            system::HABITABILITY_FOUNDING_THRESHOLD
+        );
+    }
+
+    /// Seeding with no system at all still has to work — most engine tests and
+    /// the balance harness never generate one — and must land under the
+    /// documented placeholder key rather than silently dropping the map.
+    #[test]
+    fn seed_planet_without_a_system_uses_the_placeholder_home_key() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                radius: 3,
+            })
+            .unwrap();
+        let home = engine.state.home_body_id.clone().unwrap();
+        assert!(
+            home.is_placeholder_home(),
+            "with no system there is no real body to attach to"
+        );
+        assert!(
+            engine.state.home_map().is_some(),
+            "the founding map must still be reachable"
+        );
+        assert_eq!(engine.state.planet_maps.len(), 1);
+    }
+
+    /// A body's stored surface seed must equal the one `body_surface_preview`
+    /// uses, so the surface a player scouted is the surface they get. This is
+    /// the guarantee that lets #300 lazily materialise a map on first use.
+    #[test]
+    fn body_surface_preview_and_stored_seed_share_one_derivation() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::System(system::SystemCommand::GenerateSystem {
+                seed: 555,
+                abundance_scalar: 1.0,
+                habitable_zone_center_au: 1.0,
+                min_inner_planets: 3,
+                max_inner_planets: 5,
+            }))
+            .unwrap();
+        let body_id = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .values()
+            .find(|b| b.kind.has_surface())
+            .map(|b| b.id.clone())
+            .expect("generated system must have a body with a surface");
+
+        // Previewing twice must agree, and must agree with the id-derived seed.
+        let a = engine.body_surface_preview(&body_id).unwrap();
+        let b = engine.body_surface_preview(&body_id).unwrap();
+        assert_eq!(a.cells.len(), b.cells.len());
+        for (coord, cell) in &a.cells {
+            assert_eq!(
+                b.cells.get(coord).map(|c| &c.terrain),
+                Some(&cell.terrain),
+                "preview must be stable for the same body"
+            );
+        }
+        assert_eq!(
+            body_id.surface_seed(),
+            body_id.surface_seed(),
+            "seed derivation must be pure"
+        );
+    }
+
+    /// Distinct bodies must not collide onto one surface seed — otherwise two
+    /// different worlds would present identical terrain.
+    #[test]
+    fn distinct_bodies_derive_distinct_surface_seeds() {
+        let mut seeds = std::collections::HashSet::new();
+        for _ in 0..512 {
+            assert!(
+                seeds.insert(system::BodyId::new().surface_seed()),
+                "surface seeds collided across distinct body ids"
+            );
         }
     }
 
@@ -14026,7 +14258,7 @@ mod tests {
             })
             .unwrap();
         // Pick the best landing site and find its SiteId.
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let best_coord = pm
             .best_landing_site()
             .expect("map must have habitable cells");
@@ -14053,7 +14285,7 @@ mod tests {
         // Colony must be registered in GameState.
         assert_eq!(engine.state.colonies.len(), 1);
         // Colony must appear in planet_map.colonies.
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         assert_eq!(pm.colonies.len(), 1);
         assert_eq!(pm.colonies[0].coord, best_coord);
         // Events must include ColonyFoundedAtSite and ColonyPlacedOnMap.
@@ -14083,7 +14315,7 @@ mod tests {
         // Find a habitable hex that actually has a structural_ore deposit
         // (guaranteed to exist *somewhere* on the map by #232, though not
         // necessarily at the single best landing site).
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let (site_id, coord) = pm
             .sites
             .iter()
@@ -14180,7 +14412,7 @@ mod tests {
             })
             .unwrap();
 
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let (site_id, _) = pm
             .sites
             .iter()
@@ -14389,7 +14621,7 @@ mod tests {
                 radius: 4,
             })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let site_id = pm
             .sites
             .iter()
@@ -14454,7 +14686,7 @@ mod tests {
                 radius: 3,
             })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let best_coord = pm
             .best_landing_site()
             .expect("map must have habitable cells");
@@ -14668,7 +14900,7 @@ mod tests {
                 radius: 3,
             })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let best_coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -14742,7 +14974,7 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -14818,7 +15050,7 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -14888,7 +15120,7 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -14953,7 +15185,7 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -15001,7 +15233,7 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 8, radius: 3 })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -15056,7 +15288,7 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet { seed: 2, radius: 3 })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
         let site_id = *pm
             .sites
@@ -15549,7 +15781,7 @@ mod tests {
                 radius: 3,
             })
             .unwrap();
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         // Collect two habitable coords and their site IDs.
         let habitable: Vec<(trade::SiteId, map::HexCoord)> = pm
             .sites
@@ -15647,7 +15879,7 @@ mod tests {
         assert_eq!(it, map::InfraType::Road);
 
         // Edge stored on planet map.
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         assert!(pm
             .edges
             .iter()
@@ -15747,7 +15979,7 @@ mod tests {
         assert_eq!(demolished.unwrap(), route_id);
 
         // Edge removed from planet map.
-        let pm = engine.state.planet_map.as_ref().unwrap();
+        let pm = engine.state.home_map().unwrap();
         assert!(
             pm.edges.is_empty(),
             "edge should be removed from planet map"

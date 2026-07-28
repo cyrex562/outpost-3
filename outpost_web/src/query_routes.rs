@@ -306,7 +306,7 @@ pub async fn get_colony_screen(
 /// Panics if the shared engine mutex is poisoned.
 pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse {
     let engine = state.engine.lock().expect("engine lock");
-    let Some(pm) = engine.state.planet_map.as_ref() else {
+    let Some(pm) = engine.state.home_map() else {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "no planet map — start a new game first" })),

@@ -2234,8 +2234,7 @@ pub fn get_planet_map(engine_state: State<'_, EngineState>) -> CmdResult<PlanetM
 
     let pm = engine
         .state
-        .planet_map
-        .as_ref()
+        .home_map()
         .ok_or_else(|| CmdError::Engine("no planet map — bootstrap first".into()))?;
 
     Ok(build_planet_map_wire(pm, engine))
