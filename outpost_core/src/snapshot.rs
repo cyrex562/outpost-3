@@ -34,7 +34,7 @@ use crate::modifier::{DifficultyScalar, ModifierAccumulator};
 use crate::orbital::{OrbitalConstructionProject, OrbitalRegistry};
 use crate::population::Population;
 use crate::research::SystemResearchPool;
-use crate::system::SystemState;
+use crate::system::{BodyId, SystemState};
 use crate::tech::TechState;
 use crate::trade::TradeNetwork;
 use crate::turn::GameState;
@@ -53,7 +53,8 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 8: `tech_survey_modifiers`/`propulsion_transit_scalar` fields added (issue #236).
 /// Schema version 9: `outpost_range_bonus_au` field added (issue #241).
 /// Schema version 10: `infrastructure_cost_scalar`/`infrastructure_time_scalar` fields added (issue #306).
-pub const SCHEMA_VERSION: u32 = 10;
+/// Schema version 11: `planet_map` replaced by body-keyed `planet_maps` + `home_body_id` (issue #300).
+pub const SCHEMA_VERSION: u32 = 11;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -138,9 +139,13 @@ struct FullStateBlob {
     unlocked_commodities: HashSet<String>,
     modifier_accumulator: ModifierAccumulator,
 
-    // ── Planet map ────────────────────────────────────────────────────────────
+    // ── Planet maps ───────────────────────────────────────────────────────────
+    /// Surface maps keyed by body (issue #300).
     #[serde(default)]
-    planet_map: Option<PlanetMap>,
+    planet_maps: HashMap<BodyId, PlanetMap>,
+    /// Which key in `planet_maps` is the founding planet (issue #300).
+    #[serde(default)]
+    home_body_id: Option<BodyId>,
 
     // ── Sandbox mode (issue #96) ──────────────────────────────────────────────
     #[serde(default)]
@@ -236,7 +241,8 @@ impl FullStateBlob {
             unlocked_capabilities: state.unlocked_capabilities.clone(),
             unlocked_commodities: state.unlocked_commodities.clone(),
             modifier_accumulator: state.modifier_accumulator.clone(),
-            planet_map: state.planet_map.clone(),
+            planet_maps: state.planet_maps.clone(),
+            home_body_id: state.home_body_id.clone(),
             sandbox_mode: state.sandbox_mode,
             expeditions: state.expeditions.clone(),
             hazards_enabled: state.hazards_enabled,
@@ -298,7 +304,8 @@ impl FullStateBlob {
             unlocked_capabilities: self.unlocked_capabilities,
             unlocked_commodities: self.unlocked_commodities,
             modifier_accumulator: self.modifier_accumulator,
-            planet_map: self.planet_map,
+            planet_maps: self.planet_maps,
+            home_body_id: self.home_body_id,
             sandbox_mode: self.sandbox_mode,
             expeditions: self.expeditions,
             hazards_enabled: self.hazards_enabled,
@@ -1149,22 +1156,29 @@ mod tests {
 
     /// A real game always has a generated planet map, and `PlanetMap.cells` is
     /// keyed by `HexCoord` — a struct, which JSON cannot use as an object key.
-    /// Every other test builds a `GameState` with `planet_map: None`, which is
+    /// Every other test builds a `GameState` with no planet maps at all, which is
     /// why saving looked healthy while no real game could be saved at all.
     #[test]
     fn a_state_with_a_planet_map_can_be_saved() {
         let mut snap = Snapshot::open_in_memory().unwrap();
         let mut state = GameState::new();
         state.add_colony(Colony::new("Mapped"), 300);
-        state.planet_map = Some(crate::map::PlanetMap::generate(42, 4));
+        let home = crate::system::BodyId::placeholder_home();
+        state.home_body_id = Some(home.clone());
+        state
+            .planet_maps
+            .insert(home, crate::map::PlanetMap::generate(42, 4));
 
         snap.save(&state)
             .expect("a state with a planet map must save");
 
         let restored = snap.load().unwrap();
-        let map = restored.planet_map.expect("the map must survive the trip");
+        let map = restored
+            .home_map()
+            .cloned()
+            .expect("the map must survive the trip");
         assert!(!map.cells.is_empty(), "cells were dropped");
-        let original = state.planet_map.as_ref().unwrap();
+        let original = state.home_map().unwrap();
         assert_eq!(map.cells.len(), original.cells.len());
         for (coord, cell) in &original.cells {
             assert_eq!(
@@ -1206,7 +1220,7 @@ mod tests {
         let restored = snap.load().unwrap();
         assert_eq!(restored.sol, engine.state.sol);
         assert!(
-            restored.planet_map.is_some_and(|m| !m.cells.is_empty()),
+            restored.home_map().is_some_and(|m| !m.cells.is_empty()),
             "the seeded map must survive"
         );
         assert_eq!(

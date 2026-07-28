@@ -7,14 +7,14 @@ import type { GameEvent } from '@/types/gameEvents'
 const getColonizeTargets = vi.fn()
 const getSystemBodies = vi.fn()
 const listBuildings = vi.fn()
-const getPlanetMap = vi.fn()
+const getBodySurface = vi.fn()
 const listSupplyPackages = vi.fn()
 
 vi.mock('@/services/tauriBridge', () => ({
   getColonizeTargets: () => getColonizeTargets(),
   getSystemBodies: () => getSystemBodies(),
   listBuildings: () => listBuildings(),
-  getPlanetMap: () => getPlanetMap(),
+  getBodySurface: (id: string) => getBodySurface(id),
   listSupplyPackages: () => listSupplyPackages(),
 }))
 
@@ -104,7 +104,7 @@ async function mountAtStep3() {
   getColonizeTargets.mockResolvedValue([BODY])
   getSystemBodies.mockResolvedValue([])
   listBuildings.mockResolvedValue([BUILDING_A, BUILDING_B])
-  getPlanetMap.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
+  getBodySurface.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
   listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
 
   const wrapper = mount(FoundColonyWizardView, {
@@ -114,8 +114,12 @@ async function mountAtStep3() {
 
   await wrapper.find('[data-testid="body-card-mars"]').trigger('click')
   await wrapper.find('.btn.primary').trigger('click') // Next -> step 2
+  // Entering step 2 fetches the chosen body's surface (issue #300), so the
+  // hex grid only exists after that promise settles.
+  await flushPromises()
   await wrapper.find('g').trigger('click') // select the only hex
   await wrapper.find('.btn.primary').trigger('click') // Next -> step 3
+  await flushPromises()
 
   return wrapper
 }
@@ -125,7 +129,7 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     getColonizeTargets.mockReset()
     getSystemBodies.mockReset()
     listBuildings.mockReset()
-    getPlanetMap.mockReset()
+    getBodySurface.mockReset()
     listSupplyPackages.mockReset()
     routerPush.mockReset()
     sendCommand.mockReset()
@@ -159,15 +163,18 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     getSystemBodies.mockResolvedValue([])
     // hydroponic_bay is flagged as landing-kit content, water_well is not.
     listBuildings.mockResolvedValue([BUILDING_A, { ...BUILDING_B, starter_kit: true }])
-    getPlanetMap.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
+    getBodySurface.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
     listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
 
     const wrapper = mount(FoundColonyWizardView, { global: { stubs: { teleport: true } } })
     await flushPromises()
     await wrapper.find('[data-testid="body-card-mars"]').trigger('click')
     await wrapper.find('.btn.primary').trigger('click')
+    // Step 2 fetches the chosen body's surface (issue #300).
+    await flushPromises()
     await wrapper.find('g').trigger('click')
     await wrapper.find('.btn.primary').trigger('click')
+    await flushPromises()
 
     // Only the flagged building is pre-selected, and its 2 slots are already
     // spent — so the step-3 gate is satisfied without the player touching it.
@@ -259,5 +266,26 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     const kitCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'deploy_starter_kit')
     expect(kitCalls.length).toBe(1)
     expect(routerPush).toHaveBeenCalledWith('/colony')
+  })
+
+  // Issue #300/#358: step 2 must show the surface of the body chosen in step 1.
+  // This previously loaded the founding planet's map for every target, so site
+  // ids came from the wrong world and the colony was placed at home instead.
+  it('loads the surface of the body chosen in step 1, not the founding planet', async () => {
+    getColonizeTargets.mockResolvedValue([BODY])
+    getSystemBodies.mockResolvedValue([])
+    listBuildings.mockResolvedValue([BUILDING_A, BUILDING_B])
+    getBodySurface.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
+    listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
+
+    const wrapper = mount(FoundColonyWizardView, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(getBodySurface).not.toHaveBeenCalled()
+
+    await wrapper.find('[data-testid="body-card-mars"]').trigger('click')
+    await wrapper.find('.btn.primary').trigger('click')
+    await flushPromises()
+
+    expect(getBodySurface).toHaveBeenCalledWith('mars')
   })
 })

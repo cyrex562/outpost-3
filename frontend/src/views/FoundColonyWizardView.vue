@@ -2,8 +2,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
+  getBodySurface,
   getColonizeTargets,
-  getPlanetMap,
   getSystemBodies,
   listBuildings,
   listSupplyPackages,
@@ -29,6 +29,31 @@ const bodyLocked = ref(false)
 // Step 1: pick a body
 const bodies = ref<ColonizeTarget[]>([])
 const chosenBody = ref<ColonizeTarget | null>(null)
+
+/**
+ * Load the surface of whichever body is being settled (issue #300).
+ *
+ * Site ids are allocated per body's map, so the site the player picks in step 2
+ * must come from the chosen body's own surface. Before #300 this loaded the
+ * founding planet's map for every target, which is why picking another world
+ * silently placed the colony at home instead (issue #358).
+ */
+async function loadSurfaceForChosenBody(): Promise<void> {
+  const id = chosenBody.value?.body_id
+  if (!id) return
+  // Drop any site picked on the previous body — its id means nothing here.
+  chosenHex.value = null
+  planetMap.value = await getBodySurface(id)
+}
+
+/**
+ * Which colony pays for this settlement (issue #359).
+ *
+ * The colony the player is currently operating from. `null` on the very first
+ * founding of a game — there is nobody to bill, and that colony arrives from
+ * off-system free of charge.
+ */
+const sponsorColonyId = computed<string | null>(() => gameStore.selectedColonyId)
 
 // Step 2: pick a landing site on the planet map
 const planetMap = ref<PlanetMap | null>(null)
@@ -127,7 +152,6 @@ onMounted(async () => {
     buildingCounts.value = Object.fromEntries(
       buildings.value.filter((b) => b.starter_kit).map((b) => [b.id, 1]),
     )
-    planetMap.value = await getPlanetMap()
     supplyPackages.value = await listSupplyPackages()
     // Default the supply pick to a "Standard"-named package if present, else the first.
     const std = supplyPackages.value.find((p) => p.id === 'standard' || p.name.toLowerCase() === 'standard')
@@ -142,6 +166,7 @@ onMounted(async () => {
       if (match) {
         chosenBody.value = match
         bodyLocked.value = true
+        await loadSurfaceForChosenBody()
         step.value = 2
       }
     }
@@ -202,8 +227,18 @@ function habitabilityTone(mod: number): 'bonus' | 'neutral' | 'penalty' {
   return 'neutral'
 }
 
-function next(): void {
+async function next(): Promise<void> {
   if (!canAdvance.value) return
+  // Entering step 2 loads the chosen body's own surface, so the site the
+  // player picks belongs to the world they picked (issue #300).
+  if (step.value === 1) {
+    try {
+      await loadSurfaceForChosenBody()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      return
+    }
+  }
   if (step.value < 4) step.value = (step.value + 1) as 1 | 2 | 3 | 4
 }
 
@@ -253,6 +288,9 @@ async function finish(): Promise<void> {
           focus: null,
           supplies_id: chosenSupplyId.value,
           supply_overrides: supplyOverrides.length > 0 ? supplyOverrides : null,
+          // Bill an existing colony for this settlement (issue #359). The
+          // first colony of a game has none to bill and arrives free.
+          sponsor_colony_id: sponsorColonyId.value,
           body_id: chosenBody.value?.body_id ?? null,
         }
       : {
@@ -597,7 +635,7 @@ async function finish(): Promise<void> {
       <button class="btn" @click="back">
         {{ step === 1 ? 'Cancel' : 'Back' }}
       </button>
-      <button v-if="step < 4" class="btn primary" :disabled="!canAdvance" @click="next">
+      <button v-if="step < 4" class="btn primary" :disabled="!canAdvance" @click="void next()">
         Next
       </button>
       <button

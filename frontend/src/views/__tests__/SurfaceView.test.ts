@@ -45,7 +45,20 @@ function makeMap(): PlanetMap {
   }
 }
 
-describe('SurfaceView (map/nav plan: read-only body surface preview)', () => {
+/** A settled body's surface: one hex occupied by a colony. */
+function makeSettledMap(): PlanetMap {
+  return {
+    seed: 42,
+    radius: 8,
+    edges: [],
+    hexes: [
+      makeHex({ q: 0, r: 0, site_id: 's0', occupied_by: 'Offworld', occupant_colony_id: 'col-7' }),
+      makeHex({ q: 1, r: 0, site_id: 's1' }),
+    ],
+  }
+}
+
+describe('SurfaceView (map/nav plan: any body surface, live once settled)', () => {
   beforeEach(() => {
     routerPush.mockReset()
     getBodySurface.mockReset()
@@ -88,5 +101,37 @@ describe('SurfaceView (map/nav plan: read-only body surface preview)', () => {
 
     await wrapper.get('[data-testid="btn-back-system"]').trigger('click')
     expect(routerPush).toHaveBeenCalledWith({ name: 'system' })
+  })
+
+  // Issue #300: the backend now returns the live stored surface for a settled
+  // body, so this view has to distinguish "survey preview" from "real place".
+  it('labels an unsettled body as a survey preview', async () => {
+    getBodySurface.mockResolvedValueOnce(makeMap())
+    const wrapper = mount(SurfaceView)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="surface-preview-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="surface-settled-hint"]').exists()).toBe(false)
+  })
+
+  it('labels a settled body as settled', async () => {
+    getBodySurface.mockResolvedValueOnce(makeSettledMap())
+    const wrapper = mount(SurfaceView)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="surface-settled-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="surface-preview-hint"]').exists()).toBe(false)
+  })
+
+  it('opens a colony dashboard when its node is clicked on a settled body', async () => {
+    getBodySurface.mockResolvedValueOnce(makeSettledMap())
+    const wrapper = mount(SurfaceView)
+    await flushPromises()
+
+    const map = wrapper.findComponent({ name: 'PlanetHexMap' })
+    map.vm.$emit('select', makeHex({ occupant_colony_id: 'col-7', occupied_by: 'Offworld' }))
+    await flushPromises()
+
+    expect(routerPush).toHaveBeenCalledWith({ name: 'colony', params: { colonyId: 'col-7' } })
   })
 })

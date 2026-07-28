@@ -180,6 +180,10 @@ pub enum ClientCommand {
         /// Explicit per-commodity starter-supply amounts (issue #167).
         #[serde(default)]
         supply_overrides: Option<Vec<(String, f64)>>,
+        /// Colony funding this settlement (issue #359). The sponsor pays the
+        /// `colony` cost profile and gives up the colonists.
+        #[serde(default)]
+        sponsor_colony_id: Option<String>,
         /// Star-system body this site belongs to, if known (issue #183).
         #[serde(default)]
         body_id: Option<String>,
@@ -1318,6 +1322,7 @@ mod tests {
                         focus,
                         supplies_id,
                         supply_overrides,
+                        sponsor_colony_id,
                         body_id,
                     },
             } => {
@@ -1325,6 +1330,8 @@ mod tests {
                 assert_eq!(name, "Alpha");
                 assert_eq!(starting_population, 100);
                 assert_eq!(site_id, "00000000-0000-0000-0000-000000000003");
+                // Omitted by this fixture; defaults to "nobody paid" (issue #359).
+                assert_eq!(sponsor_colony_id, None);
                 assert_eq!(focus, None);
                 assert_eq!(supplies_id, None);
                 assert_eq!(supply_overrides, None);

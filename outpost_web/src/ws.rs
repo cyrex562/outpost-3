@@ -324,6 +324,7 @@ pub(crate) fn client_command_to_core(
             focus,
             supplies_id,
             supply_overrides,
+            sponsor_colony_id,
             body_id,
         } => {
             let site_id = uuid::Uuid::from_str(&site_id)
@@ -336,6 +337,11 @@ pub(crate) fn client_command_to_core(
                         .map_err(|_| format!("invalid body_id: {b}"))
                 })
                 .transpose()?;
+            let sponsor_colony_id = sponsor_colony_id
+                .map(|c| {
+                    ColonyId::from_str(&c).map_err(|_| format!("invalid sponsor_colony_id: {c}"))
+                })
+                .transpose()?;
             Ok(Command::FoundColonyAtSite {
                 name,
                 starting_population,
@@ -343,6 +349,7 @@ pub(crate) fn client_command_to_core(
                 focus,
                 supplies_id,
                 supply_overrides,
+                sponsor_colony_id,
                 body_id,
             })
         }

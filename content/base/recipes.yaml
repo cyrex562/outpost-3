@@ -739,3 +739,55 @@
   outputs:
     - id: research
       quantity: 15.0
+
+# ── Colonization goods (issue #359) ──────────────────────────────────────────
+#
+# All three sit on the `manufactory` (the heaviest assembly building), and all
+# three draw on chains authored across #207-#225 — structural and conductive
+# metals, electronic components, composites. Expansion therefore requires a
+# broadly developed economy, not one deep specialised line.
+
+- id: assemble_survey_probe
+  name: Assemble Survey Probe
+  building: manufactory
+  cycle_sols: 2
+  inputs:
+    - id: electronic_components
+      quantity: 4.0
+    - id: structural_metal
+      quantity: 6.0
+  outputs:
+    - id: survey_probe
+      quantity: 1.0
+
+- id: assemble_habitat_module
+  name: Assemble Habitat Module
+  building: manufactory
+  cycle_sols: 4
+  inputs:
+    - id: structural_metal
+      quantity: 20.0
+    - id: composites
+      quantity: 8.0
+    - id: electronic_components
+      quantity: 6.0
+  outputs:
+    - id: habitat_module
+      quantity: 1.0
+
+- id: assemble_transport_hull
+  name: Assemble Transport Hull
+  building: manufactory
+  cycle_sols: 8
+  inputs:
+    - id: structural_metal
+      quantity: 60.0
+    - id: carbon_composites
+      quantity: 20.0
+    - id: conductive_metal
+      quantity: 12.0
+    - id: electronic_components
+      quantity: 10.0
+  outputs:
+    - id: transport_hull
+      quantity: 1.0
