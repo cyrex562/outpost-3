@@ -1006,8 +1006,20 @@ pub enum Query {
         /// Target colony.
         colony_id: ColonyId,
     },
-    /// Return the planet hex map data (all hexes, colony nodes, infrastructure).
-    PlanetMap,
+    /// Return a body's surface hex map (all hexes, colony nodes, infrastructure).
+    ///
+    /// `body_id` selects which world's surface to read (issue #300); `None`
+    /// means the founding planet, which is what every caller meant when this
+    /// was the only map in existence.
+    ///
+    /// A body with no stored surface yields an empty map rather than an error —
+    /// surfaces materialise on first settlement, so "nothing built there yet"
+    /// is an ordinary answer, not a failure.
+    PlanetMap {
+        /// Which body's surface to return; `None` for the founding planet.
+        #[serde(default)]
+        body_id: Option<system::BodyId>,
+    },
     /// Return full detail for one building type within a colony (issue #182).
     BuildingDetail {
         /// Target colony.
@@ -5871,11 +5883,23 @@ impl GameEngine {
                 }))
             }
 
-            Query::PlanetMap => {
-                let Some(pm) = self.state.home_map() else {
-                    // No planet seeded yet — return an empty map.
+            Query::PlanetMap { body_id } => {
+                // Resolve which surface to read (issue #300). An explicit
+                // `body_id` wins; otherwise the founding planet.
+                let target = body_id.clone().or_else(|| self.state.home_body_id.clone());
+                // Name the world from the system where we can. A body only has
+                // no name when it isn't in the node map at all — an unsettled
+                // system, or the placeholder home key used when a planet was
+                // seeded without one.
+                let planet_name = target
+                    .as_ref()
+                    .and_then(|id| self.state.system_state.node_map.bodies.get(id))
+                    .map_or_else(|| "Unknown Planet".to_string(), |b| b.name.clone());
+                let Some(pm) = target.as_ref().and_then(|id| self.state.map_for_body(id)) else {
+                    // Nothing seeded or settled there yet — an empty surface,
+                    // not an error.
                     return Ok(QueryResult::PlanetMap(ui::PlanetMapData {
-                        planet_name: "Unknown Planet".to_string(),
+                        planet_name,
                         hexes: Vec::new(),
                         colony_nodes: Vec::new(),
                         infrastructure: Vec::new(),
@@ -5933,7 +5957,7 @@ impl GameEngine {
                     .collect();
 
                 Ok(QueryResult::PlanetMap(ui::PlanetMapData {
-                    planet_name: "Unknown Planet".to_string(),
+                    planet_name,
                     hexes,
                     colony_nodes,
                     infrastructure,
@@ -12990,7 +13014,7 @@ mod tests {
             })
             .unwrap();
 
-        let result = engine.query(&Query::PlanetMap).unwrap();
+        let result = engine.query(&Query::PlanetMap { body_id: None }).unwrap();
         match result {
             QueryResult::PlanetMap(map) => {
                 assert_eq!(map.colony_nodes.len(), 2);
@@ -15670,7 +15694,9 @@ mod tests {
     fn planet_map_query_returns_real_hex_data_after_seed() {
         let mut engine = GameEngine::new();
         // Before seeding: empty result.
-        let QueryResult::PlanetMap(empty) = engine.query(&Query::PlanetMap).unwrap() else {
+        let QueryResult::PlanetMap(empty) =
+            engine.query(&Query::PlanetMap { body_id: None }).unwrap()
+        else {
             panic!("expected PlanetMap result");
         };
         assert!(empty.hexes.is_empty());
@@ -15680,7 +15706,9 @@ mod tests {
             .apply(&Command::SeedPlanet { seed: 1, radius: 2 })
             .unwrap();
 
-        let QueryResult::PlanetMap(data) = engine.query(&Query::PlanetMap).unwrap() else {
+        let QueryResult::PlanetMap(data) =
+            engine.query(&Query::PlanetMap { body_id: None }).unwrap()
+        else {
             panic!("expected PlanetMap result");
         };
         // radius 2: 3*4+6+1 = 19 cells
@@ -15715,7 +15743,9 @@ mod tests {
             })
             .unwrap();
 
-        let QueryResult::PlanetMap(data) = engine.query(&Query::PlanetMap).unwrap() else {
+        let QueryResult::PlanetMap(data) =
+            engine.query(&Query::PlanetMap { body_id: None }).unwrap()
+        else {
             panic!("expected PlanetMap result");
         };
         assert_eq!(data.colony_nodes.len(), 1);
@@ -15723,6 +15753,76 @@ mod tests {
         assert_eq!(node.q, coord.q);
         assert_eq!(node.r, coord.r);
         assert_eq!(node.name, "Node Colony");
+    }
+
+    /// Issue #300: the map query must return the surface actually asked for.
+    ///
+    /// An off-world colony is invisible to a home-only query, which is what
+    /// would make stage 2's engine work unreachable from the UI.
+    #[test]
+    fn planet_map_query_is_scoped_to_the_requested_body() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let site_id = habitable_site_on(&engine, &body_id);
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Offworld".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        // Querying the other body shows the colony...
+        let QueryResult::PlanetMap(there) = engine
+            .query(&Query::PlanetMap {
+                body_id: Some(body_id),
+            })
+            .unwrap()
+        else {
+            panic!("expected PlanetMap result");
+        };
+        assert_eq!(there.colony_nodes.len(), 1);
+        assert_eq!(there.colony_nodes[0].name, "Offworld");
+        assert_eq!(
+            there.planet_name, "Second",
+            "the map must be named after the body it belongs to"
+        );
+
+        // ...and the founding planet's own surface is still empty.
+        let QueryResult::PlanetMap(home) =
+            engine.query(&Query::PlanetMap { body_id: None }).unwrap()
+        else {
+            panic!("expected PlanetMap result");
+        };
+        assert!(
+            home.colony_nodes.is_empty(),
+            "the founding planet must not show a colony founded elsewhere"
+        );
+        assert!(
+            !home.hexes.is_empty(),
+            "the founding planet's own surface is still seeded"
+        );
+    }
+
+    /// A body nobody has settled yet has no stored surface. That is an ordinary
+    /// state — an empty map, not an error — so the UI can render any world.
+    #[test]
+    fn planet_map_query_for_an_unsettled_body_is_empty_not_an_error() {
+        let (engine, body_id) = engine_with_second_habitable_body();
+        let QueryResult::PlanetMap(data) = engine
+            .query(&Query::PlanetMap {
+                body_id: Some(body_id),
+            })
+            .unwrap()
+        else {
+            panic!("expected PlanetMap result");
+        };
+        assert!(data.hexes.is_empty());
+        assert!(data.colony_nodes.is_empty());
+        assert_eq!(data.planet_name, "Second");
     }
 
     /// A minimal registry with one power-free-to-check building that turns

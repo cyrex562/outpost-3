@@ -1,16 +1,22 @@
 <script setup lang="ts">
 /**
- * Surface preview (map/nav plan) — a read-only, procedurally-generated hex
- * map of any system body's surface (planet or moon), reachable from the
- * system map's "View Surface" action. Unlike `PlanetView`, this carries no
- * colonies or infrastructure and offers no build/select interactions; it's a
- * scouting look at a body you may not have settled.
+ * Surface view (map/nav plan) — the hex map of any system body's surface
+ * (planet or moon), reachable from the system map's "View Surface" action.
+ *
+ * The backend returns the body's *live* stored surface once it has been
+ * settled, and a procedurally-generated preview before then (issue #300).
+ * The two agree cell-for-cell, so the only visible difference is that a
+ * settled world shows its colonies and infrastructure — and clicking a
+ * colony opens its dashboard, exactly as on `PlanetView`.
+ *
+ * `PlanetView` remains the founding planet's dedicated hub, with build-mode
+ * infrastructure editing; this view is read-only apart from drill-down.
  */
 
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PlanetHexMap from '@/components/PlanetHexMap.vue'
-import { getBodySurface, type PlanetMap } from '@/services/tauriBridge'
+import { getBodySurface, type PlanetHex, type PlanetMap } from '@/services/tauriBridge'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,13 +56,29 @@ watch(() => route.params.bodyId, syncFromRoute)
 function backToSystem(): void {
   void router.push({ name: 'system' })
 }
+
+/** True once this body carries at least one colony — i.e. it is settled. */
+const isSettled = computed(
+  () => (surface.value?.hexes ?? []).some((h) => h.occupant_colony_id) === true,
+)
+
+/** Clicking a colony node opens its dashboard, as on the founding planet. */
+function onSelect(hex: PlanetHex): void {
+  const cid = hex.occupant_colony_id
+  if (cid) void router.push({ name: 'colony', params: { colonyId: cid } })
+}
 </script>
 
 <template>
   <div class="surface-view" data-testid="surface-view">
     <div class="toolbar">
       <h2>Surface — {{ bodyName }}</h2>
-      <span class="hint">Read-only preview. Found a colony from the system map to settle here.</span>
+      <span v-if="isSettled" class="hint" data-testid="surface-settled-hint">
+        Settled — click a colony to open it.
+      </span>
+      <span v-else class="hint" data-testid="surface-preview-hint">
+        Unsettled. This is a survey preview of the surface you would land on.
+      </span>
       <button class="btn" data-testid="btn-back-system" @click="backToSystem">Back to System</button>
     </div>
 
@@ -64,7 +86,13 @@ function backToSystem(): void {
     <p v-else-if="loading" class="hint">Loading…</p>
 
     <div v-else-if="surface" class="map-host">
-      <PlanetHexMap :map="surface" :selected-site="null" :highlight-top-n="0" />
+      <PlanetHexMap
+        :map="surface"
+        :selected-site="null"
+        :highlight-top-n="0"
+        :selectable-occupied="isSettled"
+        @select="onSelect"
+      />
     </div>
   </div>
 </template>
