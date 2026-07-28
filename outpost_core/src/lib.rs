@@ -3811,36 +3811,35 @@ impl GameEngine {
                         "colony name must not be empty".into(),
                     ));
                 }
-                // Require a seeded planet map.
+                // Which body's surface is this site on (issue #300)?
                 //
-                // Still resolves against the founding planet's map regardless
-                // of `body_id` — the #300 stage-2 seam. Retargeting this to
-                // the caller's body is what makes off-world founding real (and
-                // fixes #358, where a colony aimed elsewhere lands here).
-                let coord = {
-                    let pm = self.state.home_map().ok_or(EngineError::NoPlanetMap)?;
-                    pm.coord_for_site(*site_id)
-                        .ok_or(EngineError::SiteNotFound(*site_id))?
-                };
-                // Validate habitability and occupancy before mutating state.
-                // The home map is guaranteed present (we just resolved coord from it).
-                let pm = self.state.home_map().ok_or(EngineError::NoPlanetMap)?;
-                let cell = pm
-                    .cells
-                    .get(&coord)
-                    .ok_or(EngineError::SiteNotFound(*site_id))?;
-                if !cell.is_habitable() {
-                    return Err(EngineError::SiteNotHabitable);
-                }
-                if pm.colonies.iter().any(|n| n.coord == coord) {
-                    return Err(EngineError::SiteOccupied);
-                }
+                // `body_id` names the intended world; `None` means the caller
+                // has no body context and gets the founding planet, matching
+                // the field's documented "skips the gate entirely" behaviour.
+                // Before #300 this field was accepted and then ignored, so a
+                // colony aimed at any body was placed on the founding planet's
+                // map regardless — issue #358.
+                //
+                // Note the site id alone cannot identify the body: ids are
+                // allocated per-map, so the same number exists on every world.
+                // The caller's intent is the only authority.
+                let target_body = body_id
+                    .clone()
+                    .or_else(|| self.state.home_body_id.clone())
+                    .ok_or(EngineError::NoPlanetMap)?;
+
                 // Issue #183: gate on the parent body's habitability score
                 // before any mutation, unless the harsh-world capability is
                 // unlocked. `home_body_modifier` carries the computed
                 // productivity modifier and the body's per-category
                 // modifiers (issue #184) forward so the auto-link below
                 // doesn't need to look the body up a second time.
+                //
+                // Runs before the site is resolved (issue #300): whether a body
+                // may be settled at all is a property of the body, so an
+                // uninhabitable world must report `HabitabilityBelowThreshold`
+                // rather than whatever the site lookup happens to say — and a
+                // body rejected here must not get a surface generated for it.
                 let home_body_modifier = match body_id {
                     Some(bid) => {
                         let body = self
@@ -3872,6 +3871,41 @@ impl GameEngine {
                     }
                     None => None,
                 };
+
+                // Materialise the target's surface if this is the first time
+                // anything needed it, but do NOT store it yet: validation below
+                // can still reject this command, and a rejected command must
+                // not leave a new map behind. `body_surface_preview` is the
+                // generator, so a body's stored surface is exactly the one the
+                // player scouted.
+                let generated = if self.state.planet_maps.contains_key(&target_body) {
+                    None
+                } else {
+                    Some(self.body_surface_preview(&target_body)?)
+                };
+                let pm = match generated.as_ref() {
+                    Some(fresh) => fresh,
+                    // Present because `contains_key` said so.
+                    None => self
+                        .state
+                        .map_for_body(&target_body)
+                        .ok_or(EngineError::NoPlanetMap)?,
+                };
+
+                // Validate site, habitability and occupancy before mutating.
+                let coord = pm
+                    .coord_for_site(*site_id)
+                    .ok_or(EngineError::SiteNotFound(*site_id))?;
+                let cell = pm
+                    .cells
+                    .get(&coord)
+                    .ok_or(EngineError::SiteNotFound(*site_id))?;
+                if !cell.is_habitable() {
+                    return Err(EngineError::SiteNotHabitable);
+                }
+                if pm.colonies.iter().any(|n| n.coord == coord) {
+                    return Err(EngineError::SiteOccupied);
+                }
                 // Resolve the supply package (if any) up front so an unknown id
                 // is reported before any mutation happens. `supply_overrides`
                 // (issue #167), when present, takes precedence and is
@@ -3943,8 +3977,17 @@ impl GameEngine {
                 self.state.add_colony(colony, *starting_population);
                 // Insert default directives from the loaded content registry.
                 self.insert_default_directives(colony_id);
-                // Place colony node on the map.
-                let pm_mut = self.state.home_map_mut().ok_or(EngineError::NoPlanetMap)?;
+                // Everything is validated: commit the target body's surface if
+                // this founding is what brought it into existence (issue #300).
+                if let Some(fresh) = generated {
+                    self.state.planet_maps.insert(target_body.clone(), fresh);
+                }
+                // Place colony node on the target body's map — not the founding
+                // planet's, which is what #358 was.
+                let pm_mut = self
+                    .state
+                    .map_for_body_mut(&target_body)
+                    .ok_or(EngineError::NoPlanetMap)?;
                 pm_mut
                     .place_colony(colony_id, coord)
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
@@ -5386,10 +5429,30 @@ impl GameEngine {
                 // Validate both colonies exist.
                 self.find_colony_index(*from_colony)?;
                 self.find_colony_index(*to_colony)?;
-                // Require a planet map and that both colonies are placed on it.
-                // Home-map-scoped for now; #300 stage 2 resolves the edge
-                // against whichever body the two colonies actually share.
-                let pm = self.state.home_map_mut().ok_or(EngineError::NoPlanetMap)?;
+                // Infrastructure is a surface link, so both endpoints must sit
+                // on the same body's map (issue #300). Resolving the shared
+                // body — rather than assuming the founding planet's map —
+                // is what lets two off-world colonies link to each other, and
+                // stops a cross-body request from silently drawing an edge
+                // between unrelated hexes on the home map.
+                let from_body = self
+                    .state
+                    .body_hosting_colony(*from_colony)
+                    .ok_or(EngineError::NoPlanetMap)?;
+                let to_body = self
+                    .state
+                    .body_hosting_colony(*to_colony)
+                    .ok_or(EngineError::NoPlanetMap)?;
+                if from_body != to_body {
+                    return Err(EngineError::InvalidArgument(
+                        "infrastructure links colonies on the same body; these are on different bodies"
+                            .into(),
+                    ));
+                }
+                let pm = self
+                    .state
+                    .map_for_body_mut(&from_body)
+                    .ok_or(EngineError::NoPlanetMap)?;
                 let edge = pm
                     .add_edge(*from_colony, *to_colony, *infra_type)
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
@@ -5429,8 +5492,11 @@ impl GameEngine {
                         "no infrastructure edge between colonies {from_colony} and {to_colony}"
                     ))
                 })?;
-                // Remove the edge from the planet map if one is seeded.
-                if let Some(pm) = self.state.home_map_mut() {
+                // Drop the edge from whichever body's surface carries it
+                // (issue #300) — scanning every map rather than only the
+                // founding planet's, so demolishing an off-world link doesn't
+                // leave a stale edge drawn on that body's map forever.
+                for pm in self.state.planet_maps.values_mut() {
                     pm.edges.retain(|e| {
                         !(e.from == *from_colony && e.to == *to_colony
                             || e.from == *to_colony && e.to == *from_colony)
@@ -6348,7 +6414,12 @@ impl GameEngine {
     ) -> Option<std::collections::HashMap<String, f32>> {
         let mut out = std::collections::HashMap::new();
         let mut placed = false;
-        if let Some(pm) = self.state.home_map() {
+        // Search every seeded surface, not just the founding planet's (issue
+        // #300). A colony node lives in exactly one map, so this finds it
+        // wherever it was founded; scanning the home map alone would silently
+        // drop the per-hex deposits of every off-world colony and leave it
+        // gated on its body's coarser abundance figures only.
+        for pm in self.state.planet_maps.values() {
             if let Some(node) = pm.colonies.iter().find(|n| n.colony_id == colony_id) {
                 placed = true;
                 if let Some(cell) = pm.cells.get(&node.coord) {
@@ -6357,6 +6428,7 @@ impl GameEngine {
                         *entry = entry.max(d.richness);
                     }
                 }
+                break;
             }
         }
         if let Some(body_id) = home_body_id {
@@ -14161,6 +14233,310 @@ mod tests {
         }
     }
 
+    /// Build an engine with a seeded founding planet plus a second, habitable
+    /// body — the minimum setup for exercising off-world founding (issue #300).
+    fn engine_with_second_habitable_body() -> (GameEngine, system::BodyId) {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                radius: 4,
+            })
+            .unwrap();
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Second".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.2,
+            }))
+            .unwrap();
+        let body_id = match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            other => panic!("expected BodyAdded, got {other:?}"),
+        };
+        engine
+            .apply(&Command::System(system::SystemCommand::SetBodyAttributes {
+                body_id: body_id.clone(),
+                atmosphere_density: system::AtmosphereDensity::Breathable,
+                atmosphere_hazard: system::AtmosphereHazard::None,
+                temperature: system::TemperatureBand::Temperate,
+                gravity_g: 1.0,
+                radiation: system::RadiationLevel::Low,
+                subtype: system::PlanetarySubtype::Unclassified,
+                tidally_locked: false,
+                axial_tilt_deg: 23.5,
+                rotation_period_hours: 24.0,
+                moon_count: 0,
+            }))
+            .unwrap();
+        (engine, body_id)
+    }
+
+    /// Pick a habitable site from a specific body's surface.
+    fn habitable_site_on(engine: &GameEngine, body_id: &system::BodyId) -> SiteId {
+        let preview = engine.body_surface_preview(body_id).unwrap();
+        preview
+            .best_landing_site()
+            .and_then(|coord| {
+                preview
+                    .sites
+                    .iter()
+                    .find(|(_, &c)| c == coord)
+                    .map(|(id, _)| *id)
+            })
+            .expect("body must expose a habitable site")
+    }
+
+    /// Issue #358: a colony aimed at a body must land on *that* body's surface.
+    ///
+    /// This is the bug in its purest form — before #300 the `body_id` field was
+    /// accepted and discarded, so the colony node was appended to the founding
+    /// planet's map no matter which world the player picked.
+    #[test]
+    fn founding_on_another_body_places_the_colony_on_that_bodys_map() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let site_id = habitable_site_on(&engine, &body_id);
+        let home = engine.state.home_body_id.clone().unwrap();
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Offworld".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        let colony_id = engine.state.colonies[0].id;
+        assert_eq!(
+            engine.state.body_hosting_colony(colony_id),
+            Some(body_id.clone()),
+            "the colony must be hosted by the body it was aimed at"
+        );
+        assert!(
+            engine
+                .state
+                .home_map()
+                .is_some_and(|pm| pm.colonies.is_empty()),
+            "the founding planet's map must NOT have gained the colony (issue #358)"
+        );
+        assert!(
+            engine
+                .state
+                .map_for_body(&body_id)
+                .is_some_and(|pm| pm.colonies.len() == 1),
+            "the target body's map must hold exactly the new colony"
+        );
+        assert_ne!(home, body_id, "test setup must use two distinct bodies");
+    }
+
+    /// The surface a colony lands on must be the one the player scouted, cell
+    /// for cell — the guarantee that makes lazily materialising maps safe.
+    #[test]
+    fn a_settled_bodys_stored_surface_equals_its_preview() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let expected = engine.body_surface_preview(&body_id).unwrap();
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Scouted".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        let stored = engine.state.map_for_body(&body_id).unwrap();
+        assert_eq!(stored.cells.len(), expected.cells.len());
+        for (coord, cell) in &expected.cells {
+            assert_eq!(
+                stored.cells.get(coord).map(|c| &c.terrain),
+                Some(&cell.terrain),
+                "terrain at {coord:?} differs from the previewed surface"
+            );
+        }
+    }
+
+    /// A rejected founding must not leave a materialised surface behind.
+    ///
+    /// The map is generated during validation, so committing it unconditionally
+    /// would let a failed command permanently add a body's surface to the save.
+    #[test]
+    fn a_rejected_founding_does_not_materialise_the_target_surface() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let before = engine.state.planet_maps.len();
+
+        // A site id that exists on no map at all.
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Nowhere".into(),
+            starting_population: 100,
+            site_id: SiteId(uuid::Uuid::nil()),
+            focus: None,
+            supplies_id: None,
+            supply_overrides: None,
+            body_id: Some(body_id.clone()),
+        });
+
+        assert!(matches!(result, Err(EngineError::SiteNotFound(_))));
+        assert_eq!(
+            engine.state.planet_maps.len(),
+            before,
+            "a rejected founding must not add a surface map"
+        );
+        assert!(engine.state.map_for_body(&body_id).is_none());
+    }
+
+    /// Occupancy is per body: the same site *number* on two different worlds is
+    /// two different places, and taking one must not block the other.
+    #[test]
+    fn site_occupancy_is_scoped_per_body() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "First".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        // Re-using the same site on the same body must be refused.
+        let same_body = engine.apply(&Command::FoundColonyAtSite {
+            name: "Clash".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: None,
+            body_id: Some(body_id),
+        });
+        assert!(
+            matches!(same_body, Err(EngineError::SiteOccupied)),
+            "expected SiteOccupied, got {same_body:?}"
+        );
+    }
+
+    /// Infrastructure links two colonies on one body. Endpoints on different
+    /// bodies must be refused rather than drawing an edge between unrelated
+    /// hexes on whichever map happened to be consulted.
+    #[test]
+    fn infrastructure_across_two_bodies_is_refused() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let offworld_site = habitable_site_on(&engine, &body_id);
+
+        // One colony on the founding planet...
+        let home = engine.state.home_map().unwrap();
+        let home_site = home
+            .best_landing_site()
+            .and_then(|coord| {
+                home.sites
+                    .iter()
+                    .find(|(_, &c)| c == coord)
+                    .map(|(id, _)| *id)
+            })
+            .unwrap();
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Home".into(),
+                starting_population: 100,
+                site_id: home_site,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: None,
+            })
+            .unwrap();
+        // ...and one on the other body.
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Away".into(),
+                starting_population: 100,
+                site_id: offworld_site,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: Some(body_id),
+            })
+            .unwrap();
+
+        let a = engine.state.colonies[0].id;
+        let b = engine.state.colonies[1].id;
+        let result = engine.apply(&Command::BuildInfrastructure {
+            from_colony: a,
+            to_colony: b,
+            infra_type: map::InfraType::Road,
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "cross-body infrastructure must be refused, got {result:?}"
+        );
+    }
+
+    /// Deposit gating must read the colony's *own* body surface. Scanning only
+    /// the founding planet would leave every off-world colony gated on its
+    /// body's coarse abundances with its per-hex deposits invisible.
+    #[test]
+    fn deposit_gating_finds_an_offworld_colonys_own_hex() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let site_id = habitable_site_on(&engine, &body_id);
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Offworld".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+        let colony_id = engine.state.colonies[0].id;
+
+        // Plant a deposit on the colony's hex, on the other body's map.
+        let coord = engine
+            .state
+            .map_for_body(&body_id)
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        engine
+            .state
+            .map_for_body_mut(&body_id)
+            .unwrap()
+            .cells
+            .get_mut(&coord)
+            .unwrap()
+            .deposits
+            .push(map::Deposit {
+                commodity_id: "structural_ore".into(),
+                richness: 0.75,
+            });
+
+        let richness = engine
+            .colony_deposit_richness(colony_id, Some(&body_id))
+            .expect("a placed colony must report deposit gating");
+        assert_eq!(
+            richness.get("structural_ore").copied(),
+            Some(0.75),
+            "the off-world colony's own hex deposit must be visible to gating"
+        );
+    }
+
     #[test]
     fn found_colony_at_site_requires_planet_map() {
         let mut engine = GameEngine::new();
@@ -14686,18 +15062,6 @@ mod tests {
                 radius: 3,
             })
             .unwrap();
-        let pm = engine.state.home_map().unwrap();
-        let best_coord = pm
-            .best_landing_site()
-            .expect("map must have habitable cells");
-        let site_id = *pm
-            .sites
-            .iter()
-            .find(|(_, &c)| c == best_coord)
-            .map(|(id, _)| id)
-            .expect("best landing site must have a SiteId");
-        let _ = pm;
-
         let events = engine
             .apply(&Command::System(system::SystemCommand::AddBody {
                 name: "Target".into(),
@@ -14724,6 +15088,36 @@ mod tests {
                 moon_count: 0,
             }))
             .unwrap();
+
+        // Take the site from the *target body's* own surface (issue #300).
+        // This fixture used to hand back a site from the founding planet's map
+        // while aiming `body_id` at a different world — which only worked
+        // because `body_id` was ignored and everything landed on the home map
+        // (issue #358). Site ids are per-map, so a cross-body site id is
+        // meaningless now.
+        //
+        // A deliberately hostile body may have no habitable cell at all; those
+        // cases exist to exercise the habitability gate, which fires before the
+        // site is ever resolved, so any site id will do for them.
+        let preview = engine
+            .body_surface_preview(&body_id)
+            .expect("target body must have a previewable surface");
+        let site_id = preview
+            .best_landing_site()
+            .and_then(|coord| {
+                preview
+                    .sites
+                    .iter()
+                    .find(|(_, &c)| c == coord)
+                    .map(|(id, _)| *id)
+            })
+            .unwrap_or_else(|| {
+                *preview
+                    .sites
+                    .keys()
+                    .next()
+                    .expect("a generated surface always has sites")
+            });
 
         (engine, site_id, body_id)
     }
@@ -14867,13 +15261,25 @@ mod tests {
     fn found_colony_at_site_without_body_id_skips_gate() {
         // body_id: None must behave exactly as it did before #183 — no gate,
         // no auto-link, no ColonyHomeBodySet event.
-        let (mut engine, site_id, _) = setup_engine_with_body_and_site(
+        let (mut engine, _, _) = setup_engine_with_body_and_site(
             system::AtmosphereDensity::Dense,
             system::AtmosphereHazard::Toxic,
             system::TemperatureBand::Extreme,
             0.0,
             system::RadiationLevel::High,
         );
+        // `body_id: None` targets the founding planet, so the site must come
+        // from *its* map — the fixture's site belongs to the other body.
+        let home = engine.state.home_map().unwrap();
+        let site_id = home
+            .best_landing_site()
+            .and_then(|coord| {
+                home.sites
+                    .iter()
+                    .find(|(_, &c)| c == coord)
+                    .map(|(id, _)| *id)
+            })
+            .expect("the founding map must have a habitable site");
         let events = engine
             .apply(&Command::FoundColonyAtSite {
                 name: "Unlinked".into(),

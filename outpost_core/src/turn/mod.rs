@@ -375,6 +375,18 @@ impl GameState {
             .map(|(body_id, _)| body_id.clone())
     }
 
+    /// Which body's surface a colony is placed on, if it is placed at all.
+    ///
+    /// A colony node lives in exactly one map, so this is unambiguous — unlike
+    /// [`Self::body_for_site`], whose site ids repeat across bodies.
+    #[must_use]
+    pub fn body_hosting_colony(&self, colony_id: ColonyId) -> Option<BodyId> {
+        self.planet_maps
+            .iter()
+            .find(|(_, pm)| pm.colonies.iter().any(|n| n.colony_id == colony_id))
+            .map(|(body_id, _)| body_id.clone())
+    }
+
     /// Construct a fresh `GameState` with no colonies and no content registry.
     #[must_use]
     pub fn new() -> Self {
