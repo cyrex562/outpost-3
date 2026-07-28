@@ -156,6 +156,11 @@ pub enum ClientCommand {
         /// When present, overrides the `supplies_id` package scaling.
         #[serde(default)]
         supply_overrides: Option<Vec<(String, f64)>>,
+        /// Colony funding this settlement (issue #359). The sponsor pays the
+        /// `colony` cost profile and gives up the colonists. `None` means
+        /// nobody pays — correct only for a game's first colony.
+        #[serde(default)]
+        sponsor_colony_id: Option<String>,
         /// Star-system body this site belongs to (issue #183). `None` skips
         /// the habitability gate, preserving pre-#183 client behaviour.
         #[serde(default)]
@@ -1359,6 +1364,7 @@ pub fn apply_command(
             focus,
             supplies_id,
             supply_overrides,
+            sponsor_colony_id,
             body_id,
         } => {
             let uuid = Uuid::parse_str(&site_id)
@@ -1370,6 +1376,12 @@ pub fn apply_command(
                         .map_err(|_| CmdError::InvalidArg(format!("bad body_id: {b}")))
                 })
                 .transpose()?;
+            let sponsor_colony_id = sponsor_colony_id
+                .map(|c| {
+                    ColonyId::from_str(&c)
+                        .map_err(|_| CmdError::InvalidArg(format!("bad sponsor_colony_id: {c}")))
+                })
+                .transpose()?;
             Command::FoundColonyAtSite {
                 name,
                 starting_population,
@@ -1377,6 +1389,7 @@ pub fn apply_command(
                 focus,
                 supplies_id,
                 supply_overrides,
+                sponsor_colony_id,
                 body_id,
             }
         }
