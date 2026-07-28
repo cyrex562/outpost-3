@@ -216,6 +216,64 @@ mod scalars_serde {
     }
 }
 
+impl ModifiableQuantity {
+    /// Every scalar-tunable quantity, in a stable display order.
+    ///
+    /// Excludes [`Self::ProductionRate`], which is parameterised by a
+    /// content-pack building id and so is not a single dial — it would need one
+    /// row per building rather than one row per quantity.
+    ///
+    /// Used by the live balance editor (playtesting) to enumerate what can be
+    /// tuned without hardcoding the list in a host or the frontend.
+    pub const TUNABLE: &'static [Self] = &[
+        Self::ConstructionCost,
+        Self::LaborEfficiency,
+        Self::ResearchRate,
+        Self::ResearchCost,
+        Self::StorageCapacity,
+        Self::PopulationGrowth,
+        Self::StabilityRate,
+        Self::HazardProbability,
+        Self::ResourceConsumption,
+        Self::PowerRequirement,
+        Self::MaintenanceConsumption,
+        Self::DepositAbundance,
+    ];
+
+    /// Stable wire identifier for this quantity.
+    ///
+    /// Hosts and the frontend key on this string rather than serialising the
+    /// enum, so adding a variant cannot silently reshape an existing payload.
+    /// Returns `None` for [`Self::ProductionRate`], which is not a single dial.
+    #[must_use]
+    pub fn slug(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::ConstructionCost => "construction_cost",
+            Self::LaborEfficiency => "labor_efficiency",
+            Self::ResearchRate => "research_rate",
+            Self::ResearchCost => "research_cost",
+            Self::StorageCapacity => "storage_capacity",
+            Self::PopulationGrowth => "population_growth",
+            Self::StabilityRate => "stability_rate",
+            Self::HazardProbability => "hazard_probability",
+            Self::ResourceConsumption => "resource_consumption",
+            Self::PowerRequirement => "power_requirement",
+            Self::MaintenanceConsumption => "maintenance_consumption",
+            Self::DepositAbundance => "deposit_abundance",
+            Self::ProductionRate(_) => return None,
+        })
+    }
+
+    /// Resolve a [`Self::slug`] back to its quantity.
+    #[must_use]
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::TUNABLE
+            .iter()
+            .find(|q| q.slug() == Some(slug))
+            .cloned()
+    }
+}
+
 impl DifficultyScalar {
     /// Create with no overrides (all quantities default to scalar `1.0`).
     #[must_use]

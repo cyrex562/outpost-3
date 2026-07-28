@@ -145,6 +145,13 @@ pub enum ClientCommand {
         tech_id: String,
     },
     CancelResearch,
+    /// Retune one balance scalar live (playtesting).
+    SetBalanceScalar {
+        /// Stable slug of the quantity.
+        quantity: String,
+        /// New multiplier.
+        value: f32,
+    },
     FoundColonyAtSite {
         name: String,
         starting_population: u64,
@@ -1393,6 +1400,9 @@ pub fn apply_command(
                 body_id,
             }
         }
+        ClientCommand::SetBalanceScalar { quantity, value } => {
+            Command::SetBalanceScalar { quantity, value }
+        }
         ClientCommand::SetDifficulty { preset } => Command::SetDifficulty {
             preset: parse_preset(&preset),
         },
@@ -2237,6 +2247,20 @@ pub fn list_supply_packages(
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+/// Return every tunable balance scalar and its current value (playtesting).
+#[tauri::command]
+pub fn get_balance_scalars(
+    engine_state: State<'_, EngineState>,
+) -> CmdResult<Vec<outpost_core::ui::BalanceScalarRow>> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    match engine.query(&outpost_core::Query::BalanceScalars) {
+        Ok(outpost_core::QueryResult::BalanceScalars(rows)) => Ok(rows),
+        Ok(_) => Err(CmdError::Engine("unexpected query result".into())),
+        Err(e) => Err(CmdError::Engine(e.to_string())),
+    }
 }
 
 /// Return the current planet hex map with per-cell metadata.

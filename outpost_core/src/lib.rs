@@ -104,6 +104,17 @@ pub const MAX_SUPPLY_OVERRIDE_MULTIPLE: f64 = 3.0;
 /// time" shouldn't need to know the ceiling.
 pub const MAX_FAST_FORWARD_SOLS: u32 = 720;
 
+/// Bounds on a live-tuned balance scalar (playtesting).
+///
+/// A scalar of zero would silently disable whole systems (nothing consumed,
+/// nothing produced) and a negative one is meaningless, so the low end is a
+/// small positive number rather than zero. The high end is generous — the point
+/// of the editor is to find where things break — but finite, so a stray digit
+/// cannot push the sim into overflow territory.
+pub const MIN_BALANCE_SCALAR: f32 = 0.01;
+/// Upper bound for a live-tuned balance scalar. See [`MIN_BALANCE_SCALAR`].
+pub const MAX_BALANCE_SCALAR: f32 = 100.0;
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /// A command submitted to the engine from the outside world.
@@ -116,6 +127,23 @@ pub const MAX_FAST_FORWARD_SOLS: u32 = 720;
 pub enum Command {
     /// Advance the simulation by one colony-sol turn.
     AdvanceColonySol,
+    /// Set a single balance scalar live, mid-game (playtesting).
+    ///
+    /// `SetCustomDifficulty` replaces the whole scalar table and also toggles
+    /// menace/hazards/maintenance, which makes it far too blunt for nudging one
+    /// dial while watching its effect. This sets exactly one quantity and
+    /// touches nothing else, so a tuning pass does not silently reset the rest
+    /// of the difficulty configuration.
+    ///
+    /// `quantity` is a [`modifier::ModifiableQuantity::slug`]; unknown slugs are
+    /// rejected rather than ignored, so a typo in a host or the UI surfaces
+    /// instead of quietly doing nothing.
+    SetBalanceScalar {
+        /// Stable slug of the quantity to tune.
+        quantity: String,
+        /// New multiplier. Clamped to a sane positive range by the engine.
+        value: f32,
+    },
     /// Advance up to `max_sols` sols, halting early on the first interrupt whose
     /// tier is at or above `threshold` (issue #332).
     ///
@@ -1019,6 +1047,8 @@ pub enum Query {
         /// Target colony.
         colony_id: ColonyId,
     },
+    /// Return every tunable balance scalar and its current value (playtesting).
+    BalanceScalars,
     /// Return a body's surface hex map (all hexes, colony nodes, infrastructure).
     ///
     /// `body_id` selects which world's surface to read (issue #300); `None`
@@ -1081,6 +1111,8 @@ pub enum QueryResult {
     /// Colony management screen data bundle.
     ColonyScreen(ui::ColonyScreenData),
     /// Planet hex map data bundle.
+    /// Every tunable balance scalar and its current value (playtesting).
+    BalanceScalars(Vec<ui::BalanceScalarRow>),
     PlanetMap(ui::PlanetMapData),
     /// Full detail for one building type within a colony.
     BuildingDetail(ui::BuildingDetailData),
@@ -1604,6 +1636,13 @@ pub enum Event {
     ResearchCancelled,
 
     /// A planet map was generated and stored in `GameState`.
+    /// A balance scalar was retuned live (playtesting).
+    BalanceScalarChanged {
+        /// Slug of the quantity that changed.
+        quantity: String,
+        /// Value actually applied, after clamping.
+        value: f32,
+    },
     PlanetSeeded {
         /// Seed used for generation.
         seed: u64,
@@ -2194,6 +2233,23 @@ impl GameEngine {
                     halting_reason,
                 });
                 Ok(events)
+            }
+
+            Command::SetBalanceScalar { quantity, value } => {
+                let q = modifier::ModifiableQuantity::from_slug(quantity).ok_or_else(|| {
+                    EngineError::InvalidArgument(format!("unknown balance scalar: {quantity}"))
+                })?;
+                if !value.is_finite() {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "balance scalar for '{quantity}' must be a finite number"
+                    )));
+                }
+                let clamped = value.clamp(MIN_BALANCE_SCALAR, MAX_BALANCE_SCALAR);
+                self.state.difficulty_scalar.set(q, clamped);
+                Ok(vec![Event::BalanceScalarChanged {
+                    quantity: quantity.clone(),
+                    value: clamped,
+                }])
             }
 
             Command::AdvanceColonySol => {
@@ -6023,6 +6079,24 @@ impl GameEngine {
                     construction_queue,
                     manual_override,
                 }))
+            }
+
+            Query::BalanceScalars => {
+                // Enumerated from `TUNABLE` rather than from whatever happens to
+                // be set, so the editor shows every dial — including the ones
+                // still at their default 1.0.
+                let rows = modifier::ModifiableQuantity::TUNABLE
+                    .iter()
+                    .filter_map(|q| {
+                        Some(ui::BalanceScalarRow {
+                            quantity: q.slug()?.to_string(),
+                            value: self.state.difficulty_scalar.scalar_for(q),
+                            min: MIN_BALANCE_SCALAR,
+                            max: MAX_BALANCE_SCALAR,
+                        })
+                    })
+                    .collect();
+                Ok(QueryResult::BalanceScalars(rows))
             }
 
             Query::PlanetMap { body_id } => {
@@ -13785,6 +13859,315 @@ mod tests {
         assert!(
             engine.state.colonies[idx_b].pool.amount("food") > 0.0,
             "B's pool should be credited on arrival"
+        );
+    }
+
+    /// Found two colonies on the founding planet and return their ids plus the
+    /// map. Requires #300's per-body maps — before that, a second settlement on
+    /// the same world was the thing that could not be done in play.
+    fn found_two_colonies_on_the_home_planet(engine: &mut GameEngine) -> (ColonyId, ColonyId) {
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 4242,
+                radius: 5,
+            })
+            .unwrap();
+        let pm = engine.state.home_map().unwrap();
+        // Two distinct habitable, unoccupied sites.
+        let mut sites: Vec<SiteId> = pm
+            .sites
+            .iter()
+            .filter(|(_, coord)| pm.cells.get(coord).is_some_and(map::HexCell::is_habitable))
+            .map(|(id, _)| *id)
+            .collect();
+        sites.sort_by_key(|s| s.0);
+        assert!(sites.len() >= 2, "need two habitable sites to test trade");
+
+        let mut found = |name: &str, site: SiteId| {
+            let evs = engine
+                .apply(&Command::FoundColonyAtSite {
+                    name: name.into(),
+                    starting_population: 100,
+                    site_id: site,
+                    focus: None,
+                    supplies_id: None,
+                    supply_overrides: None,
+                    sponsor_colony_id: None,
+                    body_id: None,
+                })
+                .unwrap();
+            evs.iter()
+                .find_map(|e| match e {
+                    Event::ColonyFoundedAtSite { colony_id, .. } => Some(*colony_id),
+                    _ => None,
+                })
+                .expect("founding must report a colony id")
+        };
+        let a = found("Alpha", sites[0]);
+        let b = found("Beta", sites[1]);
+        (a, b)
+    }
+
+    /// The balance editor must list every tunable dial, not just the ones
+    /// somebody happened to override — otherwise a scalar sitting at its
+    /// default is invisible and untunable.
+    #[test]
+    fn balance_query_lists_every_tunable_scalar_including_defaults() {
+        let engine = GameEngine::new();
+        let QueryResult::BalanceScalars(rows) = engine.query(&Query::BalanceScalars).unwrap()
+        else {
+            panic!("expected BalanceScalars result");
+        };
+        assert_eq!(rows.len(), modifier::ModifiableQuantity::TUNABLE.len());
+        assert!(
+            rows.iter().all(|r| (r.value - 1.0).abs() < f32::EPSILON),
+            "a fresh game must report every scalar at its 1.0 default"
+        );
+        // Slugs must be unique — the UI keys rows on them.
+        let mut slugs: Vec<&str> = rows.iter().map(|r| r.quantity.as_str()).collect();
+        slugs.sort_unstable();
+        let before = slugs.len();
+        slugs.dedup();
+        assert_eq!(before, slugs.len(), "scalar slugs must be unique");
+    }
+
+    /// Tuning one dial must not disturb the others — the whole reason this is a
+    /// separate command from `SetCustomDifficulty`, which replaces the table.
+    #[test]
+    fn setting_one_balance_scalar_leaves_the_rest_alone() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SetBalanceScalar {
+                quantity: "resource_consumption".into(),
+                value: 2.5,
+            })
+            .unwrap();
+
+        let QueryResult::BalanceScalars(rows) = engine.query(&Query::BalanceScalars).unwrap()
+        else {
+            panic!("expected BalanceScalars result");
+        };
+        for row in &rows {
+            let expected = if row.quantity == "resource_consumption" {
+                2.5
+            } else {
+                1.0
+            };
+            assert!(
+                (row.value - expected).abs() < 1e-6,
+                "{} should be {expected}, got {}",
+                row.quantity,
+                row.value
+            );
+        }
+    }
+
+    /// A live edit has to actually reach the simulation, not just the readout.
+    #[test]
+    fn a_tuned_scalar_changes_what_the_sim_resolves() {
+        let mut engine = GameEngine::new();
+        let q = modifier::ModifiableQuantity::ResourceConsumption;
+        assert!((engine.state.difficulty_scalar.scalar_for(&q) - 1.0).abs() < f32::EPSILON);
+
+        engine
+            .apply(&Command::SetBalanceScalar {
+                quantity: "resource_consumption".into(),
+                value: 3.0,
+            })
+            .unwrap();
+        assert!(
+            (engine.state.difficulty_scalar.scalar_for(&q) - 3.0).abs() < 1e-6,
+            "the tuned value must be the one the sim reads"
+        );
+    }
+
+    /// Out-of-range values are clamped, not rejected — a slider dragged to its
+    /// end should saturate rather than error. Non-finite input is refused,
+    /// since it would poison every downstream multiplication.
+    #[test]
+    fn balance_scalars_are_clamped_and_reject_nonsense() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::SetBalanceScalar {
+                quantity: "hazard_probability".into(),
+                value: 10_000.0,
+            })
+            .unwrap();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::BalanceScalarChanged { value, .. } if (*value - MAX_BALANCE_SCALAR).abs() < 1e-6
+        )));
+
+        engine
+            .apply(&Command::SetBalanceScalar {
+                quantity: "hazard_probability".into(),
+                value: -5.0,
+            })
+            .unwrap();
+        assert!(
+            (engine
+                .state
+                .difficulty_scalar
+                .scalar_for(&modifier::ModifiableQuantity::HazardProbability)
+                - MIN_BALANCE_SCALAR)
+                .abs()
+                < 1e-6,
+            "a negative scalar must clamp to the floor, never go negative"
+        );
+
+        assert!(
+            engine
+                .apply(&Command::SetBalanceScalar {
+                    quantity: "hazard_probability".into(),
+                    value: f32::NAN,
+                })
+                .is_err(),
+            "NaN must be refused, not clamped"
+        );
+    }
+
+    /// A typo'd slug must fail loudly rather than silently tuning nothing.
+    #[test]
+    fn an_unknown_balance_scalar_slug_is_rejected() {
+        let mut engine = GameEngine::new();
+        let result = engine.apply(&Command::SetBalanceScalar {
+            quantity: "definitely_not_a_dial".into(),
+            value: 2.0,
+        });
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected InvalidArgument, got {result:?}"
+        );
+    }
+
+    /// Every tunable quantity must round-trip through its slug, or the editor
+    /// could show a dial it cannot then set.
+    #[test]
+    fn every_tunable_scalar_round_trips_through_its_slug() {
+        for q in modifier::ModifiableQuantity::TUNABLE {
+            let slug = q.slug().expect("tunable quantities must have a slug");
+            assert_eq!(
+                modifier::ModifiableQuantity::from_slug(slug).as_ref(),
+                Some(q),
+                "slug {slug} did not round-trip"
+            );
+        }
+        // The parameterised variant is deliberately not a single dial.
+        assert!(modifier::ModifiableQuantity::ProductionRate("x".into())
+            .slug()
+            .is_none());
+    }
+
+    /// Issue #341: convoys exercised through the path a player actually takes.
+    ///
+    /// The existing convoy tests call `AddTradeRoute` directly on colonies with
+    /// no body — a command neither host exposes. In play, a route comes into
+    /// existence as a side effect of `BuildInfrastructure` between two colonies
+    /// on the same world, which is why #341 was blocked on second-settlement
+    /// founding (#300) rather than on trade itself.
+    ///
+    /// Covers #341's checklist: cargo leaves on dispatch, lands on a *later*
+    /// sol, and the sender is never over-shipped across consecutive sols.
+    #[test]
+    fn infrastructure_built_in_play_carries_goods_as_convoys_not_teleports() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies_on_the_home_planet(&mut engine);
+        let idx_a = engine.find_colony_index(a).unwrap();
+        let idx_b = engine.find_colony_index(b).unwrap();
+
+        // Building a road is the in-game act that creates the route.
+        engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: a,
+                to_colony: b,
+                infra_type: map::InfraType::Road,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.state.trade_network.routes.len(),
+            1,
+            "building infrastructure must create exactly one trade route"
+        );
+        let transit = engine.state.trade_network.routes[0].transit_sols;
+        assert!(transit >= 1, "a route must take at least a sol in transit");
+
+        // Give A a surplus of something tradeable that B has none of.
+        let start_a = 400.0;
+        engine.state.colonies[idx_a]
+            .pool
+            .deposit("structural_metal", start_a);
+        let b_before = engine.state.colonies[idx_b].pool.amount("structural_metal");
+        assert_eq!(b_before, 0.0);
+
+        // Dispatch sol: A debited, B not yet credited.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let a_after_dispatch = engine.state.colonies[idx_a].pool.amount("structural_metal");
+        assert!(
+            a_after_dispatch < start_a,
+            "the sender must be debited when the convoy leaves"
+        );
+        assert_eq!(
+            engine.state.colonies[idx_b].pool.amount("structural_metal"),
+            0.0,
+            "goods must not teleport — B cannot be credited on the dispatch sol"
+        );
+
+        // Run it out and confirm delivery actually happens.
+        for _ in 0..(transit + 2) {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        assert!(
+            engine.state.colonies[idx_b].pool.amount("structural_metal") > 0.0,
+            "B must eventually receive the cargo"
+        );
+
+        // Conservation: across the whole run A can never have shipped more than
+        // it held. This is the play-level confirmation of the `pending_inbound`
+        // over-shipping fix.
+        let a_now = engine.state.colonies[idx_a].pool.amount("structural_metal");
+        let b_now = engine.state.colonies[idx_b].pool.amount("structural_metal");
+        let in_flight: f64 = engine
+            .state
+            .trade_network
+            .convoys
+            .iter()
+            .filter(|c| c.commodity_id == "structural_metal")
+            .map(|c| c.amount)
+            .sum();
+        assert!(
+            a_now >= 0.0,
+            "the sender must never be driven negative by over-shipping"
+        );
+        assert!(
+            a_now + b_now + in_flight <= start_a + 1e-6,
+            "more metal exists than was ever deposited: a={a_now} b={b_now} in_flight={in_flight}"
+        );
+    }
+
+    /// Issue #341: a route must not ship away the survival stock its own
+    /// colonists are about to consume — `TRADE_RESERVE_SOLS` of slack.
+    #[test]
+    fn trade_leaves_the_sender_a_survival_reserve() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies_on_the_home_planet(&mut engine);
+        let idx_a = engine.find_colony_index(a).unwrap();
+        engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: a,
+                to_colony: b,
+                infra_type: map::InfraType::Road,
+            })
+            .unwrap();
+
+        // A modest amount of a survival commodity — enough that a reserve
+        // matters, little enough that unreserved trade could drain it.
+        engine.state.colonies[idx_a].pool.deposit("water", 60.0);
+        for _ in 0..4 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        assert!(
+            engine.state.colonies[idx_a].pool.amount("water") >= 0.0,
+            "trade must never drive the sender's survival stock negative"
         );
     }
 

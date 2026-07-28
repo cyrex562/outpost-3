@@ -555,6 +555,25 @@ export async function getOutpostTargets(colonyId: string): Promise<OutpostTarget
   return invoke<OutpostTarget[]>('get_outpost_targets', { colonyId })
 }
 
+/** One tunable balance dial, for the live playtesting editor. */
+export interface BalanceScalar {
+  quantity: string
+  value: number
+  min: number
+  max: number
+}
+
+/**
+ * Fetch every tunable balance scalar and its current value.
+ *
+ * The list comes from the engine's canonical `TUNABLE` set, so a dial added
+ * there shows up here without a frontend change.
+ */
+export async function getBalanceScalars(): Promise<BalanceScalar[]> {
+  if (!isTauri) return fetchJson<BalanceScalar[]>('/api/balance-scalars')
+  return invoke<BalanceScalar[]>('get_balance_scalars')
+}
+
 export async function getPlanetMap(): Promise<PlanetMap> {
   if (!isTauri) return fetchJson<PlanetMap>('/api/planet-map')
   return invoke<PlanetMap>('get_planet_map')

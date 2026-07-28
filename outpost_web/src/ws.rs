@@ -361,6 +361,9 @@ pub(crate) fn client_command_to_core(
                 .map_err(|_| format!("invalid body_id: {body_id}"))?;
             Ok(Command::AssignColonyHomeBody { colony_id, body_id })
         }
+        ClientCommand::SetBalanceScalar { quantity, value } => {
+            Ok(Command::SetBalanceScalar { quantity, value })
+        }
         ClientCommand::SetDifficulty { grade } => {
             let preset = match grade.to_lowercase().as_str() {
                 "sandbox" => DifficultyPreset::Sandbox,
