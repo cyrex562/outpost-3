@@ -164,6 +164,13 @@ pub enum ClientCommand {
     },
     /// Found a new colony at a surveyed planet-map site (issue #220 — the
     /// founding wizard's primary command in browser mode).
+    /// Retune one balance scalar live (playtesting).
+    SetBalanceScalar {
+        /// Stable slug of the quantity.
+        quantity: String,
+        /// New multiplier.
+        value: f32,
+    },
     FoundColonyAtSite {
         /// Display name for the new colony.
         name: String,

@@ -80,6 +80,7 @@ pub fn run() {
             commands::get_colonize_targets,
             commands::list_buildings,
             commands::get_planet_map,
+            commands::get_balance_scalars,
             commands::get_body_surface,
             commands::get_system_name,
             commands::list_supply_packages,

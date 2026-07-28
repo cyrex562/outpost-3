@@ -316,6 +316,24 @@ pub async fn get_planet_map(State(state): State<AppState>) -> impl IntoResponse 
     Json(build_planet_map_wire(pm, &engine)).into_response()
 }
 
+/// `GET /api/balance-scalars` — every tunable balance dial and its current
+/// value, for the live playtesting editor.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_balance_scalars(State(state): State<AppState>) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    match engine.query(&outpost_core::Query::BalanceScalars) {
+        Ok(outpost_core::QueryResult::BalanceScalars(rows)) => Json(rows).into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "unexpected query result" })),
+        )
+            .into_response(),
+    }
+}
+
 /// `GET /api/body-surface/:id` — the surface of any system body, live if it has
 /// been settled and a procedurally-generated preview if it has not.
 ///

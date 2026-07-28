@@ -353,6 +353,21 @@ pub struct ShortfallRow {
     pub deficit: f64,
 }
 
+// ─── Balance tuning ───────────────────────────────────────────────────────────
+
+/// One tunable balance scalar, for the live playtesting editor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceScalarRow {
+    /// Stable slug (`crate::modifier::ModifiableQuantity::slug`).
+    pub quantity: String,
+    /// Current multiplier. `1.0` means "unmodified".
+    pub value: f32,
+    /// Lowest value the engine will accept.
+    pub min: f32,
+    /// Highest value the engine will accept.
+    pub max: f32,
+}
+
 // ─── Planet hex map ───────────────────────────────────────────────────────────
 
 /// Complete data bundle for the planet hex map view (§8.1).

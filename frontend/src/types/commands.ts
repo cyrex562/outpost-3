@@ -116,6 +116,13 @@ export type Command =
   | { kind: 'enqueue_research'; tech_id: string }
   | { kind: 'cancel_research' }
   | {
+      kind: 'set_balance_scalar'
+      /** Stable slug of the quantity to tune. */
+      quantity: string
+      /** New multiplier; the engine clamps to its own bounds. */
+      value: number
+    }
+  | {
       kind: 'found_colony_at_site'
       name: string
       starting_population: number
