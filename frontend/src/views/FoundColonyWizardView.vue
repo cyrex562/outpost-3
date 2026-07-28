@@ -46,6 +46,15 @@ async function loadSurfaceForChosenBody(): Promise<void> {
   planetMap.value = await getBodySurface(id)
 }
 
+/**
+ * Which colony pays for this settlement (issue #359).
+ *
+ * The colony the player is currently operating from. `null` on the very first
+ * founding of a game — there is nobody to bill, and that colony arrives from
+ * off-system free of charge.
+ */
+const sponsorColonyId = computed<string | null>(() => gameStore.selectedColonyId)
+
 // Step 2: pick a landing site on the planet map
 const planetMap = ref<PlanetMap | null>(null)
 const chosenHex = ref<PlanetHex | null>(null)
@@ -279,6 +288,9 @@ async function finish(): Promise<void> {
           focus: null,
           supplies_id: chosenSupplyId.value,
           supply_overrides: supplyOverrides.length > 0 ? supplyOverrides : null,
+          // Bill an existing colony for this settlement (issue #359). The
+          // first colony of a game has none to bill and arrives free.
+          sponsor_colony_id: sponsorColonyId.value,
           body_id: chosenBody.value?.body_id ?? null,
         }
       : {

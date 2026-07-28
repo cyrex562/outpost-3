@@ -1,0 +1,44 @@
+# What it costs to plant a settlement (issue #359).
+#
+# One cost table, two payment schedules. `colony` is the full price of a
+# self-sufficient settlement; `outpost` is the cheap foothold. Promotion from
+# outpost to colony charges the *difference*, so both routes to a settled world
+# total the same — direct founding pays it all up front and arrives complete,
+# while an outpost pays a fraction now, produces in the meantime, and can
+# part-fund its own promotion out of what it earned.
+#
+# That makes expansion a capital-vs-time decision rather than one dominant
+# strategy: rush a world you want before something else reaches it, or bootstrap
+# it patiently.
+#
+# Colonists are NOT listed here. They are transferred out of the sponsoring
+# colony's population at founding, so the head-count the player picks is itself
+# the human cost.
+#
+# All numbers are balance scalars (DESIGN.md §17 Q5) — tune via the harness.
+
+- id: outpost
+  name: Outpost
+  description: >
+    A probe and a prefab shelter. Affordable early, produces immediately,
+    supports no population of its own.
+  commodities:
+    - id: survey_probe
+      quantity: 1.0
+    - id: structural_metal
+      quantity: 40.0
+
+- id: colony
+  name: Colony
+  description: >
+    A transport hull, habitat modules for the colonists, a survey probe, and
+    the structural material to raise the first buildings.
+  commodities:
+    - id: survey_probe
+      quantity: 1.0
+    - id: transport_hull
+      quantity: 1.0
+    - id: habitat_module
+      quantity: 2.0
+    - id: structural_metal
+      quantity: 200.0

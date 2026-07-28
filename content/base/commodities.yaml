@@ -520,3 +520,44 @@
   phase: solid
   base_value: 90.0
   tradeable: true
+
+# ── Colonization goods (issue #359) ──────────────────────────────────────────
+#
+# What it physically takes to plant a settlement on another world. These are
+# deliberately top-of-chain: a transport hull needs metals, components and
+# composites, so expansion is paid for by the whole production graph rather
+# than by a parallel "expansion currency". That is what makes a second colony
+# an industrial achievement instead of a menu click.
+
+- id: survey_probe
+  name: Survey Probe
+  description: >
+    An instrumented probe dropped ahead of a landing to confirm what the
+    orbital survey suggested. Cheap enough that an outpost can afford one,
+    which is why both colonization profiles require it.
+  category: manufactured
+  phase: solid
+  base_value: 180.0
+  tradeable: true
+
+- id: habitat_module
+  name: Habitat Module
+  description: >
+    A sealed, pressurised living unit. This is the part of a colony ship that
+    keeps colonists alive on arrival, so it scales with how many people are
+    being moved rather than with distance.
+  category: manufactured
+  phase: solid
+  base_value: 420.0
+  tradeable: true
+
+- id: transport_hull
+  name: Transport Hull
+  description: >
+    The vessel itself — the single most expensive thing a colony can build,
+    and the reason founding a world outright is a capital decision rather than
+    a routine one. An outpost does not need one; a colony does.
+  category: manufactured
+  phase: solid
+  base_value: 1200.0
+  tradeable: true

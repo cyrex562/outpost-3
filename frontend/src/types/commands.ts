@@ -128,6 +128,13 @@ export type Command =
        * scaling with these exact absolute quantities.
        */
       supply_overrides?: [string, number][] | null
+      /**
+       * Colony funding this settlement (issue #359). The sponsor pays the
+       * `colony` cost profile out of its pool and gives up the colonists.
+       * Omitting it means nobody pays — correct only for the game's first
+       * colony, which arrives from off-system with no sponsor to bill.
+       */
+      sponsor_colony_id?: string | null
       /** Star-system body this site belongs to (issue #183). Omitting it skips the habitability gate. */
       body_id?: string | null
     }

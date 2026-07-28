@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use super::types::{
-    BuildingDef, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint, PackManifest,
-    RecipeDef, ResourceDef, StarSystemDef, SupplyPackage,
+    BuildingDef, ColonizationCost, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint,
+    PackManifest, RecipeDef, ResourceDef, StarSystemDef, SupplyPackage,
 };
 use crate::expedition::AnomalyDef;
 
@@ -32,6 +32,7 @@ pub struct ContentRegistry {
     pub default_directives: Vec<DefaultDirectiveDef>,
     /// Named starter-supply packages selectable at colony founding.
     pub(super) supply_packages: HashMap<String, SupplyPackage>,
+    pub(super) colonization_costs: HashMap<String, ColonizationCost>,
     /// Authored star-system scenarios used to seed `SystemState.node_map`.
     pub(super) star_systems: HashMap<String, StarSystemDef>,
     /// Anomaly definitions discoverable during survey expeditions (issue #235).
@@ -49,6 +50,7 @@ impl ContentRegistry {
         self.orbital_blueprints.extend(other.orbital_blueprints);
         self.default_directives.extend(other.default_directives);
         self.supply_packages.extend(other.supply_packages);
+        self.colonization_costs.extend(other.colonization_costs);
         self.star_systems.extend(other.star_systems);
         self.anomalies.extend(other.anomalies);
     }
@@ -148,6 +150,11 @@ impl ContentRegistry {
         self.commodities.insert(def.id.clone(), def);
     }
 
+    /// Insert a colonization cost profile (issue #359).
+    pub fn insert_colonization_cost(&mut self, def: ColonizationCost) {
+        self.colonization_costs.insert(def.id.clone(), def);
+    }
+
     /// Insert or replace an orbital station blueprint (used in tests and harness tooling).
     pub fn insert_orbital_blueprint(&mut self, def: OrbitalStationBlueprint) {
         self.orbital_blueprints.insert(def.id.clone(), def);
@@ -168,6 +175,20 @@ impl ContentRegistry {
     /// All supply packages as an iterator.
     pub fn supply_packages(&self) -> impl Iterator<Item = &SupplyPackage> {
         self.supply_packages.values()
+    }
+
+    /// Look up a colonization cost profile by id (issue #359).
+    ///
+    /// The engine expects `outpost` and `colony`; a pack that authors neither
+    /// leaves settlement free, which is the pre-#359 behaviour.
+    #[must_use]
+    pub fn colonization_cost(&self, id: &str) -> Option<&ColonizationCost> {
+        self.colonization_costs.get(id)
+    }
+
+    /// Iterate every authored colonization cost profile.
+    pub fn colonization_costs(&self) -> impl Iterator<Item = &ColonizationCost> {
+        self.colonization_costs.values()
     }
 
     /// Look up a star-system scenario by id.

@@ -362,6 +362,19 @@ pub enum Command {
         /// for seeding when overrides are present.
         #[serde(default)]
         supply_overrides: Option<Vec<(String, f64)>>,
+        /// Colony funding this settlement, if any (issue #359).
+        ///
+        /// The sponsor pays the `colony` colonization profile out of its own
+        /// pool and gives up `starting_population` colonists — expansion
+        /// genuinely weakens the world it launches from.
+        ///
+        /// `None` means nobody pays: the game's *first* colony arrives from
+        /// off-system with no sponsor to bill, and the balance harness and
+        /// engine tests found colonies without modelling an economy. Hosts
+        /// must pass a sponsor for any subsequent founding, or expansion is
+        /// free.
+        #[serde(default)]
+        sponsor_colony_id: Option<ColonyId>,
         /// Star-system body this site belongs to, if known (issue #183).
         ///
         /// When present, founding is gated on
@@ -2063,6 +2076,49 @@ pub struct GameEngine {
     pub interrupt_threshold: interrupt::Tier,
     /// Maximum turns for the next advance-until-interrupted run.
     pub max_advance_turns: u32,
+}
+
+/// Charge a colonization cost against a settlement's stockpile (issue #359).
+///
+/// Affordability is checked for *every* commodity before any is withdrawn, so
+/// a settlement the payer cannot afford leaves the stockpile exactly as it was
+/// rather than half-drained.
+///
+/// Commodity reserves are honoured (issue #355): reserved stock is not
+/// spendable on expansion, the same way it is withheld from construction and
+/// trade exports. Outposts carry no reserves, so they pass an empty map.
+///
+/// # Errors
+///
+/// [`EngineError::InsufficientResources`] naming the first commodity that
+/// falls short. Commodities are checked in sorted order so a multi-commodity
+/// shortfall always reports the same one rather than varying by hash order.
+fn charge_colonization_cost(
+    pool: &mut colony::ColonyPool,
+    reserves: &std::collections::HashMap<String, f64>,
+    cost: &std::collections::HashMap<String, f64>,
+) -> Result<(), EngineError> {
+    if cost.is_empty() {
+        return Ok(());
+    }
+    let mut items: Vec<(&String, &f64)> = cost.iter().collect();
+    items.sort_by(|a, b| a.0.cmp(b.0));
+    for (commodity_id, needed) in &items {
+        let withheld = reserves.get(commodity_id.as_str()).copied().unwrap_or(0.0);
+        let available = (pool.amount(commodity_id) - withheld).max(0.0);
+        #[allow(clippy::cast_possible_truncation)]
+        if available + f64::EPSILON < **needed {
+            return Err(EngineError::InsufficientResources {
+                commodity: (*commodity_id).clone(),
+                needed: **needed as f32,
+                available: available as f32,
+            });
+        }
+    }
+    for (commodity_id, needed) in items {
+        pool.withdraw(commodity_id, *needed);
+    }
+    Ok(())
 }
 
 impl GameEngine {
@@ -3816,6 +3872,7 @@ impl GameEngine {
                 focus,
                 supplies_id,
                 supply_overrides,
+                sponsor_colony_id,
                 body_id,
             } => {
                 if name.trim().is_empty() {
@@ -3984,6 +4041,33 @@ impl GameEngine {
                     None
                 };
                 let _ = pm;
+                // Bill the sponsor (issue #359). Last validation before any
+                // mutation, so an unaffordable settlement leaves the sponsor's
+                // pool and population untouched.
+                //
+                // Colonists are transferred, not conjured: the sponsor gives up
+                // exactly the head-count the new colony starts with, so
+                // expansion weakens the world it launches from.
+                if let Some(sponsor_id) = sponsor_colony_id {
+                    let sponsor_idx = self.find_colony_index(*sponsor_id)?;
+                    #[allow(clippy::cast_precision_loss)]
+                    let colonists = *starting_population as f32;
+                    let available = self.state.populations[sponsor_idx].count;
+                    if available < colonists {
+                        return Err(EngineError::InvalidArgument(format!(
+                            "sponsoring colony has {available:.0} colonists but {colonists:.0} \
+                             are needed to settle"
+                        )));
+                    }
+                    let cost = self.colonization_net_cost("colony", None);
+                    let reserves = self.state.colonies[sponsor_idx].commodity_reserves.clone();
+                    charge_colonization_cost(
+                        &mut self.state.colonies[sponsor_idx].pool,
+                        &reserves,
+                        &cost,
+                    )?;
+                    self.state.populations[sponsor_idx].count -= colonists;
+                }
                 let colony = colony::Colony::new(name.clone());
                 let colony_id = colony.id;
                 self.state.add_colony(colony, *starting_population);
@@ -4418,9 +4502,20 @@ impl GameEngine {
                         }
                     }
                 }
+                // Establishment is no longer free (issue #359): the founding
+                // colony pays the cheap `outpost` profile. Charged after every
+                // gate above has passed, so a rejected outpost costs nothing.
+                let modifiers = body.modifiers.clone();
+                let outpost_cost = self.colonization_net_cost("outpost", None);
+                let reserves = self.state.colonies[colony_idx].commodity_reserves.clone();
+                charge_colonization_cost(
+                    &mut self.state.colonies[colony_idx].pool,
+                    &reserves,
+                    &outpost_cost,
+                )?;
                 let mut new_outpost =
                     outpost::Outpost::new(name.clone(), *colony_id, body_id.clone());
-                new_outpost.category_modifiers.clone_from(&body.modifiers);
+                new_outpost.category_modifiers = modifiers;
                 let outpost_id = new_outpost.id;
                 self.state.outposts.push(new_outpost);
                 Ok(vec![Event::OutpostEstablished {
@@ -4444,6 +4539,17 @@ impl GameEngine {
                 starting_population,
             } => {
                 let idx = self.find_outpost_index(*outpost_id)?;
+                // Promotion pays `colony` minus `outpost` (issue #359), out of
+                // the outpost's own stockpile — an outpost that has been
+                // producing can part-fund its own upgrade, which is the whole
+                // point of the slow route. Charged before the outpost is
+                // removed so an unaffordable promotion changes nothing.
+                let promotion_cost = self.colonization_net_cost("colony", Some("outpost"));
+                charge_colonization_cost(
+                    &mut self.state.outposts[idx].pool,
+                    &std::collections::HashMap::new(),
+                    &promotion_cost,
+                )?;
                 let old_outpost = self.state.outposts.remove(idx);
 
                 // Prefer the body's current habitability/category modifiers
@@ -5565,7 +5671,43 @@ impl GameEngine {
         ))
     }
 
-    /// Choose which body the founding map belongs to (issue #300).
+    /// Net commodity cost of a colonization profile, minus an already-paid one.
+    ///
+    /// Promotion charges `colony` minus `outpost` (issue #359), so an outpost
+    /// that later becomes a colony pays the same total as founding one
+    /// outright — it just spreads the payment and produces in between.
+    /// Per-commodity results are floored at zero: a credit larger than the
+    /// charge is not a refund.
+    ///
+    /// Returns an empty map when the pack authors no such profile, which keeps
+    /// settlement free for content packs that opt out of the mechanic (and for
+    /// the many tests that load a minimal registry).
+    fn colonization_net_cost(
+        &self,
+        profile_id: &str,
+        credit_id: Option<&str>,
+    ) -> std::collections::HashMap<String, f64> {
+        let Some(registry) = self.state.registry.as_ref() else {
+            return std::collections::HashMap::new();
+        };
+        let mut cost: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        if let Some(profile) = registry.colonization_cost(profile_id) {
+            for ing in &profile.commodities {
+                *cost.entry(ing.id.clone()).or_insert(0.0) += ing.quantity;
+            }
+        }
+        if let Some(credit) = credit_id.and_then(|id| registry.colonization_cost(id)) {
+            for ing in &credit.commodities {
+                if let Some(slot) = cost.get_mut(&ing.id) {
+                    *slot = (*slot - ing.quantity).max(0.0);
+                }
+            }
+        }
+        cost.retain(|_, v| *v > 0.0);
+        cost
+    }
+
+    /// Choose which body the founding map belongs to (issue #300).    /// Choose which body the founding map belongs to (issue #300).
     ///
     /// Prefers the most habitable body clearing
     /// [`system::HABITABILITY_FOUNDING_THRESHOLD`] — `system_gen` guarantees
@@ -12999,6 +13141,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -13010,6 +13153,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -13191,6 +13335,7 @@ mod tests {
                 focus: Some("mining".into()),
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -14330,6 +14475,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -14373,6 +14519,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -14405,6 +14552,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: Some(body_id.clone()),
         });
 
@@ -14432,6 +14580,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -14444,6 +14593,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: Some(body_id),
         });
         assert!(
@@ -14479,6 +14629,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -14491,6 +14642,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id),
             })
             .unwrap();
@@ -14523,6 +14675,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -14572,6 +14725,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: None,
         });
         assert!(
@@ -14640,6 +14794,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: None,
         });
         assert!(
@@ -14678,6 +14833,7 @@ mod tests {
                 focus: Some("mining".into()),
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -14780,6 +14936,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -14873,6 +15030,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15059,6 +15217,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15175,6 +15334,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: Some(body_id),
         });
         assert!(
@@ -15214,6 +15374,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -15248,6 +15409,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: Some(body_id),
         });
         assert!(
@@ -15275,6 +15437,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: Some(bogus_body_id),
         });
         assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
@@ -15312,6 +15475,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15348,6 +15512,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15360,6 +15525,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: None,
         });
         assert!(
@@ -15422,6 +15588,7 @@ mod tests {
                 focus: None,
                 supplies_id: Some("standard".into()),
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15500,6 +15667,7 @@ mod tests {
                 focus: None,
                 supplies_id: Some("standard".into()),
                 supply_overrides: Some(vec![("water".into(), 500.0), ("food_ration".into(), 50.0)]),
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15568,6 +15736,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: Some(vec![("water".into(), 1201.0)]),
+            sponsor_colony_id: None,
             body_id: None,
         });
         assert!(
@@ -15632,6 +15801,7 @@ mod tests {
             focus: None,
             supplies_id: None,
             supply_overrides: Some(vec![("exotic_gas".into(), 10.0)]),
+            sponsor_colony_id: None,
             body_id: None,
         });
         assert!(
@@ -15680,6 +15850,7 @@ mod tests {
             focus: None,
             supplies_id: Some("nonexistent".into()),
             supply_overrides: None,
+            sponsor_colony_id: None,
             body_id: None,
         });
         assert!(
@@ -15739,6 +15910,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -15753,6 +15925,353 @@ mod tests {
         assert_eq!(node.q, coord.q);
         assert_eq!(node.r, coord.r);
         assert_eq!(node.name, "Node Colony");
+    }
+
+    /// A registry with both colonization profiles, for #359 cost tests.
+    fn colonization_registry() -> crate::content::ContentRegistry {
+        use crate::content::types::{ColonizationCost, CommodityDef, Ingredient};
+        let mut reg = crate::content::ContentRegistry::default();
+        for id in [
+            "survey_probe",
+            "transport_hull",
+            "habitat_module",
+            "structural_metal",
+        ] {
+            reg.insert_commodity(CommodityDef {
+                id: id.to_string(),
+                name: id.to_string(),
+                description: String::new(),
+                category: "manufactured".into(),
+                phase: crate::content::types::Phase::Solid,
+                base_value: 1.0,
+                tradeable: true,
+                tier: crate::content::types::CommodityTier::default(),
+                weight: 1.0,
+            });
+        }
+        reg.insert_colonization_cost(ColonizationCost {
+            id: "outpost".into(),
+            name: "Outpost".into(),
+            description: String::new(),
+            commodities: vec![
+                Ingredient {
+                    id: "survey_probe".into(),
+                    quantity: 1.0,
+                },
+                Ingredient {
+                    id: "structural_metal".into(),
+                    quantity: 40.0,
+                },
+            ],
+        });
+        reg.insert_colonization_cost(ColonizationCost {
+            id: "colony".into(),
+            name: "Colony".into(),
+            description: String::new(),
+            commodities: vec![
+                Ingredient {
+                    id: "survey_probe".into(),
+                    quantity: 1.0,
+                },
+                Ingredient {
+                    id: "transport_hull".into(),
+                    quantity: 1.0,
+                },
+                Ingredient {
+                    id: "structural_metal".into(),
+                    quantity: 200.0,
+                },
+            ],
+        });
+        reg
+    }
+
+    /// Issue #359: the two routes to a settled world total the same price.
+    ///
+    /// This is the whole point of the design — direct founding pays up front,
+    /// outpost-then-promote spreads it. If promotion did not charge exactly the
+    /// remainder, one route would strictly dominate.
+    #[test]
+    fn both_settlement_routes_cost_the_same_in_total() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(colonization_registry());
+
+        let direct = engine.colonization_net_cost("colony", None);
+        let outpost = engine.colonization_net_cost("outpost", None);
+        let promotion = engine.colonization_net_cost("colony", Some("outpost"));
+
+        for (commodity, direct_amount) in &direct {
+            let staged = outpost.get(commodity).copied().unwrap_or(0.0)
+                + promotion.get(commodity).copied().unwrap_or(0.0);
+            assert!(
+                (staged - direct_amount).abs() < 1e-9,
+                "{commodity}: staged route costs {staged} but direct costs {direct_amount}"
+            );
+        }
+    }
+
+    /// A credit larger than the charge is not a refund.
+    #[test]
+    fn promotion_credit_never_goes_negative() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(colonization_registry());
+        // Credit `colony` against `outpost`: every line is over-credited.
+        let inverted = engine.colonization_net_cost("outpost", Some("colony"));
+        assert!(
+            inverted.values().all(|v| *v > 0.0),
+            "zero/negative lines must be dropped, got {inverted:?}"
+        );
+        assert!(
+            !inverted.contains_key("survey_probe"),
+            "1 - 1 = 0 must drop out"
+        );
+    }
+
+    /// A pack that authors no profiles leaves settlement free — the pre-#359
+    /// behaviour, which the balance harness and most engine tests rely on.
+    #[test]
+    fn settlement_is_free_when_no_profiles_are_authored() {
+        let engine = GameEngine::new();
+        assert!(engine.colonization_net_cost("colony", None).is_empty());
+        assert!(engine.colonization_net_cost("outpost", None).is_empty());
+    }
+
+    /// Founding bills the sponsor for commodities *and* colonists — expansion
+    /// weakens the world it launches from.
+    #[test]
+    fn founding_charges_the_sponsors_pool_and_population() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Sponsor");
+        sponsor.pool.deposit("survey_probe", 5.0);
+        sponsor.pool.deposit("transport_hull", 5.0);
+        sponsor.pool.deposit("structural_metal", 1000.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 500);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Funded".into(),
+                starting_population: 120,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: Some(sponsor_id),
+                body_id: Some(body_id),
+            })
+            .unwrap();
+
+        let idx = engine.find_colony_index(sponsor_id).unwrap();
+        let sponsor = &engine.state.colonies[idx];
+        assert!((sponsor.pool.amount("transport_hull") - 4.0).abs() < 1e-9);
+        assert!((sponsor.pool.amount("structural_metal") - 800.0).abs() < 1e-9);
+        assert!(
+            (engine.state.populations[idx].count - 380.0).abs() < 1e-3,
+            "the 120 colonists must come out of the sponsor's population"
+        );
+    }
+
+    /// An unaffordable founding must change nothing at all.
+    #[test]
+    fn an_unaffordable_founding_leaves_the_sponsor_untouched() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Poor");
+        sponsor.pool.deposit("survey_probe", 5.0);
+        // No transport hull, and not enough metal.
+        sponsor.pool.deposit("structural_metal", 10.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 500);
+        let colonies_before = engine.state.colonies.len();
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Doomed".into(),
+            starting_population: 120,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: None,
+            sponsor_colony_id: Some(sponsor_id),
+            body_id: Some(body_id.clone()),
+        });
+
+        assert!(
+            matches!(result, Err(EngineError::InsufficientResources { .. })),
+            "expected InsufficientResources, got {result:?}"
+        );
+        let idx = engine.find_colony_index(sponsor_id).unwrap();
+        assert!((engine.state.colonies[idx].pool.amount("survey_probe") - 5.0).abs() < 1e-9);
+        assert!((engine.state.colonies[idx].pool.amount("structural_metal") - 10.0).abs() < 1e-9);
+        assert!((engine.state.populations[idx].count - 500.0).abs() < 1e-3);
+        assert_eq!(engine.state.colonies.len(), colonies_before);
+        assert!(engine.state.map_for_body(&body_id).is_none());
+    }
+
+    /// A sponsor without the colonists to spare cannot found, however rich.
+    #[test]
+    fn founding_requires_the_sponsor_to_have_the_colonists() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Small");
+        sponsor.pool.deposit("survey_probe", 5.0);
+        sponsor.pool.deposit("transport_hull", 5.0);
+        sponsor.pool.deposit("structural_metal", 1000.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 50);
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Overreach".into(),
+            starting_population: 120,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: None,
+            sponsor_colony_id: Some(sponsor_id),
+            body_id: Some(body_id),
+        });
+
+        assert!(
+            matches!(result, Err(EngineError::InvalidArgument(_))),
+            "expected a colonist shortfall, got {result:?}"
+        );
+        let idx = engine.find_colony_index(sponsor_id).unwrap();
+        assert!(
+            (engine.state.colonies[idx].pool.amount("structural_metal") - 1000.0).abs() < 1e-9,
+            "a colonist shortfall must not spend commodities"
+        );
+    }
+
+    /// Reserved stock is not spendable on expansion (issue #355 + #359).
+    #[test]
+    fn commodity_reserves_are_not_spendable_on_settlement() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Reserved");
+        sponsor.pool.deposit("survey_probe", 5.0);
+        sponsor.pool.deposit("transport_hull", 5.0);
+        sponsor.pool.deposit("structural_metal", 220.0);
+        // Reserve enough that only 20 of the 220 is actually spendable.
+        sponsor
+            .commodity_reserves
+            .insert("structural_metal".into(), 200.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 500);
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Blocked".into(),
+            starting_population: 120,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: None,
+            sponsor_colony_id: Some(sponsor_id),
+            body_id: Some(body_id),
+        });
+
+        assert!(
+            matches!(result, Err(EngineError::InsufficientResources { .. })),
+            "reserved stock must not fund expansion, got {result:?}"
+        );
+    }
+
+    /// Establishing an outpost is no longer free (issue #359).
+    #[test]
+    fn establishing_an_outpost_charges_the_parent_colony() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+
+        let mut parent = colony::Colony::new("Parent");
+        parent.pool.deposit("survey_probe", 3.0);
+        parent.pool.deposit("structural_metal", 100.0);
+        parent.home_body_id = engine.state.home_body_id.clone();
+        let parent_id = parent.id;
+        engine.state.add_colony(parent, 300);
+
+        engine
+            .apply(&Command::EstablishOutpost {
+                name: "Foothold".into(),
+                colony_id: parent_id,
+                body_id: body_id.clone(),
+            })
+            .unwrap();
+
+        let idx = engine.find_colony_index(parent_id).unwrap();
+        assert!((engine.state.colonies[idx].pool.amount("survey_probe") - 2.0).abs() < 1e-9);
+        assert!((engine.state.colonies[idx].pool.amount("structural_metal") - 60.0).abs() < 1e-9);
+    }
+
+    /// Promotion charges the remainder out of the outpost's own stockpile, and
+    /// an outpost that cannot pay stays an outpost (issue #359).
+    #[test]
+    fn promotion_charges_the_remainder_and_is_refused_when_unaffordable() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+
+        let mut parent = colony::Colony::new("Parent");
+        parent.pool.deposit("survey_probe", 3.0);
+        parent.pool.deposit("structural_metal", 100.0);
+        parent.home_body_id = engine.state.home_body_id.clone();
+        let parent_id = parent.id;
+        engine.state.add_colony(parent, 300);
+        engine
+            .apply(&Command::EstablishOutpost {
+                name: "Foothold".into(),
+                colony_id: parent_id,
+                body_id,
+            })
+            .unwrap();
+        let outpost_id = engine.state.outposts[0].id;
+
+        // Broke outpost: promotion must be refused and the outpost survive.
+        let refused = engine.apply(&Command::PromoteOutpostToColony {
+            outpost_id,
+            name: "Premature".into(),
+            starting_population: 50,
+        });
+        assert!(
+            matches!(refused, Err(EngineError::InsufficientResources { .. })),
+            "expected InsufficientResources, got {refused:?}"
+        );
+        assert_eq!(
+            engine.state.outposts.len(),
+            1,
+            "outpost must survive a refused promotion"
+        );
+
+        // Fund it with exactly the remainder: colony(1 probe, 1 hull, 200 metal)
+        // minus outpost(1 probe, 40 metal) = 1 hull + 160 metal.
+        engine.state.outposts[0].pool.deposit("transport_hull", 1.0);
+        engine.state.outposts[0]
+            .pool
+            .deposit("structural_metal", 160.0);
+        engine
+            .apply(&Command::PromoteOutpostToColony {
+                outpost_id,
+                name: "Grown".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+
+        assert!(engine.state.outposts.is_empty());
+        let grown = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.name == "Grown")
+            .expect("promotion must produce a colony");
+        assert!(
+            grown.pool.amount("transport_hull") < 1e-9,
+            "the remainder must actually be spent, not carried over"
+        );
     }
 
     /// Issue #300: the map query must return the surface actually asked for.
@@ -15771,6 +16290,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: Some(body_id.clone()),
             })
             .unwrap();
@@ -16312,6 +16832,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();
@@ -16334,6 +16855,7 @@ mod tests {
                 focus: None,
                 supplies_id: None,
                 supply_overrides: None,
+                sponsor_colony_id: None,
                 body_id: None,
             })
             .unwrap();

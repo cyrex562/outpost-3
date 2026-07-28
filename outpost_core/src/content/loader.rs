@@ -9,8 +9,8 @@ use super::{
     error::ContentError,
     registry::ContentRegistry,
     types::{
-        BuildingDef, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef, ResourceDef,
-        StarSystemDef, SupplyPackage,
+        BuildingDef, ColonizationCost, CommodityDef, DefaultDirectiveDef, PackManifest, RecipeDef,
+        ResourceDef, StarSystemDef, SupplyPackage,
     },
 };
 use crate::expedition::AnomalyDef;
@@ -58,6 +58,7 @@ impl PackLoader {
         let supply_packages = collect_table::<SupplyPackage>(files, &["supplies.yaml"])?;
         let star_systems = collect_table::<StarSystemDef>(files, &["systems.yaml"])?;
         let anomalies = collect_table::<AnomalyDef>(files, &["anomalies.yaml"])?;
+        let colonization_costs = collect_table::<ColonizationCost>(files, &["colonization.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
         // An id must be declared exactly once, as either a commodity or a
@@ -112,6 +113,8 @@ impl PackLoader {
             }
         }
 
+        validate_colonization_costs(&colonization_costs, &commodity_ids)?;
+
         // Issue #196: each body's subtype must be valid for its kind, and
         // any authored `parent_body` must name another body in the same
         // system (self-references rejected too — a body can't orbit itself).
@@ -152,6 +155,7 @@ impl PackLoader {
             supply_packages,
             star_systems,
             anomalies,
+            colonization_costs,
         })
     }
 }
@@ -239,6 +243,34 @@ impl HasId for BuildingDef {
 }
 
 impl HasId for SupplyPackage {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// Every commodity a colonization profile names must exist and be shippable.
+///
+/// Colonization costs are physically loaded onto a ship, so they carry the same
+/// tradeable-commodity restriction as supply packages (issue #359).
+fn validate_colonization_costs(
+    costs: &std::collections::HashMap<String, ColonizationCost>,
+    commodity_ids: &std::collections::HashSet<&str>,
+) -> Result<(), ContentError> {
+    for cost in costs.values() {
+        for ing in &cost.commodities {
+            if !commodity_ids.contains(ing.id.as_str()) {
+                return Err(ContentError::UnknownCommodityRef {
+                    file: "colonization.yaml".to_string(),
+                    id: cost.id.clone(),
+                    commodity_id: ing.id.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+impl HasId for ColonizationCost {
     fn id(&self) -> &str {
         &self.id
     }

@@ -533,3 +533,27 @@ pub struct SupplyPackage {
     #[serde(default)]
     pub commodities: Vec<Ingredient>,
 }
+
+/// What it costs to plant a new settlement (issue #359).
+///
+/// Two profiles are authored: `outpost` (cheap, no population) and `colony`
+/// (expensive). Promotion from outpost to colony charges the *difference*, so
+/// both routes to a settled world total the same price — direct founding pays
+/// it up front, an outpost spreads it and produces in between.
+///
+/// Amounts are absolute, not per-colonist: a transport hull is a transport
+/// hull regardless of how many people ride it. Colonists are charged
+/// separately, out of the sponsoring colony's population.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ColonizationCost {
+    /// Profile id. The engine looks up `outpost` and `colony` by name.
+    pub id: String,
+    /// Human-readable name for the founding UI.
+    pub name: String,
+    /// Short flavour / summary text.
+    #[serde(default)]
+    pub description: String,
+    /// Commodities consumed from the sponsoring colony's pool.
+    #[serde(default)]
+    pub commodities: Vec<Ingredient>,
+}
