@@ -35,7 +35,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::map::VEIN_COMMODITIES;
 use crate::system::{
     AtmosphereDensity, AtmosphereHazard, BeltProfile, BeltZone, Body, BodyDeposit, BodyId,
-    BodyKind, PlanetarySubtype, RadiationLevel, SystemRole, TemperatureBand,
+    BodyKind, BodySize, PlanetarySubtype, RadiationLevel, SystemRole, TemperatureBand,
     HABITABILITY_FOUNDING_THRESHOLD,
 };
 
@@ -498,6 +498,7 @@ fn generate_body(
     body.atmosphere_density = density;
     body.atmosphere_hazard = hazard;
     body.subtype = subtype_for(&body, rng);
+    body.size = size_for(kind, body.gravity_g);
 
     body.tidally_locked = matches!(kind, BodyKind::Moon) || distance_au < 0.35;
     body.axial_tilt_deg = if body.tidally_locked {
@@ -663,6 +664,30 @@ fn gravity_for_kind(kind: &BodyKind, temperature: TemperatureBand, rng: &mut Cha
         BodyKind::Moon => rng.gen_range(0.05..0.3),
         BodyKind::AsteroidBelt | BodyKind::CometaryBelt => rng.gen_range(0.02..0.08),
         BodyKind::OrbitalStation => 0.0,
+    }
+}
+
+/// Physical size class for a body, derived from its already-rolled gravity
+/// rather than an independent roll, so the two attributes stay correlated —
+/// a heavier world is a bigger one (issue #314).
+///
+/// Moons are always [`BodySize::Tiny`] regardless of gravity, matching the
+/// issue's own "moons get proportionally small maps" wording — a moon's
+/// gravity range (0.05-0.3) would mostly land in `Small` under the shared
+/// thresholds anyway, but forcing it keeps the intent explicit rather than
+/// incidental. Every other kind shares one threshold table: gas giants'
+/// gravity floor (1.0) already clears the `Large` cutoff, so giants come out
+/// big without a kind-specific branch.
+fn size_for(kind: &BodyKind, gravity_g: f32) -> BodySize {
+    if matches!(kind, BodyKind::Moon) {
+        return BodySize::Tiny;
+    }
+    if gravity_g < 0.4 {
+        BodySize::Small
+    } else if gravity_g < 0.9 {
+        BodySize::Medium
+    } else {
+        BodySize::Large
     }
 }
 
@@ -1377,5 +1402,65 @@ mod tests {
             saw_high,
             "no warm (Jupiter-like) giant seen across seed sweep"
         );
+    }
+
+    // ── Body size (issue #314) ────────────────────────────────────────────────
+
+    #[test]
+    fn size_for_moons_is_always_tiny_regardless_of_gravity() {
+        // Even the top of a moon's gravity range (0.05..0.3) must not clear
+        // into Small — moons are unconditionally Tiny by the issue's own
+        // wording, not incidentally so.
+        assert_eq!(size_for(&BodyKind::Moon, 0.29), BodySize::Tiny);
+        assert_eq!(size_for(&BodyKind::Moon, 0.0), BodySize::Tiny);
+    }
+
+    #[test]
+    fn size_for_tracks_gravity_thresholds_for_non_moon_kinds() {
+        assert_eq!(size_for(&BodyKind::InnerPlanet, 0.2), BodySize::Small);
+        assert_eq!(size_for(&BodyKind::InnerPlanet, 0.39), BodySize::Small);
+        assert_eq!(size_for(&BodyKind::InnerPlanet, 0.4), BodySize::Medium);
+        assert_eq!(size_for(&BodyKind::InnerPlanet, 0.89), BodySize::Medium);
+        assert_eq!(size_for(&BodyKind::InnerPlanet, 0.9), BodySize::Large);
+        assert_eq!(size_for(&BodyKind::InnerPlanet, 1.3), BodySize::Large);
+    }
+
+    #[test]
+    fn gas_giants_always_come_out_large() {
+        // A gas giant's gravity floor (1.0, Neptune-band) already clears the
+        // shared `Large` threshold (0.9) — giants get big maps for free,
+        // with no kind-specific branch in `size_for`.
+        for seed in 0..64u64 {
+            for body in generate_system(seed, &params(1.0)) {
+                if body.kind == BodyKind::GasGiant {
+                    assert_eq!(
+                        body.size,
+                        BodySize::Large,
+                        "seed {seed}: giant {} (gravity {}) should be Large",
+                        body.name,
+                        body.gravity_g
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_moon_generated_by_the_system_gen_pipeline_is_tiny() {
+        let mut saw_a_moon = false;
+        for seed in 0..64u64 {
+            for body in generate_system(seed, &params(1.0)) {
+                if body.kind == BodyKind::Moon {
+                    saw_a_moon = true;
+                    assert_eq!(
+                        body.size,
+                        BodySize::Tiny,
+                        "seed {seed}: moon {} should be Tiny",
+                        body.name
+                    );
+                }
+            }
+        }
+        assert!(saw_a_moon, "no moon seen across seed sweep 0..64");
     }
 }

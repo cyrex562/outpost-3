@@ -731,7 +731,10 @@ async fn handle_new_game(
             .map_err(|e| format!("GenerateSystem failed: {e}"))?;
         events.extend(system_evs);
 
-        // Seed the planet map.
+        // Seed the planet map. `radius` here is only the no-system fallback —
+        // `GenerateSystem` just ran above, so the handler derives the real
+        // radius from the designated home body's rolled size instead
+        // (issue #314).
         let seed_evs = engine
             .apply(&Command::SeedPlanet {
                 seed: planet_seed,

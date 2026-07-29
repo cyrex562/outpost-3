@@ -1071,6 +1071,9 @@ pub fn bootstrap(
         max_inner_planets: max_inner_planets.unwrap_or(gen_defaults.max_inner_planets),
     }));
 
+    // `radius` here is only the no-system fallback — since `GenerateSystem`
+    // just ran above, the handler derives the real radius from the
+    // designated home body's rolled size instead (issue #314).
     let _ = engine.apply(&Command::SeedPlanet {
         seed: planet_seed,
         radius: 12,
