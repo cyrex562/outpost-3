@@ -778,6 +778,14 @@ fn subtype_for(body: &Body, rng: &mut ChaCha8Rng) -> PlanetarySubtype {
                 TemperatureBand::Hot | TemperatureBand::Extreme
             ) {
                 PlanetarySubtype::RockyBarrenHot
+            } else if matches!(body.temperature, TemperatureBand::Cold)
+                && matches!(body.atmosphere_density, AtmosphereDensity::Thin)
+                && rng.gen_bool(0.25)
+            {
+                // Mountain world (issue #313): thin-atmosphere ruggedness,
+                // distinct from the barren-cold default it would otherwise
+                // fall into.
+                PlanetarySubtype::Mountain
             } else {
                 PlanetarySubtype::RockyBarrenCold
             }

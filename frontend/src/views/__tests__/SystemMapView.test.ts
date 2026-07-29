@@ -36,7 +36,7 @@ function makeBody(overrides: Partial<SystemBody>): SystemBody {
     habitability_modifier: 1.0,
     habitability_effective: 40,
     habitability_modifier_effective: 1.0,
-    subtype: 'Rocky',
+    subtype: 'rocky',
     tidally_locked: false,
     axial_tilt_deg: 0,
     rotation_period_hours: 24,
@@ -173,6 +173,20 @@ describe('SystemMapView (system fixes B1: moons orbit their parent)', () => {
 
     await wrapper.get('[data-testid="body-node-belt-1"]').trigger('click')
     expect(wrapper.get('[data-testid="belt-span"]').text()).toContain('2.30–2.70 AU')
+  })
+
+  // Issue #313: the wire value is the engine's snake_case tag, which reads as
+  // an implementation detail — the side panel should show the named archetype.
+  it('shows the archetype label, not the raw snake_case tag', async () => {
+    const ocean = makeBody({ id: 'ocean-1', name: 'Ocean World', subtype: 'ocean' })
+    getSystemBodies.mockResolvedValueOnce([ocean])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-node-ocean-1"]').trigger('click')
+    const archetype = wrapper.get('[data-testid="body-archetype"]')
+    expect(archetype.text()).toBe('Ocean world')
+    expect(archetype.text()).not.toContain('ocean_')
   })
 })
 
