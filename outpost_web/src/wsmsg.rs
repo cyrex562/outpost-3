@@ -162,6 +162,18 @@ pub enum ClientCommand {
         /// New name, or `null` to revert to the default.
         name: Option<String>,
     },
+    /// Pause or resume a placed building (issue #309).
+    ///
+    /// A paused building is excluded from production entirely (no labour, power,
+    /// or commodity draw) but keeps its build slot — pausing is not demolition.
+    SetBuildingPaused {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Placed-building instance UUID.
+        building_id: String,
+        /// `true` to pause, `false` to resume.
+        paused: bool,
+    },
     /// Found a new colony at a surveyed planet-map site (issue #220 — the
     /// founding wizard's primary command in browser mode).
     /// Retune one balance scalar live (playtesting).

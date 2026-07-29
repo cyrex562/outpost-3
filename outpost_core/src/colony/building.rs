@@ -63,6 +63,30 @@ pub struct PlacedBuilding {
     /// can be labelled ("North Vein Mine").
     #[serde(default)]
     pub name: Option<String>,
+    /// Whether this building is mothballed (issue #309).
+    ///
+    /// A paused building is excluded from the production pass entirely —
+    /// [`crate::ProductionInput`] never gets built for it — rather than
+    /// included with each of its draws individually zeroed. That single
+    /// exclusion is what makes every other release in the issue (labour,
+    /// power, commodity inputs, maintenance, waste it never generates) a
+    /// consequence instead of six separate special cases, and it is why
+    /// pausing beats even a [`Self::labour_lock`]: an excluded building offers
+    /// zero labour demand, so a lock on it can never claim anything.
+    ///
+    /// **Build slots are the one thing that must survive this exclusion.**
+    /// Slot accounting ([`crate::colony::Colony::slots_used`]) sums
+    /// `slot_cost` directly off the placed-building list and does not touch
+    /// the production pass, so pausing never frees a slot — the building's
+    /// physical footprint is still standing, only its utilities are off.
+    ///
+    /// Per-instance, not per-type — matching [`Self::priority`],
+    /// [`Self::labour_lock`], and [`Self::name`], all of which are already
+    /// per-`PlacedBuilding` despite only the *default* being authored per
+    /// type. Pausing one of three mines and leaving the other two running is
+    /// the whole point.
+    #[serde(default)]
+    pub paused: bool,
 }
 
 fn default_placed_priority() -> u8 {
@@ -91,6 +115,7 @@ impl PlacedBuilding {
             labour_lock: None,
             ordinal: 0,
             name: None,
+            paused: false,
         }
     }
 

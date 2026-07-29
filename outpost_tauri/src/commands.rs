@@ -126,6 +126,15 @@ pub enum ClientCommand {
         building_id: String,
         name: Option<String>,
     },
+    /// Pause or resume a placed building (issue #309).
+    ///
+    /// A paused building is excluded from production entirely (no labour, power,
+    /// or commodity draw) but keeps its build slot — pausing is not demolition.
+    SetBuildingPaused {
+        colony_id: String,
+        building_id: String,
+        paused: bool,
+    },
     /// Cancel a queued construction project and receive a 50% partial refund.
     CancelConstruction {
         colony_id: String,
@@ -1345,6 +1354,15 @@ pub fn apply_command(
             colony_id: parse_colony(&colony_id)?,
             building_id: parse_building(&building_id)?,
             name,
+        },
+        ClientCommand::SetBuildingPaused {
+            colony_id,
+            building_id,
+            paused,
+        } => Command::SetBuildingPaused {
+            colony_id: parse_colony(&colony_id)?,
+            building_id: parse_building(&building_id)?,
+            paused,
         },
         ClientCommand::CancelConstruction {
             colony_id,

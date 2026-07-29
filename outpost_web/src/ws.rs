@@ -317,6 +317,15 @@ pub(crate) fn client_command_to_core(
             building_id: parse_building_id(&building_id)?,
             name,
         }),
+        ClientCommand::SetBuildingPaused {
+            colony_id,
+            building_id,
+            paused,
+        } => Ok(Command::SetBuildingPaused {
+            colony_id: parse_colony_id(&colony_id)?,
+            building_id: parse_building_id(&building_id)?,
+            paused,
+        }),
         ClientCommand::FoundColonyAtSite {
             name,
             starting_population,
@@ -2521,6 +2530,27 @@ mod tests {
                 assert_eq!(name.as_deref(), Some("North Vein"));
             }
             other => panic!("expected RenameBuilding, got {other:?}"),
+        }
+
+        let paused = client_command_to_core(
+            ClientCommand::SetBuildingPaused {
+                colony_id: colony_id.to_string(),
+                building_id: building_id.to_string(),
+                paused: true,
+            },
+            &state,
+        )
+        .expect("pause translates");
+        match paused {
+            Command::SetBuildingPaused {
+                building_id: got_building,
+                paused: got,
+                ..
+            } => {
+                assert_eq!(got_building, building_id);
+                assert!(got);
+            }
+            other => panic!("expected SetBuildingPaused, got {other:?}"),
         }
     }
 
