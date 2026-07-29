@@ -1,9 +1,10 @@
 # Victory Conditions — Outpost 3 base pack
 #
 # All four standard conditions are listed here.  The engine loads these at
-# startup and tracks progress toward each one during the strategic-month loop.
-# The first condition satisfied emits VictoryAchieved and (unless sandbox-
-# continue is active) halts the game.
+# startup and tracks progress toward each one every colony-sol (issue #333
+# retired the strategic-month cadence this used to run on).  The first
+# condition satisfied emits VictoryAchieved and (unless sandbox-continue is
+# active) halts the game.
 
 conditions:
   # Primary capstone — system-scale megaproject.

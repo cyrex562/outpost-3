@@ -1,9 +1,14 @@
 <script setup lang="ts">
 /**
  * Turn control bar (UI-rework PR3; time controls added in issue #332) — the
- * persistent footer. Shows the current-turn indicator (Sol / Month) on the left
- * and the turn controls pinned bottom-right, so time is reachable from every
+ * persistent footer. Shows the current-turn indicator (Sol) on the left and
+ * the turn controls pinned bottom-right, so time is reachable from every
  * in-game screen. Also hosts the global event toast.
+ *
+ * The sol is the game's only cadence (issue #333 retired the strategic
+ * month), so the indicator shows sol alone (issue #338) — `World.month`
+ * still exists as a derived calendar label but is no longer surfaced in
+ * any UI.
  *
  * ## Time controls
  *
@@ -136,7 +141,7 @@ onUnmounted(stopTimer)
 <template>
   <footer class="turn-control-bar" data-testid="turn-control-bar">
     <div class="turn-indicator" data-testid="turn-indicator">
-      Sol {{ world.sol }} · Month {{ world.month }}
+      Sol {{ world.sol }}
     </div>
 
     <div

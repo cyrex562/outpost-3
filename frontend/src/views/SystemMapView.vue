@@ -522,7 +522,7 @@ function viewSurface(body: SystemBody): void {
     <div class="toolbar">
       <h2 data-testid="system-title">{{ systemTitle }}</h2>
       <div class="clock">
-        Sol {{ worldStore.sol }} · Month {{ worldStore.month }}
+        Sol {{ worldStore.sol }}
       </div>
       <div class="actions">
         <button class="btn" data-testid="btn-reset-view" @click="resetView">
