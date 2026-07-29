@@ -92,6 +92,17 @@ export type Command =
       building_id: string
       name: string | null
     }
+  | {
+      /**
+       * Pause or resume a placed building (issue #309). A paused building is
+       * excluded from production entirely — no labour, power, or commodity
+       * draw — but keeps its build slot; pausing is not demolition.
+       */
+      kind: 'set_building_paused'
+      colony_id: string
+      building_id: string
+      paused: boolean
+    }
   | { kind: 'cancel_construction'; colony_id: string; project_id: string }
   | {
       kind: 'deploy_starter_kit'

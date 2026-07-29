@@ -34,6 +34,12 @@ export interface BuildingRow {
   priority: number
   /** Workers pinned by the player, or `null` when automatic (issue #307). */
   labour_lock: number | null
+  /**
+   * Whether this building is paused (issue #309) — excluded from production
+   * entirely, so it draws no labour, power, or commodity inputs and produces
+   * nothing, but still occupies its build slot.
+   */
+  paused: boolean
   slot_cost: number
   full_capacity: boolean
   /** Production scale achieved last turn, 0.0–1.0. `0` = produced nothing. */

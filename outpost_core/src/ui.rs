@@ -101,6 +101,15 @@ pub struct BuildingRow {
     pub priority: u8,
     /// Workers pinned here by the player, or `None` if automatic (issue #307).
     pub labour_lock: Option<u32>,
+    /// Whether this building is paused (issue #309).
+    ///
+    /// A paused building is excluded from the production pass entirely, so its
+    /// [`Self::scale`]/[`Self::labour_assigned`]/[`Self::labour_demand`] all read
+    /// as their empty defaults (`0.0`/`0`/`0`) just like a building that hasn't
+    /// run a sol yet — this flag is what lets the UI tell "paused" apart from
+    /// "genuinely produced nothing."
+    #[serde(default)]
+    pub paused: bool,
     /// Number of build slots consumed by this building.
     pub slot_cost: u32,
     /// Whether the building ran at full capacity last turn.
@@ -633,6 +642,7 @@ mod tests {
                 labour_demand: 10,
                 priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
                 labour_lock: None,
+                paused: false,
                 slot_cost: 1,
                 full_capacity: true,
                 scale: 1.0,

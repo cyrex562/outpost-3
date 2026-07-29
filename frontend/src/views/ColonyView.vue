@@ -286,6 +286,21 @@ async function renameBuilding(buildingId: string, name: string | null): Promise<
   })
 }
 
+/**
+ * Pause or resume a building (issue #309). Same intent-up/dispatch-here split
+ * as the staffing controls above.
+ */
+async function setBuildingPaused(buildingId: string, paused: boolean): Promise<void> {
+  const col = selectedColony.value
+  if (!col) return
+  await gameStore.sendCommand({
+    kind: 'set_building_paused',
+    colony_id: col.id,
+    building_id: buildingId,
+    paused,
+  })
+}
+
 // ─── Panel layout persistence ───────────────────────────────────────────────────
 
 interface PersistedLayout {
@@ -424,6 +439,7 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                   @set-priority="setBuildingPriority"
                   @set-lock="setBuildingLock"
                   @rename="renameBuilding"
+                  @set-paused="setBuildingPaused"
                 />
               </Pane>
               <Pane :size="centerSizes[1]" min-size="10">

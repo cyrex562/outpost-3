@@ -130,4 +130,23 @@ test('set a building’s staffing priority, rename it, and pin its labour', asyn
   await expect(page.getByTestId(`building-locked-${buildingId}`)).toBeVisible({ timeout: 10_000 })
   await page.getByTestId(`building-unpin-${buildingId}`).click()
   await expect(page.getByTestId(`building-pin-${buildingId}`)).toBeVisible({ timeout: 10_000 })
+
+  // ── Pause, then resume (issue #309) — round-trips through the engine, same
+  // as everything above: a reload must still show it paused, proving the flag
+  // is real backend state and not held in the component. ──
+  const pauseBtn = page.getByTestId(`building-pause-${buildingId}`)
+  await expect(pauseBtn).toHaveText('Pause')
+  await pauseBtn.click()
+  await expect(pauseBtn).toHaveText('Resume', { timeout: 10_000 })
+  await expect(page.getByTestId(`building-status-colony_hq`)).toHaveText('Paused')
+
+  await page.reload()
+  await expect(page.getByTestId(`building-pause-${buildingId}`)).toHaveText('Resume', {
+    timeout: 15_000,
+  })
+
+  await page.getByTestId(`building-pause-${buildingId}`).click()
+  await expect(page.getByTestId(`building-pause-${buildingId}`)).toHaveText('Pause', {
+    timeout: 10_000,
+  })
 })

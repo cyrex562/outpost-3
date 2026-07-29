@@ -50,6 +50,7 @@ const emit = defineEmits<{
   (e: 'set-lock', buildingId: string, lock: number | null): void
   /** `null` reverts to the auto-numbered default name. */
   (e: 'rename', buildingId: string, name: string | null): void
+  (e: 'set-paused', buildingId: string, paused: boolean): void
 }>()
 
 /** Priority bands offered, matching the engine's `1..=MAX_BUILDING_PRIORITY`. */
@@ -97,15 +98,20 @@ function unpin(b: BuildingRow): void {
   emit('set-lock', b.building_id, null)
 }
 
-function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' {
+function togglePaused(b: BuildingRow): void {
+  emit('set-paused', b.building_id, !b.paused)
+}
+
+function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' | 'paused' {
+  if (b.paused) return 'paused'
   if (b.full_capacity) return 'running'
   // Anything above zero produced *something* last turn — only a genuine zero
   // is idle.
   return b.scale > 0 ? 'partial' : 'idle'
 }
 
-function statusLabel(status: 'idle' | 'running' | 'partial'): string {
-  return { idle: 'Idle', running: 'Running', partial: 'Partial' }[status]
+function statusLabel(status: 'idle' | 'running' | 'partial' | 'paused'): string {
+  return { idle: 'Idle', running: 'Running', partial: 'Partial', paused: 'Paused' }[status]
 }
 
 /**
@@ -125,6 +131,7 @@ function isTransientShortfall(b: BuildingRow): boolean {
  * reason when it has one, so "Partial" and "Idle" say *why*.
  */
 function statusDetail(b: BuildingRow): string {
+  if (b.paused) return 'Paused — draws no labour, power, or inputs. Still occupies its build slot.'
   if (b.full_capacity) return 'Running at full output'
   if (b.shortfall_reason) {
     return `${(b.scale * 100).toFixed(0)}% output — ${b.shortfall_reason}`
@@ -231,6 +238,7 @@ function displayName(b: BuildingRow): string {
         v-for="b in props.buildings"
         :key="b.building_id"
         class="building-item"
+        :class="{ 'is-paused': b.paused }"
         :data-testid="`building-row-${b.building_type}`"
         :data-building-id="b.building_id"
       >
@@ -323,6 +331,18 @@ function displayName(b: BuildingRow): string {
               @click="unpin(b)"
             >Unpin</button>
           </template>
+
+          <button
+            class="btn-small"
+            :class="{ 'btn-paused': b.paused }"
+            :data-testid="`building-pause-${b.building_id}`"
+            :title="
+              b.paused
+                ? 'Resume this building — it will draw labour, power, and inputs again.'
+                : 'Pause this building — releases its labour, power, and commodity draw. Its build slot is kept.'
+            "
+            @click="togglePaused(b)"
+          >{{ b.paused ? 'Resume' : 'Pause' }}</button>
 
           <template v-if="renamingId === b.building_id">
             <input
@@ -436,6 +456,12 @@ function displayName(b: BuildingRow): string {
 .status-running { color: #6adba5; }
 .status-partial { color: #eab764; }
 .status-idle    { color: #778; }
+.status-paused  { color: #79a; }
+
+/* A paused building is deliberately off, not broken — dim the whole row
+   rather than flag it the way a shortfall would. */
+.building-item.is-paused { opacity: 0.6; }
+.btn-paused { border-color: #579; color: #9ad; }
 
 .staffing { font-size: 0.72rem; color: #789; font-family: monospace; }
 .staffing.understaffed { color: #eab764; }

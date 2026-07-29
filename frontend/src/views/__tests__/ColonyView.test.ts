@@ -143,6 +143,7 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
           labour_demand: 0,
           priority: 5,
           labour_lock: null,
+          paused: false,
           slot_cost: 1,
           full_capacity: true,
           scale: 1.0,

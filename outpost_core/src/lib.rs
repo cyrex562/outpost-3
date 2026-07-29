@@ -292,6 +292,29 @@ pub enum Command {
         /// New name, or `None` to revert to the auto-numbered default.
         name: Option<String>,
     },
+    /// Pause or resume a placed building (issue #309).
+    ///
+    /// A paused building is excluded from the production pass entirely — no
+    /// labour demand, no power draw or generation, no commodity inputs
+    /// consumed or outputs produced, no maintenance charged. It wins over a
+    /// [`Command::SetBuildingLabourLock`]: an excluded building never becomes a
+    /// labour candidate in the first place, so a stale lock on a paused
+    /// building can never claim workers.
+    ///
+    /// **Build slots are not released.** Pausing is not demolition — the
+    /// building's physical footprint still counts against
+    /// [`colony::Colony::slots_used`].
+    ///
+    /// Scoped to a **building instance**, not a type, matching
+    /// [`Command::SetBuildingPriority`].
+    SetBuildingPaused {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance to pause or resume.
+        building_id: uuid::Uuid,
+        /// `true` to pause, `false` to resume.
+        paused: bool,
+    },
     /// Assign a number of labour units to a named slot in a colony.
     ///
     /// `slot` identifies the production slot; `labour` is the worker-unit count.
@@ -1305,6 +1328,15 @@ pub enum Event {
         building_id: uuid::Uuid,
         /// The name now in effect, or `None` if reverted to the default.
         name: Option<String>,
+    },
+    /// A placed building was paused or resumed (issue #309).
+    BuildingPaused {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance.
+        building_id: uuid::Uuid,
+        /// `true` if now paused, `false` if resumed.
+        paused: bool,
     },
     /// A building type's active recipe was set (issue #166).
     ActiveRecipeSet {
@@ -2844,9 +2876,18 @@ impl GameEngine {
                         let labor: f32 = pop.available_labor();
                         // Per-instance priorities and locks ride along so
                         // production can allocate labour itself (#307).
+                        //
+                        // Paused buildings (#309) are excluded here, before any
+                        // `ProductionInput` is built for them — one exclusion that
+                        // frees their labour, power, and commodity draws all at
+                        // once, rather than special-casing each inside the
+                        // production pass. Slot accounting is untouched: it sums
+                        // `slot_cost` straight off `colony.buildings` (see
+                        // `Colony::slots_used`), never this filtered list.
                         let placed: Vec<colony::ProductionInput> = colony
                             .buildings
                             .iter()
+                            .filter(|b| !b.paused)
                             .map(colony::ProductionInput::from_placed)
                             .collect();
                         colony.pool.reset_deltas();
@@ -2918,9 +2959,12 @@ impl GameEngine {
                         .map(|o| (o.id, self.body_deposit_richness(&o.body_id)))
                         .collect();
                     for out in &mut self.state.outposts {
+                        // See the colony loop above: paused buildings (#309) are
+                        // excluded before `ProductionInput` construction.
                         let placed: Vec<colony::ProductionInput> = out
                             .buildings
                             .iter()
+                            .filter(|b| !b.paused)
                             .map(colony::ProductionInput::from_placed)
                             .collect();
                         out.pool.reset_deltas();
@@ -3746,6 +3790,29 @@ impl GameEngine {
                     colony_id: *colony_id,
                     building_id: *building_id,
                     lock: *lock,
+                }])
+            }
+
+            Command::SetBuildingPaused {
+                colony_id,
+                building_id,
+                paused,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let building = self.state.colonies[idx]
+                    .buildings
+                    .iter_mut()
+                    .find(|b| b.id == *building_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "no building {building_id} in colony {colony_id}"
+                        ))
+                    })?;
+                building.paused = *paused;
+                Ok(vec![Event::BuildingPaused {
+                    colony_id: *colony_id,
+                    building_id: *building_id,
+                    paused: *paused,
                 }])
             }
 
@@ -5930,6 +5997,7 @@ impl GameEngine {
                             labour_demand: allocation.map_or(0, |a| a.demand),
                             priority: b.priority,
                             labour_lock: b.labour_lock,
+                            paused: b.paused,
                             slot_cost: b.slot_cost,
                             full_capacity: scale >= 1.0 - 1e-9,
                             scale,
@@ -9949,6 +10017,11 @@ mod tests {
                 building_id: ghost,
                 name: Some("Nowhere".into()),
             },
+            Command::SetBuildingPaused {
+                colony_id,
+                building_id: ghost,
+                paused: true,
+            },
         ] {
             let err = engine
                 .apply(&cmd)
@@ -10051,6 +10124,281 @@ mod tests {
             Some(3),
             "the rejected lock left the old one in place"
         );
+    }
+
+    // ── Pause / resume (issue #309) ───────────────────────────────────────────
+
+    #[test]
+    fn set_building_paused_happy_path_sets_flag_and_emits_event() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+
+        let events = engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: lab,
+                paused: true,
+            })
+            .expect("pause accepted");
+        assert!(matches!(
+            events.as_slice(),
+            [Event::BuildingPaused { paused: true, .. }]
+        ));
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            engine.state.colonies[idx]
+                .buildings
+                .iter()
+                .find(|b| b.id == lab)
+                .unwrap()
+                .paused
+        );
+
+        let events = engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: lab,
+                paused: false,
+            })
+            .expect("resume accepted");
+        assert!(matches!(
+            events.as_slice(),
+            [Event::BuildingPaused { paused: false, .. }]
+        ));
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            !engine.state.colonies[idx]
+                .buildings
+                .iter()
+                .find(|b| b.id == lab)
+                .unwrap()
+                .paused
+        );
+    }
+
+    #[test]
+    fn a_paused_building_is_excluded_from_production_entirely() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+        let water_before = engine.state.colonies[idx].pool.amount("water");
+
+        engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: lab,
+                paused: true,
+            })
+            .unwrap();
+
+        let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::ResearchProduced { .. })),
+            "a paused lab must produce no research"
+        );
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            !engine.state.colonies[idx]
+                .last_production_by_building
+                .contains_key(&lab),
+            "a fully excluded building has no production result at all"
+        );
+        assert!(
+            (engine.state.colonies[idx].pool.amount("water") - water_before).abs() < 1e-9,
+            "a paused building must not draw its commodity inputs"
+        );
+    }
+
+    #[test]
+    fn pausing_frees_labour_for_other_buildings_and_beats_a_stale_lock() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        // A second lab competing for the same three-worker pool.
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("research_lab", 1));
+        let labs: Vec<uuid::Uuid> = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .filter(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .collect();
+        assert_eq!(labs.len(), 2);
+
+        // Lock the first lab's workers, then pause it anyway — pausing must win.
+        engine
+            .apply(&Command::SetBuildingLabourLock {
+                colony_id,
+                building_id: labs[0],
+                lock: Some(3),
+            })
+            .expect("lock accepted");
+        engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: labs[0],
+                paused: true,
+            })
+            .expect("pause accepted");
+
+        // Exactly enough labour for one three-worker lab.
+        engine.state.populations[idx].count = 3.0;
+        engine.state.populations[idx].stability = 1.0;
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let plan = engine.state.colonies[idx]
+            .last_labour
+            .as_ref()
+            .expect("a plan after the sol");
+        assert_eq!(
+            plan.for_building(labs[0]),
+            None,
+            "the paused-and-locked lab is not even a labour candidate"
+        );
+        assert_eq!(
+            plan.for_building(labs[1]).expect("the other lab").assigned,
+            3,
+            "the running lab got the workers the paused one would have hoarded"
+        );
+    }
+
+    #[test]
+    fn pausing_a_power_consumer_removes_its_demand_from_the_grid() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+
+        engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: lab,
+                paused: true,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            !engine.state.colonies[idx]
+                .last_production_by_building
+                .contains_key(&lab),
+            "a paused consumer never enters the power grid computation"
+        );
+    }
+
+    #[test]
+    fn pausing_does_not_free_the_buildings_slot() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+        let slots_before = engine.state.colonies[idx].slots_used();
+
+        engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: lab,
+                paused: true,
+            })
+            .unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].slots_used(),
+            slots_before,
+            "pausing is not demolition — the slot is still occupied"
+        );
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].slots_used(),
+            slots_before,
+            "slot accounting must survive a full sol with the building excluded from production"
+        );
+    }
+
+    #[test]
+    fn pre_309_save_payload_without_paused_field_deserializes_as_not_paused() {
+        let json = r#"{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "building_type": "research_lab",
+            "slot_cost": 1
+        }"#;
+        let building: colony::PlacedBuilding = serde_json::from_str(json).unwrap();
+        assert!(
+            !building.paused,
+            "a pre-#309 payload with no `paused` field must default to false"
+        );
+    }
+
+    #[test]
+    fn building_row_reflects_paused_state_in_colony_screen() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_science_colony(&mut engine);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let lab = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "research_lab")
+            .map(|b| b.id)
+            .expect("a lab");
+
+        engine
+            .apply(&Command::SetBuildingPaused {
+                colony_id,
+                building_id: lab,
+                paused: true,
+            })
+            .unwrap();
+
+        let QueryResult::ColonyScreen(screen) =
+            engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+        else {
+            panic!()
+        };
+        let row = screen
+            .buildings
+            .iter()
+            .find(|b| b.building_id == lab)
+            .expect("the lab's row");
+        assert!(row.paused, "ColonyScreen must surface the paused flag");
+
+        let solar = screen
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "solar_array")
+            .expect("the solar array's row");
+        assert!(!solar.paused, "an unpaused building must read false");
     }
 
     #[test]

@@ -12,6 +12,7 @@ function makeRow(overrides: Partial<BuildingRow>): BuildingRow {
     labour_demand: 5,
     priority: 5,
     labour_lock: null,
+    paused: false,
     slot_cost: 2,
     full_capacity: true,
     scale: 1.0,
@@ -107,6 +108,21 @@ describe('BuildingsPanel status derivation (#169, corrected in #303)', () => {
   it('does not badge an ordinary pick-one building as always-on', () => {
     const wrapper = mountWith({ always_on: false })
     expect(wrapper.find('[data-testid="building-always-on-smelter"]').exists()).toBe(false)
+  })
+
+  // ── Pause / resume (issue #309) ──
+
+  it('shows Paused and dims the row, overriding scale-derived status', () => {
+    const wrapper = mountWith({ paused: true, full_capacity: true, scale: 1.0 })
+    expect(wrapper.find('[data-testid="building-status-smelter"]').text()).toBe('Paused')
+    expect(wrapper.get('[data-testid="building-row-smelter"]').classes()).toContain('is-paused')
+  })
+
+  it('does not dim a running row', () => {
+    const wrapper = mountWith({ paused: false, full_capacity: true, scale: 1.0 })
+    expect(wrapper.get('[data-testid="building-row-smelter"]').classes()).not.toContain(
+      'is-paused',
+    )
   })
 
   it('shows a loading hint when buildings is null', () => {
@@ -419,6 +435,19 @@ describe('BuildingsPanel per-building staffing (#307 stage 4)', () => {
 
     await wrapper.get('[data-testid="building-unpin-m1"]').trigger('click')
     expect(wrapper.emitted('set-lock')).toEqual([['m1', null]])
+  })
+
+  it('pausing and resuming emits set-paused with the toggled value', async () => {
+    const wrapper = mountRows([{ building_id: 'm1', paused: false }])
+    const btn = wrapper.get('[data-testid="building-pause-m1"]')
+    expect(btn.text()).toBe('Pause')
+    await btn.trigger('click')
+    expect(wrapper.emitted('set-paused')).toEqual([['m1', true]])
+  })
+
+  it('shows Resume for an already-paused building', () => {
+    const wrapper = mountRows([{ building_id: 'm1', paused: true }])
+    expect(wrapper.get('[data-testid="building-pause-m1"]').text()).toBe('Resume')
   })
 
   it('renames with the surrounding whitespace trimmed', async () => {
