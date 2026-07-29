@@ -158,7 +158,11 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     expect((water.element as HTMLInputElement).value).toBe('100')
   })
 
-  it('pre-selects the landing kit so the default loadout matches what the engine would place', async () => {
+  // Issue #312: founding no longer asks the player to pick buildings — the
+  // engine places a fixed bootstrap kit automatically inside
+  // `found_colony_at_site` itself. Step 3 only previews what that kit
+  // contains; there is nothing here for the player to edit.
+  it('previews the bootstrap kit read-only, with no per-building controls', async () => {
     getColonizeTargets.mockResolvedValue([BODY])
     getSystemBodies.mockResolvedValue([])
     // hydroponic_bay is flagged as landing-kit content, water_well is not.
@@ -176,50 +180,38 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     await wrapper.find('.btn.primary').trigger('click')
     await flushPromises()
 
-    // Only the flagged building is pre-selected, and its 2 slots are already
-    // spent — so the step-3 gate is satisfied without the player touching it.
+    // Only the flagged building appears in the kit preview, and its 2 slots
+    // are shown as spent — with no picker to change that.
     const preview = wrapper.find('[data-testid="budget-preview"]')
     expect(preview.text()).toContain('2 / 10')
-    expect(preview.classes()).not.toContain('over')
-    const wellCount = wrapper.find('[data-testid="building-count-water_well"]')
-    expect((wellCount.element as HTMLInputElement).value).toBe('0')
+    expect(wrapper.find('[data-testid="kit-building-hydroponic_bay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="kit-building-water_well"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="building-count-water_well"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="building-plus-water_well"]').exists()).toBe(false)
   })
 
-  it('updates the budget preview as building counts change, and flags over-budget', async () => {
+  it('advancing past step 3 needs only a positive colonist count, not any building choice', async () => {
+    // No building is flagged starter_kit — the kit preview is empty — and step
+    // 3 must still be advanceable, since the player never chose buildings here.
     const wrapper = await mountAtStep3()
+    expect(wrapper.find('[data-testid="kit-building-water_well"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="kit-building-hydroponic_bay"]').exists()).toBe(false)
 
-    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
-    let preview = wrapper.find('[data-testid="budget-preview"]')
-    expect(preview.text()).toContain('1 / 10')
-    expect(preview.classes()).not.toContain('over')
-
-    // 1 water_well (1 slot) + 6 hydroponic_bay (2 slots each) = 13 > 10.
-    for (let i = 0; i < 6; i += 1) {
-      await wrapper.find('[data-testid="building-plus-hydroponic_bay"]').trigger('click')
-    }
-
-    preview = wrapper.find('[data-testid="budget-preview"]')
-    expect(preview.text()).toContain('13 / 10')
-    expect(preview.classes()).toContain('over')
+    const next = wrapper.find('.btn.primary')
+    expect(next.attributes('disabled')).toBeUndefined()
+    await next.trigger('click')
+    expect(wrapper.find('[data-testid="colony-name-input"]').exists()).toBe(true)
   })
 
-  it('sends supply_overrides and deploys a starter kit batch, omitting zeroed-out commodities', async () => {
+  it('sends supply_overrides and founds the colony without a separate starter-kit dispatch', async () => {
     const wrapper = await mountAtStep3()
 
-    // Zero out food_ration, and queue 2x water_well.
+    // Zero out food_ration; nothing here touches buildings since the kit is fixed.
     await wrapper.find('[data-testid="supply-amount-food_ration"]').setValue(0)
-    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
-    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
 
     sendCommand.mockImplementation(async (cmd: Command) => {
       if (cmd.kind === 'found_colony_at_site') {
         return [{ kind: 'colony_founded', colony_id: 'colony-1' } as unknown as GameEvent]
-      }
-      if (cmd.kind === 'deploy_starter_kit') {
-        return [
-          { kind: 'building_constructed', colony_id: 'colony-1', building_type: 'water_well' } as unknown as GameEvent,
-          { kind: 'building_constructed', colony_id: 'colony-1', building_type: 'water_well' } as unknown as GameEvent,
-        ]
       }
       return []
     })
@@ -234,37 +226,10 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     expect(foundCmd.starting_population).toBe(100)
     expect(foundCmd.supply_overrides).toEqual([['water', 50]])
 
-    const kitCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'deploy_starter_kit')
-    expect(kitCalls.length).toBe(1)
-    const kitCmd = kitCalls[0][0] as Extract<Command, { kind: 'deploy_starter_kit' }>
-    expect(kitCmd.colony_id).toBe('colony-1')
-    expect(kitCmd.buildings).toEqual([
-      ['water_well', 1],
-      ['water_well', 1],
-    ])
+    // The engine places the kit itself as part of founding — the wizard must
+    // not also dispatch a `deploy_starter_kit` batch (issue #312).
+    expect(sendCommand.mock.calls.some(([cmd]) => cmd.kind === 'deploy_starter_kit')).toBe(false)
 
-    expect(routerPush).toHaveBeenCalledWith('/colony')
-  })
-
-  it('still navigates when the starter kit deploy is rejected (rejection surfaced via toastMessage)', async () => {
-    const wrapper = await mountAtStep3()
-
-    await wrapper.find('[data-testid="building-plus-water_well"]').trigger('click')
-
-    sendCommand.mockImplementation(async (cmd: Command) => {
-      if (cmd.kind === 'found_colony_at_site') {
-        return [{ kind: 'colony_founded', colony_id: 'colony-1' } as unknown as GameEvent]
-      }
-      // deploy_starter_kit rejected — engine returns no events.
-      return []
-    })
-
-    await wrapper.find('.btn.primary').trigger('click') // Next -> step 4
-    await wrapper.find('.btn.primary').trigger('click') // Found Colony
-    await flushPromises()
-
-    const kitCalls = sendCommand.mock.calls.filter(([cmd]) => cmd.kind === 'deploy_starter_kit')
-    expect(kitCalls.length).toBe(1)
     expect(routerPush).toHaveBeenCalledWith('/colony')
   })
 
