@@ -423,6 +423,48 @@ impl PlanetarySubtype {
 fn default_subtype() -> PlanetarySubtype {
     PlanetarySubtype::Unclassified
 }
+
+/// Physical size class for a body, driving its generated hex-map radius
+/// (issue #314) — bigger worlds get bigger surface maps.
+///
+/// A closed set of classes rather than a continuous radius: easier to author
+/// and to reason about balance-wise, mirroring [`PlanetarySubtype`]'s own
+/// closed-enum-plus-lookup-table shape (issue #313). `Large`'s radius (12) is
+/// deliberately the same ceiling the existing
+/// `subtype_aware_generation_stays_within_performance_budget` test already
+/// exercises (`map.rs`) — this issue doesn't push the performance envelope,
+/// it just makes what was already the "everything gets radius 8" default
+/// actually vary by body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BodySize {
+    /// Moon-scale — always this class regardless of gravity (issue #314's
+    /// own wording: moons get "proportionally small maps").
+    Tiny,
+    /// Small planets, asteroid/cometary belt point bodies.
+    Small,
+    /// Mid-range planets and cold (Neptune-like) giants.
+    Medium,
+    /// Large planets and warm (Jupiter-like) giants.
+    Large,
+}
+
+impl BodySize {
+    /// Hex-map radius this size class generates at. Cell count is `3r²+3r+1`.
+    #[must_use]
+    pub fn hex_radius(self) -> u32 {
+        match self {
+            Self::Tiny => 4,
+            Self::Small => 6,
+            Self::Medium => 9,
+            Self::Large => 12,
+        }
+    }
+}
+
+fn default_body_size() -> BodySize {
+    BodySize::Medium
+}
 fn default_tidally_locked() -> bool {
     false
 }
@@ -546,6 +588,13 @@ pub struct Body {
     /// guidance — never an input to [`Body::habitability`].
     #[serde(default = "default_subtype")]
     pub subtype: PlanetarySubtype,
+    /// Physical size class (issue #314), driving the body's generated
+    /// hex-map radius via [`BodySize::hex_radius`]. Derived from the
+    /// already-rolled [`Self::gravity_g`] during system generation
+    /// (`system_gen.rs::size_for`) rather than an independent roll, so the
+    /// two attributes stay consistent — a heavier world is a bigger one.
+    #[serde(default = "default_body_size")]
+    pub size: BodySize,
     /// Whether the body's rotation is locked to its orbital period (one
     /// hemisphere permanently faces the primary). Flavor-only for now — no
     /// habitability or production effect (issue #196).
@@ -613,6 +662,7 @@ impl Body {
             gravity_g: default_gravity_g(),
             radiation: default_radiation(),
             subtype: default_subtype(),
+            size: default_body_size(),
             tidally_locked: default_tidally_locked(),
             axial_tilt_deg: default_axial_tilt_deg(),
             rotation_period_hours: default_rotation_period_hours(),

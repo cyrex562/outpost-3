@@ -78,11 +78,6 @@ const POPULATION_WARNING_ETA: u32 = 10;
 /// Default RNG seed used when constructing a [`GameEngine`] with [`GameEngine::new`].
 pub const DEFAULT_SEED: u64 = 0;
 
-/// Hex radius used for a body's read-only surface preview
-/// ([`GameEngine::body_surface_preview`]). Sized for a quick scouting look —
-/// smaller than the live founding planet's map.
-const BODY_SURFACE_PREVIEW_RADIUS: u32 = 8;
-
 /// Cargo-capacity stand-in for [`Command::FoundColonyAtSite`]'s
 /// `supply_overrides` (issue #167, open design question: "bounded by a
 /// cargo capacity?"). Each per-commodity override is capped at this many
@@ -5513,17 +5508,29 @@ impl GameEngine {
 
             // ── M1: Planet map ────────────────────────────────────────────────
             Command::SeedPlanet { seed, radius } => {
-                let map = PlanetMap::generate(*seed, *radius);
-                let cell_count = map.cells.len();
                 // Attach the founding map to a real body (issue #300). Before
                 // #300 the map floated free of the system entirely, which is
                 // why colonies aimed at any body all landed on this one map.
                 let home_id = self.designate_home_body();
+                // The home body's size (issue #314) drives the map's radius
+                // whenever a real generated body was found; the caller's
+                // `radius` is the fallback for the no-system-generated case
+                // (most engine tests, and the balance harness), where there
+                // is no rolled `Body` to read a size from at all.
+                let resolved_radius = self
+                    .state
+                    .system_state
+                    .node_map
+                    .bodies
+                    .get(&home_id)
+                    .map_or(*radius, |b| b.size.hex_radius());
+                let map = PlanetMap::generate(*seed, resolved_radius);
+                let cell_count = map.cells.len();
                 self.state.home_body_id = Some(home_id.clone());
                 self.state.planet_maps.insert(home_id, map);
                 Ok(vec![Event::PlanetSeeded {
                     seed: *seed,
-                    radius: *radius,
+                    radius: resolved_radius,
                     cell_count,
                 }])
             }
@@ -5788,7 +5795,7 @@ impl GameEngine {
         let seed = body.id.surface_seed();
         Ok(map::PlanetMap::generate_for_body_and_subtype(
             seed,
-            BODY_SURFACE_PREVIEW_RADIUS,
+            body.size.hex_radius(),
             body.temperature,
             body.subtype,
         ))
@@ -14965,6 +14972,95 @@ mod tests {
         // Reachable both ways: as "home", and by its body key.
         assert!(engine.state.home_map().is_some());
         assert!(engine.state.map_for_body(&home).is_some());
+    }
+
+    /// The home body's size (issue #314), not `SeedPlanet`'s caller-supplied
+    /// `radius`, drives the founding map once a real system exists — that
+    /// caller value is only the no-system fallback.
+    #[test]
+    fn seed_planet_derives_the_founding_maps_radius_from_the_home_bodys_size() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::System(system::SystemCommand::GenerateSystem {
+                seed: 2_024,
+                abundance_scalar: 1.0,
+                habitable_zone_center_au: 1.0,
+                min_inner_planets: 3,
+                max_inner_planets: 5,
+            }))
+            .unwrap();
+        // A radius the home body's size is extremely unlikely to match by
+        // coincidence (every `BodySize::hex_radius()` value is 4/6/9/12).
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 1,
+                radius: 99,
+            })
+            .unwrap();
+
+        let home = engine.state.home_body_id.clone().unwrap();
+        let expected_radius = engine.state.system_state.node_map.bodies[&home]
+            .size
+            .hex_radius();
+        let map = engine.state.map_for_body(&home).unwrap();
+        assert_eq!(
+            map.radius, expected_radius,
+            "the seeded map's radius must match the home body's size class, not the caller's 99"
+        );
+    }
+
+    /// With no generated system, `SeedPlanet` has no real body to read a size
+    /// from, so it must fall back to the caller's `radius` exactly as it did
+    /// before issue #314 — this is the behaviour most engine tests and the
+    /// balance harness rely on when they never call `GenerateSystem`.
+    #[test]
+    fn seed_planet_falls_back_to_the_caller_radius_with_no_system_generated() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet { seed: 1, radius: 5 })
+            .unwrap();
+        let map = engine.state.home_map().unwrap();
+        assert_eq!(map.radius, 5);
+    }
+
+    /// A body's surface preview (issue #314) is sized by its own size class,
+    /// not a flat constant — two bodies with different rolled sizes must
+    /// produce differently-sized previews.
+    #[test]
+    fn body_surface_preview_radius_matches_the_bodys_size_class() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::System(system::SystemCommand::GenerateSystem {
+                seed: 777,
+                abundance_scalar: 1.0,
+                habitable_zone_center_au: 1.0,
+                min_inner_planets: 3,
+                max_inner_planets: 5,
+            }))
+            .unwrap();
+        let bodies: Vec<system::Body> = engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .values()
+            .filter(|b| b.kind.has_surface())
+            .cloned()
+            .collect();
+        assert!(
+            !bodies.is_empty(),
+            "generated system must have at least one surfaced body"
+        );
+        for body in &bodies {
+            let preview = engine.body_surface_preview(&body.id).unwrap();
+            assert_eq!(
+                preview.radius,
+                body.size.hex_radius(),
+                "body {} ({:?}) preview radius should match its size class",
+                body.name,
+                body.size
+            );
+        }
     }
 
     /// Home designation must not depend on `HashMap` iteration order.
