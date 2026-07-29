@@ -70,7 +70,14 @@ describe('TurnControlBar (UI-rework PR3)', () => {
   it('shows the current-turn indicator from the world store', () => {
     const wrapper = mount(TurnControlBar)
     expect(wrapper.get('[data-testid="turn-indicator"]').text()).toContain('Sol 7')
-    expect(wrapper.get('[data-testid="turn-indicator"]').text()).toContain('Month 3')
+  })
+
+  // Issue #338: #333 retired the strategic month as a cadence; the footer
+  // kept showing it anyway. The month is still a derived calendar label
+  // internally, but nothing in the UI should surface it.
+  it('shows sol only — no month counter (issue #338)', () => {
+    const wrapper = mount(TurnControlBar)
+    expect(wrapper.get('[data-testid="turn-indicator"]').text()).not.toContain('Month')
   })
 
   // Advance Turn was removed: play, fast-forward, and it were three triggers

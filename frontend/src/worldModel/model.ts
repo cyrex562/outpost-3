@@ -29,7 +29,11 @@ export interface ProjectState {
 export interface WorldState {
   /** Current colony-sol counter. */
   sol: number
-  /** Current strategic-month counter. */
+  /**
+   * Derived calendar label (sol ÷ sols-per-month) — no longer a real cadence
+   * since #333 unified everything onto the sol, and no longer shown in the
+   * UI (issue #338). Kept only because the engine still emits it.
+   */
   month: number
   /** All known colonies, keyed by colony UUID. */
   colonies: Record<string, ColonyState>

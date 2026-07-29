@@ -169,37 +169,45 @@ export const useGameStore = defineStore('game', () => {
 
 function summariseEvents(events: GameEvent[]): string {
   if (events.length === 0) return 'Command accepted — no events.'
-  const lines = events.map((e) => {
-    switch (e.kind) {
-      case 'colony_sol_advanced':
-        return `Sol ${e.sol} begins.`
-      case 'strategic_month_advanced':
-        return `Month ${e.month} begins.`
-      case 'colony_founded':
-        return `Colony "${e.name}" founded.`
-      case 'needs_resolved': {
-        const delta = (e as import('@/types/gameEvents').NeedsResolvedEvent).stability_delta
-        return `Needs resolved (Δstability ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}).`
+  const lines = events
+    .map((e) => {
+      switch (e.kind) {
+        case 'colony_sol_advanced':
+          return `Sol ${e.sol} begins.`
+        // The month is a calendar label with nothing in the UI showing it
+        // anymore (issue #338, following #333's cadence unification) — a
+        // toast for it would be month-flavoured copy with no month display
+        // left to explain it, so this event is intentionally silent (filtered
+        // out below).
+        case 'strategic_month_advanced':
+          return null
+        case 'colony_founded':
+          return `Colony "${e.name}" founded.`
+        case 'needs_resolved': {
+          const delta = (e as import('@/types/gameEvents').NeedsResolvedEvent).stability_delta
+          return `Needs resolved (Δstability ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}).`
+        }
+        case 'research_produced': {
+          const amt = (e as import('@/types/gameEvents').ResearchProducedEvent).amount
+          return `Research +${amt.toFixed(1)} RP.`
+        }
+        case 'directive_fired':
+          return `Directive fired.`
+        case 'production_shortfall':
+          return `Shortfall: ${e.building_type} — ${e.reason}.`
+        case 'outpost_established':
+          return `Outpost established.`
+        case 'outpost_decommissioned':
+          return `Outpost decommissioned.`
+        case 'outpost_construction_queued':
+          return `Outpost queued ${(e as import('@/types/gameEvents').OutpostConstructionQueuedEvent).building_type}.`
+        case 'outpost_promoted':
+          return `Outpost promoted to colony "${(e as import('@/types/gameEvents').OutpostPromotedEvent).name}".`
+        default:
+          return e.kind.replace(/_/g, ' ')
       }
-      case 'research_produced': {
-        const amt = (e as import('@/types/gameEvents').ResearchProducedEvent).amount
-        return `Research +${amt.toFixed(1)} RP.`
-      }
-      case 'directive_fired':
-        return `Directive fired.`
-      case 'production_shortfall':
-        return `Shortfall: ${e.building_type} — ${e.reason}.`
-      case 'outpost_established':
-        return `Outpost established.`
-      case 'outpost_decommissioned':
-        return `Outpost decommissioned.`
-      case 'outpost_construction_queued':
-        return `Outpost queued ${(e as import('@/types/gameEvents').OutpostConstructionQueuedEvent).building_type}.`
-      case 'outpost_promoted':
-        return `Outpost promoted to colony "${(e as import('@/types/gameEvents').OutpostPromotedEvent).name}".`
-      default:
-        return e.kind.replace(/_/g, ' ')
-    }
-  })
+    })
+    .filter((line): line is string => line !== null)
+  if (lines.length === 0) return 'Command accepted — no events.'
   return lines.slice(0, 4).join('  |  ') + (lines.length > 4 ? ` (+${lines.length - 4} more)` : '')
 }
