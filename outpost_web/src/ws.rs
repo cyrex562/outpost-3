@@ -731,14 +731,15 @@ async fn handle_new_game(
             .map_err(|e| format!("GenerateSystem failed: {e}"))?;
         events.extend(system_evs);
 
-        // Seed the planet map. `radius` here is only the no-system fallback —
-        // `GenerateSystem` just ran above, so the handler derives the real
-        // radius from the designated home body's rolled size instead
-        // (issue #314).
+        // Seed the planet map. `width`/`height` here are only the no-system
+        // fallback — `GenerateSystem` just ran above, so the handler derives
+        // the real dimensions from the designated home body's rolled size
+        // instead (issue #314).
         let seed_evs = engine
             .apply(&Command::SeedPlanet {
                 seed: planet_seed,
-                radius: 4,
+                width: 10,
+                height: 6,
             })
             .map_err(|e| format!("SeedPlanet failed: {e}"))?;
         events.extend(seed_evs);
@@ -1108,7 +1109,11 @@ mod tests {
                 }))
                 .expect("generate system");
             engine
-                .apply(&Command::SeedPlanet { seed, radius: 4 })
+                .apply(&Command::SeedPlanet {
+                    seed,
+                    width: 10,
+                    height: 6,
+                })
                 .expect("seed planet");
             engine
                 .apply(&Command::FoundColony {
@@ -2607,7 +2612,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 99,
-                radius: 4,
+                width: 10,
+                height: 6,
             })
             .expect("seed planet");
         engine
@@ -2653,7 +2659,11 @@ mod tests {
         engine.state.needs_config = Some(NeedsConfig::default_survival());
 
         engine
-            .apply(&Command::SeedPlanet { seed: 1, radius: 4 })
+            .apply(&Command::SeedPlanet {
+                seed: 1,
+                width: 10,
+                height: 6,
+            })
             .expect("seed");
         engine
             .apply(&Command::FoundColony {

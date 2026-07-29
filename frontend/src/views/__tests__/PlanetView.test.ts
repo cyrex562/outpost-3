@@ -51,7 +51,8 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
   function twoColonyMap(edges: PlanetMap['edges'] = []): PlanetMap {
     return {
       seed: 1,
-      radius: 1,
+      width: 5,
+      height: 4,
       edges,
       hexes: [
         makeHex({ q: 0, r: 0, site_id: 's1', occupied_by: 'Alpha', occupant_colony_id: 'colony-1' }),
@@ -63,7 +64,8 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
   it('renders the planet hex map with colony nodes', async () => {
     getPlanetMap.mockResolvedValueOnce({
       seed: 1,
-      radius: 1,
+      width: 5,
+      height: 4,
       edges: [],
       hexes: [
         makeHex({ q: 0, r: 0, site_id: 's0' }),
@@ -86,7 +88,8 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
   it('routes to the colony dashboard when a colony node is clicked', async () => {
     getPlanetMap.mockResolvedValueOnce({
       seed: 1,
-      radius: 1,
+      width: 5,
+      height: 4,
       edges: [],
       hexes: [
         makeHex({
@@ -110,7 +113,8 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
   it('does not route when a non-colony (unoccupied) hex is clicked', async () => {
     getPlanetMap.mockResolvedValueOnce({
       seed: 1,
-      radius: 1,
+      width: 5,
+      height: 4,
       edges: [],
       hexes: [makeHex({ q: 0, r: 0, site_id: 's0', habitable: true })],
     })

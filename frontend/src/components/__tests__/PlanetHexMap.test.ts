@@ -22,7 +22,7 @@ function makeHex(overrides: Partial<PlanetHex>): PlanetHex {
 }
 
 function makeMap(hexes: PlanetHex[], edges: PlanetMap['edges'] = []): PlanetMap {
-  return { seed: 1, radius: 1, hexes, edges }
+  return { seed: 1, width: 5, height: 4, hexes, edges }
 }
 
 describe('PlanetHexMap temperature tint (#191)', () => {

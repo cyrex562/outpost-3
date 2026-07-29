@@ -81,23 +81,49 @@ interface RenderedEdge {
   infra_type: string
 }
 
+// Pixel-space width of one full map wrap: shifting a hex's `q` by the map's
+// `width` shifts its pixel x by exactly this (the `y` term only depends on
+// `r`, so this shift is uniform regardless of which row the hex is on).
+const mapPixelWidth = computed(() => HEX_SIZE * SQRT3 * props.map.width)
+
 const infraEdges = computed<RenderedEdge[]>(() => {
   const out: RenderedEdge[] = []
+  const wrapW = mapPixelWidth.value
   for (const e of props.map.edges ?? []) {
     const from = colonyCenters.value.get(e.from_colony_id)
     const to = colonyCenters.value.get(e.to_colony_id)
     if (!from || !to) continue // an endpoint colony isn't on the map (yet)
-    out.push({
-      key: `${e.from_colony_id}-${e.to_colony_id}-${e.infra_type}`,
-      x1: from.cx,
-      y1: from.cy,
-      x2: to.cx,
-      y2: to.cy,
-      color: INFRA_COLOR[e.infra_type] ?? '#889',
-      // Thicker line = more throughput, clamped so a rail line doesn't dominate.
-      width: 1.2 + Math.min(4, e.throughput / 60),
-      infra_type: e.infra_type,
-    })
+    const width = 1.2 + Math.min(4, e.throughput / 60)
+    const color = INFRA_COLOR[e.infra_type] ?? '#889'
+    const key = `${e.from_colony_id}-${e.to_colony_id}-${e.infra_type}`
+
+    // The engine's `edge_cost` already routes construction cost through the
+    // seam when that's shorter (issue #315); rendering must match, or a
+    // cheap seam-adjacent edge would draw as a long line across the whole
+    // map interior. Pick whichever unwrapped copy of `to` is nearest `from`
+    // in pixel space, then draw that segment *and* its mirror shifted by one
+    // full map width — whichever half is actually within the viewBox shows,
+    // giving a continuous wrap-around line without any special clipping.
+    let toX = to.cx
+    if (Math.abs(to.cx - wrapW - from.cx) < Math.abs(toX - from.cx)) toX = to.cx - wrapW
+    if (Math.abs(to.cx + wrapW - from.cx) < Math.abs(toX - from.cx)) toX = to.cx + wrapW
+
+    out.push({ key, x1: from.cx, y1: from.cy, x2: toX, y2: to.cy, color, width, infra_type: e.infra_type })
+    if (toX !== to.cx) {
+      // Mirror copy, shifted back by one map width, so the portion that
+      // exits one side of the visible map re-enters on the other.
+      const shift = toX - to.cx
+      out.push({
+        key: `${key}-wrap`,
+        x1: from.cx - shift,
+        y1: from.cy,
+        x2: to.cx,
+        y2: to.cy,
+        color,
+        width,
+        infra_type: e.infra_type,
+      })
+    }
   }
   return out
 })

@@ -54,7 +54,13 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 9: `outpost_range_bonus_au` field added (issue #241).
 /// Schema version 10: `infrastructure_cost_scalar`/`infrastructure_time_scalar` fields added (issue #306).
 /// Schema version 11: `planet_map` replaced by body-keyed `planet_maps` + `home_body_id` (issue #300).
-pub const SCHEMA_VERSION: u32 = 11;
+/// Schema version 12: `PlanetMap` topology changed from hex-of-radius-N (`radius`) to a
+/// rectangular `width` × `height` east-west-wrapping grid (issue #315) — an old save's
+/// serialized `PlanetMap`/`Command::SeedPlanet`/`Event::PlanetSeeded` shapes no longer
+/// deserialize, so the version bump alone is what rejects them with a clear
+/// [`SnapshotError::SchemaVersionMismatch`] rather than silently reshaping a player's
+/// colony placements onto the new topology.
+pub const SCHEMA_VERSION: u32 = 12;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -1167,7 +1173,7 @@ mod tests {
         state.home_body_id = Some(home.clone());
         state
             .planet_maps
-            .insert(home, crate::map::PlanetMap::generate(42, 4));
+            .insert(home, crate::map::PlanetMap::generate(42, 4, 4));
 
         snap.save(&state)
             .expect("a state with a planet map must save");
@@ -1197,7 +1203,11 @@ mod tests {
     fn a_state_built_through_the_command_path_can_be_saved() {
         let mut engine = GameEngine::new();
         engine
-            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 5,
+                height: 4,
+            })
             .expect("seed planet");
         // Picking a difficulty is part of every real setup, and it seeds
         // `DifficultyScalar` with a `ProductionRate(..)` key — the second

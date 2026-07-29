@@ -239,8 +239,10 @@ pub struct DepositWire {
 pub struct PlanetMapWire {
     /// Procedural-generation seed used for this planet.
     pub seed: u64,
-    /// Map radius in hex rings.
-    pub radius: u32,
+    /// Column count of the map (wraps east-west).
+    pub width: u32,
+    /// Row count of the map (`r = 0` / `r = height - 1` are the poles).
+    pub height: u32,
     /// Every cell on the map.
     pub hexes: Vec<PlanetHexWire>,
     /// Infrastructure edges connecting colony nodes (map/nav plan phase A3).
@@ -445,7 +447,8 @@ fn build_planet_map_wire(
 
     PlanetMapWire {
         seed: pm.seed,
-        radius: pm.radius,
+        width: pm.width,
+        height: pm.height,
         hexes,
         edges,
     }
