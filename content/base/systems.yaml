@@ -27,11 +27,21 @@
 # commodities spawn as hex-map deposits (see PlanetMap::generate_for_body_and_subtype
 # in outpost_core::map) and should be chosen consistent with the authored
 # attributes above it (e.g. `molten` pairs with hot/toxic/dense/high-radiation).
+#
+# Since issue #313, every inner-planet subtype (bar gas/ice giants) also
+# carries an explicit target land/water fraction and elevation bias that
+# hex-map generation hits quantitatively — e.g. `ocean` really does come out
+# under 25% land, `mountain` really does come out mostly high-elevation with
+# under 10% water. See PlanetarySubtype::target_land_fraction/elevation_bias
+# in outpost_core::system for the exact per-archetype numbers.
+#
 # Valid subtype tags, and which `kind` each is valid on:
-#   rocky_barren_hot | rocky_barren_cold | molten | earth_like | ocean  → inner_planet only
-#   rocky | icy                                                        → inner_planet, moon, asteroid_belt
-#   gas_giant | ice_giant                                              → gas_giant only
-#   unclassified (default)                                             → any kind
+#   rocky_barren_hot ("Mercury-like") | rocky_barren_cold ("Mars-like")
+#     | molten ("Venus-like") | earth_like | ocean | mountain  → inner_planet only
+#   icy ("Pluto-like" on an inner planet)                      → inner_planet, moon, asteroid_belt
+#   rocky                                                      → inner_planet, moon, asteroid_belt
+#   gas_giant | ice_giant                                      → gas_giant only
+#   unclassified (default)                                     → any kind
 #
 # `tidally_locked` / `axial_tilt_deg` / `rotation_period_hours` / `moon_count`
 # / `parent_body` (issue #196) are flavor-only for now — no mechanical effect.

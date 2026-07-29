@@ -421,10 +421,27 @@ impl PlanetMap {
         let equator_normal = equator_normal(seed);
 
         // Pass 1: elevation for every cell (drives vein placement below).
+        // The archetype's elevation bias (issue #313) is folded in here, not
+        // just at terrain-classification time, so a Mountain world's cells
+        // genuinely report high `HexCell::elevation` rather than only being
+        // more likely to roll a mountain terrain tag.
+        let elevation_bias = planetary_subtype.elevation_bias();
         let elevations: HashMap<HexCoord, f32> = coords
             .iter()
-            .map(|coord| (*coord, compute_elevation(seed, *coord, &mut rng)))
+            .map(|coord| {
+                let raw = compute_elevation(seed, *coord, &mut rng);
+                (*coord, (raw + elevation_bias).clamp(0.0, 1.0))
+            })
             .collect();
+
+        // The elevation quantile below which a cell becomes ocean, chosen so
+        // the map's water coverage matches the archetype's target land
+        // fraction (issue #313) instead of a fixed per-cell probability.
+        // `None` (gas/ice giants) keeps the pre-#313 fixed-probability
+        // behaviour — see `target_land_fraction`'s doc comment.
+        let water_threshold = planetary_subtype
+            .target_land_fraction()
+            .map(|land_fraction| water_threshold_for(&elevations, land_fraction));
 
         // Vein centres, keyed by commodity, placed after elevation is known
         // so elevation-band bias (e.g. iron on ridges) can steer placement.
@@ -441,6 +458,7 @@ impl PlanetMap {
                 body_temperature,
                 equator_normal,
                 &veins,
+                water_threshold,
             );
             cells.insert(*coord, cell);
             let site_id = site_id_for_coord(seed, *coord);
@@ -797,6 +815,9 @@ fn site_id_for_coord(seed: u64, coord: HexCoord) -> SiteId {
 /// carries through as the baseline temperature band before latitude/elevation
 /// shifts. `veins` are the map's per-commodity vein centres, used to bias the
 /// deposit roll and commodity choice toward coherent ore fields.
+/// `water_threshold` is the archetype's elevation-quantile ocean cut (issue
+/// #313), or `None` for subtypes with no land/water target.
+#[allow(clippy::too_many_arguments)]
 fn generate_cell(
     rng: &mut ChaCha8Rng,
     coord: HexCoord,
@@ -805,6 +826,7 @@ fn generate_cell(
     body_temperature: TemperatureBand,
     equator_normal: (f32, f32),
     veins: &[Vein],
+    water_threshold: Option<f32>,
 ) -> HexCell {
     // Rough distance from centre as a fraction [0, 1].
     let dist_frac = if radius == 0 {
@@ -822,15 +844,34 @@ fn generate_cell(
 
     // Elevation biases the terrain roll: high elevation shifts toward
     // Mountains/Volcanic (lower buckets); low elevation shifts toward
-    // Plains/Wetlands (higher buckets). Ocean is gated to low elevation only,
-    // so we don't spawn mountain-top lakes.
+    // Plains/Wetlands (higher buckets).
     let terrain_roll: f32 = rng.gen();
     let bias = (elevation - 0.5) * 0.3;
     let adjusted = (terrain_roll - bias).clamp(0.0, 1.0);
     let terrain = if dist_frac < 0.15 {
         // Near-polar regions favour flat plains.
         Terrain::Plains
+    } else if let Some(threshold) = water_threshold {
+        // Issue #313: ocean is an elevation-quantile cut chosen so the whole
+        // map's water coverage matches the archetype's target land fraction,
+        // rather than a fixed low-probability roll — a genuine ocean world
+        // now reliably comes out mostly water, not "mostly land with the
+        // occasional lake."
+        if elevation <= threshold {
+            Terrain::Ocean
+        } else if adjusted < 0.06 {
+            Terrain::Volcanic
+        } else if adjusted < 0.18 {
+            Terrain::Mountains
+        } else if adjusted < 0.33 {
+            Terrain::Hills
+        } else if adjusted < 0.43 {
+            Terrain::Wetlands
+        } else {
+            Terrain::Plains
+        }
     } else if adjusted < 0.02 {
+        // No archetype target (gas/ice giants) — unchanged pre-#313 behaviour.
         if elevation < 0.35 {
             Terrain::Ocean
         } else {
@@ -921,6 +962,29 @@ fn compute_elevation(seed: u64, coord: HexCoord, rng: &mut ChaCha8Rng) -> f32 {
     let spatial = ((ridge + valley + cross) / 3.0 + 1.0) * 0.5;
     let jitter: f32 = rng.gen();
     (spatial * 0.7 + jitter * 0.3).clamp(0.0, 1.0)
+}
+
+/// Elevation quantile below which a cell becomes ocean, chosen so that the
+/// fraction of cells at or below it is `1.0 - target_land_fraction` (issue
+/// #313).
+///
+/// Deterministic given `elevations`' iteration order does not affect the
+/// result: the whole value set is sorted before the quantile is picked.
+fn water_threshold_for(elevations: &HashMap<HexCoord, f32>, target_land_fraction: f32) -> f32 {
+    let mut values: Vec<f32> = elevations.values().copied().collect();
+    values.sort_by(|a, b| a.partial_cmp(b).expect("elevation values are never NaN"));
+    if values.is_empty() {
+        return 0.0;
+    }
+    let water_fraction = (1.0 - target_land_fraction).clamp(0.0, 1.0);
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    let idx = ((values.len() as f32) * water_fraction).round() as usize;
+    let idx = idx.min(values.len() - 1);
+    values[idx]
 }
 
 fn phase_from_seed(seed: u64, byte_offset: u32) -> f32 {
@@ -1160,6 +1224,14 @@ pub(crate) fn subtype_commodity_multiplier(subtype: PlanetarySubtype, commodity:
             "biomass" | "hydrocarbons" => 0.4,
             _ => 1.0,
         },
+        // Mostly-exposed rock at high elevation (issue #313) — ore-rich like
+        // the barren archetypes, and more so, since almost nothing is buried
+        // under water or lowland sediment.
+        PlanetarySubtype::Mountain => match commodity {
+            "structural_ore" | "silicates" | "conductive_ore" | "semiconductor_ore" => 1.8,
+            "biomass" | "hydrocarbons" => 0.2,
+            _ => 1.0,
+        },
         PlanetarySubtype::GasGiant => match commodity {
             "hydrocarbons" => 1.8,
             _ => 1.0,
@@ -1396,6 +1468,7 @@ fn cube_round(fq: f32, fr: f32, fs: f32) -> HexCoord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system::BodyKind;
 
     // ── Hex coordinate math ──────────────────────────────────────────────────
 
@@ -2342,6 +2415,14 @@ mod tests {
             .count()
     }
 
+    /// Cells eligible for deposits at all — everything but ocean (issue #313).
+    fn land_cell_count(map: &PlanetMap) -> usize {
+        map.cells
+            .values()
+            .filter(|c| !matches!(c.terrain, Terrain::Ocean))
+            .count()
+    }
+
     // ── Founding-site resource guarantee (issue #232) ────────────────────────
 
     #[test]
@@ -2430,9 +2511,18 @@ mod tests {
 
     #[test]
     fn ocean_subtype_yields_more_water_family_deposits_than_earth_like() {
+        // Since issue #313 gave Ocean a much smaller land-fraction target
+        // than EarthLike (0.20 vs 0.55), an ocean world's *land* is scarcer
+        // — comparing raw deposit totals would conflate "less land to place
+        // deposits on" with "the multiplier favours these commodities less,"
+        // which is backwards. Comparing density (deposits per land cell)
+        // isolates `subtype_commodity_multiplier`'s effect from the land/water
+        // target's, which is what this test is actually about.
         let radius = 12;
-        let mut ocean_total = 0usize;
-        let mut earth_like_total = 0usize;
+        let mut ocean_deposits = 0usize;
+        let mut ocean_land_cells = 0usize;
+        let mut earth_like_deposits = 0usize;
+        let mut earth_like_land_cells = 0usize;
         for seed in 0..10u64 {
             let ocean = PlanetMap::generate_for_body_and_subtype(
                 seed,
@@ -2446,13 +2536,111 @@ mod tests {
                 TemperatureBand::Temperate,
                 PlanetarySubtype::EarthLike,
             );
-            ocean_total += water_family_deposit_count(&ocean);
-            earth_like_total += water_family_deposit_count(&earth_like);
+            ocean_deposits += water_family_deposit_count(&ocean);
+            ocean_land_cells += land_cell_count(&ocean);
+            earth_like_deposits += water_family_deposit_count(&earth_like);
+            earth_like_land_cells += land_cell_count(&earth_like);
         }
+        #[allow(clippy::cast_precision_loss)]
+        let ocean_density = ocean_deposits as f64 / ocean_land_cells as f64;
+        #[allow(clippy::cast_precision_loss)]
+        let earth_like_density = earth_like_deposits as f64 / earth_like_land_cells as f64;
         assert!(
-            ocean_total > earth_like_total,
-            "ocean_total={ocean_total} should exceed earth_like_total={earth_like_total} across seeds 0-9"
+            ocean_density > earth_like_density,
+            "ocean density={ocean_density:.4} should exceed earth-like density={earth_like_density:.4} across seeds 0-9"
         );
+    }
+
+    // ── Quantitative archetype targets (issue #313) ───────────────────────────
+
+    fn land_fraction(map: &PlanetMap) -> f64 {
+        #[allow(clippy::cast_precision_loss)]
+        {
+            land_cell_count(map) as f64 / map.cells.len() as f64
+        }
+    }
+
+    #[test]
+    fn ocean_world_land_fraction_matches_its_less_than_25_percent_target() {
+        // The issue's own wording: "less than 25% land tiles." Near-polar
+        // cells are always forced to Plains regardless of the water
+        // threshold, which nudges the real fraction up slightly — hence the
+        // small tolerance rather than asserting the raw 0.20 target exactly.
+        for seed in 0..5u64 {
+            let ocean = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                12,
+                TemperatureBand::Temperate,
+                PlanetarySubtype::Ocean,
+            );
+            let land = land_fraction(&ocean);
+            assert!(
+                land < 0.30,
+                "seed {seed}: ocean world land fraction {land:.3} should be well under 25%"
+            );
+        }
+    }
+
+    #[test]
+    fn mountain_world_is_mostly_land_with_elevated_terrain() {
+        // The issue's own wording: "all high elevation, less than 10% water."
+        for seed in 0..5u64 {
+            let mountain = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                12,
+                TemperatureBand::Cold,
+                PlanetarySubtype::Mountain,
+            );
+            let land = land_fraction(&mountain);
+            assert!(
+                land > 0.85,
+                "seed {seed}: mountain world land fraction {land:.3} should clear 90% water<10%"
+            );
+
+            let mean_elevation: f64 = {
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    mountain
+                        .cells
+                        .values()
+                        .map(|c| f64::from(c.elevation))
+                        .sum::<f64>()
+                        / mountain.cells.len() as f64
+                }
+            };
+            assert!(
+                mean_elevation > 0.55,
+                "seed {seed}: mountain world mean elevation {mean_elevation:.3} should be biased high"
+            );
+        }
+    }
+
+    #[test]
+    fn mountain_subtype_is_inner_planet_only() {
+        assert!(PlanetarySubtype::Mountain.compatible_with(&BodyKind::InnerPlanet));
+        assert!(!PlanetarySubtype::Mountain.compatible_with(&BodyKind::Moon));
+        assert!(!PlanetarySubtype::Mountain.compatible_with(&BodyKind::GasGiant));
+        assert!(!PlanetarySubtype::Mountain.compatible_with(&BodyKind::AsteroidBelt));
+    }
+
+    #[test]
+    fn giant_subtypes_keep_the_pre_313_fixed_probability_ocean_behaviour() {
+        // `target_land_fraction` returns `None` for gas/ice giants, so the
+        // quantile-threshold path must not engage — the legacy low-probability
+        // roll (~98% non-ocean, no archetype opinion) still applies.
+        for seed in 0..5u64 {
+            let map = PlanetMap::generate_for_body_and_subtype(
+                seed,
+                10,
+                TemperatureBand::Hot,
+                PlanetarySubtype::GasGiant,
+            );
+            let land = land_fraction(&map);
+            assert!(
+                land > 0.85,
+                "seed {seed}: gas giant's unbiased legacy roll should still be mostly non-ocean, got land={land:.3}"
+            );
+        }
     }
 
     #[test]

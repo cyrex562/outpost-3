@@ -304,11 +304,14 @@ pub enum PlanetarySubtype {
     /// downstream systems (e.g. [`crate::map::PlanetMap`] deposit
     /// generation) any differently than [`PlanetarySubtype::EarthLike`].
     Unclassified,
-    /// Rocky and airless-to-thin, baked by proximity to the primary.
+    /// Rocky and airless-to-thin, baked by proximity to the primary
+    /// ("Mercury-like", issue #313).
     RockyBarrenHot,
-    /// Rocky and airless-to-thin, chilled by distance from the primary.
+    /// Rocky and airless-to-thin, chilled by distance from the primary
+    /// ("Mars-like", issue #313).
     RockyBarrenCold,
-    /// Active volcanism; typically hot, toxic, and dense-atmosphered.
+    /// Active volcanism; typically hot, toxic, and dense-atmosphered
+    /// ("Venus-like", issue #313).
     Molten,
     /// Breathable, temperate, broadly Earth-comparable.
     EarthLike,
@@ -317,8 +320,12 @@ pub enum PlanetarySubtype {
     /// Bare rock, no strong thermal extreme — valid on inner planets,
     /// moons, and asteroid-belt aggregates alike.
     Rocky,
+    /// Rugged, almost entirely high-elevation terrain with very little
+    /// liquid water (issue #313) — valid on inner planets only.
+    Mountain,
     /// Ice-dominant composition — valid on inner planets, moons, and
-    /// asteroid-belt aggregates alike.
+    /// asteroid-belt aggregates alike ("Pluto-like" on an inner planet,
+    /// issue #313).
     Icy,
     /// A hydrogen/helium-dominated giant. Only valid on [`BodyKind::GasGiant`].
     GasGiant,
@@ -339,7 +346,8 @@ impl PlanetarySubtype {
             | Self::RockyBarrenCold
             | Self::Molten
             | Self::EarthLike
-            | Self::Ocean => {
+            | Self::Ocean
+            | Self::Mountain => {
                 matches!(kind, BodyKind::InnerPlanet)
             }
             Self::Rocky | Self::Icy => {
@@ -352,6 +360,62 @@ impl PlanetarySubtype {
                 )
             }
             Self::GasGiant | Self::IceGiant => matches!(kind, BodyKind::GasGiant),
+        }
+    }
+
+    /// Target fraction of a generated hex map's cells that should end up as
+    /// land rather than ocean (issue #313).
+    ///
+    /// [`crate::map::PlanetMap::generate_for_body_and_subtype`] hits this
+    /// fraction by computing an elevation quantile threshold across the
+    /// whole map rather than a fixed per-cell probability, so an ocean
+    /// world's water coverage is a property of the archetype, not a coin
+    /// flip. `None` for [`Self::GasGiant`]/[`Self::IceGiant`] — those have no
+    /// solid surface for a land/water split to mean anything (issue #313
+    /// leaves surface-mapping giants as an open question; today's hex-map
+    /// generation still runs for them unchanged, same as before this issue).
+    #[must_use]
+    pub fn target_land_fraction(self) -> Option<f32> {
+        match self {
+            // Matches `Self::EarthLike` exactly — `Unclassified`'s own doc
+            // comment guarantees it never biases downstream generation any
+            // differently than EarthLike (issue #196), and that must still
+            // hold for the land/water target introduced by issue #313.
+            Self::Unclassified | Self::EarthLike => Some(0.55),
+            // Mercury-like: airless and baked — essentially all land.
+            Self::RockyBarrenHot => Some(0.98),
+            // Mars-like: thin atmosphere, barren, negligible open water.
+            // Same target as Mountain (all high elevation, less than 10%
+            // water) — both are barren-rocky with negligible open water.
+            Self::RockyBarrenCold | Self::Mountain => Some(0.95),
+            // Venus-like: molten surface, no liquid water at all.
+            Self::Molten => Some(0.99),
+            // Water-dominant: less than 25% land (issue #313's own wording).
+            Self::Ocean => Some(0.20),
+            Self::Rocky => Some(0.85),
+            // Pluto-like: ice is classified as land-like terrain, not the
+            // `Terrain::Ocean` liquid-water marker, so this stays high.
+            Self::Icy => Some(0.90),
+            Self::GasGiant | Self::IceGiant => None,
+        }
+    }
+
+    /// Additive shift applied to each cell's raw elevation before terrain is
+    /// classified (issue #313), so "all high elevation" archetypes actually
+    /// report high [`crate::map::HexCell::elevation`] rather than merely
+    /// having their ocean threshold moved.
+    ///
+    /// `0.0` for archetypes with no elevation opinion. Applied and clamped to
+    /// `[0.0, 1.0]` before [`Self::target_land_fraction`]'s quantile is
+    /// computed, so the two compose rather than fight each other.
+    #[must_use]
+    pub fn elevation_bias(self) -> f32 {
+        match self {
+            Self::Mountain => 0.35,
+            Self::Molten => 0.10,
+            Self::RockyBarrenHot | Self::RockyBarrenCold => 0.05,
+            Self::Ocean => -0.15,
+            _ => 0.0,
         }
     }
 }

@@ -270,6 +270,35 @@ function formatYieldCategory(category: string): string {
   return category.replace(/([a-z])([A-Z])/g, '$1 $2')
 }
 
+/**
+ * Human-facing archetype names (issue #313) — the wire value is the engine's
+ * snake_case `PlanetarySubtype` tag (e.g. `rocky_barren_hot`), which reads as
+ * an implementation detail rather than the "Mercury-like" naming the issue
+ * asked for. Falls back to a title-cased version of the raw tag for any
+ * subtype not in this table, so an unmapped future variant still degrades
+ * gracefully instead of showing nothing.
+ */
+const SUBTYPE_LABELS: Record<string, string> = {
+  unclassified: 'Unclassified',
+  rocky_barren_hot: 'Mercury-like',
+  rocky_barren_cold: 'Mars-like',
+  molten: 'Venus-like',
+  earth_like: 'Earth-like',
+  ocean: 'Ocean world',
+  rocky: 'Rocky',
+  icy: 'Pluto-like',
+  mountain: 'Mountain world',
+  gas_giant: 'Gas giant',
+  ice_giant: 'Ice giant',
+}
+
+function formatSubtype(subtype: string): string {
+  return (
+    SUBTYPE_LABELS[subtype] ??
+    subtype.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  )
+}
+
 // Star-centered orbit tracks: one per planet/giant/station. Moons get their
 // own mini-orbit rings around their parent (see `moonOrbits`); belts render
 // as an annulus (see `beltRenders`) rather than a single-line track.
@@ -698,8 +727,8 @@ function viewSurface(body: SystemBody): void {
               </span>
             </dd>
           </template>
-          <dt>Subtype</dt>
-          <dd>{{ selected.subtype }}</dd>
+          <dt>Archetype</dt>
+          <dd data-testid="body-archetype">{{ formatSubtype(selected.subtype) }}</dd>
           <template v-if="selected.belt_profile">
             <dt>Belt span</dt>
             <dd data-testid="belt-span">
