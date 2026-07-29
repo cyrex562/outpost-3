@@ -794,16 +794,21 @@ pub enum Command {
     },
 
     // ── M1: Planet map ────────────────────────────────────────────────────
-    /// Generate and store a planet map from an RNG seed and cell radius.
+    /// Generate and store a planet map from an RNG seed and grid size.
     ///
     /// Overwrites any previously seeded map. The generated map is stored in
     /// `GameState::planet_map` and subsequent [`Command::FoundColonyAtSite`]
-    /// commands can reference hex sites by their [`SiteId`].
+    /// commands can reference hex sites by their [`SiteId`]. The map is a
+    /// rectangular `width`-column × `height`-row region that wraps east-west
+    /// (issue #315), not a hex-of-radius-N one.
     SeedPlanet {
         /// Deterministic RNG seed for map generation.
         seed: u64,
-        /// Hex radius of the generated map (cell count = 3r²+3r+1).
-        radius: u32,
+        /// Column count of the generated map (wraps east-west).
+        width: u32,
+        /// Row count of the generated map (`r = 0` / `r = height - 1` are the
+        /// poles; no vertical wrap).
+        height: u32,
     },
 
     // ── M1: Megaproject / Victory ─────────────────────────────────────────
@@ -1673,8 +1678,10 @@ pub enum Event {
     PlanetSeeded {
         /// Seed used for generation.
         seed: u64,
-        /// Hex radius of the generated map.
-        radius: u32,
+        /// Column count of the generated map.
+        width: u32,
+        /// Row count of the generated map.
+        height: u32,
         /// Total number of hex cells in the map.
         cell_count: usize,
     },
@@ -5507,30 +5514,36 @@ impl GameEngine {
             }
 
             // ── M1: Planet map ────────────────────────────────────────────────
-            Command::SeedPlanet { seed, radius } => {
+            Command::SeedPlanet {
+                seed,
+                width,
+                height,
+            } => {
                 // Attach the founding map to a real body (issue #300). Before
                 // #300 the map floated free of the system entirely, which is
                 // why colonies aimed at any body all landed on this one map.
                 let home_id = self.designate_home_body();
-                // The home body's size (issue #314) drives the map's radius
-                // whenever a real generated body was found; the caller's
-                // `radius` is the fallback for the no-system-generated case
-                // (most engine tests, and the balance harness), where there
-                // is no rolled `Body` to read a size from at all.
-                let resolved_radius = self
+                // The home body's size (issue #314) drives the map's
+                // dimensions whenever a real generated body was found; the
+                // caller's `width`/`height` are the fallback for the
+                // no-system-generated case (most engine tests, and the
+                // balance harness), where there is no rolled `Body` to read a
+                // size from at all.
+                let (resolved_width, resolved_height) = self
                     .state
                     .system_state
                     .node_map
                     .bodies
                     .get(&home_id)
-                    .map_or(*radius, |b| b.size.hex_radius());
-                let map = PlanetMap::generate(*seed, resolved_radius);
+                    .map_or((*width, *height), |b| b.size.map_dimensions());
+                let map = PlanetMap::generate(*seed, resolved_width, resolved_height);
                 let cell_count = map.cells.len();
                 self.state.home_body_id = Some(home_id.clone());
                 self.state.planet_maps.insert(home_id, map);
                 Ok(vec![Event::PlanetSeeded {
                     seed: *seed,
-                    radius: resolved_radius,
+                    width: resolved_width,
+                    height: resolved_height,
                     cell_count,
                 }])
             }
@@ -5793,9 +5806,11 @@ impl GameEngine {
         // Shared with the persisted map a body gains when settled, so the
         // previewed surface is the surface the player lands on (issue #300).
         let seed = body.id.surface_seed();
+        let (width, height) = body.size.map_dimensions();
         Ok(map::PlanetMap::generate_for_body_and_subtype(
             seed,
-            body.size.hex_radius(),
+            width,
+            height,
             body.temperature,
             body.subtype,
         ))
@@ -13541,7 +13556,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 10,
-                radius: 5,
+                width: 5,
+                height: 4,
             })
             .unwrap();
 
@@ -13743,7 +13759,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 77,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
@@ -14224,7 +14241,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 4242,
-                radius: 5,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
@@ -14909,7 +14927,8 @@ mod tests {
         let events = engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
-                radius: 3,
+                width: 6,
+                height: 6,
             })
             .unwrap();
         assert!(
@@ -14922,9 +14941,9 @@ mod tests {
                 .any(|e| matches!(e, Event::PlanetSeeded { seed: 42, .. })),
             "PlanetSeeded event must be emitted"
         );
-        // Cell count = 3r²+3r+1 = 3*9+9+1 = 37
+        // Cell count = width * height = 6 * 6 = 36
         if let Event::PlanetSeeded { cell_count, .. } = &events[0] {
-            assert_eq!(*cell_count, 37);
+            assert_eq!(*cell_count, 36);
         }
     }
 
@@ -14947,7 +14966,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
 
@@ -14975,10 +14995,10 @@ mod tests {
     }
 
     /// The home body's size (issue #314), not `SeedPlanet`'s caller-supplied
-    /// `radius`, drives the founding map once a real system exists — that
-    /// caller value is only the no-system fallback.
+    /// `width`/`height`, drives the founding map once a real system exists —
+    /// those caller values are only the no-system fallback.
     #[test]
-    fn seed_planet_derives_the_founding_maps_radius_from_the_home_bodys_size() {
+    fn seed_planet_derives_the_founding_maps_dimensions_from_the_home_bodys_size() {
         let mut engine = GameEngine::new();
         engine
             .apply(&Command::System(system::SystemCommand::GenerateSystem {
@@ -14989,45 +15009,51 @@ mod tests {
                 max_inner_planets: 5,
             }))
             .unwrap();
-        // A radius the home body's size is extremely unlikely to match by
-        // coincidence (every `BodySize::hex_radius()` value is 4/6/9/12).
+        // Dimensions the home body's size is extremely unlikely to match by
+        // coincidence (every `BodySize::map_dimensions()` value is smaller).
         engine
             .apply(&Command::SeedPlanet {
                 seed: 1,
-                radius: 99,
+                width: 999,
+                height: 999,
             })
             .unwrap();
 
         let home = engine.state.home_body_id.clone().unwrap();
-        let expected_radius = engine.state.system_state.node_map.bodies[&home]
+        let (expected_width, expected_height) = engine.state.system_state.node_map.bodies[&home]
             .size
-            .hex_radius();
+            .map_dimensions();
         let map = engine.state.map_for_body(&home).unwrap();
         assert_eq!(
-            map.radius, expected_radius,
-            "the seeded map's radius must match the home body's size class, not the caller's 99"
+            (map.width, map.height),
+            (expected_width, expected_height),
+            "the seeded map's dimensions must match the home body's size class, not the caller's 999x999"
         );
     }
 
     /// With no generated system, `SeedPlanet` has no real body to read a size
-    /// from, so it must fall back to the caller's `radius` exactly as it did
-    /// before issue #314 — this is the behaviour most engine tests and the
-    /// balance harness rely on when they never call `GenerateSystem`.
+    /// from, so it must fall back to the caller's `width`/`height` exactly as
+    /// it did before issue #314 — this is the behaviour most engine tests and
+    /// the balance harness rely on when they never call `GenerateSystem`.
     #[test]
-    fn seed_planet_falls_back_to_the_caller_radius_with_no_system_generated() {
+    fn seed_planet_falls_back_to_the_caller_dimensions_with_no_system_generated() {
         let mut engine = GameEngine::new();
         engine
-            .apply(&Command::SeedPlanet { seed: 1, radius: 5 })
+            .apply(&Command::SeedPlanet {
+                seed: 1,
+                width: 5,
+                height: 4,
+            })
             .unwrap();
         let map = engine.state.home_map().unwrap();
-        assert_eq!(map.radius, 5);
+        assert_eq!((map.width, map.height), (5, 4));
     }
 
     /// A body's surface preview (issue #314) is sized by its own size class,
     /// not a flat constant — two bodies with different rolled sizes must
     /// produce differently-sized previews.
     #[test]
-    fn body_surface_preview_radius_matches_the_bodys_size_class() {
+    fn body_surface_preview_dimensions_match_the_bodys_size_class() {
         let mut engine = GameEngine::new();
         engine
             .apply(&Command::System(system::SystemCommand::GenerateSystem {
@@ -15054,9 +15080,9 @@ mod tests {
         for body in &bodies {
             let preview = engine.body_surface_preview(&body.id).unwrap();
             assert_eq!(
-                preview.radius,
-                body.size.hex_radius(),
-                "body {} ({:?}) preview radius should match its size class",
+                (preview.width, preview.height),
+                body.size.map_dimensions(),
+                "body {} ({:?}) preview dimensions should match its size class",
                 body.name,
                 body.size
             );
@@ -15102,7 +15128,11 @@ mod tests {
         let mut chosen = None;
         for _ in 0..16 {
             engine
-                .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+                .apply(&Command::SeedPlanet {
+                    seed: 7,
+                    width: 3,
+                    height: 3,
+                })
                 .unwrap();
             let home = engine.state.home_body_id.clone().unwrap();
             assert_eq!(
@@ -15136,7 +15166,11 @@ mod tests {
             }))
             .unwrap();
         engine
-            .apply(&Command::SeedPlanet { seed: 1, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 1,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let home = engine.state.home_body_id.clone().unwrap();
         let body = &engine.state.system_state.node_map.bodies[&home];
@@ -15158,7 +15192,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let home = engine.state.home_body_id.clone().unwrap();
@@ -15236,7 +15271,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
-                radius: 4,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let events = engine
@@ -15612,7 +15648,11 @@ mod tests {
     fn found_colony_at_site_rejects_unknown_site() {
         let mut engine = GameEngine::new();
         engine
-            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let result = engine.apply(&Command::FoundColonyAtSite {
             name: "Beta".into(),
@@ -15636,7 +15676,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 99,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         // Pick the best landing site and find its SiteId.
@@ -15691,7 +15732,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 4242,
-                radius: 6,
+                width: 5,
+                height: 4,
             })
             .unwrap();
 
@@ -15792,7 +15834,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 4242,
-                radius: 6,
+                width: 5,
+                height: 4,
             })
             .unwrap();
 
@@ -16003,7 +16046,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 77,
-                radius: 4,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
@@ -16069,7 +16113,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let events = engine
@@ -16318,7 +16363,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 55,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
@@ -16395,7 +16441,11 @@ mod tests {
         let mut engine = GameEngine::new();
         engine.state.registry = Some(registry);
         engine
-            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
@@ -16472,7 +16522,11 @@ mod tests {
         let mut engine = GameEngine::new();
         engine.state.registry = Some(registry);
         engine
-            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
@@ -16543,7 +16597,11 @@ mod tests {
         let mut engine = GameEngine::new();
         engine.state.registry = Some(registry);
         engine
-            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
@@ -16609,7 +16667,11 @@ mod tests {
         let mut engine = GameEngine::new();
         engine.state.registry = Some(registry);
         engine
-            .apply(&Command::SeedPlanet { seed: 7, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
@@ -16658,7 +16720,11 @@ mod tests {
         let mut engine = GameEngine::new();
         engine.state.registry = Some(registry);
         engine
-            .apply(&Command::SeedPlanet { seed: 8, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 8,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
@@ -16701,7 +16767,11 @@ mod tests {
         assert!(empty.colony_nodes.is_empty());
 
         engine
-            .apply(&Command::SeedPlanet { seed: 1, radius: 2 })
+            .apply(&Command::SeedPlanet {
+                seed: 1,
+                width: 5,
+                height: 4,
+            })
             .unwrap();
 
         let QueryResult::PlanetMap(data) =
@@ -16709,8 +16779,8 @@ mod tests {
         else {
             panic!("expected PlanetMap result");
         };
-        // radius 2: 3*4+6+1 = 19 cells
-        assert_eq!(data.hexes.len(), 19, "radius 2 must yield 19 hex cells");
+        // 5 × 4 grid = 20 cells.
+        assert_eq!(data.hexes.len(), 20, "5x4 map must yield 20 hex cells");
         assert!(data.colony_nodes.is_empty(), "no colonies placed yet");
     }
 
@@ -16718,7 +16788,11 @@ mod tests {
     fn planet_map_query_includes_colony_node_after_founding() {
         let mut engine = GameEngine::new();
         engine
-            .apply(&Command::SeedPlanet { seed: 2, radius: 3 })
+            .apply(&Command::SeedPlanet {
+                seed: 2,
+                width: 3,
+                height: 3,
+            })
             .unwrap();
         let pm = engine.state.home_map().unwrap();
         let coord = pm.best_landing_site().unwrap();
@@ -17631,7 +17705,8 @@ mod tests {
         engine
             .apply(&Command::SeedPlanet {
                 seed: 42,
-                radius: 3,
+                width: 5,
+                height: 4,
             })
             .unwrap();
         let pm = engine.state.home_map().unwrap();

@@ -450,14 +450,18 @@ pub enum BodySize {
 }
 
 impl BodySize {
-    /// Hex-map radius this size class generates at. Cell count is `3r²+3r+1`.
+    /// `(width, height)` this size class's surface map generates at (issue
+    /// #315). Cell count is `width × height`; roughly a 2:1 aspect (real
+    /// planets are wider east-west than pole-to-pole in hex rows) at each
+    /// size, keeping the same rough per-class area progression the old
+    /// hex-radius scale had.
     #[must_use]
-    pub fn hex_radius(self) -> u32 {
+    pub fn map_dimensions(self) -> (u32, u32) {
         match self {
-            Self::Tiny => 4,
-            Self::Small => 6,
-            Self::Medium => 9,
-            Self::Large => 12,
+            Self::Tiny => (10, 6),
+            Self::Small => (16, 8),
+            Self::Medium => (22, 12),
+            Self::Large => (30, 16),
         }
     }
 }

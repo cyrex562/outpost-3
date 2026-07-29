@@ -372,7 +372,10 @@ export interface InfraEdge {
 
 export interface PlanetMap {
   seed: number
-  radius: number
+  /** Column count of the map (wraps east-west). */
+  width: number
+  /** Row count of the map (`r = 0` / `r = height - 1` are the poles). */
+  height: number
   hexes: PlanetHex[]
   /** Infrastructure edges connecting colony nodes (map/nav plan phase A3). */
   edges: InfraEdge[]

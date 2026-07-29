@@ -1071,12 +1071,14 @@ pub fn bootstrap(
         max_inner_planets: max_inner_planets.unwrap_or(gen_defaults.max_inner_planets),
     }));
 
-    // `radius` here is only the no-system fallback — since `GenerateSystem`
-    // just ran above, the handler derives the real radius from the
-    // designated home body's rolled size instead (issue #314).
+    // `width`/`height` here are only the no-system fallback — since
+    // `GenerateSystem` just ran above, the handler derives the real
+    // dimensions from the designated home body's rolled size instead
+    // (issue #314).
     let _ = engine.apply(&Command::SeedPlanet {
         seed: planet_seed,
-        radius: 12,
+        width: 22,
+        height: 12,
     });
 
     load_embedded_tech(&mut engine);
@@ -2209,7 +2211,8 @@ pub struct DepositWire {
 #[derive(Debug, Serialize)]
 pub struct PlanetMapWire {
     pub seed: u64,
-    pub radius: u32,
+    pub width: u32,
+    pub height: u32,
     pub hexes: Vec<PlanetHexWire>,
     /// Infrastructure edges connecting colony nodes (map/nav plan phase A3).
     pub edges: Vec<InfraEdgeWire>,
@@ -2409,7 +2412,8 @@ fn build_planet_map_wire(
 
     PlanetMapWire {
         seed: pm.seed,
-        radius: pm.radius,
+        width: pm.width,
+        height: pm.height,
         hexes,
         edges,
     }

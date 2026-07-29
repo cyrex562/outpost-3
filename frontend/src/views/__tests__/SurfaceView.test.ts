@@ -39,7 +39,8 @@ function makeHex(overrides: Partial<PlanetHex>): PlanetHex {
 function makeMap(): PlanetMap {
   return {
     seed: 42,
-    radius: 8,
+    width: 5,
+    height: 4,
     edges: [],
     hexes: [makeHex({ q: 0, r: 0, site_id: 's0' }), makeHex({ q: 1, r: 0, site_id: 's1' })],
   }
@@ -49,7 +50,8 @@ function makeMap(): PlanetMap {
 function makeSettledMap(): PlanetMap {
   return {
     seed: 42,
-    radius: 8,
+    width: 5,
+    height: 4,
     edges: [],
     hexes: [
       makeHex({ q: 0, r: 0, site_id: 's0', occupied_by: 'Offworld', occupant_colony_id: 'col-7' }),
