@@ -49,11 +49,10 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   await expect(page.locator('.site-details h4')).toHaveText('Selected site')
   await primaryAction.click()
 
-  // ── Step 3: loadout ── the landing kit is pre-selected (issue #317), so the
-  // step's gate is already satisfied without the player touching anything.
-  await expect(wizard.locator('[data-testid^="building-plus-"]').first()).toBeVisible()
+  // ── Step 3: loadout ── the bootstrap kit is a fixed, read-only preview
+  // (issue #312) — no per-building picker, and nothing here gates advancing.
+  await expect(wizard.locator('[data-testid^="kit-building-"]').first()).toBeVisible()
   const budget = wizard.getByTestId('budget-preview')
-  await expect(budget).not.toHaveClass(/over/)
   await expect(budget).not.toContainText('0 / ')
   await primaryAction.click()
 

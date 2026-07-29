@@ -70,17 +70,25 @@ const chosenBodyAttributes = computed<SystemBody | null>(() => {
   return systemBodies.value.find((b) => b.id === chosenBody.value?.body_id) ?? null
 })
 
-// Step 3: population, per-commodity supplies, per-building counts (issue #167)
+// Step 3: population, per-commodity supplies, and a read-only bootstrap-kit
+// preview (issue #312 — founding no longer asks the player to pick buildings;
+// the engine places a fixed kit automatically, this step just previews it).
 const buildings = ref<BuildingOption[]>([])
 /**
- * Buildings selectable at founding — tech-gated buildings can't be
- * researched yet at this point in a new game, so offering them here would
- * let the player queue construction they can never actually complete
- * (issue #166).
+ * The bootstrap kit the engine will place automatically on arrival — every
+ * building flagged `starter_kit` in the loaded content pack (issue #317's
+ * landing kit, `registry.starter_kit()`). Read-only: the player used to
+ * queue their own loadout here, but that was busywork before they could
+ * evaluate anything, so #312 removed the picker and made this a preview of
+ * what founding actually delivers.
  */
-const starterBuildings = computed(() => buildings.value.filter((b) => !b.tech_prerequisite))
-/** Number of each building type to queue at founding. Keyed by building id. */
-const buildingCounts = ref<Record<string, number>>({})
+const kitBuildings = computed(() => buildings.value.filter((b) => b.starter_kit))
+/** Total build slots the bootstrap kit occupies — informational only now. */
+const kitSlotCost = computed(() => kitBuildings.value.reduce((sum, b) => sum + b.slot_cost, 0))
+/** Total labor/turn the bootstrap kit demands — informational only now. */
+const kitLaborPerTurn = computed(() =>
+  kitBuildings.value.reduce((sum, b) => sum + b.labor_per_turn, 0),
+)
 const supplyPackages = ref<SupplyPackage[]>([])
 const chosenSupplyId = ref<string | null>(null)
 /**
@@ -93,9 +101,9 @@ const supplyAmounts = ref<Record<string, number>>({})
 /**
  * Colony starting build-slot budget. Mirrors `outpost_core::colony::BASE_SLOT_CAPACITY`
  * — every new colony starts with this many slots before any tech bonuses.
- * Used only for the wizard's real-time preview; the engine is the actual
- * source of truth and independently rejects over-budget `QueueConstruction`
- * calls with `EngineError::SlotCapacityExceeded`.
+ * Shown next to the kit preview purely as context; the kit is authored
+ * content and the engine places it directly, so there is nothing here for
+ * the player to exceed.
  */
 const BASE_SLOT_CAPACITY = 10
 
@@ -120,38 +128,11 @@ function selectPreset(presetId: string): void {
   applyPresetDefaults(presetId)
 }
 
-/** Total build slots the currently-chosen building counts would consume. */
-const totalSlotCost = computed(() =>
-  starterBuildings.value.reduce(
-    (sum, b) => sum + (buildingCounts.value[b.id] ?? 0) * b.slot_cost,
-    0,
-  ),
-)
-/** Total labor/turn the currently-chosen building counts would consume. */
-const totalLaborPerTurn = computed(() =>
-  starterBuildings.value.reduce(
-    (sum, b) => sum + (buildingCounts.value[b.id] ?? 0) * b.labor_per_turn,
-    0,
-  ),
-)
-const overBudget = computed(() => totalSlotCost.value > BASE_SLOT_CAPACITY)
-/** Number of buildings queued (sum of all per-building counts). */
-const totalBuildingCount = computed(() =>
-  Object.values(buildingCounts.value).reduce((sum, n) => sum + n, 0),
-)
-
 onMounted(async () => {
   try {
     bodies.value = await getColonizeTargets()
     systemBodies.value = await getSystemBodies()
     buildings.value = await listBuildings()
-    // Pre-select the landing kit as the recommended loadout (issue #317). The
-    // engine auto-places the same set at founding, so this makes the wizard's
-    // default agree with the engine's rather than starting empty; the player is
-    // free to adjust it, and whatever they submit replaces the auto kit.
-    buildingCounts.value = Object.fromEntries(
-      buildings.value.filter((b) => b.starter_kit).map((b) => [b.id, 1]),
-    )
     supplyPackages.value = await listSupplyPackages()
     // Default the supply pick to a "Standard"-named package if present, else the first.
     const std = supplyPackages.value.find((p) => p.id === 'standard' || p.name.toLowerCase() === 'standard')
@@ -182,13 +163,9 @@ const canAdvance = computed(() => {
     case 2:
       return chosenHex.value !== null && chosenHex.value.habitable
     case 3:
-      return startingPop.value > 0 && totalBuildingCount.value > 0 && !overBudget.value
+      return startingPop.value > 0
     case 4:
-      // Re-check overBudget here too, not just on step 3's gate — step 3
-      // is the only place buildingCounts is edited today, but defending
-      // the actual submit action directly means this can't silently drift
-      // out of sync if that ever changes.
-      return colonyName.value.trim().length > 0 && !overBudget.value
+      return colonyName.value.trim().length > 0
     default:
       return false
   }
@@ -253,18 +230,6 @@ function back(): void {
   else router.push('/system')
 }
 
-/** Adjust a building's queued count by `delta`, clamped to zero. */
-function adjustBuildingCount(id: string, delta: number): void {
-  const current = buildingCounts.value[id] ?? 0
-  const next = Math.max(0, current + delta)
-  buildingCounts.value = { ...buildingCounts.value, [id]: next }
-}
-
-function setBuildingCount(id: string, value: number): void {
-  const next = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
-  buildingCounts.value = { ...buildingCounts.value, [id]: next }
-}
-
 function setSupplyAmount(commodityId: string, value: number): void {
   const next = Number.isFinite(value) ? Math.max(0, value) : 0
   supplyAmounts.value = { ...supplyAmounts.value, [commodityId]: next }
@@ -327,32 +292,11 @@ async function finish(): Promise<void> {
         body_id: chosenBody.value.body_id,
       })
     }
-    // Deploy the chosen starter buildings instantly in one "lander" batch —
-    // the engine places them directly into `colony.buildings` rather than the
-    // multi-turn `build_queue`, so they're operational the moment the colony
-    // is founded. The engine validates the whole batch (tech gates, total
-    // slot cost) atomically before placing anything.
-    const kitBuildings: [string, number][] = []
-    for (const [bid, count] of Object.entries(buildingCounts.value)) {
-      if (count <= 0) continue
-      const b = buildings.value.find((x) => x.id === bid)
-      if (!b) continue
-      for (let i = 0; i < count; i += 1) {
-        kitBuildings.push([b.id, b.slot_cost])
-      }
-    }
-    if (kitBuildings.length > 0) {
-      // sendCommand() already sets gameStore.toastMessage with the failure
-      // reason (or a success summary) — no separate fallback needed here.
-      await gameStore.sendCommand({
-        kind: 'deploy_starter_kit',
-        colony_id: founded.colony_id,
-        buildings: kitBuildings,
-      })
-    }
-    // If no starting buildings were queued, the selection change fires the
-    // watcher which triggers a refresh. Await it explicitly here so that by
-    // the time ColonyView mounts, its stockpile table has data.
+    // The bootstrap kit is no longer dispatched from here (issue #312) — the
+    // engine places it automatically inside the `found_colony_at_site`
+    // handler itself, atomically with founding. Refresh explicitly so that by
+    // the time ColonyView mounts, its buildings/stockpile tables have data;
+    // otherwise the selection-change watcher wouldn't fire until later.
     await gameStore.refreshColonyScreen(founded.colony_id)
   }
   router.push('/colony')
@@ -541,64 +485,30 @@ async function finish(): Promise<void> {
       </div>
       <div v-else class="hint">No supply packages authored in this content pack.</div>
 
-      <h4 class="sub-title">Starting buildings</h4>
-      <div class="budget-preview" data-testid="budget-preview" :class="{ over: overBudget }">
-        Build slots: <strong>{{ totalSlotCost }} / {{ BASE_SLOT_CAPACITY }}</strong>
-        · Labor/turn: <strong>{{ totalLaborPerTurn }}</strong>
-        · Buildings queued: <strong>{{ totalBuildingCount }}</strong>
-        <span v-if="overBudget" class="budget-warning">— exceeds the starter build-slot budget</span>
+      <h4 class="sub-title">Bootstrap kit</h4>
+      <p class="hint">
+        These buildings arrive already built — founding places them directly, no
+        construction queue or player choice involved (issue #312).
+      </p>
+      <div class="budget-preview" data-testid="budget-preview">
+        Build slots: <strong>{{ kitSlotCost }} / {{ BASE_SLOT_CAPACITY }}</strong>
+        · Labor/turn: <strong>{{ kitLaborPerTurn }}</strong>
+        · Buildings: <strong>{{ kitBuildings.length }}</strong>
       </div>
 
       <div class="building-grid">
-        <div
-          v-for="b in starterBuildings"
-          :key="b.id"
-          class="building-card"
-          :class="{ selected: (buildingCounts[b.id] ?? 0) > 0 }"
-        >
+        <div v-for="b in kitBuildings" :key="b.id" class="building-card kit-item" :data-testid="`kit-building-${b.id}`">
           <div class="building-info">
             <div class="building-name">{{ b.name }}</div>
             <div class="building-cat">{{ b.category }}</div>
             <div class="building-desc">{{ b.description || '—' }}</div>
             <div class="building-stats">
-              {{ b.construction_turns }} sols · {{ b.labor_per_turn }} labor/turn · {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
-            </div>
-            <div v-if="b.construction_cost.length" class="building-cost">
-              cost:
-              <span v-for="(c, i) in b.construction_cost" :key="i" class="cost-chip">
-                {{ c[1] }} {{ c[0] }}
-              </span>
-            </div>
-            <div class="building-count-row">
-              <button
-                type="button"
-                class="count-btn"
-                :data-testid="`building-minus-${b.id}`"
-                @click="adjustBuildingCount(b.id, -1)"
-              >
-                −
-              </button>
-              <input
-                type="number"
-                min="0"
-                class="input count-input"
-                :value="buildingCounts[b.id] ?? 0"
-                :data-testid="`building-count-${b.id}`"
-                @change="setBuildingCount(b.id, ($event.target as HTMLInputElement).valueAsNumber)"
-              />
-              <button
-                type="button"
-                class="count-btn"
-                :data-testid="`building-plus-${b.id}`"
-                @click="adjustBuildingCount(b.id, 1)"
-              >
-                +
-              </button>
+              {{ b.labor_per_turn }} labor/turn · {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
             </div>
           </div>
         </div>
-        <div v-if="starterBuildings.length === 0" class="hint">
-          No starter buildings available in the loaded content pack.
+        <div v-if="kitBuildings.length === 0" class="hint">
+          No bootstrap-kit buildings authored in this content pack.
         </div>
       </div>
     </section>
@@ -627,7 +537,7 @@ async function finish(): Promise<void> {
             }}
           </strong>
         </div>
-        <div>Buildings queued: <strong>{{ totalBuildingCount }}</strong> ({{ totalSlotCost }} / {{ BASE_SLOT_CAPACITY }} slots)</div>
+        <div>Bootstrap kit: <strong>{{ kitBuildings.length }}</strong> buildings ({{ kitSlotCost }} / {{ BASE_SLOT_CAPACITY }} slots)</div>
       </div>
     </section>
 
@@ -853,23 +763,6 @@ async function finish(): Promise<void> {
   color: #aab;
   font-size: 0.8rem;
 }
-.budget-preview.over { border-color: #a53; color: #d88; }
-.budget-warning { color: #d66; margin-left: 0.4rem; }
-
-.building-count-row { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.35rem; }
-.count-btn {
-  background: #1a1a28;
-  border: 1px solid #446;
-  border-radius: 3px;
-  color: #aac;
-  width: 1.6rem;
-  height: 1.6rem;
-  font-family: monospace;
-  cursor: pointer;
-}
-.count-btn:hover { background: #22223a; }
-.count-input { width: 60px; }
-
 .building-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.5rem; }
 .building-card {
   display: flex;
@@ -879,25 +772,16 @@ async function finish(): Promise<void> {
   border: 1px solid #334;
   border-radius: 4px;
   padding: 0.5rem;
-  cursor: pointer;
   color: #aab;
 }
-.building-card:hover { background: #1a1a2a; }
-.building-card.selected { border-color: #468; background: #182030; }
+/* The bootstrap-kit preview is informational, not a picker (issue #312) — no
+   pointer cursor or hover state implying it can be clicked. */
+.building-card.kit-item { cursor: default; }
 .building-info { display: flex; flex-direction: column; }
 .building-name { color: #8cf; font-size: 0.85rem; }
 .building-cat { color: #557; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .building-desc { color: #778; font-size: 0.75rem; margin-top: 0.15rem; }
 .building-stats { color: #668; font-size: 0.72rem; margin-top: 0.25rem; }
-.building-cost { color: #668; font-size: 0.72rem; margin-top: 0.15rem; display: flex; gap: 0.35rem; flex-wrap: wrap; }
-.cost-chip {
-  background: #1a1a2a;
-  border: 1px solid #223;
-  border-radius: 2px;
-  padding: 0.05rem 0.3rem;
-  color: #8a8;
-}
-.building-tech { color: #a86; font-size: 0.72rem; margin-top: 0.15rem; }
 
 .field { display: flex; flex-direction: column; font-size: 0.8rem; color: #667; gap: 0.2rem; }
 .input {
