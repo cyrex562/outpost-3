@@ -3146,6 +3146,7 @@ mod tests {
         let map = PlanetMap::generate_for_body_and_subtype(
             7,
             8,
+            8,
             TemperatureBand::Temperate,
             PlanetarySubtype::Ocean,
         );
@@ -3172,6 +3173,7 @@ mod tests {
     fn dry_terrain_has_zero_water_coverage() {
         let map = PlanetMap::generate_for_body_and_subtype(
             3,
+            8,
             8,
             TemperatureBand::Temperate,
             PlanetarySubtype::RockyBarrenHot,
@@ -3207,6 +3209,7 @@ mod tests {
         let map = PlanetMap::generate_for_body_and_subtype(
             11,
             8,
+            8,
             TemperatureBand::Hot,
             PlanetarySubtype::Molten,
         );
@@ -3224,6 +3227,7 @@ mod tests {
     fn vegetation_present_on_earth_like_worlds() {
         let map = PlanetMap::generate_for_body_and_subtype(
             11,
+            10,
             10,
             TemperatureBand::Temperate,
             PlanetarySubtype::EarthLike,

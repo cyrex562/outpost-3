@@ -1133,9 +1133,9 @@ pub enum QueryResult {
     ResearchTotal(f32),
     /// Colony management screen data bundle.
     ColonyScreen(ui::ColonyScreenData),
-    /// Planet hex map data bundle.
     /// Every tunable balance scalar and its current value (playtesting).
     BalanceScalars(Vec<ui::BalanceScalarRow>),
+    /// Planet hex map data bundle.
     PlanetMap(ui::PlanetMapData),
     /// Full detail for one building type within a colony.
     BuildingDetail(ui::BuildingDetailData),
@@ -1667,7 +1667,6 @@ pub enum Event {
     /// The research queue and current project were cleared.
     ResearchCancelled,
 
-    /// A planet map was generated and stored in `GameState`.
     /// A balance scalar was retuned live (playtesting).
     BalanceScalarChanged {
         /// Slug of the quantity that changed.
@@ -1675,6 +1674,8 @@ pub enum Event {
         /// Value actually applied, after clamping.
         value: f32,
     },
+
+    /// A planet map was generated and stored in `GameState`.
     PlanetSeeded {
         /// Seed used for generation.
         seed: u64,
