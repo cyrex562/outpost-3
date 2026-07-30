@@ -10,8 +10,18 @@
  * caller owns the async send and passes back `cancelingIds` so this panel can
  * disable the right button while a cancel is in flight without duplicating
  * request-tracking state.
+ *
+ * Empty-queue collapse (issue #339): most of the early game has nothing
+ * under construction, so a full-height panel here just pushes the building
+ * list into a short scroll area. When the queue is empty this renders a
+ * single compact row instead of the padded heading + hint block, so the
+ * host layout (ColonyView's resizable split) can give the building list the
+ * space by default. The host still owns and persists the actual split size —
+ * this component only signals emptiness via `data-collapsed` for the host
+ * (and tests) to key off of.
  */
 
+import { computed } from 'vue'
 import type { ConstructionQueueRow } from '@/types/screen'
 
 const props = defineProps<{
@@ -24,10 +34,18 @@ const emit = defineEmits<{
   (e: 'cancel', projectId: string): void
   (e: 'open-build'): void
 }>()
+
+/** Nothing in progress — drives the compact collapsed presentation below. */
+const isEmpty = computed(() => props.queue === null || props.queue.length === 0)
 </script>
 
 <template>
-  <div class="panel" data-testid="construction-queue-panel">
+  <div
+    class="panel"
+    :class="{ 'panel--collapsed': isEmpty }"
+    data-testid="construction-queue-panel"
+    :data-collapsed="isEmpty"
+  >
     <div class="queue-heading">
       <h4 class="panel-title">Under Construction</h4>
       <button class="btn-build" data-testid="btn-open-build" @click="emit('open-build')">
@@ -55,12 +73,25 @@ const emit = defineEmits<{
         </button>
       </li>
     </ul>
-    <div v-else class="hint">Nothing under construction. Use “Build…” to queue a project.</div>
+    <div v-else class="hint" data-testid="construction-queue-empty-hint">
+      Nothing under construction. Use “Build…” to queue a project.
+    </div>
   </div>
 </template>
 
 <style scoped>
 .panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
+/* Compact state (issue #339): a single tight row rather than a padded block,
+   so the host pane reads as "collapsed" even when the split gives it more
+   room than the content needs. */
+.panel--collapsed {
+  padding: 0.4rem 0.75rem;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.panel--collapsed .queue-heading { margin-bottom: 0; flex: 1; }
+.panel--collapsed .hint { margin: 0 0 0 0.6rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queue-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
 .panel-title { color: #8cf; font-size: 0.9rem; margin: 0; }
 .hint { font-size: 0.75rem; color: #446; font-style: italic; }

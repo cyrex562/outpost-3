@@ -115,7 +115,7 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     expect(wrapper.find('[data-testid="no-colonies"]').exists()).toBe(true)
   })
 
-  it('navigates to the facility route when a building requests details (navigation rework #7 phase 2)', async () => {
+  it('opens a floating window (not a route navigation) when a building requests details (issue #339)', async () => {
     seedColonies()
     routeParams.colonyId = 'colony-1'
     const gameStore = useGameStore()
@@ -167,22 +167,89 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     // "view details" button emits the real event ColonyView listens for —
     // Splitpanes/Pane need slot-rendering stubs instead of the default
     // auto-stub (which drops slot content) so BuildingsPanel actually mounts.
+    // BuildingDetailsHud is stubbed since it fetches over tauriBridge, which
+    // isn't mocked in this suite — only the floating window shell matters here.
     const wrapper = mount(ColonyView, {
       global: {
         stubs: {
           ...STUBS,
           BuildingsPanel: false,
+          BuildingDetailsHud: true,
+          Splitpanes: { template: '<div><slot /></div>' },
+          Pane: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+    expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="view-details-colony_hq"]').trigger('click')
+
+    expect(routerPush).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'facility' }),
+    )
+    const win = wrapper.find('[data-testid="floating-window"]')
+    expect(win.exists()).toBe(true)
+    expect(win.text()).toContain('colony_hq')
+  })
+
+  it('closes the floating building-details window via its close button', async () => {
+    seedColonies()
+    routeParams.colonyId = 'colony-1'
+    const gameStore = useGameStore()
+    gameStore.colonyScreen = {
+      colony_id: 'colony-1',
+      name: 'Alpha Base',
+      population: 100,
+      stability: 0.9,
+      slots_used: 1,
+      slot_capacity: 5,
+      labour_available: 5,
+      labour_total: 10,
+      labour_demanded: 4,
+      labour_employed: 4,
+      labour_unemployed: 1,
+      resources: [],
+      buildings: [
+        {
+          building_id: 'hq-instance-1',
+          name: 'Colony HQ 1',
+          building_type: 'colony_hq',
+          labour_assigned: 0,
+          labour_demand: 0,
+          priority: 5,
+          labour_lock: null,
+          paused: false,
+          slot_cost: 1,
+          full_capacity: true,
+          scale: 1.0,
+          shortfall_reason: null,
+          shortfall_kind: null,
+          always_on: true,
+          running_recipe_ids: [],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+      stockpile: [],
+      construction_queue: [],
+      manual_override: false,
+    }
+
+    const wrapper = mount(ColonyView, {
+      global: {
+        stubs: {
+          ...STUBS,
+          BuildingsPanel: false,
+          BuildingDetailsHud: true,
           Splitpanes: { template: '<div><slot /></div>' },
           Pane: { template: '<div><slot /></div>' },
         },
       },
     })
     await wrapper.get('[data-testid="view-details-colony_hq"]').trigger('click')
+    expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(true)
 
-    expect(routerPush).toHaveBeenCalledWith({
-      name: 'facility',
-      params: { colonyId: 'colony-1', buildingType: 'colony_hq' },
-    })
+    await wrapper.get('[data-testid="fw-close"]').trigger('click')
+    expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(false)
   })
-
 })

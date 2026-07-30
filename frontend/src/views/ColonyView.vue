@@ -25,6 +25,8 @@ import BuildingsPanel from '@/components/BuildingsPanel.vue'
 import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
 import BuildDialog from '@/components/BuildDialog.vue'
 import AlertsPanel from '@/components/AlertsPanel.vue'
+import FloatingWindow from '@/components/FloatingWindow.vue'
+import BuildingDetailsHud from '@/components/BuildingDetailsHud.vue'
 import type { ColonyState } from '@/worldModel/model'
 import {
   isTauri,
@@ -220,12 +222,27 @@ async function cancelConstruction(projectId: string): Promise<void> {
   }
 }
 
-// ─── Building details (issue #182; routed page as of navigation rework #7 phase 2) ──
+// ─── Building details (issue #182, floated as of #339) ─────────────────────────
+//
+// Selecting a building used to navigate to the routed `/facility/:type` page,
+// replacing the whole colony view. That hid the stores/labour/building-list
+// context a player usually wants while reading a building's lines and
+// shortfalls, so it now opens as a floating window over the colony view
+// instead (`BuildingDetailsHud` in its `asPage` presentation, which is the
+// plain-content mode the routed page already used — only the container
+// changes). The routed page itself stays for deep-linking (e.g. outposts).
+
+/** Building type currently shown in the floating details window, or `null` when closed. */
+const selectedBuildingType = ref<string | null>(null)
 
 function openBuildingDetails(buildingType: string): void {
   const col = selectedColony.value
   if (!col) return
-  void router.push({ name: 'facility', params: { colonyId: col.id, buildingType } })
+  selectedBuildingType.value = buildingType
+}
+
+function closeBuildingDetails(): void {
+  selectedBuildingType.value = null
 }
 
 // ─── Per-building staffing (issue #307) ────────────────────────────────────────
@@ -310,28 +327,44 @@ interface PersistedLayout {
   left: number[]
   /** center column vertical split: [buildings %, construction-queue %] */
   center: number[]
+  /** Whether `center` reflects a deliberate drag rather than an emptiness-driven default. */
+  centerTouched: boolean
 }
 
 // Bumped to `.v2` because the split shape changed from 2+4 panes to the
 // 3-column (3 + 2 + 2) arrangement (UI-rework PR4); a stale entry would have
 // the wrong number of sizes. Bumped to v3 when the left column gained a third
 // pane for the utilities panel (issue #304) — a persisted v2 entry has only two
-// left sizes and would leave the new pane unsized.
-const STORAGE_KEY = 'outpost3.colony-view.layout.v3'
+// left sizes and would leave the new pane unsized. Bumped to v4 when the
+// center split gained emptiness-driven defaults (issue #339) — `center` is no
+// longer meaningful on its own without the `centerTouched` flag.
+const STORAGE_KEY = 'outpost3.colony-view.layout.v4'
 const DEFAULT_OUTER = [30, 45, 25]
 const DEFAULT_LEFT = [34, 26, 40]
-const DEFAULT_CENTER = [45, 55]
+// Building list gets the space by default (issue #339) — construction is
+// empty most of the early game, so it no longer starts out larger than the
+// building list the way `[45, 55]` used to.
+const DEFAULT_CENTER_FILLED = [62, 38]
+// Compact "nothing under construction" default: the queue panel collapses to
+// just enough room for its heading row, handing the rest to the buildings.
+const DEFAULT_CENTER_EMPTY = [88, 12]
 
 function loadPersistedLayout(): PersistedLayout {
-  const fallback = { outer: DEFAULT_OUTER, left: DEFAULT_LEFT, center: DEFAULT_CENTER }
+  const fallback = {
+    outer: DEFAULT_OUTER,
+    left: DEFAULT_LEFT,
+    center: DEFAULT_CENTER_FILLED,
+    centerTouched: false,
+  }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<PersistedLayout>
     const outer = Array.isArray(p.outer) && p.outer.length === 3 ? p.outer : DEFAULT_OUTER
     const left = Array.isArray(p.left) && p.left.length === 3 ? p.left : DEFAULT_LEFT
-    const center = Array.isArray(p.center) && p.center.length === 2 ? p.center : DEFAULT_CENTER
-    return { outer, left, center }
+    const center = Array.isArray(p.center) && p.center.length === 2 ? p.center : DEFAULT_CENTER_FILLED
+    const centerTouched = p.centerTouched === true
+    return { outer, left, center, centerTouched }
   } catch {
     // corrupt entry — fall back to defaults
     return fallback
@@ -342,6 +375,26 @@ const persistedLayout = loadPersistedLayout()
 const outerSizes = ref<number[]>(persistedLayout.outer)
 const leftSizes = ref<number[]>(persistedLayout.left)
 const centerSizes = ref<number[]>(persistedLayout.center)
+/** Once the player drags the queue/building-list divider, their choice sticks
+ * regardless of the queue's emptiness — only an untouched split auto-adjusts. */
+const centerTouched = ref<boolean>(persistedLayout.centerTouched)
+
+/** Nothing currently under construction — drives the collapsed default split. */
+const constructionQueueEmpty = computed(
+  () => !screen.value || screen.value.construction_queue.length === 0,
+)
+
+/** The center split actually handed to Splitpanes: the player's own drag once
+ * they've made one, otherwise an emptiness-driven default so the building
+ * list gets the space while the queue is empty and expands back out once
+ * something is queued. */
+const effectiveCenterSizes = computed<number[]>(() =>
+  centerTouched.value
+    ? centerSizes.value
+    : constructionQueueEmpty.value
+      ? DEFAULT_CENTER_EMPTY
+      : DEFAULT_CENTER_FILLED,
+)
 
 function savePersistedLayout(): void {
   try {
@@ -349,6 +402,7 @@ function savePersistedLayout(): void {
       outer: outerSizes.value,
       left: leftSizes.value,
       center: centerSizes.value,
+      centerTouched: centerTouched.value,
     }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
@@ -368,6 +422,7 @@ function onLeftResized(payload: SplitpanesResizedPayload): void {
 
 function onCenterResized(payload: SplitpanesResizedPayload): void {
   centerSizes.value = payload.panes.map((p) => p.size)
+  centerTouched.value = true
   savePersistedLayout()
 }
 </script>
@@ -427,8 +482,13 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
 
           <!-- Center column: the buildings list over the construction queue. -->
           <Pane :size="outerSizes[1]" min-size="20">
+            <!-- Resizable split (issue #339): the construction queue defaults
+                 to a compact size while empty and expands back out once
+                 something is queued, but a deliberate drag on this divider
+                 always wins over that emptiness-driven default — see
+                 `effectiveCenterSizes`. -->
             <Splitpanes horizontal @resized="onCenterResized">
-              <Pane :size="centerSizes[0]" min-size="10">
+              <Pane :size="effectiveCenterSizes[0]" min-size="15">
                 <BuildingsPanel
                   :buildings="screen ? screen.buildings : null"
                   :slots-used="screen?.slots_used ?? 0"
@@ -442,7 +502,7 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
                   @set-paused="setBuildingPaused"
                 />
               </Pane>
-              <Pane :size="centerSizes[1]" min-size="10">
+              <Pane :size="effectiveCenterSizes[1]" min-size="6">
                 <ConstructionQueuePanel
                   :queue="screen ? screen.construction_queue : null"
                   :canceling-ids="cancelingIds"
@@ -473,6 +533,33 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
         @queue="queueBuilding"
         @close="showBuildDialog = false"
       />
+
+      <!-- Building details float over the whole view (issue #339) rather than
+           replacing it, so stores/labour/the rest of the building list stay
+           visible while reading a building's lines and shortfalls. Reuses
+           `BuildingDetailsHud`'s `asPage` presentation (plain content, no
+           backdrop) since `FloatingWindow` already supplies the frame,
+           drag/resize, and dismiss button. -->
+      <FloatingWindow
+        v-if="selectedBuildingType && selectedColony"
+        :title="selectedBuildingType"
+        storage-key="outpost3.colony-view.building-details-window"
+        closable
+        fill-host
+        :initial-x="40"
+        :initial-y="40"
+        :initial-width="520"
+        :initial-height="480"
+        @close="closeBuildingDetails"
+      >
+        <BuildingDetailsHud
+          owner-type="colony"
+          :owner-id="selectedColony.id"
+          :building-type="selectedBuildingType"
+          as-page
+          @close="closeBuildingDetails"
+        />
+      </FloatingWindow>
     </template>
   </div>
 </template>
@@ -482,7 +569,7 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
 /* Fill the shell's main region (UI-rework PR4): a flex column whose panel
    area (`.panel-layout`) grows to take all remaining height, so the colony
    dashboard fills the screen without a fixed viewport-height guess. */
-.colony-view { width: 100%; height: 100%; display: flex; flex-direction: column; }
+.colony-view { width: 100%; height: 100%; display: flex; flex-direction: column; position: relative; }
 
 .empty-state { color: #666; font-style: italic; margin: 1rem 0; }
 

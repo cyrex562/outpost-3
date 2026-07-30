@@ -349,6 +349,39 @@ describe('BuildingDetailsHud (#182)', () => {
     expect(wrapper.emitted('close')).toBeTruthy()
   })
 
+  describe('asPage presentation (floating window content, issue #339)', () => {
+    it('renders as plain content with no backdrop when embedded in a floating window', async () => {
+      getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: 'research_lab', asPage: true },
+      })
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="facility-page"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="building-details-hud"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="close-details-hud"]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Research Lab')
+    })
+
+    it('renders even without a building type selected yet, unlike modal mode', () => {
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: null, asPage: true },
+      })
+      expect(wrapper.find('[data-testid="facility-page"]').exists()).toBe(true)
+    })
+
+    it('the Back button emits close, letting a floating-window host dismiss it', async () => {
+      getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
+      const wrapper = mount(BuildingDetailsHud, {
+        props: { ownerId: 'colony-1', buildingType: 'research_lab', asPage: true },
+      })
+      await flushPromises()
+
+      await wrapper.find('[data-testid="facility-back"]').trigger('click')
+      expect(wrapper.emitted('close')).toBeTruthy()
+    })
+  })
+
   describe('ownerType="outpost" (navigation rework #7 phase 4)', () => {
     it('fetches outpost-scoped detail instead of colony detail', async () => {
       getOutpostBuildingDetail.mockResolvedValueOnce(makeDetail({ building_type: 'mining_outpost', name: 'Mining Outpost' }))
