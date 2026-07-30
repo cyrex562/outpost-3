@@ -797,6 +797,7 @@ mod tests {
                 menace_enabled: false,
                 hazards_enabled: false,
                 maintenance_enabled: true,
+                deposit_depletion_enabled: false,
             })
             .expect("SetCustomDifficulty");
         assert!(matches!(
@@ -845,6 +846,7 @@ mod tests {
                 menace_enabled: false,
                 hazards_enabled: true,
                 maintenance_enabled: true,
+                deposit_depletion_enabled: false,
             })
             .expect("custom off");
         assert!(engine.state.menace_state.is_none());
@@ -856,6 +858,7 @@ mod tests {
                 menace_enabled: true,
                 hazards_enabled: true,
                 maintenance_enabled: true,
+                deposit_depletion_enabled: false,
             })
             .expect("custom on");
         assert!(
@@ -882,6 +885,7 @@ mod tests {
                 menace_enabled: false,
                 hazards_enabled: true,
                 maintenance_enabled: true,
+                deposit_depletion_enabled: false,
             })
             .expect("custom");
         assert!(engine.state.hazards_enabled);
@@ -903,6 +907,7 @@ mod tests {
                 menace_enabled: false,
                 hazards_enabled: true,
                 maintenance_enabled: false,
+                deposit_depletion_enabled: false,
             })
             .expect("custom");
         assert!(!engine.state.maintenance_enabled);
@@ -913,6 +918,7 @@ mod tests {
                 menace_enabled: false,
                 hazards_enabled: true,
                 maintenance_enabled: true,
+                deposit_depletion_enabled: false,
             })
             .expect("custom on");
         assert!(engine.state.maintenance_enabled);
@@ -933,6 +939,89 @@ mod tests {
             .apply(&Command::SetMaintenanceEnabled { enabled: true })
             .expect("toggle on");
         assert!(engine.state.maintenance_enabled);
+    }
+
+    #[test]
+    fn set_difficulty_enables_deposit_depletion_on_hard_and_brutal_only() {
+        // Issue #317: Hard/Brutal presets turn on finite-deposit mode by
+        // default; all other presets leave deposits infinite.
+        use crate::{Command, GameEngine};
+
+        for preset in [
+            DifficultyPreset::Sandbox,
+            DifficultyPreset::Easy,
+            DifficultyPreset::Normal,
+        ] {
+            let mut engine = GameEngine::new();
+            engine
+                .apply(&Command::SetDifficulty { preset })
+                .expect("set difficulty");
+            assert!(
+                !engine.state.deposit_depletion_enabled,
+                "{preset:?} must leave deposits infinite"
+            );
+        }
+
+        for preset in [DifficultyPreset::Hard, DifficultyPreset::Brutal] {
+            let mut engine = GameEngine::new();
+            engine
+                .apply(&Command::SetDifficulty { preset })
+                .expect("set difficulty");
+            assert!(
+                engine.state.deposit_depletion_enabled,
+                "{preset:?} must enable finite deposits"
+            );
+        }
+    }
+
+    #[test]
+    fn set_custom_difficulty_propagates_deposit_depletion_enabled_atomically() {
+        // Issue #317: the atomic panel apply must carry
+        // deposit_depletion_enabled alongside the other toggles.
+        use crate::modifier::DifficultyScalar;
+        use crate::{Command, GameEngine};
+
+        let mut engine = GameEngine::new();
+        assert!(!engine.state.deposit_depletion_enabled);
+
+        engine
+            .apply(&Command::SetCustomDifficulty {
+                scalars: DifficultyScalar::new(),
+                menace_enabled: false,
+                hazards_enabled: true,
+                maintenance_enabled: true,
+                deposit_depletion_enabled: true,
+            })
+            .expect("custom");
+        assert!(engine.state.deposit_depletion_enabled);
+
+        engine
+            .apply(&Command::SetCustomDifficulty {
+                scalars: DifficultyScalar::new(),
+                menace_enabled: false,
+                hazards_enabled: true,
+                maintenance_enabled: true,
+                deposit_depletion_enabled: false,
+            })
+            .expect("custom off");
+        assert!(!engine.state.deposit_depletion_enabled);
+    }
+
+    #[test]
+    fn set_deposit_depletion_enabled_toggles_state() {
+        // Issue #317: standalone toggle mirrors SetHazardsEnabled/SetMaintenanceEnabled.
+        use crate::{Command, GameEngine};
+
+        let mut engine = GameEngine::new();
+        assert!(!engine.state.deposit_depletion_enabled);
+        engine
+            .apply(&Command::SetDepositDepletionEnabled { enabled: true })
+            .expect("toggle on");
+        assert!(engine.state.deposit_depletion_enabled);
+        engine
+            .apply(&Command::SetDepositDepletionEnabled { enabled: false })
+            .expect("toggle off");
+        assert!(!engine.state.deposit_depletion_enabled);
     }
 
     #[test]

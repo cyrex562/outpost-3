@@ -196,6 +196,10 @@ pub enum ClientCommand {
         /// this default to `true` so authored building upkeep still applies.
         #[serde(default)]
         maintenance_enabled: Option<bool>,
+        /// Master deposit-depletion toggle (issue #317). Clients that omit
+        /// this default to `false` (deposits stay infinite).
+        #[serde(default)]
+        deposit_depletion_enabled: Option<bool>,
     },
     /// Master hazards toggle (issue #161).
     SetHazardsEnabled {
@@ -203,6 +207,10 @@ pub enum ClientCommand {
     },
     /// Master maintenance toggle (issue #180).
     SetMaintenanceEnabled {
+        enabled: bool,
+    },
+    /// Master deposit-depletion toggle (issue #317).
+    SetDepositDepletionEnabled {
         enabled: bool,
     },
     /// Link a colony to its home star-system body (issue #163).
@@ -1040,11 +1048,16 @@ pub fn bootstrap(
 
     // Overlay a custom-difficulty payload if one was supplied (issue #161).
     if let Some(map) = custom_scalars {
+        // No dedicated bootstrap parameter for this yet — preserve whatever
+        // `SetDifficulty` above just derived from the preset (issue #317)
+        // rather than silently resetting it to infinite.
+        let deposit_depletion_enabled = engine.state.deposit_depletion_enabled;
         let _ = engine.apply(&Command::SetCustomDifficulty {
             scalars: scalars_from_map(&map),
             menace_enabled: custom_menace_enabled.unwrap_or(true),
             hazards_enabled: custom_hazards_enabled.unwrap_or(true),
             maintenance_enabled: custom_maintenance_enabled.unwrap_or(true),
+            deposit_depletion_enabled,
         });
     }
 
@@ -1434,15 +1447,20 @@ pub fn apply_command(
             menace_enabled,
             hazards_enabled,
             maintenance_enabled,
+            deposit_depletion_enabled,
         } => Command::SetCustomDifficulty {
             scalars: scalars_from_map(&scalars),
             menace_enabled,
             hazards_enabled,
             maintenance_enabled: maintenance_enabled.unwrap_or(true),
+            deposit_depletion_enabled: deposit_depletion_enabled.unwrap_or(false),
         },
         ClientCommand::SetHazardsEnabled { enabled } => Command::SetHazardsEnabled { enabled },
         ClientCommand::SetMaintenanceEnabled { enabled } => {
             Command::SetMaintenanceEnabled { enabled }
+        }
+        ClientCommand::SetDepositDepletionEnabled { enabled } => {
+            Command::SetDepositDepletionEnabled { enabled }
         }
         ClientCommand::AssignColonyHomeBody { colony_id, body_id } => {
             let cid = parse_colony(&colony_id)?;

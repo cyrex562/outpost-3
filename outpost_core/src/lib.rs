@@ -660,6 +660,9 @@ pub enum Command {
         hazards_enabled: bool,
         /// Whether per-building maintenance draws should apply (issue #180).
         maintenance_enabled: bool,
+        /// Whether surface deposits deplete with extraction (issue #317).
+        #[serde(default)]
+        deposit_depletion_enabled: bool,
     },
     /// Toggle the master hazard switch (issue #161).
     ///
@@ -674,6 +677,19 @@ pub enum Command {
     /// regardless of the `MaintenanceConsumption` scalar.
     SetMaintenanceEnabled {
         /// New master maintenance-enabled state.
+        enabled: bool,
+    },
+    /// Toggle whether surface deposits deplete with extraction (issue #317).
+    ///
+    /// Deposits are effectively infinite by default (`false`) — richness only
+    /// governs extraction *rate*, never runs out. When `true`, a deposit also
+    /// tracks a real remaining quantity that extraction draws down; once
+    /// exhausted, the deposit is gone and extraction there falls back to the
+    /// background trace-extraction floor ([`colony::TRACE_DEPOSIT_RATIO`]),
+    /// not to zero. `Command::SetDifficulty` defaults this on for the harder
+    /// presets (Hard/Brutal) and off otherwise.
+    SetDepositDepletionEnabled {
+        /// New master deposit-depletion-enabled state.
         enabled: bool,
     },
     /// Activate the existential clock with the given authored menace definition.
@@ -2942,6 +2958,62 @@ impl GameEngine {
                             .collect();
                     }
 
+                    // ── Step 3a2: Deposit depletion (issue #317, opt-in) ─────
+                    // Off by default (deposits stay effectively infinite);
+                    // when enabled, draw down each colony's site deposit by
+                    // what its extraction lines actually produced this sol —
+                    // the same `quantity * line.scale` figure the pool
+                    // withdrawal above already applied, read back from
+                    // `line_results` rather than duplicating the production
+                    // pass. Scoped to hex-level deposits only (what
+                    // `compute_deposit_ratio` actually gates production
+                    // against for a founded colony) — `BodyDeposit` abundance
+                    // stays a comparative flavor figure, not something
+                    // extraction consumes.
+                    if self.state.deposit_depletion_enabled {
+                        let mut depletions: Vec<(system::BodyId, map::HexCoord, String, f32)> =
+                            Vec::new();
+                        for colony in &self.state.colonies {
+                            let Some((body_id, coord)) =
+                                self.state.planet_maps.iter().find_map(|(body_id, pm)| {
+                                    pm.colonies
+                                        .iter()
+                                        .find(|n| n.colony_id == colony.id)
+                                        .map(|n| (body_id.clone(), n.coord))
+                                })
+                            else {
+                                continue;
+                            };
+                            for result in colony.last_production_by_building.values() {
+                                for line in &result.line_results {
+                                    let Some(recipe) = registry.recipe(&line.recipe_id) else {
+                                        continue;
+                                    };
+                                    for output in &recipe.outputs {
+                                        if !map::VEIN_COMMODITIES.contains(&output.id.as_str()) {
+                                            continue;
+                                        }
+                                        #[allow(clippy::cast_possible_truncation)]
+                                        let amount = (output.quantity * line.scale) as f32;
+                                        if amount > 0.0 {
+                                            depletions.push((
+                                                body_id.clone(),
+                                                coord,
+                                                output.id.clone(),
+                                                amount,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for (body_id, coord, commodity_id, amount) in depletions {
+                            if let Some(pm) = self.state.planet_maps.get_mut(&body_id) {
+                                pm.deplete_deposit(coord, &commodity_id, amount);
+                            }
+                        }
+                    }
+
                     // ── Step 3b: Outpost production (issue #233) ────────────
                     // Fixed skeleton-crew labor (no population to derive it
                     // from) and a neutral 1.0 habitability modifier — outposts
@@ -5167,6 +5239,14 @@ impl GameEngine {
                 self.state.difficulty_preset = *preset;
                 self.state.difficulty_scalar =
                     self.state.difficulty_grade_table.build_scalar(*preset);
+                // Deposits stay infinite by default; picking a preset that's
+                // meaningfully harder than Normal opts into finite deposits so
+                // "more difficulty" naturally implies real scarcity, without
+                // forcing depletion on Sandbox/Easy/Normal (issue #317).
+                self.state.deposit_depletion_enabled = matches!(
+                    preset,
+                    difficulty::DifficultyPreset::Hard | difficulty::DifficultyPreset::Brutal
+                );
                 Ok(vec![Event::DifficultyChanged { preset: *preset }])
             }
 
@@ -5175,11 +5255,13 @@ impl GameEngine {
                 menace_enabled,
                 hazards_enabled,
                 maintenance_enabled,
+                deposit_depletion_enabled,
             } => {
                 self.state.difficulty_preset = difficulty::DifficultyPreset::Custom;
                 self.state.difficulty_scalar = scalars.clone();
                 self.state.hazards_enabled = *hazards_enabled;
                 self.state.maintenance_enabled = *maintenance_enabled;
+                self.state.deposit_depletion_enabled = *deposit_depletion_enabled;
                 if *menace_enabled {
                     // Re-attach the last-known definition if the player
                     // toggles menace back on with nothing currently active.
@@ -5203,6 +5285,11 @@ impl GameEngine {
 
             Command::SetMaintenanceEnabled { enabled } => {
                 self.state.maintenance_enabled = *enabled;
+                Ok(vec![])
+            }
+
+            Command::SetDepositDepletionEnabled { enabled } => {
+                self.state.deposit_depletion_enabled = *enabled;
                 Ok(vec![])
             }
 

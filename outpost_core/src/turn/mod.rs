@@ -260,6 +260,13 @@ pub struct GameState {
     /// regardless of the `MaintenanceConsumption` scalar. Defaults to `true`
     /// on new games so authored maintenance costs apply by default.
     pub maintenance_enabled: bool,
+    /// Master deposit-depletion toggle (issue #317).
+    ///
+    /// When `false` (the default), surface deposits are effectively infinite —
+    /// richness only governs extraction rate, never runs out. When `true`, a
+    /// deposit also tracks a real remaining quantity that extraction draws
+    /// down (see [`crate::map::PlanetMap::deplete_deposit`]).
+    pub deposit_depletion_enabled: bool,
     /// Most recently activated menace definition, if any.
     ///
     /// Kept alongside `menace_state` so a menace-disabled → re-enabled
@@ -427,6 +434,7 @@ impl GameState {
             hazard_config: None,
             hazards_enabled: true,
             maintenance_enabled: true,
+            deposit_depletion_enabled: false,
             last_menace_definition: None,
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
