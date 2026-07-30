@@ -214,6 +214,12 @@ fn default_elevation() -> f32 {
 fn default_cell_temperature() -> TemperatureBand {
     TemperatureBand::Temperate
 }
+fn default_water_coverage() -> f32 {
+    0.0
+}
+fn default_vegetation_density() -> f32 {
+    0.0
+}
 
 /// A single hex cell in the planet map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -231,6 +237,21 @@ pub struct HexCell {
     /// per-cell latitude and elevation deltas.
     #[serde(default = "default_cell_temperature")]
     pub temperature: TemperatureBand,
+    /// Fraction of this cell's surface covered by water or ice, in `[0.0,
+    /// 1.0]` (issue #316). Drives the hex map's independent water/ice
+    /// render layer — `0.0` for dry terrain, high for `Terrain::Ocean`, a
+    /// moderate flat value for `Terrain::Wetlands`. Whether it reads as
+    /// liquid or frozen is a rendering decision keyed off `temperature`, not
+    /// a separate field.
+    #[serde(default = "default_water_coverage")]
+    pub water_coverage: f32,
+    /// Vegetation density in this cell, in `[0.0, 1.0]` (issue #316). Drives
+    /// the hex map's independent vegetation render layer. Always `0.0` on a
+    /// body whose [`PlanetarySubtype`] has no vegetation
+    /// ([`PlanetarySubtype::has_vegetation`]); otherwise derived from biome
+    /// and tempered by how harsh the cell's `temperature` band is.
+    #[serde(default = "default_vegetation_density")]
+    pub vegetation_density: f32,
     /// Resource deposits present in this cell (may be empty).
     pub deposits: Vec<Deposit>,
 }
@@ -249,6 +270,8 @@ impl HexCell {
             biome,
             elevation: default_elevation(),
             temperature: default_cell_temperature(),
+            water_coverage: default_water_coverage(),
+            vegetation_density: default_vegetation_density(),
             deposits: Vec::new(),
         }
     }
@@ -498,6 +521,11 @@ impl PlanetMap {
             planetary_subtype,
         );
 
+        // Whether this body's archetype supports vegetation at all (issue
+        // #316) — checked once outside the per-cell loop rather than per
+        // cell, since it's a body-level property.
+        let has_vegetation = planetary_subtype.has_vegetation();
+
         // Pass 2: terrain, biome, temperature, and deposits.
         for coord in &coords {
             let elevation = elevations[coord];
@@ -510,6 +538,7 @@ impl PlanetMap {
                 body_temperature,
                 &veins,
                 water_threshold,
+                has_vegetation,
             );
             cells.insert(*coord, cell);
             let site_id = site_id_for_coord(seed, *coord);
@@ -903,6 +932,7 @@ fn generate_cell(
     body_temperature: TemperatureBand,
     veins: &[Vein],
     water_threshold: Option<f32>,
+    has_vegetation: bool,
 ) -> HexCell {
     let latitude_abs = cell_latitude_abs(coord, height);
 
@@ -977,6 +1007,8 @@ fn generate_cell(
     let mut cell = HexCell::new(coord, terrain, biome);
     cell.elevation = elevation;
     cell.temperature = temperature;
+    cell.water_coverage = compute_water_coverage(terrain, elevation, water_threshold);
+    cell.vegetation_density = compute_vegetation_density(biome, temperature, has_vegetation);
 
     // Deposit rolls are biased by proximity to the nearest vein centre
     // (issue #188): cells inside a vein's influence radius roll far more
@@ -1001,6 +1033,79 @@ fn generate_cell(
     }
 
     cell
+}
+
+/// Fallback ocean-cutoff used when a body's [`PlanetarySubtype`] has no
+/// [`PlanetarySubtype::target_land_fraction`] opinion (gas/ice giants) — see
+/// the matching fallback in `generate_cell`'s terrain roll above.
+const DEFAULT_WATER_THRESHOLD: f32 = 0.35;
+
+/// Derive a cell's water/ice surface coverage in `[0.0, 1.0]` (issue #316)
+/// from its terrain and elevation.
+///
+/// `Terrain::Ocean` cells are always mostly-to-fully covered; deeper basins
+/// (lower elevation relative to the water threshold) read as fuller
+/// coverage, so a coastal shelf and an abyssal trench don't render
+/// identically. `Terrain::Wetlands` gets a flat moderate value (part land,
+/// part standing water). Every other terrain is dry.
+fn compute_water_coverage(terrain: Terrain, elevation: f32, water_threshold: Option<f32>) -> f32 {
+    match terrain {
+        Terrain::Ocean => {
+            let threshold = water_threshold.unwrap_or(DEFAULT_WATER_THRESHOLD);
+            if threshold <= 0.0 {
+                return 1.0;
+            }
+            let depth_frac = (1.0 - elevation / threshold).clamp(0.0, 1.0);
+            (0.6 + depth_frac * 0.4).clamp(0.6, 1.0)
+        }
+        Terrain::Wetlands => 0.35,
+        _ => 0.0,
+    }
+}
+
+/// Base vegetation density by biome, before the temperature tempering in
+/// [`compute_vegetation_density`]. Biomes not listed (Polar/Barren/Ocean/
+/// Geothermal) support no vegetation at all.
+fn base_vegetation_density(biome: Biome) -> f32 {
+    match biome {
+        Biome::Jungle => 0.9,
+        Biome::Forest => 0.65,
+        Biome::Grassland => 0.4,
+        Biome::Tundra => 0.1,
+        Biome::Desert => 0.05,
+        Biome::Polar | Biome::Barren | Biome::Ocean | Biome::Geothermal => 0.0,
+    }
+}
+
+/// Derive a cell's vegetation density in `[0.0, 1.0]` (issue #316) from its
+/// biome and temperature, gated by whether the parent body's
+/// [`PlanetarySubtype`] supports vegetation at all
+/// ([`PlanetarySubtype::has_vegetation`]).
+///
+/// A harsh per-cell temperature band tempers an otherwise-lush biome's
+/// density down (a nominally-Jungle cell that rolls `Extreme` shouldn't
+/// render fully verdant), mirroring how [`temperature_suitability_factor`]
+/// already tempers founding-site scoring by climate.
+fn compute_vegetation_density(
+    biome: Biome,
+    temperature: TemperatureBand,
+    has_vegetation: bool,
+) -> f32 {
+    if !has_vegetation {
+        return 0.0;
+    }
+    let base = base_vegetation_density(biome);
+    if base <= 0.0 {
+        return 0.0;
+    }
+    let temperature_factor = match temperature {
+        TemperatureBand::Extreme => 0.1,
+        TemperatureBand::Frozen => 0.3,
+        TemperatureBand::Cold => 0.75,
+        TemperatureBand::Temperate => 1.0,
+        TemperatureBand::Hot => 0.7,
+    };
+    (base * temperature_factor).clamp(0.0, 1.0)
 }
 
 /// Compute an elevation in `[0.0, 1.0]` for `coord` on a `width`-wide map
@@ -3032,5 +3137,131 @@ mod tests {
             "subtype-aware generation at radius 12 took {:?}, expected well under 100ms",
             start.elapsed()
         );
+    }
+
+    // ── Layered tile colour: water/ice + vegetation fields (issue #316) ───────
+
+    #[test]
+    fn ocean_cells_have_high_water_coverage() {
+        let map = PlanetMap::generate_for_body_and_subtype(
+            7,
+            8,
+            TemperatureBand::Temperate,
+            PlanetarySubtype::Ocean,
+        );
+        let ocean_cells: Vec<_> = map
+            .cells
+            .values()
+            .filter(|c| matches!(c.terrain, Terrain::Ocean))
+            .collect();
+        assert!(
+            !ocean_cells.is_empty(),
+            "an Ocean-subtype world should have ocean cells"
+        );
+        for cell in ocean_cells {
+            assert!(
+                cell.water_coverage >= 0.6,
+                "ocean cell at {:?} has water_coverage {}, expected >= 0.6",
+                cell.coord,
+                cell.water_coverage
+            );
+        }
+    }
+
+    #[test]
+    fn dry_terrain_has_zero_water_coverage() {
+        let map = PlanetMap::generate_for_body_and_subtype(
+            3,
+            8,
+            TemperatureBand::Temperate,
+            PlanetarySubtype::RockyBarrenHot,
+        );
+        for cell in map.cells.values() {
+            if !matches!(cell.terrain, Terrain::Ocean | Terrain::Wetlands) {
+                assert_eq!(
+                    cell.water_coverage, 0.0,
+                    "dry terrain {:?} at {:?} should have zero water coverage",
+                    cell.terrain, cell.coord
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wetlands_have_moderate_water_coverage() {
+        assert_eq!(
+            compute_water_coverage(Terrain::Wetlands, 0.5, Some(0.35)),
+            0.35
+        );
+        assert_eq!(
+            compute_water_coverage(Terrain::Plains, 0.5, Some(0.35)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn vegetation_absent_on_non_vegetated_archetypes() {
+        // Molten worlds have no vegetation story at all (issue #316) —
+        // every cell's vegetation_density must be exactly zero regardless
+        // of the biome roll.
+        let map = PlanetMap::generate_for_body_and_subtype(
+            11,
+            8,
+            TemperatureBand::Hot,
+            PlanetarySubtype::Molten,
+        );
+        assert!(!PlanetarySubtype::Molten.has_vegetation());
+        for cell in map.cells.values() {
+            assert_eq!(
+                cell.vegetation_density, 0.0,
+                "Molten-world cell at {:?} should have zero vegetation_density",
+                cell.coord
+            );
+        }
+    }
+
+    #[test]
+    fn vegetation_present_on_earth_like_worlds() {
+        let map = PlanetMap::generate_for_body_and_subtype(
+            11,
+            10,
+            TemperatureBand::Temperate,
+            PlanetarySubtype::EarthLike,
+        );
+        assert!(PlanetarySubtype::EarthLike.has_vegetation());
+        let any_vegetated = map.cells.values().any(|c| c.vegetation_density > 0.0);
+        assert!(
+            any_vegetated,
+            "an EarthLike world's map should have at least one cell with vegetation_density > 0"
+        );
+    }
+
+    #[test]
+    fn vegetation_density_scales_with_biome_lushness() {
+        assert!(
+            compute_vegetation_density(Biome::Jungle, TemperatureBand::Temperate, true)
+                > compute_vegetation_density(Biome::Grassland, TemperatureBand::Temperate, true)
+        );
+        assert_eq!(
+            compute_vegetation_density(Biome::Barren, TemperatureBand::Temperate, true),
+            0.0
+        );
+    }
+
+    #[test]
+    fn vegetation_density_is_tempered_by_harsh_temperature() {
+        let temperate = compute_vegetation_density(Biome::Forest, TemperatureBand::Temperate, true);
+        let extreme = compute_vegetation_density(Biome::Forest, TemperatureBand::Extreme, true);
+        assert!(
+            extreme < temperate,
+            "an Extreme-band forest cell ({extreme}) should read less vegetated than a Temperate one ({temperate})"
+        );
+    }
+
+    #[test]
+    fn hex_cell_new_defaults_water_and_vegetation_to_zero() {
+        let cell = HexCell::new(HexCoord::origin(), Terrain::Plains, Biome::Grassland);
+        assert_eq!(cell.water_coverage, 0.0);
+        assert_eq!(cell.vegetation_density, 0.0);
     }
 }

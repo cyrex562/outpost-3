@@ -212,6 +212,10 @@ pub struct PlanetHexWire {
     pub elevation: f32,
     /// Per-cell surface-temperature band.
     pub temperature: String,
+    /// Fraction of this cell covered by water/ice, in `[0.0, 1.0]` (issue #316).
+    pub water_coverage: f32,
+    /// Vegetation density in this cell, in `[0.0, 1.0]` (issue #316).
+    pub vegetation_density: f32,
     /// Resource deposits present in this cell.
     pub deposits: Vec<DepositWire>,
     /// Whether a colony could be founded on this cell.
@@ -410,6 +414,8 @@ fn build_planet_map_wire(
                 biome: format!("{:?}", cell.biome),
                 elevation: cell.elevation,
                 temperature: format!("{:?}", cell.temperature),
+                water_coverage: cell.water_coverage,
+                vegetation_density: cell.vegetation_density,
                 deposits: cell
                     .deposits
                     .iter()
