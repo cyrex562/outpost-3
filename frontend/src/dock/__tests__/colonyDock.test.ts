@@ -63,11 +63,18 @@ describe('buildDefaultColonyLayout (issue #321)', () => {
 })
 
 describe('openBuildingDetailsPanel (issue #322)', () => {
-  function fakeManager(): DockPanelManager & {
-    added: { id: string; component: string; params?: unknown; position?: unknown }[]
-  } {
+  /** `seedIds` pre-registers panels (e.g. `buildings`) as already open, the
+   * way a real dock's default layout would have them — `openBuildingDetailsPanel`
+   * looks up the buildings panel via `getPanel` before positioning itself
+   * relative to it. */
+  function fakeManager(
+    seedIds: string[] = [],
+  ): DockPanelManager & { added: { id: string; component: string; params?: unknown; position?: unknown }[] } {
     const panels = new Map<string, { api: { updateParameters: ReturnType<typeof vi.fn>; setTitle: ReturnType<typeof vi.fn>; setActive: ReturnType<typeof vi.fn> } }>()
     const added: { id: string; component: string; params?: unknown; position?: unknown }[] = []
+    for (const id of seedIds) {
+      panels.set(id, { api: { updateParameters: vi.fn(), setTitle: vi.fn(), setActive: vi.fn() } })
+    }
     return {
       added,
       addPanel: (opts) => {
@@ -81,7 +88,7 @@ describe('openBuildingDetailsPanel (issue #322)', () => {
   }
 
   it('adds a new panel docked alongside buildings when none is open yet', () => {
-    const api = fakeManager()
+    const api = fakeManager([COLONY_DOCK_COMPONENT.buildings])
 
     openBuildingDetailsPanel(api, 'colony_hq')
 
@@ -96,8 +103,27 @@ describe('openBuildingDetailsPanel (issue #322)', () => {
     ])
   })
 
-  it('retargets the existing panel instead of adding a second one', () => {
+  it('adds an unpositioned panel when the buildings panel is not currently open', () => {
+    // Panels are user-closeable and layouts persist across sessions, so the
+    // buildings list may not be there — `addPanel` with a `referencePanel`
+    // that doesn't resolve to an open panel throws in real dockview-core, so
+    // this must fall back rather than positioning relative to it.
     const api = fakeManager()
+
+    openBuildingDetailsPanel(api, 'colony_hq')
+
+    expect(api.added).toEqual([
+      {
+        id: COLONY_DOCK_COMPONENT.buildingDetails,
+        title: 'colony_hq',
+        component: COLONY_DOCK_COMPONENT.buildingDetails,
+        params: { buildingType: 'colony_hq' },
+      },
+    ])
+  })
+
+  it('retargets the existing panel instead of adding a second one', () => {
+    const api = fakeManager([COLONY_DOCK_COMPONENT.buildings])
 
     openBuildingDetailsPanel(api, 'colony_hq')
     openBuildingDetailsPanel(api, 'research_lab')

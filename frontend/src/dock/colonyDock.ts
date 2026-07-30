@@ -135,6 +135,15 @@ export function buildDefaultColonyLayout(api: DockPanelAdder): void {
  * buildings list whenever details are active) — the whole point per the
  * issue is that the colony context, including the list just clicked, stays
  * visible while reading a building's detail.
+ *
+ * `addPanel` with a `position.referencePanel` that doesn't resolve to a
+ * currently-open panel throws (real `dockview-core` behaviour, not this
+ * project's) — since panels are user-closeable and layouts persist across
+ * sessions, the buildings list may not be open when this runs (e.g. a
+ * `/facility/:type` deep link visited after closing it, or restoring an
+ * older saved layout). Falls back to an unpositioned `addPanel` (dockview
+ * places it in a new group) rather than throwing and silently dropping the
+ * player's click.
  */
 export function openBuildingDetailsPanel(api: DockPanelManager, buildingType: string): void {
   const id = COLONY_DOCK_COMPONENT.buildingDetails
@@ -146,12 +155,15 @@ export function openBuildingDetailsPanel(api: DockPanelManager, buildingType: st
     existing.api.setActive()
     return
   }
+  const buildingsPanel = api.getPanel(COLONY_DOCK_COMPONENT.buildings)
   api.addPanel({
     id,
     title: buildingType,
     component: id,
     params,
-    position: { referencePanel: COLONY_DOCK_COMPONENT.buildings, direction: 'right' },
+    ...(buildingsPanel
+      ? { position: { referencePanel: COLONY_DOCK_COMPONENT.buildings, direction: 'right' as const } }
+      : {}),
   })
 }
 

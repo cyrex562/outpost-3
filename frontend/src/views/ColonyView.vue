@@ -424,10 +424,19 @@ function onDockReady(event: DockviewReadyEvent): void {
  * `facility` route name, e.g. from `BuildingsListView`) is kept as a
  * deep link into the building-details panel rather than its own routed page
  * (issue #322 decision) — both route names resolve to this same component,
- * so visiting either just opens the panel once the dock and colony are
- * ready. Re-fires on every dependency change (not once at mount) so a
- * second facility link clicked while already on this colony retargets the
- * panel instead of being a no-op.
+ * so visiting either just opens the panel once the dock is ready. Re-fires
+ * when the dock becomes ready or the route's `buildingType` actually
+ * changes (not once at mount), so a second facility link clicked while
+ * already on this colony retargets the panel instead of being a no-op.
+ *
+ * Deliberately watches only `dockApi`/`routeBuildingType`, not
+ * `selectedColony` — `selectedColony` is a computed over `worldStore.world`,
+ * which is replaced wholesale on every server-pushed event (any sol
+ * advance, any command from any client), so including it here would re-run
+ * this watcher — and therefore reopen the panel — on unrelated world ticks,
+ * even after the player closed it via the dock's own tab close control.
+ * `selectedColony` is still checked, just inside the callback rather than
+ * as a tracked dependency, so this stays a no-op until a colony resolves.
  */
 const routeBuildingType = computed((): string | null => {
   const raw = route.params.buildingType
@@ -435,9 +444,9 @@ const routeBuildingType = computed((): string | null => {
 })
 
 watch(
-  () => [dockApi.value, routeBuildingType.value, selectedColony.value?.id] as const,
+  () => [dockApi.value, routeBuildingType.value] as const,
   ([api, buildingType]) => {
-    if (!api || !buildingType) return
+    if (!api || !buildingType || !selectedColony.value) return
     openBuildingDetailsPanel(api, buildingType)
   },
   { immediate: true },
