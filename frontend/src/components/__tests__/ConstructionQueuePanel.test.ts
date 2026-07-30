@@ -55,3 +55,32 @@ describe('ConstructionQueuePanel (UI-rework PR5: in-progress list only)', () => 
     expect(wrapper.find('[data-testid="build-card-smelter"]').exists()).toBe(false)
   })
 })
+
+describe('ConstructionQueuePanel empty-queue collapse (issue #339)', () => {
+  it('marks the panel collapsed when the queue is empty', () => {
+    const wrapper = mount(ConstructionQueuePanel, {
+      props: { queue: [], cancelingIds: new Set<string>() },
+    })
+    const panel = wrapper.get('[data-testid="construction-queue-panel"]')
+    expect(panel.attributes('data-collapsed')).toBe('true')
+    expect(panel.classes()).toContain('panel--collapsed')
+  })
+
+  it('marks the panel collapsed when the queue has not loaded yet (null)', () => {
+    const wrapper = mount(ConstructionQueuePanel, {
+      props: { queue: null, cancelingIds: new Set<string>() },
+    })
+    expect(wrapper.get('[data-testid="construction-queue-panel"]').attributes('data-collapsed')).toBe(
+      'true',
+    )
+  })
+
+  it('is not collapsed once something is queued', () => {
+    const wrapper = mount(ConstructionQueuePanel, {
+      props: { queue: [makeQueueRow({ project_id: 'proj-1' })], cancelingIds: new Set<string>() },
+    })
+    const panel = wrapper.get('[data-testid="construction-queue-panel"]')
+    expect(panel.attributes('data-collapsed')).toBe('false')
+    expect(panel.classes()).not.toContain('panel--collapsed')
+  })
+})

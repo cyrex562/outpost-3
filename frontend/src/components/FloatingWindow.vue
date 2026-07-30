@@ -36,6 +36,12 @@ const props = defineProps<{
    * initial size is used instead.
    */
   fillHost?: boolean
+  /** Show a dismiss (×) button in the title bar that emits `close`. */
+  closable?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'close'): void
 }>()
 
 interface Rect {
@@ -340,6 +346,19 @@ onUnmounted(() => {
       >
         {{ maximised ? '❐' : '▢' }}
       </button>
+      <!-- mousedown is stopped so hitting the button can't also start a drag. -->
+      <button
+        v-if="closable"
+        class="fw-close"
+        type="button"
+        data-testid="fw-close"
+        title="Close"
+        aria-label="Close"
+        @mousedown.stop
+        @click="emit('close')"
+      >
+        ×
+      </button>
     </div>
     <div class="fw-body">
       <slot />
@@ -395,6 +414,17 @@ onUnmounted(() => {
   padding: 0.15rem 0.35rem;
 }
 .fw-max:hover { background: #22223a; color: #8cf; }
+
+.fw-close {
+  background: none;
+  border: none;
+  color: #889;
+  cursor: pointer;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.fw-close:hover { color: #f89; }
 
 .fw-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 

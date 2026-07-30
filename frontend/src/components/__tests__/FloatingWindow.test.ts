@@ -102,6 +102,16 @@ describe('FloatingWindow (UI-rework PR6)', () => {
     expect(s.top).toBe('0px')
   })
 
+  it('shows no close button by default, and emits close when closable is set', async () => {
+    const bare = mountWindow()
+    expect(bare.find('[data-testid="fw-close"]').exists()).toBe(false)
+
+    const wrapper = mountWindow({ closable: true })
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.get('[data-testid="fw-close"]').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
   it('restores a persisted position on mount', () => {
     window.localStorage.setItem(KEY, JSON.stringify({ x: 200, y: 120, w: 500, h: 350 }))
     const wrapper = mountWindow()
