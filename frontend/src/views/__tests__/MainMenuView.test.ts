@@ -102,6 +102,21 @@ describe('MainMenuView system-generation sliders (playtest feedback round 3, Tau
     expect(genParams.maxRockyMoons).toBe(1)
   })
 
+  it('clamps the giant-moon min/max sliders so they never cross', async () => {
+    const wrapper = mount(MainMenuView)
+    await wrapper.get('[data-testid="btn-new-game"]').trigger('click')
+
+    // Bring max down first so a subsequent min raise has room to cross it.
+    await wrapper.get('[data-testid="giant-moons-max-slider"]').setValue('10')
+    // Dragging min above the current max pulls max up with it.
+    await wrapper.get('[data-testid="giant-moons-min-slider"]').setValue('15')
+    expect((wrapper.get('[data-testid="giant-moons-max-slider"]').element as HTMLInputElement).value).toBe('15')
+
+    // Dragging max below the current min pulls min down with it.
+    await wrapper.get('[data-testid="giant-moons-max-slider"]').setValue('3')
+    expect((wrapper.get('[data-testid="giant-moons-min-slider"]').element as HTMLInputElement).value).toBe('3')
+  })
+
   it('randomises the system seed independently of the planet seed', async () => {
     const wrapper = mount(MainMenuView)
     await wrapper.get('[data-testid="btn-new-game"]').trigger('click')

@@ -46,6 +46,16 @@ const cometaryBeltPresent = ref<boolean>(true)
 const giantMoonsMin = ref<number>(2)
 const giantMoonsMax = ref<number>(20)
 const rockyMoonsMax = ref<number>(3)
+// Keep the two independent moon-count sliders from silently crossing —
+// dragging min above max (or max below min) pulls the other bound along,
+// so the pair always reads as a coherent range (the engine would normalize
+// an inverted range safely, but silently swapping meaning is confusing UX).
+watch(giantMoonsMin, (v) => {
+  if (v > giantMoonsMax.value) giantMoonsMax.value = v
+})
+watch(giantMoonsMax, (v) => {
+  if (v < giantMoonsMin.value) giantMoonsMin.value = v
+})
 // Difficulty selection: built-in preset name, "Custom", or "custom:<name>" for a saved preset.
 const difficulty = ref<string>('Normal')
 const savedPresets = ref<CustomPreset[]>([])
