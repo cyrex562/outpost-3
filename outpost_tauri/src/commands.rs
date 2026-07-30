@@ -1008,6 +1008,11 @@ fn sanitize_preset_name(name: &str) -> String {
 /// in the binary at build time is used. Otherwise `content_dir` is read
 /// from the filesystem.
 #[tauri::command]
+// Tauri IPC commands take flat scalar arguments (no struct-of-options
+// aggregation across the JS/Rust boundary in this codebase's convention);
+// issue #318 added 9 more New Game generation overrides on top of an
+// already-large parameter list inherited from issue #199/#161.
+#[allow(clippy::too_many_arguments)]
 pub fn bootstrap(
     content_dir: String,
     planet_seed: u64,
@@ -1021,6 +1026,16 @@ pub fn bootstrap(
     min_inner_planets: Option<u32>,
     max_inner_planets: Option<u32>,
     abundance_scalar_override: Option<f32>,
+    // Gas-giant/asteroid-belt/cometary-belt/moon count overrides (issue #318).
+    min_gas_giants: Option<u32>,
+    max_gas_giants: Option<u32>,
+    min_asteroid_belts: Option<u32>,
+    max_asteroid_belts: Option<u32>,
+    min_cometary_belts: Option<u32>,
+    max_cometary_belts: Option<u32>,
+    min_giant_moons: Option<u32>,
+    max_giant_moons: Option<u32>,
+    max_rocky_moons: Option<u32>,
     engine_state: State<'_, EngineState>,
 ) -> CmdResult<SnapshotPayload> {
     log::info!(
@@ -1082,6 +1097,15 @@ pub fn bootstrap(
             .unwrap_or(gen_defaults.habitable_zone_center_au),
         min_inner_planets: min_inner_planets.unwrap_or(gen_defaults.min_inner_planets),
         max_inner_planets: max_inner_planets.unwrap_or(gen_defaults.max_inner_planets),
+        min_gas_giants: min_gas_giants.unwrap_or(gen_defaults.min_gas_giants),
+        max_gas_giants: max_gas_giants.unwrap_or(gen_defaults.max_gas_giants),
+        min_asteroid_belts: min_asteroid_belts.unwrap_or(gen_defaults.min_asteroid_belts),
+        max_asteroid_belts: max_asteroid_belts.unwrap_or(gen_defaults.max_asteroid_belts),
+        min_cometary_belts: min_cometary_belts.unwrap_or(gen_defaults.min_cometary_belts),
+        max_cometary_belts: max_cometary_belts.unwrap_or(gen_defaults.max_cometary_belts),
+        min_giant_moons: min_giant_moons.unwrap_or(gen_defaults.min_giant_moons),
+        max_giant_moons: max_giant_moons.unwrap_or(gen_defaults.max_giant_moons),
+        max_rocky_moons: max_rocky_moons.unwrap_or(gen_defaults.max_rocky_moons),
     }));
 
     // `width`/`height` here are only the no-system fallback — since

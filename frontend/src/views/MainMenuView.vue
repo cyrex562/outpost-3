@@ -35,6 +35,17 @@ const systemSeed = ref<number>(Math.floor(Math.random() * 0xffffffff))
 const habitableZoneCenterAu = ref<number>(1.0)
 const innerPlanetCount = ref<number>(3)
 const abundanceScalar = ref<number>(1.0)
+// System-composition options (issue #318): gas giants/asteroid belts pick an
+// exact count (sent as min=max, mirroring innerPlanetCount above); the
+// cometary belt is a presence toggle (0 or 1, never a count of belts); giant
+// moons is a real min/max spread (each giant in the system rolls
+// independently within it) so it gets paired sliders instead of one.
+const gasGiantCount = ref<number>(2)
+const asteroidBeltCount = ref<number>(2)
+const cometaryBeltPresent = ref<boolean>(true)
+const giantMoonsMin = ref<number>(2)
+const giantMoonsMax = ref<number>(20)
+const rockyMoonsMax = ref<number>(3)
 // Difficulty selection: built-in preset name, "Custom", or "custom:<name>" for a saved preset.
 const difficulty = ref<string>('Normal')
 const savedPresets = ref<CustomPreset[]>([])
@@ -124,6 +135,15 @@ async function startNewGame(): Promise<void> {
         minInnerPlanets: innerPlanetCount.value,
         maxInnerPlanets: innerPlanetCount.value,
         abundanceScalarOverride: abundanceScalar.value,
+        minGasGiants: gasGiantCount.value,
+        maxGasGiants: gasGiantCount.value,
+        minAsteroidBelts: asteroidBeltCount.value,
+        maxAsteroidBelts: asteroidBeltCount.value,
+        minCometaryBelts: cometaryBeltPresent.value ? 1 : 0,
+        maxCometaryBelts: cometaryBeltPresent.value ? 1 : 0,
+        minGiantMoons: giantMoonsMin.value,
+        maxGiantMoons: giantMoonsMax.value,
+        maxRockyMoons: rockyMoonsMax.value,
       },
     )
     worldStore.hydrate({ sol: snap.sol, month: snap.month, colonies: snap.colonies })
@@ -262,6 +282,79 @@ async function exitApp(): Promise<void> {
             data-testid="abundance-slider"
           />
           <span class="slider-value" data-testid="abundance-value">{{ abundanceScalar.toFixed(1) }}x</span>
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Gas Giants</span>
+          <input
+            v-model.number="gasGiantCount"
+            type="range"
+            min="1"
+            max="4"
+            step="1"
+            class="slider"
+            data-testid="gas-giant-count-slider"
+          />
+          <span class="slider-value" data-testid="gas-giant-count-value">{{ gasGiantCount }}</span>
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Asteroid Belts</span>
+          <input
+            v-model.number="asteroidBeltCount"
+            type="range"
+            min="1"
+            max="3"
+            step="1"
+            class="slider"
+            data-testid="asteroid-belt-count-slider"
+          />
+          <span class="slider-value" data-testid="asteroid-belt-count-value">{{ asteroidBeltCount }}</span>
+        </label>
+        <label class="slider-row checkbox-row">
+          <span class="slider-label">Cometary Belt</span>
+          <input
+            v-model="cometaryBeltPresent"
+            type="checkbox"
+            data-testid="cometary-belt-checkbox"
+          />
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Giant Moons (min)</span>
+          <input
+            v-model.number="giantMoonsMin"
+            type="range"
+            min="0"
+            max="20"
+            step="1"
+            class="slider"
+            data-testid="giant-moons-min-slider"
+          />
+          <span class="slider-value" data-testid="giant-moons-min-value">{{ giantMoonsMin }}</span>
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Giant Moons (max)</span>
+          <input
+            v-model.number="giantMoonsMax"
+            type="range"
+            min="0"
+            max="20"
+            step="1"
+            class="slider"
+            data-testid="giant-moons-max-slider"
+          />
+          <span class="slider-value" data-testid="giant-moons-max-value">{{ giantMoonsMax }}</span>
+        </label>
+        <label class="slider-row">
+          <span class="slider-label">Rocky Moons (max)</span>
+          <input
+            v-model.number="rockyMoonsMax"
+            type="range"
+            min="0"
+            max="6"
+            step="1"
+            class="slider"
+            data-testid="rocky-moons-max-slider"
+          />
+          <span class="slider-value" data-testid="rocky-moons-max-value">{{ rockyMoonsMax }}</span>
         </label>
       </div>
       <label>

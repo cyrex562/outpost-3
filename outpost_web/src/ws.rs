@@ -720,6 +720,11 @@ async fn handle_new_game(
                 .difficulty_scalar
                 .scalar_for(&ModifiableQuantity::DepositAbundance)
         });
+        // Gas giant/asteroid-belt/cometary-belt/moon counts (issue #318)
+        // have no browser-mode New Game sliders yet — always resolve to
+        // `SystemGenParams::default()` here, matching the Tauri-only slider
+        // scope decision on the issue.
+        let gen_defaults = outpost_core::system_gen::SystemGenParams::default();
         let system_evs = engine
             .apply(&Command::System(SystemCommand::GenerateSystem {
                 seed: system_seed,
@@ -727,6 +732,15 @@ async fn handle_new_game(
                 habitable_zone_center_au: gen_overrides.habitable_zone_center_au,
                 min_inner_planets: gen_overrides.min_inner_planets,
                 max_inner_planets: gen_overrides.max_inner_planets,
+                min_gas_giants: gen_defaults.min_gas_giants,
+                max_gas_giants: gen_defaults.max_gas_giants,
+                min_asteroid_belts: gen_defaults.min_asteroid_belts,
+                max_asteroid_belts: gen_defaults.max_asteroid_belts,
+                min_cometary_belts: gen_defaults.min_cometary_belts,
+                max_cometary_belts: gen_defaults.max_cometary_belts,
+                min_giant_moons: gen_defaults.min_giant_moons,
+                max_giant_moons: gen_defaults.max_giant_moons,
+                max_rocky_moons: gen_defaults.max_rocky_moons,
             }))
             .map_err(|e| format!("GenerateSystem failed: {e}"))?;
         events.extend(system_evs);
@@ -1106,6 +1120,15 @@ mod tests {
                     habitable_zone_center_au: gen_defaults.habitable_zone_center_au,
                     min_inner_planets: gen_defaults.min_inner_planets,
                     max_inner_planets: gen_defaults.max_inner_planets,
+                    min_gas_giants: gen_defaults.min_gas_giants,
+                    max_gas_giants: gen_defaults.max_gas_giants,
+                    min_asteroid_belts: gen_defaults.min_asteroid_belts,
+                    max_asteroid_belts: gen_defaults.max_asteroid_belts,
+                    min_cometary_belts: gen_defaults.min_cometary_belts,
+                    max_cometary_belts: gen_defaults.max_cometary_belts,
+                    min_giant_moons: gen_defaults.min_giant_moons,
+                    max_giant_moons: gen_defaults.max_giant_moons,
+                    max_rocky_moons: gen_defaults.max_rocky_moons,
                 }))
                 .expect("generate system");
             engine

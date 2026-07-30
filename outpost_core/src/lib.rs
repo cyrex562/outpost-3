@@ -15048,6 +15048,15 @@ mod tests {
                 habitable_zone_center_au: 1.0,
                 min_inner_planets: 3,
                 max_inner_planets: 5,
+                min_gas_giants: system_gen::SystemGenParams::default().min_gas_giants,
+                max_gas_giants: system_gen::SystemGenParams::default().max_gas_giants,
+                min_asteroid_belts: system_gen::SystemGenParams::default().min_asteroid_belts,
+                max_asteroid_belts: system_gen::SystemGenParams::default().max_asteroid_belts,
+                min_cometary_belts: system_gen::SystemGenParams::default().min_cometary_belts,
+                max_cometary_belts: system_gen::SystemGenParams::default().max_cometary_belts,
+                min_giant_moons: system_gen::SystemGenParams::default().min_giant_moons,
+                max_giant_moons: system_gen::SystemGenParams::default().max_giant_moons,
+                max_rocky_moons: system_gen::SystemGenParams::default().max_rocky_moons,
             }))
             .unwrap();
         engine
@@ -15094,6 +15103,15 @@ mod tests {
                 habitable_zone_center_au: 1.0,
                 min_inner_planets: 3,
                 max_inner_planets: 5,
+                min_gas_giants: system_gen::SystemGenParams::default().min_gas_giants,
+                max_gas_giants: system_gen::SystemGenParams::default().max_gas_giants,
+                min_asteroid_belts: system_gen::SystemGenParams::default().min_asteroid_belts,
+                max_asteroid_belts: system_gen::SystemGenParams::default().max_asteroid_belts,
+                min_cometary_belts: system_gen::SystemGenParams::default().min_cometary_belts,
+                max_cometary_belts: system_gen::SystemGenParams::default().max_cometary_belts,
+                min_giant_moons: system_gen::SystemGenParams::default().min_giant_moons,
+                max_giant_moons: system_gen::SystemGenParams::default().max_giant_moons,
+                max_rocky_moons: system_gen::SystemGenParams::default().max_rocky_moons,
             }))
             .unwrap();
         // Dimensions the home body's size is extremely unlikely to match by
@@ -15149,6 +15167,15 @@ mod tests {
                 habitable_zone_center_au: 1.0,
                 min_inner_planets: 3,
                 max_inner_planets: 5,
+                min_gas_giants: system_gen::SystemGenParams::default().min_gas_giants,
+                max_gas_giants: system_gen::SystemGenParams::default().max_gas_giants,
+                min_asteroid_belts: system_gen::SystemGenParams::default().min_asteroid_belts,
+                max_asteroid_belts: system_gen::SystemGenParams::default().max_asteroid_belts,
+                min_cometary_belts: system_gen::SystemGenParams::default().min_cometary_belts,
+                max_cometary_belts: system_gen::SystemGenParams::default().max_cometary_belts,
+                min_giant_moons: system_gen::SystemGenParams::default().min_giant_moons,
+                max_giant_moons: system_gen::SystemGenParams::default().max_giant_moons,
+                max_rocky_moons: system_gen::SystemGenParams::default().max_rocky_moons,
             }))
             .unwrap();
         let bodies: Vec<system::Body> = engine
@@ -15198,6 +15225,15 @@ mod tests {
                 habitable_zone_center_au: 1.0,
                 min_inner_planets: 3,
                 max_inner_planets: 5,
+                min_gas_giants: system_gen::SystemGenParams::default().min_gas_giants,
+                max_gas_giants: system_gen::SystemGenParams::default().max_gas_giants,
+                min_asteroid_belts: system_gen::SystemGenParams::default().min_asteroid_belts,
+                max_asteroid_belts: system_gen::SystemGenParams::default().max_asteroid_belts,
+                min_cometary_belts: system_gen::SystemGenParams::default().min_cometary_belts,
+                max_cometary_belts: system_gen::SystemGenParams::default().max_cometary_belts,
+                min_giant_moons: system_gen::SystemGenParams::default().min_giant_moons,
+                max_giant_moons: system_gen::SystemGenParams::default().max_giant_moons,
+                max_rocky_moons: system_gen::SystemGenParams::default().max_rocky_moons,
             }))
             .unwrap();
 
@@ -15250,6 +15286,15 @@ mod tests {
                 habitable_zone_center_au: 1.0,
                 min_inner_planets: 3,
                 max_inner_planets: 5,
+                min_gas_giants: system_gen::SystemGenParams::default().min_gas_giants,
+                max_gas_giants: system_gen::SystemGenParams::default().max_gas_giants,
+                min_asteroid_belts: system_gen::SystemGenParams::default().min_asteroid_belts,
+                max_asteroid_belts: system_gen::SystemGenParams::default().max_asteroid_belts,
+                min_cometary_belts: system_gen::SystemGenParams::default().min_cometary_belts,
+                max_cometary_belts: system_gen::SystemGenParams::default().max_cometary_belts,
+                min_giant_moons: system_gen::SystemGenParams::default().min_giant_moons,
+                max_giant_moons: system_gen::SystemGenParams::default().max_giant_moons,
+                max_rocky_moons: system_gen::SystemGenParams::default().max_rocky_moons,
             }))
             .unwrap();
         engine
@@ -15308,6 +15353,15 @@ mod tests {
                 habitable_zone_center_au: 1.0,
                 min_inner_planets: 3,
                 max_inner_planets: 5,
+                min_gas_giants: system_gen::SystemGenParams::default().min_gas_giants,
+                max_gas_giants: system_gen::SystemGenParams::default().max_gas_giants,
+                min_asteroid_belts: system_gen::SystemGenParams::default().min_asteroid_belts,
+                max_asteroid_belts: system_gen::SystemGenParams::default().max_asteroid_belts,
+                min_cometary_belts: system_gen::SystemGenParams::default().min_cometary_belts,
+                max_cometary_belts: system_gen::SystemGenParams::default().max_cometary_belts,
+                min_giant_moons: system_gen::SystemGenParams::default().min_giant_moons,
+                max_giant_moons: system_gen::SystemGenParams::default().max_giant_moons,
+                max_rocky_moons: system_gen::SystemGenParams::default().max_rocky_moons,
             }))
             .unwrap();
         let body_id = engine
