@@ -336,6 +336,12 @@ pub struct GameState {
     /// The resulting turn count is floored at `1` separately — a project that
     /// took zero turns would complete before the sol it was queued in.
     pub infrastructure_time_scalar: f32,
+
+    // ── #359 Direct-founding transit delay ──────────────────────────────────
+    /// Directly-founded colonies that have been billed and launched but have
+    /// not yet materialised — see [`crate::PendingColony`]. Ticked down once
+    /// per `AdvanceColonySol`.
+    pub pending_colonies: Vec<crate::PendingColony>,
 }
 
 impl GameState {
@@ -447,6 +453,7 @@ impl GameState {
             outpost_range_bonus_au: 0.0,
             infrastructure_cost_scalar: 1.0,
             infrastructure_time_scalar: 1.0,
+            pending_colonies: Vec::new(),
         }
     }
 
