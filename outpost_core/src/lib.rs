@@ -110,6 +110,76 @@ pub const MIN_BALANCE_SCALAR: f32 = 0.01;
 /// Upper bound for a live-tuned balance scalar. See [`MIN_BALANCE_SCALAR`].
 pub const MAX_BALANCE_SCALAR: f32 = 100.0;
 
+// ─── Pending colonies (issue #359) ─────────────────────────────────────────
+
+/// A directly-founded colony in transit, not yet materialised.
+///
+/// `Command::FoundColonyAtSite` with a `sponsor_colony_id` validates and bills
+/// the sponsor immediately (so an unaffordable founding changes nothing) but
+/// defers actually creating the [`colony::Colony`] until `sols_remaining`
+/// counts down to zero — mirroring the trade-convoy pattern in [`trade`]
+/// (goods withdrawn at dispatch, credited only on arrival) rather than
+/// teleporting the new settlement into existence the instant it is paid for.
+///
+/// The target site is reserved against double-founding for the whole transit
+/// (see the occupancy check in `Command::FoundColonyAtSite`) even though no
+/// [`map::ColonyNode`] exists yet — callers must also scan `GameState::pending_colonies`
+/// for the same `(body_id, coord)`, not just the map's `colonies` list.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PendingColony {
+    /// Stable identifier for this in-flight founding, referenced by
+    /// [`Event::ColonyFoundingLaunched`] so a host can track it until arrival.
+    pub id: uuid::Uuid,
+    /// Display name for the colony once it materialises.
+    pub name: String,
+    /// Starting colonist head-count, already withdrawn from the sponsor.
+    pub starting_population: u64,
+    /// Surveyed site the colony will occupy on arrival.
+    pub site_id: SiteId,
+    /// Resolved hex coordinate of `site_id`, cached so materialisation does not
+    /// need to re-resolve it against a map that may have changed shape.
+    pub coord: map::HexCoord,
+    /// Star-system body the colony will belong to (the resolved target used
+    /// for map placement, occupancy checks, and the transit calculation).
+    pub body_id: system::BodyId,
+    /// Body to auto-link via the `Command::AssignColonyHomeBody` equivalent
+    /// at arrival, mirroring the immediate path's `body_id` command field.
+    ///
+    /// Usually equal to [`Self::body_id`], but `None` when the founding
+    /// command omitted `body_id` and `body_id` was resolved from
+    /// `GameState::home_body_id` instead — that path skips the habitability
+    /// gate and so must skip the auto-link too, exactly as the immediate
+    /// path does.
+    pub link_body_id: Option<system::BodyId>,
+    /// Optional economic focus, carried through to the eventual
+    /// `Event::ColonyFoundedAtSite`.
+    pub focus: Option<String>,
+    /// Resolved starter supplies to deposit on arrival, and whether the
+    /// amounts are already absolute (`true`, from `supply_overrides`) or need
+    /// scaling by `starting_population / 100.0` (`false`, from a package).
+    pub supplies: Option<(Vec<content::types::Ingredient>, bool)>,
+    /// Sponsoring colony that paid for this founding, if any — carried through
+    /// for display/analytics only; the cost was already charged at launch.
+    pub sponsor_colony_id: Option<ColonyId>,
+    /// Colony habitability modifier + per-category modifiers resolved at
+    /// launch time, applied to the colony when it materialises exactly as
+    /// `AssignColonyHomeBody` would.
+    pub home_body_modifier: Option<(f32, Vec<system::BodyModifier>)>,
+    /// Sols remaining until arrival; decremented once per `AdvanceColonySol`.
+    pub sols_remaining: u32,
+}
+
+impl PendingColony {
+    /// Decrement `sols_remaining` by one sol, saturating at zero.
+    ///
+    /// Returns `true` once the founding has arrived (`sols_remaining` reaches
+    /// zero), mirroring [`orbital::OrbitalConstructionProject::tick`].
+    fn tick(&mut self) -> bool {
+        self.sols_remaining = self.sols_remaining.saturating_sub(1);
+        self.sols_remaining == 0
+    }
+}
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /// A command submitted to the engine from the outside world.
@@ -1407,6 +1477,25 @@ pub enum Event {
         /// Identifier of the directive that fired.
         directive_id: DirectiveId,
     },
+    /// A directly-founded colony has been billed and launched, but has not
+    /// yet arrived (issue #359) — a distance-derived transit delay stands
+    /// between payment and the colony actually existing.
+    ///
+    /// Hosts should surface this as "in transit"; the eventual arrival fires
+    /// [`Event::ColonyFoundedAtSite`] and [`Event::ColonyPlacedOnMap`] exactly
+    /// as an unsponsored (bootstrap) founding does today.
+    ColonyFoundingLaunched {
+        /// Identifier of the [`PendingColony`] tracking this founding.
+        pending_id: uuid::Uuid,
+        /// Display name for the colony once it arrives.
+        name: String,
+        /// Body the colony is headed for.
+        body_id: system::BodyId,
+        /// Sponsoring colony that paid for the founding, if any.
+        sponsor_colony_id: Option<ColonyId>,
+        /// Sols until the colony materialises.
+        sols_remaining: u32,
+    },
     /// A colony was founded at a specific planetary site.
     ColonyFoundedAtSite {
         /// Stable identifier assigned to the new colony.
@@ -2349,6 +2438,49 @@ impl GameEngine {
                             commodity_id: arrival.commodity_id,
                             amount: arrival.amount,
                         });
+                    }
+
+                    // ── Pending colony arrivals (issue #359) ──────────────────
+                    // Decrement every in-flight direct founding; when
+                    // sols_remaining hits zero, materialise the colony exactly
+                    // as the immediate/bootstrap path does. Mirrors the
+                    // trade-convoy pattern: goods (here, a colony) were
+                    // withdrawn/billed at dispatch and only appear at the
+                    // destination once transit completes.
+                    {
+                        let mut arrived: Vec<PendingColony> = Vec::new();
+                        self.state.pending_colonies.retain_mut(|p| {
+                            if p.tick() {
+                                arrived.push(p.clone());
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                        for pending in arrived {
+                            // Best-effort: the target map must already be
+                            // committed (done at launch time) and the site
+                            // still free — both essentially guaranteed since
+                            // the site was reserved against pending_colonies
+                            // for the whole transit. A failure here (e.g. the
+                            // map was somehow removed mid-flight) drops the
+                            // arrival rather than panicking mid-turn; the
+                            // sponsor's payment is not refunded, matching how
+                            // a lost trade convoy is not refunded either.
+                            if let Ok(mut arrival_events) = self.materialize_founded_colony(
+                                pending.name,
+                                pending.starting_population,
+                                pending.site_id,
+                                pending.coord,
+                                &pending.body_id,
+                                pending.focus,
+                                pending.supplies,
+                                pending.home_body_modifier,
+                                pending.link_body_id,
+                            ) {
+                                events.append(&mut arrival_events);
+                            }
+                        }
                     }
 
                     // ── Orbital construction countdown ────────────────────────
@@ -4169,7 +4301,13 @@ impl GameEngine {
                 if !cell.is_habitable() {
                     return Err(EngineError::SiteNotHabitable);
                 }
-                if pm.colonies.iter().any(|n| n.coord == coord) {
+                if pm.colonies.iter().any(|n| n.coord == coord)
+                    || self
+                        .state
+                        .pending_colonies
+                        .iter()
+                        .any(|p| p.body_id == target_body && p.coord == coord)
+                {
                     return Err(EngineError::SiteOccupied);
                 }
                 // Resolve the supply package (if any) up front so an unknown id
@@ -4245,6 +4383,11 @@ impl GameEngine {
                 // Colonists are transferred, not conjured: the sponsor gives up
                 // exactly the head-count the new colony starts with, so
                 // expansion weakens the world it launches from.
+                //
+                // `sponsor_home_body` is captured here (rather than looked up
+                // again below) so the transit-delay calculation uses the same
+                // sponsor snapshot the billing did.
+                let mut sponsor_home_body: Option<system::BodyId> = None;
                 if let Some(sponsor_id) = sponsor_colony_id {
                     let sponsor_idx = self.find_colony_index(*sponsor_id)?;
                     #[allow(clippy::cast_precision_loss)]
@@ -4264,133 +4407,62 @@ impl GameEngine {
                         &cost,
                     )?;
                     self.state.populations[sponsor_idx].count -= colonists;
+                    sponsor_home_body.clone_from(&self.state.colonies[sponsor_idx].home_body_id);
                 }
-                let colony = colony::Colony::new(name.clone());
-                let colony_id = colony.id;
-                self.state.add_colony(colony, *starting_population);
-                // Insert default directives from the loaded content registry.
-                self.insert_default_directives(colony_id);
-                // Everything is validated: commit the target body's surface if
-                // this founding is what brought it into existence (issue #300).
+                // Everything is validated and (if sponsored) paid for: commit
+                // the target body's surface if this founding is what brought
+                // it into existence (issue #300). Committed regardless of the
+                // route below so the site is visibly reserved for the whole
+                // transit, not just at arrival.
                 if let Some(fresh) = generated {
                     self.state.planet_maps.insert(target_body.clone(), fresh);
                 }
-                // Place colony node on the target body's map — not the founding
-                // planet's, which is what #358 was.
-                let pm_mut = self
-                    .state
-                    .map_for_body_mut(&target_body)
-                    .ok_or(EngineError::NoPlanetMap)?;
-                pm_mut
-                    .place_colony(colony_id, coord)
-                    .map_err(|e| EngineError::InvalidState(e.to_string()))?;
-                // Seed the starter supplies. Package-derived amounts are
-                // per-100-colonist and scaled linearly by starting_population;
-                // `supply_overrides` amounts (issue #167) are already
-                // absolute final quantities and are deposited as-is.
-                if let Some((ings, already_absolute)) = supplies {
-                    #[allow(clippy::cast_precision_loss)]
-                    let scale = (*starting_population as f64) / 100.0;
-                    let idx = self
-                        .find_colony_index(colony_id)
-                        .expect("colony was just inserted");
-                    for ing in &ings {
-                        let qty = if already_absolute {
-                            ing.quantity
-                        } else {
-                            ing.quantity * scale
-                        };
-                        if qty > 0.0 {
-                            self.state.colonies[idx].pool.deposit(&ing.id, qty);
-                        }
-                    }
-                }
-                let mut events = vec![
-                    Event::ColonyFoundedAtSite {
-                        colony_id,
+
+                if let Some(sponsor_id) = sponsor_colony_id {
+                    // Deferred materialisation (issue #359): the sponsor has
+                    // already paid, but the colony arrives after a
+                    // distance-derived transit delay rather than instantly.
+                    let sols_remaining =
+                        self.body_transit_sols(sponsor_home_body.as_ref(), &target_body);
+                    let pending_id = uuid::Uuid::new_v4();
+                    self.state.pending_colonies.push(PendingColony {
+                        id: pending_id,
                         name: name.clone(),
                         starting_population: *starting_population,
                         site_id: *site_id,
+                        coord,
+                        body_id: target_body.clone(),
+                        link_body_id: body_id.clone(),
                         focus: focus.clone(),
-                    },
-                    Event::ColonyPlacedOnMap {
-                        colony_id,
-                        q: coord.q,
-                        r: coord.r,
-                    },
-                ];
-                // Place the landing kit — one building for each basic resource
-                // (issue #317).
-                //
-                // Done here in the engine rather than by each host's founding
-                // wizard so it is a property of founding a colony rather than of
-                // which UI you used. The browser-mode wizard never placed
-                // buildings at all, so a colony founded there started with
-                // nothing and no route to anything.
-                //
-                // The player can still bring a different loadout explicitly via
-                // `Command::DeployStarterKit`; `starter_kit_deployed` is set here
-                // so the two can't stack into a double kit.
-                if let Some(kit) = self
-                    .state
-                    .registry
-                    .as_ref()
-                    .map(|reg| {
-                        reg.starter_kit()
-                            .into_iter()
-                            .map(|def| (def.id.clone(), def.slot_cost))
-                            .collect::<Vec<_>>()
-                    })
-                    .filter(|kit: &Vec<(String, u32)>| !kit.is_empty())
-                {
-                    let idx = self
-                        .find_colony_index(colony_id)
-                        .expect("colony was just inserted");
-                    for (building_type, slot_cost) in kit {
-                        let existing = &self.state.colonies[idx].buildings;
-                        let priority = self
-                            .state
-                            .registry
-                            .as_ref()
-                            .and_then(|reg| reg.building(&building_type))
-                            .map_or(content::types::DEFAULT_BUILDING_PRIORITY, |d| {
-                                d.default_priority
-                            });
-                        let placed = colony::PlacedBuilding::with_priority(
-                            &building_type,
-                            slot_cost,
-                            priority,
-                        )
-                        .numbered_within(existing);
-                        self.state.colonies[idx].buildings.push(placed);
-                        events.push(Event::BuildingConstructed {
-                            colony_id,
-                            building_type,
-                        });
-                    }
-                    self.state.colonies[idx].starter_kit_deployed = true;
-                    self.state.colonies[idx].auto_landing_kit = true;
-                }
-                // Auto-link the home body now that the gate has passed —
-                // equivalent to a follow-up Command::AssignColonyHomeBody,
-                // which remains separately callable but is no longer
-                // required for this to take effect.
-                if let (Some(bid), Some((modifier, category_modifiers))) =
-                    (body_id, home_body_modifier)
-                {
-                    let idx = self
-                        .find_colony_index(colony_id)
-                        .expect("colony was just inserted");
-                    self.state.colonies[idx].home_body_id = Some(bid.clone());
-                    self.state.colonies[idx].habitability_modifier = modifier;
-                    self.state.colonies[idx].category_modifiers = category_modifiers;
-                    events.push(Event::ColonyHomeBodySet {
-                        colony_id,
-                        body_id: bid.clone(),
-                        habitability_modifier: modifier,
+                        supplies,
+                        sponsor_colony_id: Some(*sponsor_id),
+                        home_body_modifier,
+                        sols_remaining,
                     });
+                    return Ok(vec![Event::ColonyFoundingLaunched {
+                        pending_id,
+                        name: name.clone(),
+                        body_id: target_body,
+                        sponsor_colony_id: Some(*sponsor_id),
+                        sols_remaining,
+                    }]);
                 }
-                Ok(events)
+
+                // Bootstrap path (no sponsor): the game's first colony arrives
+                // from off-system with nobody to bill, so it materialises
+                // immediately, matching pre-#359 behaviour that the harness
+                // and most engine tests rely on.
+                self.materialize_founded_colony(
+                    name.clone(),
+                    *starting_population,
+                    *site_id,
+                    coord,
+                    &target_body,
+                    focus.clone(),
+                    supplies,
+                    home_body_modifier,
+                    body_id.clone(),
+                )
             }
 
             Command::AssignColonyHomeBody { colony_id, body_id } => {
@@ -6891,6 +6963,178 @@ impl GameEngine {
             .compute_travel_time(&body_a, &body_b)
             .unwrap_or(trade::DEFAULT_TRANSIT_SOLS)
             .max(trade::DEFAULT_TRANSIT_SOLS)
+    }
+
+    /// Transit-delay sols for a directly-founded colony travelling from
+    /// `from_body` to `to_body` (issue #359).
+    ///
+    /// Same distance-derived reading as [`Self::route_transit_sols`] (a body
+    /// separation read as sols, not months — see that method's doc comment),
+    /// but keyed on body ids directly since the destination colony does not
+    /// exist yet to look up. [`trade::DEFAULT_TRANSIT_SOLS`] when the sponsor
+    /// has no known home body (so distance can't be computed) or is founding
+    /// on its own body (a same-body founding is conceptually a surface convoy,
+    /// per #359/#311 — still a beat of transit, not instant).
+    fn body_transit_sols(
+        &self,
+        from_body: Option<&system::BodyId>,
+        to_body: &system::BodyId,
+    ) -> u32 {
+        let Some(from) = from_body else {
+            return trade::DEFAULT_TRANSIT_SOLS;
+        };
+        if from == to_body {
+            return trade::DEFAULT_TRANSIT_SOLS;
+        }
+        self.state
+            .system_state
+            .node_map
+            .compute_travel_time(from, to_body)
+            .unwrap_or(trade::DEFAULT_TRANSIT_SOLS)
+            .max(trade::DEFAULT_TRANSIT_SOLS)
+    }
+
+    /// Create and place a colony that has already been validated and (if
+    /// sponsored) paid for — the second half of `Command::FoundColonyAtSite`,
+    /// shared between the immediate bootstrap path and a [`PendingColony`]'s
+    /// arrival (issue #359).
+    ///
+    /// `coord` must already be a validated, unoccupied cell on `target_body`'s
+    /// map, and that map must already be committed to `self.state.planet_maps`
+    /// — both are the caller's responsibility, since the two callers resolve
+    /// them at different times (immediately, vs. cached on the pending
+    /// record from launch time).
+    #[allow(clippy::too_many_arguments)]
+    fn materialize_founded_colony(
+        &mut self,
+        name: String,
+        starting_population: u64,
+        site_id: SiteId,
+        coord: map::HexCoord,
+        target_body: &system::BodyId,
+        focus: Option<String>,
+        supplies: Option<(Vec<content::types::Ingredient>, bool)>,
+        home_body_modifier: Option<(f32, Vec<system::BodyModifier>)>,
+        link_body_id: Option<system::BodyId>,
+    ) -> Result<Vec<Event>, EngineError> {
+        let colony = colony::Colony::new(name.clone());
+        let colony_id = colony.id;
+        self.state.add_colony(colony, starting_population);
+        // Insert default directives from the loaded content registry.
+        self.insert_default_directives(colony_id);
+        // Place colony node on the target body's map — not the founding
+        // planet's, which is what #358 was.
+        let pm_mut = self
+            .state
+            .map_for_body_mut(target_body)
+            .ok_or(EngineError::NoPlanetMap)?;
+        pm_mut
+            .place_colony(colony_id, coord)
+            .map_err(|e| EngineError::InvalidState(e.to_string()))?;
+        // Seed the starter supplies. Package-derived amounts are
+        // per-100-colonist and scaled linearly by starting_population;
+        // `supply_overrides` amounts (issue #167) are already absolute final
+        // quantities and are deposited as-is.
+        if let Some((ings, already_absolute)) = supplies {
+            #[allow(clippy::cast_precision_loss)]
+            let scale = (starting_population as f64) / 100.0;
+            let idx = self
+                .find_colony_index(colony_id)
+                .expect("colony was just inserted");
+            for ing in &ings {
+                let qty = if already_absolute {
+                    ing.quantity
+                } else {
+                    ing.quantity * scale
+                };
+                if qty > 0.0 {
+                    self.state.colonies[idx].pool.deposit(&ing.id, qty);
+                }
+            }
+        }
+        let mut events = vec![
+            Event::ColonyFoundedAtSite {
+                colony_id,
+                name,
+                starting_population,
+                site_id,
+                focus,
+            },
+            Event::ColonyPlacedOnMap {
+                colony_id,
+                q: coord.q,
+                r: coord.r,
+            },
+        ];
+        // Place the landing kit — one building for each basic resource
+        // (issue #317).
+        //
+        // Done here in the engine rather than by each host's founding wizard
+        // so it is a property of founding a colony rather than of which UI
+        // you used. The browser-mode wizard never placed buildings at all, so
+        // a colony founded there started with nothing and no route to
+        // anything.
+        //
+        // The player can still bring a different loadout explicitly via
+        // `Command::DeployStarterKit`; `starter_kit_deployed` is set here so
+        // the two can't stack into a double kit.
+        if let Some(kit) = self
+            .state
+            .registry
+            .as_ref()
+            .map(|reg| {
+                reg.starter_kit()
+                    .into_iter()
+                    .map(|def| (def.id.clone(), def.slot_cost))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|kit: &Vec<(String, u32)>| !kit.is_empty())
+        {
+            let idx = self
+                .find_colony_index(colony_id)
+                .expect("colony was just inserted");
+            for (building_type, slot_cost) in kit {
+                let existing = &self.state.colonies[idx].buildings;
+                let priority = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .and_then(|reg| reg.building(&building_type))
+                    .map_or(content::types::DEFAULT_BUILDING_PRIORITY, |d| {
+                        d.default_priority
+                    });
+                let placed =
+                    colony::PlacedBuilding::with_priority(&building_type, slot_cost, priority)
+                        .numbered_within(existing);
+                self.state.colonies[idx].buildings.push(placed);
+                events.push(Event::BuildingConstructed {
+                    colony_id,
+                    building_type,
+                });
+            }
+            self.state.colonies[idx].starter_kit_deployed = true;
+            self.state.colonies[idx].auto_landing_kit = true;
+        }
+        // Auto-link the home body now that the gate has passed — equivalent
+        // to a follow-up Command::AssignColonyHomeBody, which remains
+        // separately callable but is no longer required for this to take
+        // effect.
+        if let (Some(bid), Some((modifier, category_modifiers))) =
+            (link_body_id, home_body_modifier)
+        {
+            let idx = self
+                .find_colony_index(colony_id)
+                .expect("colony was just inserted");
+            self.state.colonies[idx].home_body_id = Some(bid.clone());
+            self.state.colonies[idx].habitability_modifier = modifier;
+            self.state.colonies[idx].category_modifiers = category_modifiers;
+            events.push(Event::ColonyHomeBodySet {
+                colony_id,
+                body_id: bid,
+                habitability_modifier: modifier,
+            });
+        }
+        Ok(events)
     }
 
     /// Whether `building_type` is a site-preparation project — one whose
@@ -17459,6 +17703,166 @@ mod tests {
         assert!(
             grown.pool.amount("transport_hull") < 1e-9,
             "the remainder must actually be spent, not carried over"
+        );
+    }
+
+    /// A sponsored founding is billed immediately but does not create the
+    /// colony in the same command — it launches, in transit (issue #359).
+    #[test]
+    fn sponsored_founding_launches_but_does_not_materialize_immediately() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Sponsor");
+        sponsor.pool.deposit("survey_probe", 5.0);
+        sponsor.pool.deposit("transport_hull", 5.0);
+        sponsor.pool.deposit("structural_metal", 1000.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 500);
+        let colonies_before = engine.state.colonies.len();
+
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "In Transit".into(),
+                starting_population: 120,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: Some(sponsor_id),
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        // Billed immediately...
+        let idx = engine.find_colony_index(sponsor_id).unwrap();
+        assert!((engine.state.populations[idx].count - 380.0).abs() < 1e-3);
+        // ...but not materialized: no new colony, no ColonyFoundedAtSite yet.
+        assert_eq!(
+            engine.state.colonies.len(),
+            colonies_before,
+            "the colony must not exist until it arrives"
+        );
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyFoundedAtSite { .. })));
+        let (pending_id, sols_remaining) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ColonyFoundingLaunched {
+                    pending_id,
+                    sols_remaining,
+                    ..
+                } => Some((*pending_id, *sols_remaining)),
+                _ => None,
+            })
+            .expect("expected ColonyFoundingLaunched");
+        assert!(sols_remaining >= 1, "transit must not be instantaneous");
+        assert_eq!(engine.state.pending_colonies.len(), 1);
+        assert_eq!(engine.state.pending_colonies[0].id, pending_id);
+    }
+
+    /// Once the transit delay elapses, the pending founding materializes with
+    /// the same identity it launched with (issue #359).
+    #[test]
+    fn pending_colony_materializes_after_its_transit_delay() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Sponsor");
+        sponsor.pool.deposit("survey_probe", 5.0);
+        sponsor.pool.deposit("transport_hull", 5.0);
+        sponsor.pool.deposit("structural_metal", 1000.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 500);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Arriving".into(),
+                starting_population: 120,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: Some(sponsor_id),
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+        let sols_remaining = engine.state.pending_colonies[0].sols_remaining;
+
+        let mut founded_events = Vec::new();
+        for _ in 0..sols_remaining {
+            let events = engine.apply(&Command::AdvanceColonySol).unwrap();
+            founded_events = events;
+        }
+
+        assert!(
+            engine.state.pending_colonies.is_empty(),
+            "the pending record must be consumed on arrival"
+        );
+        assert!(founded_events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyFoundedAtSite { name, .. } if name == "Arriving")));
+        assert!(founded_events
+            .iter()
+            .any(|e| matches!(e, Event::ColonyPlacedOnMap { .. })));
+        let arrived = engine
+            .state
+            .colonies
+            .iter()
+            .find(|c| c.name == "Arriving")
+            .expect("colony must exist after arrival");
+        assert_eq!(arrived.home_body_id.as_ref(), Some(&body_id));
+        let arrived_idx = engine.find_colony_index(arrived.id).unwrap();
+        assert!((engine.state.populations[arrived_idx].count - 120.0).abs() < 1e-3);
+        let pm = engine.state.map_for_body(&body_id).unwrap();
+        assert_eq!(pm.colonies.len(), 1);
+    }
+
+    /// The target site is reserved for the whole transit — a second founding
+    /// cannot land on the same hex while the first is still in flight
+    /// (issue #359).
+    #[test]
+    fn in_flight_founding_reserves_its_site_against_a_second_founding() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        engine.state.registry = Some(colonization_registry());
+        let site_id = habitable_site_on(&engine, &body_id);
+
+        let mut sponsor = colony::Colony::new("Sponsor");
+        sponsor.pool.deposit("survey_probe", 10.0);
+        sponsor.pool.deposit("transport_hull", 10.0);
+        sponsor.pool.deposit("structural_metal", 2000.0);
+        let sponsor_id = sponsor.id;
+        engine.state.add_colony(sponsor, 1000);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "First".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: Some(sponsor_id),
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+
+        let result = engine.apply(&Command::FoundColonyAtSite {
+            name: "Second".into(),
+            starting_population: 100,
+            site_id,
+            focus: None,
+            supplies_id: None,
+            supply_overrides: None,
+            sponsor_colony_id: Some(sponsor_id),
+            body_id: Some(body_id),
+        });
+        assert!(
+            matches!(result, Err(EngineError::SiteOccupied)),
+            "expected SiteOccupied, got {result:?}"
         );
     }
 

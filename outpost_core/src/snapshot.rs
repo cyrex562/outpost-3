@@ -60,7 +60,10 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// deserialize, so the version bump alone is what rejects them with a clear
 /// [`SnapshotError::SchemaVersionMismatch`] rather than silently reshaping a player's
 /// colony placements onto the new topology.
-pub const SCHEMA_VERSION: u32 = 12;
+/// Schema version 13: `pending_colonies` field added to `FullStateBlob` (issue #359) —
+/// directly-founded colonies now arrive after a distance-derived transit delay instead
+/// of materialising instantly, and the in-flight queue must round-trip through snapshot.
+pub const SCHEMA_VERSION: u32 = 13;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -202,6 +205,10 @@ struct FullStateBlob {
     infrastructure_cost_scalar: f32,
     #[serde(default = "default_infrastructure_scalar")]
     infrastructure_time_scalar: f32,
+
+    // ── #359 Direct-founding transit delay ───────────────────────────────────
+    #[serde(default)]
+    pending_colonies: Vec<crate::PendingColony>,
 }
 
 fn default_infrastructure_scalar() -> f32 {
@@ -267,6 +274,7 @@ impl FullStateBlob {
             infrastructure_cost_scalar: state.infrastructure_cost_scalar,
             infrastructure_time_scalar: state.infrastructure_time_scalar,
             outpost_range_bonus_au: state.outpost_range_bonus_au,
+            pending_colonies: state.pending_colonies.clone(),
         }
     }
 
@@ -331,6 +339,7 @@ impl FullStateBlob {
             infrastructure_cost_scalar: self.infrastructure_cost_scalar,
             infrastructure_time_scalar: self.infrastructure_time_scalar,
             outpost_range_bonus_au: self.outpost_range_bonus_au,
+            pending_colonies: self.pending_colonies,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
@@ -903,6 +912,47 @@ mod tests {
         assert_eq!(restored.pending_migrations[0].id, migration_id);
         assert_eq!(restored.pending_migrations[0].turns_remaining, 10);
         assert!((restored.pending_migrations[0].count - 50.0).abs() < 1e-4);
+    }
+
+    /// A directly-founded colony in transit must round-trip through a
+    /// snapshot exactly like any other in-flight state (issue #359).
+    #[test]
+    fn round_trip_pending_colonies() {
+        use crate::map::HexCoord;
+        use crate::system::{Body, BodyKind};
+        use crate::trade::SiteId;
+        use crate::PendingColony;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Sponsor"), 500);
+        let sponsor_id = state.colonies[0].id;
+        let target_body = Body::new("Target", BodyKind::InnerPlanet, 1.5).id;
+
+        let pending = PendingColony {
+            id: uuid::Uuid::new_v4(),
+            name: "In Transit".into(),
+            starting_population: 120,
+            site_id: SiteId::new(),
+            coord: HexCoord { q: 1, r: 2 },
+            body_id: target_body.clone(),
+            link_body_id: Some(target_body.clone()),
+            focus: None,
+            supplies: None,
+            sponsor_colony_id: Some(sponsor_id),
+            home_body_modifier: None,
+            sols_remaining: 7,
+        };
+        let pending_id = pending.id;
+        state.pending_colonies.push(pending);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert_eq!(restored.pending_colonies.len(), 1);
+        assert_eq!(restored.pending_colonies[0].id, pending_id);
+        assert_eq!(restored.pending_colonies[0].sols_remaining, 7);
+        assert_eq!(restored.pending_colonies[0].body_id, target_body);
     }
 
     #[test]
