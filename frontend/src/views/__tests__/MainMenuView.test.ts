@@ -42,6 +42,12 @@ describe('MainMenuView system-generation sliders (playtest feedback round 3, Tau
     expect((wrapper.get('[data-testid="hz-center-slider"]').element as HTMLInputElement).value).toBe('1')
     expect((wrapper.get('[data-testid="inner-planet-count-slider"]').element as HTMLInputElement).value).toBe('3')
     expect((wrapper.get('[data-testid="abundance-slider"]').element as HTMLInputElement).value).toBe('1')
+    expect((wrapper.get('[data-testid="gas-giant-count-slider"]').element as HTMLInputElement).value).toBe('2')
+    expect((wrapper.get('[data-testid="asteroid-belt-count-slider"]').element as HTMLInputElement).value).toBe('2')
+    expect((wrapper.get('[data-testid="cometary-belt-checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="giant-moons-min-slider"]').element as HTMLInputElement).value).toBe('2')
+    expect((wrapper.get('[data-testid="giant-moons-max-slider"]').element as HTMLInputElement).value).toBe('20')
+    expect((wrapper.get('[data-testid="rocky-moons-max-slider"]').element as HTMLInputElement).value).toBe('3')
   })
 
   it('sends the independent system seed and generation sliders through bootstrap()', async () => {
@@ -51,6 +57,12 @@ describe('MainMenuView system-generation sliders (playtest feedback round 3, Tau
     await wrapper.get('[data-testid="hz-center-slider"]').setValue('1.5')
     await wrapper.get('[data-testid="inner-planet-count-slider"]').setValue('5')
     await wrapper.get('[data-testid="abundance-slider"]').setValue('2')
+    await wrapper.get('[data-testid="gas-giant-count-slider"]').setValue('4')
+    await wrapper.get('[data-testid="asteroid-belt-count-slider"]').setValue('3')
+    await wrapper.get('[data-testid="cometary-belt-checkbox"]').setValue(false)
+    await wrapper.get('[data-testid="giant-moons-min-slider"]').setValue('4')
+    await wrapper.get('[data-testid="giant-moons-max-slider"]').setValue('12')
+    await wrapper.get('[data-testid="rocky-moons-max-slider"]').setValue('1')
 
     await wrapper.get('[data-testid="btn-start"]').trigger('click')
     await new Promise((r) => setTimeout(r, 0))
@@ -64,12 +76,45 @@ describe('MainMenuView system-generation sliders (playtest feedback round 3, Tau
       minInnerPlanets?: number
       maxInnerPlanets?: number
       abundanceScalarOverride?: number
+      minGasGiants?: number
+      maxGasGiants?: number
+      minAsteroidBelts?: number
+      maxAsteroidBelts?: number
+      minCometaryBelts?: number
+      maxCometaryBelts?: number
+      minGiantMoons?: number
+      maxGiantMoons?: number
+      maxRockyMoons?: number
     }
     expect(systemSeedArg).toEqual(expect.any(Number))
     expect(genParams.habitableZoneCenterAu).toBeCloseTo(1.5)
     expect(genParams.minInnerPlanets).toBe(5)
     expect(genParams.maxInnerPlanets).toBe(5)
     expect(genParams.abundanceScalarOverride).toBeCloseTo(2)
+    expect(genParams.minGasGiants).toBe(4)
+    expect(genParams.maxGasGiants).toBe(4)
+    expect(genParams.minAsteroidBelts).toBe(3)
+    expect(genParams.maxAsteroidBelts).toBe(3)
+    expect(genParams.minCometaryBelts).toBe(0)
+    expect(genParams.maxCometaryBelts).toBe(0)
+    expect(genParams.minGiantMoons).toBe(4)
+    expect(genParams.maxGiantMoons).toBe(12)
+    expect(genParams.maxRockyMoons).toBe(1)
+  })
+
+  it('clamps the giant-moon min/max sliders so they never cross', async () => {
+    const wrapper = mount(MainMenuView)
+    await wrapper.get('[data-testid="btn-new-game"]').trigger('click')
+
+    // Bring max down first so a subsequent min raise has room to cross it.
+    await wrapper.get('[data-testid="giant-moons-max-slider"]').setValue('10')
+    // Dragging min above the current max pulls max up with it.
+    await wrapper.get('[data-testid="giant-moons-min-slider"]').setValue('15')
+    expect((wrapper.get('[data-testid="giant-moons-max-slider"]').element as HTMLInputElement).value).toBe('15')
+
+    // Dragging max below the current min pulls min down with it.
+    await wrapper.get('[data-testid="giant-moons-max-slider"]').setValue('3')
+    expect((wrapper.get('[data-testid="giant-moons-min-slider"]').element as HTMLInputElement).value).toBe('3')
   })
 
   it('randomises the system seed independently of the planet seed', async () => {

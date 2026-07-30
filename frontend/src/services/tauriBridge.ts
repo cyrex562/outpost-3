@@ -109,6 +109,16 @@ export async function bootstrap(
     minInnerPlanets?: number
     maxInnerPlanets?: number
     abundanceScalarOverride?: number
+    /** Gas-giant/asteroid-belt/cometary-belt/moon count overrides (issue #318). */
+    minGasGiants?: number
+    maxGasGiants?: number
+    minAsteroidBelts?: number
+    maxAsteroidBelts?: number
+    minCometaryBelts?: number
+    maxCometaryBelts?: number
+    minGiantMoons?: number
+    maxGiantMoons?: number
+    maxRockyMoons?: number
   },
 ): Promise<SnapshotPayload> {
   return invoke<SnapshotPayload>('bootstrap', {
@@ -124,6 +134,15 @@ export async function bootstrap(
     minInnerPlanets: genParams?.minInnerPlanets ?? null,
     maxInnerPlanets: genParams?.maxInnerPlanets ?? null,
     abundanceScalarOverride: genParams?.abundanceScalarOverride ?? null,
+    minGasGiants: genParams?.minGasGiants ?? null,
+    maxGasGiants: genParams?.maxGasGiants ?? null,
+    minAsteroidBelts: genParams?.minAsteroidBelts ?? null,
+    maxAsteroidBelts: genParams?.maxAsteroidBelts ?? null,
+    minCometaryBelts: genParams?.minCometaryBelts ?? null,
+    maxCometaryBelts: genParams?.maxCometaryBelts ?? null,
+    minGiantMoons: genParams?.minGiantMoons ?? null,
+    maxGiantMoons: genParams?.maxGiantMoons ?? null,
+    maxRockyMoons: genParams?.maxRockyMoons ?? null,
   })
 }
 

@@ -288,6 +288,33 @@ fn default_min_inner_planets() -> u32 {
 fn default_max_inner_planets() -> u32 {
     crate::system_gen::SystemGenParams::default().max_inner_planets
 }
+fn default_min_gas_giants() -> u32 {
+    crate::system_gen::SystemGenParams::default().min_gas_giants
+}
+fn default_max_gas_giants() -> u32 {
+    crate::system_gen::SystemGenParams::default().max_gas_giants
+}
+fn default_min_asteroid_belts() -> u32 {
+    crate::system_gen::SystemGenParams::default().min_asteroid_belts
+}
+fn default_max_asteroid_belts() -> u32 {
+    crate::system_gen::SystemGenParams::default().max_asteroid_belts
+}
+fn default_min_cometary_belts() -> u32 {
+    crate::system_gen::SystemGenParams::default().min_cometary_belts
+}
+fn default_max_cometary_belts() -> u32 {
+    crate::system_gen::SystemGenParams::default().max_cometary_belts
+}
+fn default_min_giant_moons() -> u32 {
+    crate::system_gen::SystemGenParams::default().min_giant_moons
+}
+fn default_max_giant_moons() -> u32 {
+    crate::system_gen::SystemGenParams::default().max_giant_moons
+}
+fn default_max_rocky_moons() -> u32 {
+    crate::system_gen::SystemGenParams::default().max_rocky_moons
+}
 
 /// Surface/composition archetype for a body, orthogonal to [`BodyKind`]
 /// (issue #196).
@@ -1283,6 +1310,33 @@ pub enum SystemCommand {
         /// Maximum inner-planet (rocky world) count.
         #[serde(default = "default_max_inner_planets")]
         max_inner_planets: u32,
+        /// Minimum gas-giant count (issue #318).
+        #[serde(default = "default_min_gas_giants")]
+        min_gas_giants: u32,
+        /// Maximum gas-giant count (issue #318).
+        #[serde(default = "default_max_gas_giants")]
+        max_gas_giants: u32,
+        /// Minimum asteroid-belt count (issue #318).
+        #[serde(default = "default_min_asteroid_belts")]
+        min_asteroid_belts: u32,
+        /// Maximum asteroid-belt count (issue #318).
+        #[serde(default = "default_max_asteroid_belts")]
+        max_asteroid_belts: u32,
+        /// Minimum cometary-belt count — `0` or `1` in practice (issue #318).
+        #[serde(default = "default_min_cometary_belts")]
+        min_cometary_belts: u32,
+        /// Maximum cometary-belt count — `0` or `1` in practice (issue #318).
+        #[serde(default = "default_max_cometary_belts")]
+        max_cometary_belts: u32,
+        /// Minimum moon count for a gas/ice giant (issue #318).
+        #[serde(default = "default_min_giant_moons")]
+        min_giant_moons: u32,
+        /// Maximum moon count for a gas/ice giant (issue #318).
+        #[serde(default = "default_max_giant_moons")]
+        max_giant_moons: u32,
+        /// Maximum moon count for a rocky inner planet (issue #318).
+        #[serde(default = "default_max_rocky_moons")]
+        max_rocky_moons: u32,
     },
     /// Add a shipping route between two bodies (travel time auto-computed).
     AddShippingRoute {
@@ -1689,6 +1743,15 @@ pub fn apply_system_command(
             habitable_zone_center_au,
             min_inner_planets,
             max_inner_planets,
+            min_gas_giants,
+            max_gas_giants,
+            min_asteroid_belts,
+            max_asteroid_belts,
+            min_cometary_belts,
+            max_cometary_belts,
+            min_giant_moons,
+            max_giant_moons,
+            max_rocky_moons,
         } => {
             state.node_map.bodies.clear();
             state.node_map.system_name = crate::system_gen::system_name_for_seed(*seed).to_string();
@@ -1697,6 +1760,15 @@ pub fn apply_system_command(
                 min_inner_planets: *min_inner_planets,
                 max_inner_planets: *max_inner_planets,
                 abundance_scalar: *abundance_scalar,
+                min_gas_giants: *min_gas_giants,
+                max_gas_giants: *max_gas_giants,
+                min_asteroid_belts: *min_asteroid_belts,
+                max_asteroid_belts: *max_asteroid_belts,
+                min_cometary_belts: *min_cometary_belts,
+                max_cometary_belts: *max_cometary_belts,
+                min_giant_moons: *min_giant_moons,
+                max_giant_moons: *max_giant_moons,
+                max_rocky_moons: *max_rocky_moons,
             };
             let generated = crate::system_gen::generate_system(*seed, &gen_params);
             let body_ids: Vec<BodyId> = generated
@@ -2451,6 +2523,15 @@ mod tests {
                 habitable_zone_center_au: default_habitable_zone_center_au(),
                 min_inner_planets: default_min_inner_planets(),
                 max_inner_planets: default_max_inner_planets(),
+                min_gas_giants: default_min_gas_giants(),
+                max_gas_giants: default_max_gas_giants(),
+                min_asteroid_belts: default_min_asteroid_belts(),
+                max_asteroid_belts: default_max_asteroid_belts(),
+                min_cometary_belts: default_min_cometary_belts(),
+                max_cometary_belts: default_max_cometary_belts(),
+                min_giant_moons: default_min_giant_moons(),
+                max_giant_moons: default_max_giant_moons(),
+                max_rocky_moons: default_max_rocky_moons(),
             },
         )
         .unwrap();
@@ -2477,6 +2558,15 @@ mod tests {
                 habitable_zone_center_au: default_habitable_zone_center_au(),
                 min_inner_planets: default_min_inner_planets(),
                 max_inner_planets: default_max_inner_planets(),
+                min_gas_giants: default_min_gas_giants(),
+                max_gas_giants: default_max_gas_giants(),
+                min_asteroid_belts: default_min_asteroid_belts(),
+                max_asteroid_belts: default_max_asteroid_belts(),
+                min_cometary_belts: default_min_cometary_belts(),
+                max_cometary_belts: default_max_cometary_belts(),
+                min_giant_moons: default_min_giant_moons(),
+                max_giant_moons: default_max_giant_moons(),
+                max_rocky_moons: default_max_rocky_moons(),
             },
         )
         .unwrap();

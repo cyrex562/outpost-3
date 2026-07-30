@@ -50,9 +50,31 @@ const DEFAULT_HABITABLE_ZONE_CENTER_AU: f32 = 1.0;
 const DEFAULT_MIN_INNER_PLANETS: u32 = 2;
 const DEFAULT_MAX_INNER_PLANETS: u32 = 4;
 
+/// Default gas-giant count range (issue #318) — a system always gets at
+/// least one, reversing the old hardcoded `0..=2` roll that allowed zero.
+/// Defaults for [`SystemGenParams::min_gas_giants`]/`max_gas_giants`.
+const DEFAULT_MIN_GAS_GIANTS: u32 = 1;
+const DEFAULT_MAX_GAS_GIANTS: u32 = 4;
+
+/// Default asteroid-belt count range (issue #318), replacing the old
+/// `gen_bool(0.75)` single-belt-or-none roll. Belts are placed sequentially
+/// in the inner-system distance walk, before any gas giant.
+/// Defaults for [`SystemGenParams::min_asteroid_belts`]/`max_asteroid_belts`.
+const DEFAULT_MIN_ASTEROID_BELTS: u32 = 1;
+const DEFAULT_MAX_ASTEROID_BELTS: u32 = 3;
+
+/// Default cometary-belt count range (issue #318), replacing the old
+/// `gen_bool(0.6)` roll. Only ever `0` or `1` — a system has at most one
+/// Kuiper-analogue ring, so this range is a presence toggle, not a count of
+/// belts. Defaults for [`SystemGenParams::min_cometary_belts`]/`max_cometary_belts`.
+const DEFAULT_MIN_COMETARY_BELTS: u32 = 0;
+const DEFAULT_MAX_COMETARY_BELTS: u32 = 1;
+
 /// Moon-count bounds per parent body. Gas/ice giants carry extensive moon
 /// systems (Jupiter/Saturn scale), capped for sim sanity; rocky inner planets
-/// host at most a small handful (Earth/Mars scale).
+/// host at most a small handful (Earth/Mars scale). Defaults for
+/// [`SystemGenParams::min_giant_moons`]/`max_giant_moons`/`max_rocky_moons`
+/// (issue #318).
 const MIN_GIANT_MOONS: u32 = 2;
 const MAX_GIANT_MOONS: u32 = 20;
 const MAX_ROCKY_MOONS: u32 = 3;
@@ -141,6 +163,25 @@ pub struct SystemGenParams {
     /// Scales every placed deposit's abundance — `1.0` is neutral. See
     /// [`generate_system`]'s doc comment.
     pub abundance_scalar: f32,
+    /// Minimum gas-giant count (issue #318).
+    pub min_gas_giants: u32,
+    /// Maximum gas-giant count (issue #318).
+    pub max_gas_giants: u32,
+    /// Minimum asteroid-belt count (issue #318).
+    pub min_asteroid_belts: u32,
+    /// Maximum asteroid-belt count (issue #318).
+    pub max_asteroid_belts: u32,
+    /// Minimum cometary-belt count — `0` or `1` in practice (issue #318).
+    pub min_cometary_belts: u32,
+    /// Maximum cometary-belt count — `0` or `1` in practice (issue #318).
+    pub max_cometary_belts: u32,
+    /// Minimum moon count for a gas/ice giant (issue #318).
+    pub min_giant_moons: u32,
+    /// Maximum moon count for a gas/ice giant (issue #318).
+    pub max_giant_moons: u32,
+    /// Maximum moon count for a rocky inner planet; the minimum is always
+    /// `0` (issue #318).
+    pub max_rocky_moons: u32,
 }
 
 impl Default for SystemGenParams {
@@ -150,6 +191,15 @@ impl Default for SystemGenParams {
             min_inner_planets: DEFAULT_MIN_INNER_PLANETS,
             max_inner_planets: DEFAULT_MAX_INNER_PLANETS,
             abundance_scalar: 1.0,
+            min_gas_giants: DEFAULT_MIN_GAS_GIANTS,
+            max_gas_giants: DEFAULT_MAX_GAS_GIANTS,
+            min_asteroid_belts: DEFAULT_MIN_ASTEROID_BELTS,
+            max_asteroid_belts: DEFAULT_MAX_ASTEROID_BELTS,
+            min_cometary_belts: DEFAULT_MIN_COMETARY_BELTS,
+            max_cometary_belts: DEFAULT_MAX_COMETARY_BELTS,
+            min_giant_moons: MIN_GIANT_MOONS,
+            max_giant_moons: MAX_GIANT_MOONS,
+            max_rocky_moons: MAX_ROCKY_MOONS,
         }
     }
 }
@@ -219,7 +269,7 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         );
         // Rocky worlds host a small handful of moons at most (Earth/Mars
         // scale), unlike the giants' extensive moon systems below.
-        let moon_count = rng.gen_range(0..=MAX_ROCKY_MOONS);
+        let moon_count = rng.gen_range(0..=params.max_rocky_moons);
         body.moon_count = moon_count;
         let planet_id = body.id.clone();
         let planet_distance = body.distance_au;
@@ -237,11 +287,20 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         distance_au *= rng.gen_range(1.35..1.75);
     }
 
-    // ── Asteroid belt (usually present, placed just past the inner worlds) ──
-    if rng.gen_bool(0.75) {
+    // ── Asteroid belts (issue #318: 0-N, placed sequentially just past the
+    //    inner worlds, each at its own radius before any gas giant) ─────────
+    let min_asteroid_belts = params.min_asteroid_belts.min(params.max_asteroid_belts);
+    let max_asteroid_belts = params.min_asteroid_belts.max(params.max_asteroid_belts);
+    let belt_count = rng.gen_range(min_asteroid_belts..=max_asteroid_belts);
+    for i in 0..belt_count {
+        let belt_name = if belt_count > 1 {
+            format!("{system_name} Belt {}", i + 1)
+        } else {
+            format!("{system_name} Belt")
+        };
         let mut belt = generate_body(
             &mut rng,
-            format!("{system_name} Belt"),
+            belt_name,
             &BodyKind::AsteroidBelt,
             distance_au,
             hz_center,
@@ -264,7 +323,9 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     // The first (innermost) giant tends to roll warmer given the distance
     // curve, so it typically lands Jupiter-like; later giants trend colder
     // and land Neptune-like — see `subtype_for`/`gravity_for_kind`.
-    let giant_count = rng.gen_range(0..=2u32);
+    let min_gas_giants = params.min_gas_giants.min(params.max_gas_giants);
+    let max_gas_giants = params.min_gas_giants.max(params.max_gas_giants);
+    let giant_count = rng.gen_range(min_gas_giants..=max_gas_giants);
     for i in 0..giant_count {
         // Giants continue the planet numbering after the inner worlds, so a
         // system reads "<System>-1..N" across rocky planets then giants.
@@ -281,9 +342,11 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
         let giant_distance = giant.distance_au;
 
         // Gas/ice giants carry extensive moon systems (Jupiter/Saturn scale),
-        // capped at [`MAX_GIANT_MOONS`] for sim sanity. A giant always has at
-        // least a couple, so it visibly reads as a moon-rich system.
-        let moon_count = rng.gen_range(MIN_GIANT_MOONS..=MAX_GIANT_MOONS);
+        // capped for sim sanity. A giant always has at least a couple, so it
+        // visibly reads as a moon-rich system.
+        let min_giant_moons = params.min_giant_moons.min(params.max_giant_moons);
+        let max_giant_moons = params.min_giant_moons.max(params.max_giant_moons);
+        let moon_count = rng.gen_range(min_giant_moons..=max_giant_moons);
         giant.moon_count = moon_count;
         bodies.push(giant);
 
@@ -303,8 +366,12 @@ pub fn generate_system(seed: u64, params: &SystemGenParams) -> Vec<Body> {
     }
 
     // ── Cometary belt at the cold outer edge (Kuiper-like) ──────────────────
-    // A wide, sparse ring of icy volatiles beyond the giants. Usually present.
-    if rng.gen_bool(0.6) {
+    // A wide, sparse ring of icy volatiles beyond the giants. `min`/`max` are
+    // a presence range (0 or 1), not a count of belts (issue #318) — a
+    // system has at most one Kuiper analogue.
+    let min_cometary_belts = params.min_cometary_belts.min(params.max_cometary_belts);
+    let max_cometary_belts = params.min_cometary_belts.max(params.max_cometary_belts);
+    if rng.gen_range(min_cometary_belts..=max_cometary_belts) >= 1 {
         let comet_center = distance_au * rng.gen_range(1.3..1.8);
         let mut comet = generate_body(
             &mut rng,
@@ -1462,5 +1529,175 @@ mod tests {
             }
         }
         assert!(saw_a_moon, "no moon seen across seed sweep 0..64");
+    }
+
+    // ── System-composition options (issue #318) ──────────────────────────────
+
+    #[test]
+    fn gas_giant_count_always_falls_within_the_configured_range() {
+        let mut gen_params = params(1.0);
+        gen_params.min_gas_giants = 2;
+        gen_params.max_gas_giants = 3;
+        for seed in 0..64u64 {
+            let count = generate_system(seed, &gen_params)
+                .iter()
+                .filter(|b| b.kind == BodyKind::GasGiant)
+                .count();
+            assert!(
+                (2..=3).contains(&count),
+                "seed {seed}: gas giant count {count} outside configured [2, 3]"
+            );
+        }
+    }
+
+    #[test]
+    fn default_gas_giant_range_never_produces_zero() {
+        // The old hardcoded roll allowed zero giants; issue #318 reverses that
+        // by defaulting `min_gas_giants` to 1.
+        for seed in 0..64u64 {
+            let count = generate_system(seed, &params(1.0))
+                .iter()
+                .filter(|b| b.kind == BodyKind::GasGiant)
+                .count();
+            assert!(count >= 1, "seed {seed}: expected at least one gas giant");
+        }
+    }
+
+    #[test]
+    fn asteroid_belt_count_always_falls_within_the_configured_range() {
+        let mut gen_params = params(1.0);
+        gen_params.min_asteroid_belts = 2;
+        gen_params.max_asteroid_belts = 3;
+        for seed in 0..64u64 {
+            let count = generate_system(seed, &gen_params)
+                .iter()
+                .filter(|b| b.kind == BodyKind::AsteroidBelt)
+                .count();
+            assert!(
+                (2..=3).contains(&count),
+                "seed {seed}: asteroid belt count {count} outside configured [2, 3]"
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_asteroid_belts_sit_at_distinct_increasing_radii() {
+        let mut gen_params = params(1.0);
+        gen_params.min_asteroid_belts = 3;
+        gen_params.max_asteroid_belts = 3;
+        let mut saw_multiple = false;
+        for seed in 0..16u64 {
+            let belts: Vec<f32> = generate_system(seed, &gen_params)
+                .iter()
+                .filter(|b| b.kind == BodyKind::AsteroidBelt)
+                .map(|b| b.distance_au)
+                .collect();
+            if belts.len() > 1 {
+                saw_multiple = true;
+            }
+            for pair in belts.windows(2) {
+                assert!(
+                    pair[1] > pair[0],
+                    "seed {seed}: asteroid belts must be placed at strictly increasing radii, got {belts:?}"
+                );
+            }
+        }
+        assert!(
+            saw_multiple,
+            "expected at least one seed with 3 belts placed"
+        );
+    }
+
+    #[test]
+    fn cometary_belt_count_never_exceeds_one() {
+        // min/max_cometary_belts is a presence range (0 or 1), not a count of
+        // belts — a system has at most one Kuiper analogue (issue #318).
+        for seed in 0..64u64 {
+            let count = generate_system(seed, &params(1.0))
+                .iter()
+                .filter(|b| b.kind == BodyKind::CometaryBelt)
+                .count();
+            assert!(
+                count <= 1,
+                "seed {seed}: expected at most one cometary belt, got {count}"
+            );
+        }
+    }
+
+    #[test]
+    fn cometary_belt_min_one_forces_presence_every_seed() {
+        let mut gen_params = params(1.0);
+        gen_params.min_cometary_belts = 1;
+        gen_params.max_cometary_belts = 1;
+        for seed in 0..32u64 {
+            let count = generate_system(seed, &gen_params)
+                .iter()
+                .filter(|b| b.kind == BodyKind::CometaryBelt)
+                .count();
+            assert_eq!(count, 1, "seed {seed}: expected a forced cometary belt");
+        }
+    }
+
+    #[test]
+    fn cometary_belt_max_zero_forces_absence_every_seed() {
+        let mut gen_params = params(1.0);
+        gen_params.min_cometary_belts = 0;
+        gen_params.max_cometary_belts = 0;
+        for seed in 0..32u64 {
+            let count = generate_system(seed, &gen_params)
+                .iter()
+                .filter(|b| b.kind == BodyKind::CometaryBelt)
+                .count();
+            assert_eq!(count, 0, "seed {seed}: expected no cometary belt");
+        }
+    }
+
+    #[test]
+    fn giant_moon_count_respects_a_configured_range() {
+        let mut gen_params = params(1.0);
+        gen_params.min_giant_moons = 5;
+        gen_params.max_giant_moons = 8;
+        for seed in 0..32u64 {
+            for body in generate_system(seed, &gen_params) {
+                if body.kind == BodyKind::GasGiant {
+                    assert!(
+                        (5..=8).contains(&body.moon_count),
+                        "seed {seed}: giant {} has {} moons, outside configured [5, 8]",
+                        body.name,
+                        body.moon_count
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rocky_moon_count_never_exceeds_the_configured_max() {
+        let mut gen_params = params(1.0);
+        gen_params.max_rocky_moons = 1;
+        for seed in 0..32u64 {
+            for body in generate_system(seed, &gen_params) {
+                if body.kind == BodyKind::InnerPlanet {
+                    assert!(
+                        body.moon_count <= 1,
+                        "seed {seed}: rocky planet {} has {} moons, above configured max 1",
+                        body.name,
+                        body.moon_count
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inverted_gas_giant_range_is_normalized_rather_than_panicking() {
+        let mut gen_params = params(1.0);
+        gen_params.min_gas_giants = 4;
+        gen_params.max_gas_giants = 1;
+        let count = generate_system(7, &gen_params)
+            .iter()
+            .filter(|b| b.kind == BodyKind::GasGiant)
+            .count();
+        assert!((1..=4).contains(&count));
     }
 }
