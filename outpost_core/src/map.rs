@@ -206,6 +206,13 @@ impl Deposit {
     }
 }
 
+/// Extractable units a deposit at `richness` `1.0` holds before it's exhausted,
+/// under the opt-in finite-deposit mode (issue #317). A balance dial, not a
+/// physical constant — chosen so a single extraction building (roughly
+/// 5-10 units/sol at a typical recipe) takes many sols to exhaust a
+/// full-richness deposit, rather than draining it in the first sol or two.
+pub const DEPOSIT_DEPLETION_UNITS_PER_RICHNESS: f32 = 500.0;
+
 // ─── HexCell ─────────────────────────────────────────────────────────────────
 
 fn default_elevation() -> f32 {
@@ -588,6 +595,43 @@ impl PlanetMap {
     #[must_use]
     pub fn cell(&self, coord: HexCoord) -> Option<&HexCell> {
         self.cells.get(&coord)
+    }
+
+    /// Draw down a deposit's remaining quantity by `amount_extracted` units of
+    /// its commodity (issue #317's opt-in finite-deposit mode).
+    ///
+    /// A deposit's `richness` doubles as a stand-in for total extractable
+    /// quantity here: richness `1.0` represents
+    /// [`DEPOSIT_DEPLETION_UNITS_PER_RICHNESS`] extractable units, so
+    /// `amount_extracted` is converted to a richness delta and subtracted.
+    /// Once richness hits zero the deposit is removed outright — not left at
+    /// a zero-richness entry — so a subsequent lookup falls back to the same
+    /// "no matching deposit" trace-extraction path
+    /// ([`crate::colony::TRACE_DEPOSIT_RATIO`]) an area that never had a
+    /// deposit at all uses; an exhausted deposit reads identically to bare
+    /// ground, not as a poisoned zero. A no-op if `coord` has no deposit of
+    /// `commodity_id` — depletion is only ever a consequence of extraction
+    /// that already happened, never a way to create a shortfall out of
+    /// nothing.
+    pub fn deplete_deposit(&mut self, coord: HexCoord, commodity_id: &str, amount_extracted: f32) {
+        if amount_extracted <= 0.0 {
+            return;
+        }
+        let Some(cell) = self.cells.get_mut(&coord) else {
+            return;
+        };
+        let Some(index) = cell
+            .deposits
+            .iter()
+            .position(|d| d.commodity_id == commodity_id)
+        else {
+            return;
+        };
+        let delta = amount_extracted / DEPOSIT_DEPLETION_UNITS_PER_RICHNESS;
+        cell.deposits[index].richness -= delta;
+        if cell.deposits[index].richness <= 0.0 {
+            cell.deposits.remove(index);
+        }
     }
 
     /// Return the best landing site in the map, by [`Self::site_score`].
@@ -2587,6 +2631,70 @@ mod tests {
             .expect("coord in map")
             .deposits
             .push(Deposit::new(commodity, richness));
+    }
+
+    // ── Deposit depletion (issue #317, opt-in finite-deposit mode) ───────────
+
+    #[test]
+    fn depleting_a_deposit_below_zero_removes_it() {
+        let (mut map, center) = flat_map(4);
+        put_deposit(&mut map, center, "structural_ore", 1.0);
+        // A full-richness deposit holds DEPOSIT_DEPLETION_UNITS_PER_RICHNESS
+        // units; extracting more than that in one call must exhaust it
+        // outright, not leave a negative-richness ghost entry.
+        map.deplete_deposit(
+            center,
+            "structural_ore",
+            DEPOSIT_DEPLETION_UNITS_PER_RICHNESS * 2.0,
+        );
+        let cell = map.cell(center).expect("cell");
+        assert!(
+            cell.deposits.is_empty(),
+            "exhausted deposit should be removed, not left at a negative/zero richness: {:?}",
+            cell.deposits
+        );
+    }
+
+    #[test]
+    fn partial_depletion_reduces_richness_without_removing_it() {
+        let (mut map, center) = flat_map(4);
+        put_deposit(&mut map, center, "structural_ore", 1.0);
+        map.deplete_deposit(
+            center,
+            "structural_ore",
+            DEPOSIT_DEPLETION_UNITS_PER_RICHNESS * 0.25,
+        );
+        let cell = map.cell(center).expect("cell");
+        let deposit = cell
+            .deposits
+            .iter()
+            .find(|d| d.commodity_id == "structural_ore")
+            .expect("deposit should still be present after partial depletion");
+        assert!(
+            (deposit.richness - 0.75).abs() < 1e-4,
+            "expected richness ~0.75 after draining a quarter of the deposit, got {}",
+            deposit.richness
+        );
+    }
+
+    #[test]
+    fn depleting_a_nonexistent_deposit_is_a_no_op() {
+        let (mut map, center) = flat_map(4);
+        // No deposit placed at all — depleting a commodity that isn't there,
+        // or a coordinate outside the map, must not panic or fabricate one.
+        map.deplete_deposit(center, "structural_ore", 100.0);
+        assert!(map.cell(center).unwrap().deposits.is_empty());
+        map.deplete_deposit(HexCoord::new(9999, 9999), "structural_ore", 100.0);
+    }
+
+    #[test]
+    fn depleting_a_different_commodity_at_the_same_cell_is_untouched() {
+        let (mut map, center) = flat_map(4);
+        put_deposit(&mut map, center, "structural_ore", 0.5);
+        map.deplete_deposit(center, "conductive_ore", 1000.0);
+        let cell = map.cell(center).expect("cell");
+        assert_eq!(cell.deposits.len(), 1);
+        assert!((cell.deposits[0].richness - 0.5).abs() < 1e-6);
     }
 
     #[test]

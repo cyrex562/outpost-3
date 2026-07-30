@@ -171,6 +171,10 @@ struct FullStateBlob {
     #[serde(default = "default_true")]
     maintenance_enabled: bool,
 
+    // ── #317 Deposit depletion ───────────────────────────────────────────────
+    #[serde(default)]
+    deposit_depletion_enabled: bool,
+
     // ── #185 Tech-driven habitability mitigation ────────────────────────────
     #[serde(default)]
     habitability_mitigations: HashSet<crate::system::HabitabilityAttribute>,
@@ -254,6 +258,7 @@ impl FullStateBlob {
             hazards_enabled: state.hazards_enabled,
             last_menace_definition: state.last_menace_definition.clone(),
             maintenance_enabled: state.maintenance_enabled,
+            deposit_depletion_enabled: state.deposit_depletion_enabled,
             habitability_mitigations: state.habitability_mitigations.clone(),
             outposts: state.outposts.clone(),
             expedition_registry: state.expedition_registry.clone(),
@@ -317,6 +322,7 @@ impl FullStateBlob {
             hazards_enabled: self.hazards_enabled,
             last_menace_definition: self.last_menace_definition,
             maintenance_enabled: self.maintenance_enabled,
+            deposit_depletion_enabled: self.deposit_depletion_enabled,
             habitability_mitigations: self.habitability_mitigations,
             outposts: self.outposts,
             expedition_registry: self.expedition_registry,

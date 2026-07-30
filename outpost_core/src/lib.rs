@@ -660,6 +660,9 @@ pub enum Command {
         hazards_enabled: bool,
         /// Whether per-building maintenance draws should apply (issue #180).
         maintenance_enabled: bool,
+        /// Whether surface deposits deplete with extraction (issue #317).
+        #[serde(default)]
+        deposit_depletion_enabled: bool,
     },
     /// Toggle the master hazard switch (issue #161).
     ///
@@ -674,6 +677,19 @@ pub enum Command {
     /// regardless of the `MaintenanceConsumption` scalar.
     SetMaintenanceEnabled {
         /// New master maintenance-enabled state.
+        enabled: bool,
+    },
+    /// Toggle whether surface deposits deplete with extraction (issue #317).
+    ///
+    /// Deposits are effectively infinite by default (`false`) — richness only
+    /// governs extraction *rate*, never runs out. When `true`, a deposit also
+    /// tracks a real remaining quantity that extraction draws down; once
+    /// exhausted, the deposit is gone and extraction there falls back to the
+    /// background trace-extraction floor ([`colony::TRACE_DEPOSIT_RATIO`]),
+    /// not to zero. `Command::SetDifficulty` defaults this on for the harder
+    /// presets (Hard/Brutal) and off otherwise.
+    SetDepositDepletionEnabled {
+        /// New master deposit-depletion-enabled state.
         enabled: bool,
     },
     /// Activate the existential clock with the given authored menace definition.
@@ -2942,6 +2958,61 @@ impl GameEngine {
                             .collect();
                     }
 
+                    // ── Step 3a2: Deposit depletion (issue #317, opt-in) ─────
+                    // Off by default (deposits stay effectively infinite);
+                    // when enabled, draw down each colony's site deposit by
+                    // what its extraction lines actually deposited to the
+                    // stockpile this sol — `line.outputs_deposited`, the real
+                    // post-multiplier figure `process_production_scaled`
+                    // already computed (productivity/category/tech
+                    // multipliers included), not a re-derived
+                    // `quantity * scale` approximation that would silently
+                    // diverge from it. Scoped to hex-level deposits only
+                    // (what `compute_deposit_ratio` actually gates production
+                    // against for a founded colony) — `BodyDeposit` abundance
+                    // stays a comparative flavor figure, not something
+                    // extraction consumes.
+                    if self.state.deposit_depletion_enabled {
+                        let mut depletions: Vec<(system::BodyId, map::HexCoord, String, f32)> =
+                            Vec::new();
+                        for colony in &self.state.colonies {
+                            let Some((body_id, coord)) =
+                                self.state.planet_maps.iter().find_map(|(body_id, pm)| {
+                                    pm.colonies
+                                        .iter()
+                                        .find(|n| n.colony_id == colony.id)
+                                        .map(|n| (body_id.clone(), n.coord))
+                                })
+                            else {
+                                continue;
+                            };
+                            for result in colony.last_production_by_building.values() {
+                                for line in &result.line_results {
+                                    for (commodity_id, amount) in &line.outputs_deposited {
+                                        if !map::VEIN_COMMODITIES.contains(&commodity_id.as_str()) {
+                                            continue;
+                                        }
+                                        #[allow(clippy::cast_possible_truncation)]
+                                        let amount = *amount as f32;
+                                        if amount > 0.0 {
+                                            depletions.push((
+                                                body_id.clone(),
+                                                coord,
+                                                commodity_id.clone(),
+                                                amount,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for (body_id, coord, commodity_id, amount) in depletions {
+                            if let Some(pm) = self.state.planet_maps.get_mut(&body_id) {
+                                pm.deplete_deposit(coord, &commodity_id, amount);
+                            }
+                        }
+                    }
+
                     // ── Step 3b: Outpost production (issue #233) ────────────
                     // Fixed skeleton-crew labor (no population to derive it
                     // from) and a neutral 1.0 habitability modifier — outposts
@@ -5167,6 +5238,14 @@ impl GameEngine {
                 self.state.difficulty_preset = *preset;
                 self.state.difficulty_scalar =
                     self.state.difficulty_grade_table.build_scalar(*preset);
+                // Deposits stay infinite by default; picking a preset that's
+                // meaningfully harder than Normal opts into finite deposits so
+                // "more difficulty" naturally implies real scarcity, without
+                // forcing depletion on Sandbox/Easy/Normal (issue #317).
+                self.state.deposit_depletion_enabled = matches!(
+                    preset,
+                    difficulty::DifficultyPreset::Hard | difficulty::DifficultyPreset::Brutal
+                );
                 Ok(vec![Event::DifficultyChanged { preset: *preset }])
             }
 
@@ -5175,11 +5254,13 @@ impl GameEngine {
                 menace_enabled,
                 hazards_enabled,
                 maintenance_enabled,
+                deposit_depletion_enabled,
             } => {
                 self.state.difficulty_preset = difficulty::DifficultyPreset::Custom;
                 self.state.difficulty_scalar = scalars.clone();
                 self.state.hazards_enabled = *hazards_enabled;
                 self.state.maintenance_enabled = *maintenance_enabled;
+                self.state.deposit_depletion_enabled = *deposit_depletion_enabled;
                 if *menace_enabled {
                     // Re-attach the last-known definition if the player
                     // toggles menace back on with nothing currently active.
@@ -5203,6 +5284,11 @@ impl GameEngine {
 
             Command::SetMaintenanceEnabled { enabled } => {
                 self.state.maintenance_enabled = *enabled;
+                Ok(vec![])
+            }
+
+            Command::SetDepositDepletionEnabled { enabled } => {
+                self.state.deposit_depletion_enabled = *enabled;
                 Ok(vec![])
             }
 
@@ -15935,6 +16021,152 @@ mod tests {
                 .unwrap()
                 .scale,
             colony::production::TRACE_DEPOSIT_RATIO
+        );
+    }
+
+    /// Done-when (issue #317): with finite-deposit mode enabled, a real
+    /// `AdvanceColonySol` turn actually drains the site's hex deposit — not
+    /// just the isolated `PlanetMap::deplete_deposit` unit, but the whole
+    /// "Step 3a2" wiring: read back real production, filter to
+    /// `VEIN_COMMODITIES`, and deplete. A near-exhausted deposit is fully
+    /// consumed and removed after one sol.
+    #[test]
+    fn advance_sol_with_depletion_enabled_drains_and_removes_a_near_exhausted_deposit() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 4242,
+                width: 5,
+                height: 4,
+            })
+            .unwrap();
+
+        let pm = engine.state.home_map().unwrap();
+        let (site_id, coord) = pm
+            .sites
+            .iter()
+            .find_map(|(&id, &coord)| {
+                let cell = pm.cells.get(&coord)?;
+                if cell.is_habitable()
+                    && cell
+                        .deposits
+                        .iter()
+                        .any(|d| d.commodity_id == "structural_ore")
+                {
+                    Some((id, coord))
+                } else {
+                    None
+                }
+            })
+            .expect("a habitable hex with a structural_ore deposit must exist");
+
+        let mut registry = content::ContentRegistry::default();
+        registry.insert_building(content::types::BuildingDef {
+            id: "structural_mine".into(),
+            name: "Structural Mine".into(),
+            description: String::new(),
+            category: content::types::BuildingCategory::Extraction,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+        });
+        registry.insert_recipe(content::types::RecipeDef {
+            id: "mine_structural_ore".into(),
+            name: "Mine Structural Ore".into(),
+            building: "structural_mine".into(),
+            inputs: vec![],
+            outputs: vec![content::types::Ingredient {
+                id: "structural_ore".into(),
+                quantity: 10.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+            concurrent: false,
+            line: None,
+        });
+        engine.state.registry = Some(registry);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Ore Landing".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+
+        let idx = 0;
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("structural_mine", 1));
+
+        // Shrink the deposit to a sliver — well under one sol's extraction —
+        // so a single AdvanceColonySol is guaranteed to exhaust it.
+        {
+            let cell = engine
+                .state
+                .home_map_mut()
+                .unwrap()
+                .cells
+                .get_mut(&coord)
+                .unwrap();
+            let deposit = cell
+                .deposits
+                .iter_mut()
+                .find(|d| d.commodity_id == "structural_ore")
+                .unwrap();
+            deposit.richness = 0.002; // 0.002 * 500 = 1.0 unit remaining
+        }
+
+        engine
+            .apply(&Command::SetDepositDepletionEnabled { enabled: true })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        assert!(
+            engine.state.colonies[idx].pool.amount("structural_ore") > 0.0,
+            "the sol that exhausts the deposit must still bank whatever it mined"
+        );
+
+        let pm = engine.state.home_map().unwrap();
+        let cell = pm.cells.get(&coord).unwrap();
+        assert!(
+            !cell
+                .deposits
+                .iter()
+                .any(|d| d.commodity_id == "structural_ore"),
+            "an exhausted deposit must be removed, not left at zero/negative richness"
+        );
+
+        // The site now reads as bare ground: a second sol yields only the
+        // trace floor, exactly like a site that never had a deposit.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let mine_id = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "structural_mine")
+            .map(|b| b.id)
+            .expect("a structural_mine");
+        assert_eq!(
+            engine.state.colonies[idx]
+                .last_production_by_building
+                .get(&mine_id)
+                .unwrap()
+                .scale,
+            colony::production::TRACE_DEPOSIT_RATIO,
+            "post-exhaustion sols must fall back to the trace floor, not a hard zero"
         );
     }
 
