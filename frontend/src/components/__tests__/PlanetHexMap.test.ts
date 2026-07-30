@@ -263,3 +263,82 @@ describe('PlanetHexMap deposit boxes', () => {
     expect(legend.text()).toContain('silicates')
   })
 })
+
+describe('PlanetHexMap layered tile colour (#316)', () => {
+  function parseRgb(s: string): { r: number; g: number; b: number } {
+    const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(s)
+    if (!m) throw new Error(`unexpected fill format: ${s}`)
+    return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) }
+  }
+
+  it('shifts fill bluer as water_coverage increases on otherwise identical hexes', () => {
+    const hexes = [
+      makeHex({ q: 0, r: 0, site_id: 'dry', terrain: 'Ocean', water_coverage: 0 }),
+      makeHex({ q: 1, r: 0, site_id: 'full', terrain: 'Ocean', water_coverage: 1 }),
+    ]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const [dry, full] = wrapper.findAll('polygon').map((p) => parseRgb(p.attributes('fill')!))
+    // Full coverage should read visibly more blue than zero coverage on the
+    // same (Ocean) terrain base.
+    expect(full.b).toBeGreaterThan(dry.b)
+  })
+
+  it('renders water as white/ice on a Frozen hex and blue on a Temperate hex', () => {
+    const hexes = [
+      makeHex({
+        q: 0,
+        r: 0,
+        site_id: 'frozen-water',
+        terrain: 'Ocean',
+        water_coverage: 1,
+        temperature: 'Frozen',
+      }),
+      makeHex({
+        q: 1,
+        r: 0,
+        site_id: 'liquid-water',
+        terrain: 'Ocean',
+        water_coverage: 1,
+        temperature: 'Hot',
+      }),
+    ]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const [frozen, liquid] = wrapper.findAll('polygon').map((p) => parseRgb(p.attributes('fill')!))
+    // Ice reads brighter/whiter (all channels high) than liquid water.
+    expect(frozen.r).toBeGreaterThan(liquid.r)
+    expect(frozen.g).toBeGreaterThan(liquid.g)
+  })
+
+  it('shifts fill toward the vegetation colour as vegetation_density increases', () => {
+    const hexes = [
+      makeHex({ q: 0, r: 0, site_id: 'bare', vegetation_density: 0 }),
+      makeHex({ q: 1, r: 0, site_id: 'lush', vegetation_density: 1 }),
+    ]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const [bare, lush] = wrapper.findAll('polygon').map((p) => parseRgb(p.attributes('fill')!))
+    // Full density should blend fully toward the vegetation colour
+    // (#2f6b2f), which is darker/redder than the Plains terrain base
+    // (#8a7f5a) — the red channel is the clearest, unambiguous signal.
+    expect(lush.r).toBeLessThan(bare.r)
+  })
+
+  it('renders no vegetation tint when vegetation_density is zero, even on a lush biome', () => {
+    const hexes = [
+      makeHex({ q: 0, r: 0, site_id: 'no-veg', biome: 'Jungle', vegetation_density: 0 }),
+    ]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const fill = wrapper.find('polygon').attributes('fill')!
+    // Same as a Plains/Grassland-with-zero-vegetation baseline shape: no
+    // green shift should have been applied by vegetation_density: 0.
+    const plain = mount(PlanetHexMap, {
+      props: {
+        map: makeMap([makeHex({ q: 0, r: 0, site_id: 'baseline', vegetation_density: 0 })]),
+        selectedSite: null,
+      },
+    })
+    // Both explicitly zero vegetation_density hexes share the same terrain
+    // (Plains) and temperature/elevation, so their fills should match
+    // regardless of biome — proving the real field, not biome, drives it.
+    expect(fill).toBe(plain.find('polygon').attributes('fill'))
+  })
+})

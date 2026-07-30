@@ -174,8 +174,6 @@ pub enum ClientCommand {
         /// `true` to pause, `false` to resume.
         paused: bool,
     },
-    /// Found a new colony at a surveyed planet-map site (issue #220 — the
-    /// founding wizard's primary command in browser mode).
     /// Retune one balance scalar live (playtesting).
     SetBalanceScalar {
         /// Stable slug of the quantity.
@@ -183,6 +181,8 @@ pub enum ClientCommand {
         /// New multiplier.
         value: f32,
     },
+    /// Found a new colony at a surveyed planet-map site (issue #220 — the
+    /// founding wizard's primary command in browser mode).
     FoundColonyAtSite {
         /// Display name for the new colony.
         name: String,

@@ -350,6 +350,19 @@ export interface PlanetHex {
   biome: string
   elevation: number
   temperature: string
+  /**
+   * Fraction of this cell covered by water/ice, in `[0.0, 1.0]` (issue
+   * #316). Optional so older snapshots/fixtures without the field still
+   * type-check — `PlanetHexMap.vue` derives a fallback from `terrain` when
+   * absent.
+   */
+  water_coverage?: number
+  /**
+   * Vegetation density in this cell, in `[0.0, 1.0]` (issue #316). Optional
+   * for the same reason as `water_coverage` — `PlanetHexMap.vue` falls back
+   * to a biome-derived approximation when absent.
+   */
+  vegetation_density?: number
   deposits: { commodity_id: string; richness: number }[]
   habitable: boolean
   suitability: number

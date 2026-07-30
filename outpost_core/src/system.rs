@@ -418,6 +418,20 @@ impl PlanetarySubtype {
             _ => 0.0,
         }
     }
+
+    /// Whether a body of this archetype can support vegetation at all
+    /// (issue #316).
+    ///
+    /// A body-level property that gates [`crate::map::HexCell::vegetation_density`]
+    /// to `0.0` everywhere on bodies with no atmosphere/liquid-water story
+    /// for plant life — barren, molten, ice, and gas-giant archetypes — while
+    /// biome still decides *how much* vegetation shows up on a body that
+    /// does support it. `Unclassified` matches `EarthLike` per this type's
+    /// own "never biases downstream systems any differently" contract.
+    #[must_use]
+    pub fn has_vegetation(self) -> bool {
+        matches!(self, Self::Unclassified | Self::EarthLike | Self::Ocean)
+    }
 }
 
 fn default_subtype() -> PlanetarySubtype {
@@ -1980,6 +1994,37 @@ pub fn apply_system_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn has_vegetation_matches_unclassified_to_earth_like() {
+        // `Unclassified`'s own contract is "never biases downstream systems
+        // any differently than EarthLike" — this must hold for issue #316's
+        // vegetation gate too.
+        assert_eq!(
+            PlanetarySubtype::Unclassified.has_vegetation(),
+            PlanetarySubtype::EarthLike.has_vegetation()
+        );
+        assert!(PlanetarySubtype::EarthLike.has_vegetation());
+    }
+
+    #[test]
+    fn has_vegetation_is_false_for_lifeless_archetypes() {
+        for subtype in [
+            PlanetarySubtype::RockyBarrenHot,
+            PlanetarySubtype::RockyBarrenCold,
+            PlanetarySubtype::Molten,
+            PlanetarySubtype::Rocky,
+            PlanetarySubtype::Mountain,
+            PlanetarySubtype::Icy,
+            PlanetarySubtype::GasGiant,
+            PlanetarySubtype::IceGiant,
+        ] {
+            assert!(
+                !subtype.has_vegetation(),
+                "{subtype:?} should have no vegetation"
+            );
+        }
+    }
 
     fn make_state_with_two_bodies() -> (SystemState, BodyId, BodyId) {
         let mut state = SystemState::new();

@@ -272,30 +272,70 @@ const TERRAIN_COLOR: Record<string, string> = {
   Volcanic: '#5a3324',
 }
 
-// Vegetation is layered on top of terrain as a green tint, derived from
-// biome (there's no independent vegetation-density field today — this is a
-// deliberate approximation: biome is a category, not a gradient, but it's
-// the best signal available without new backend data). Mirrors
-// `outpost_core::map::Biome`; biomes not listed here (Desert/Tundra/Polar/
-// Barren/Ocean/Geothermal) get no vegetation overlay.
-const VEGETATION_STRENGTH: Record<string, number> = {
+// Vegetation is layered on top of terrain + water as a green tint (issue
+// #316's layer 3). `vegetation_density` (0–1, `outpost_core::map::HexCell`)
+// is the primary signal — a real per-cell gradient, zero everywhere on a
+// body whose archetype has no vegetation story at all
+// (`PlanetarySubtype::has_vegetation`). Older/fixture data that lacks the
+// field falls back to a biome-derived approximation so existing snapshots
+// and tests keep rendering sensibly.
+const VEGETATION_STRENGTH_BY_BIOME: Record<string, number> = {
   Jungle: 0.7,
   Forest: 0.55,
   Grassland: 0.25,
 }
 const VEGETATION_COLOR = '#2f6b2f'
 
+// Water/ice is its own overlay (issue #316's layer 2), independent of
+// terrain's base color. `water_coverage` (0–1) sets the overlay's alpha;
+// whether it reads as liquid or frozen is decided here from `temperature`
+// rather than a separate core field — a `Frozen`/`Extreme` cell tints white
+// (ice), everything else tints blue (liquid water). Terrain without an
+// explicit `water_coverage` falls back to a terrain-derived guess (full
+// coverage for Ocean, moderate for Wetlands) for older/fixture data.
+const LIQUID_WATER_COLOR = '#3a78b0'
+const ICE_COLOR = '#eaf3fb'
+const FROZEN_BANDS = new Set(['Frozen', 'Extreme'])
+
 function terrainColor(hex: PlanetHex): string {
   const base = TERRAIN_COLOR[hex.terrain] ?? '#556'
-  const vegetated = applyVegetation(base, hex.biome)
+  const watered = applyWaterIce(base, hex)
+  const vegetated = applyVegetation(watered, hex)
   const elevated = applyElevationShading(vegetated, hex.elevation)
   return applyTemperatureTint(elevated, hex.temperature)
 }
 
-/** Blend the vegetation tint over a terrain base color, if this biome has any. */
-function applyVegetation(rgbOrHex: string, biome: string): string {
-  const strength = VEGETATION_STRENGTH[biome]
-  if (!strength) return rgbOrHex
+/** This hex's water/ice surface coverage in `[0, 1]`, real or derived. */
+function waterCoverage(hex: PlanetHex): number {
+  if (typeof hex.water_coverage === 'number') return hex.water_coverage
+  if (hex.terrain === 'Ocean') return 1.0
+  if (hex.terrain === 'Wetlands') return 0.35
+  return 0.0
+}
+
+/** This hex's vegetation density in `[0, 1]`, real or derived from biome. */
+function vegetationDensity(hex: PlanetHex): number {
+  if (typeof hex.vegetation_density === 'number') return hex.vegetation_density
+  return VEGETATION_STRENGTH_BY_BIOME[hex.biome] ?? 0
+}
+
+/** Blend the water/ice overlay over a terrain base color, by coverage. */
+function applyWaterIce(rgbOrHex: string, hex: PlanetHex): string {
+  const coverage = waterCoverage(hex)
+  if (coverage <= 0) return rgbOrHex
+  const base = parseRgb(rgbOrHex)
+  const target = parseHex(FROZEN_BANDS.has(hex.temperature) ? ICE_COLOR : LIQUID_WATER_COLOR)
+  if (!base || !target) return rgbOrHex
+  const r = clamp255(base.r + (target.r - base.r) * coverage)
+  const g = clamp255(base.g + (target.g - base.g) * coverage)
+  const b = clamp255(base.b + (target.b - base.b) * coverage)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
+/** Blend the vegetation tint over a color, by this hex's vegetation density. */
+function applyVegetation(rgbOrHex: string, hex: PlanetHex): string {
+  const strength = vegetationDensity(hex)
+  if (strength <= 0) return rgbOrHex
   const base = parseRgb(rgbOrHex)
   const target = parseHex(VEGETATION_COLOR)
   if (!base || !target) return rgbOrHex
