@@ -2961,12 +2961,14 @@ impl GameEngine {
                     // ── Step 3a2: Deposit depletion (issue #317, opt-in) ─────
                     // Off by default (deposits stay effectively infinite);
                     // when enabled, draw down each colony's site deposit by
-                    // what its extraction lines actually produced this sol —
-                    // the same `quantity * line.scale` figure the pool
-                    // withdrawal above already applied, read back from
-                    // `line_results` rather than duplicating the production
-                    // pass. Scoped to hex-level deposits only (what
-                    // `compute_deposit_ratio` actually gates production
+                    // what its extraction lines actually deposited to the
+                    // stockpile this sol — `line.outputs_deposited`, the real
+                    // post-multiplier figure `process_production_scaled`
+                    // already computed (productivity/category/tech
+                    // multipliers included), not a re-derived
+                    // `quantity * scale` approximation that would silently
+                    // diverge from it. Scoped to hex-level deposits only
+                    // (what `compute_deposit_ratio` actually gates production
                     // against for a founded colony) — `BodyDeposit` abundance
                     // stays a comparative flavor figure, not something
                     // extraction consumes.
@@ -2986,20 +2988,17 @@ impl GameEngine {
                             };
                             for result in colony.last_production_by_building.values() {
                                 for line in &result.line_results {
-                                    let Some(recipe) = registry.recipe(&line.recipe_id) else {
-                                        continue;
-                                    };
-                                    for output in &recipe.outputs {
-                                        if !map::VEIN_COMMODITIES.contains(&output.id.as_str()) {
+                                    for (commodity_id, amount) in &line.outputs_deposited {
+                                        if !map::VEIN_COMMODITIES.contains(&commodity_id.as_str()) {
                                             continue;
                                         }
                                         #[allow(clippy::cast_possible_truncation)]
-                                        let amount = (output.quantity * line.scale) as f32;
+                                        let amount = *amount as f32;
                                         if amount > 0.0 {
                                             depletions.push((
                                                 body_id.clone(),
                                                 coord,
-                                                output.id.clone(),
+                                                commodity_id.clone(),
                                                 amount,
                                             ));
                                         }

@@ -211,6 +211,12 @@ pub struct LineProductionResult {
     pub scale: f64,
     /// Shortfalls that held this line back.
     pub shortfalls: Vec<ProductionShortfall>,
+    /// `(commodity_id, amount)` actually deposited per output this sol, after
+    /// every yield multiplier (productivity/category/tech) has been applied
+    /// (issue #317). Purely additive: `#[serde(default)]` so pre-#317 saves
+    /// load with an empty vec.
+    #[serde(default)]
+    pub outputs_deposited: Vec<(String, f64)>,
 }
 
 impl BuildingProductionResult {
@@ -277,6 +283,11 @@ struct PendingLine<'a> {
     recipe: &'a RecipeDef,
     scale: f64,
     shortfalls: Vec<ProductionShortfall>,
+    /// `(commodity_id, amount)` actually deposited per output this sol, filled
+    /// in Pass B after every yield multiplier has been applied (issue #317) —
+    /// the true figure, not `recipe.outputs[].quantity * scale`, which skips
+    /// the productivity/category/tech multipliers applied alongside it.
+    outputs_deposited: Vec<(String, f64)>,
 }
 
 /// Classify a recipe output into a [`crate::system::YieldCategory`] (issue
@@ -729,6 +740,7 @@ pub fn process_production_scaled(
                 recipe: line.selected,
                 scale,
                 shortfalls,
+                outputs_deposited: Vec::new(),
             });
         }
 
@@ -849,10 +861,10 @@ pub fn process_production_scaled(
     // Pass B: apply all changes now that every scale has been determined.
     let output_multiplier = f64::from(productivity_multiplier.max(0.0));
     let mut building_results: Vec<BuildingProductionResult> = Vec::new();
-    for p in pending {
+    for mut p in pending {
         // Each line applies at its OWN scale (issue #272) — that independence
         // is the point of lines.
-        for line in &p.lines {
+        for line in &mut p.lines {
             if line.scale <= 1e-9 {
                 continue;
             }
@@ -876,14 +888,14 @@ pub fn process_production_scaled(
                     modifier_accumulator,
                     difficulty_scalar,
                 ));
-                stores.deposit(
-                    &ingredient.id,
-                    ingredient.quantity
-                        * line.scale
-                        * output_multiplier
-                        * category_mult
-                        * tech_mult,
-                );
+                let deposited = ingredient.quantity
+                    * line.scale
+                    * output_multiplier
+                    * category_mult
+                    * tech_mult;
+                stores.deposit(&ingredient.id, deposited);
+                line.outputs_deposited
+                    .push((ingredient.id.clone(), deposited));
             }
         }
         // Upkeep is a building-level cost, charged once regardless of how many
@@ -932,6 +944,7 @@ pub fn process_production_scaled(
                 recipe_id: l.recipe.id.clone(),
                 scale: l.scale,
                 shortfalls: l.shortfalls.clone(),
+                outputs_deposited: l.outputs_deposited.clone(),
             })
             .collect();
         building_results.push(BuildingProductionResult {
@@ -3437,6 +3450,56 @@ mod tests {
             "expected 0.75 iron_plate at 0.75× productivity, got {}",
             pool.amount("iron_plate")
         );
+    }
+
+    #[test]
+    fn line_results_outputs_deposited_matches_the_post_multiplier_amount() {
+        // Issue #317: depletion consumes `outputs_deposited`, which must be
+        // the *actual* stockpile deposit — including productivity_multiplier
+        // — not `recipe.outputs[].quantity * scale`, which silently omits it.
+        let reg = make_registry_with_power();
+        let mut pool = ColonyPool::new();
+        pool.deposit("iron_ore", 10.0);
+
+        let placed = buildings(&["solar_array", "smelter"]);
+        let outcome = process_production_scaled(
+            &mut pool,
+            &placed,
+            100.0_f32,
+            &reg,
+            1.0,
+            1.0,
+            true,
+            0.75,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
+        );
+
+        let smelter = outcome
+            .building_results
+            .iter()
+            .find(|b| b.building_type == "smelter")
+            .expect("smelter ran");
+        let line = smelter
+            .line_results
+            .first()
+            .expect("smelter has a line result");
+        let (commodity, deposited) = line
+            .outputs_deposited
+            .iter()
+            .find(|(id, _)| id == "iron_plate")
+            .expect("iron_plate output recorded");
+
+        assert_eq!(commodity, "iron_plate");
+        assert!(
+            (deposited - 0.75).abs() < 1e-6,
+            "expected outputs_deposited to carry the 0.75x productivity multiplier, got {deposited}"
+        );
+        // Sanity: the recorded figure matches what actually landed in the pool.
+        assert!((pool.amount("iron_plate") - *deposited).abs() < 1e-9);
     }
 
     /// A building hosting two authored recipes (issue #166).
