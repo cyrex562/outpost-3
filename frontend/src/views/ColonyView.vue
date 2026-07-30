@@ -1,32 +1,47 @@
 <script setup lang="ts">
 /**
- * Colony dashboard — a draggable/resizable multi-panel layout (issue #169)
- * showing population, commodities, buildings, construction queue, and
- * alerts/event log for the selected colony. Panels are laid out with
- * Splitpanes (dockable, resizable splits) and the split sizes persist to
- * localStorage, mirroring the pattern SystemMapView.vue already uses for
- * its own layout state.
+ * Colony dashboard — a moveable, resizable, dockable multi-panel layout
+ * (issue #169, redone as a real dock framework by issue #321) showing
+ * population, commodities, buildings, construction queue, and alerts/event
+ * log for the selected colony. Panels are laid out with `dockview-vue`
+ * (drag-to-dock, tabs, splitters, serialisable layouts) — the previous
+ * Splitpanes arrangement (resizable, but not moveable/tabbable/floatable)
+ * is retired; see `docs/DESIGN.md` for the decision record.
+ *
+ * The six panel components below are unchanged — they're wrapped by thin
+ * `Dock*Panel.vue` components (registered with `DockviewVue`) that read
+ * colony data via `provide`/`inject` (`colonyDock.ts`) rather than through
+ * dockview's own per-panel `params`, since every panel here shows the same
+ * single colony and there's nothing to parameterise per panel instance.
  *
  * Turn control (Advance Turn) and system-wide stats now live in the app
  * shell's footer/stats bars (UI-rework PR3), not in this view.
  */
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Splitpanes, Pane } from 'splitpanes'
-import type { SplitpanesResizedPayload } from 'splitpanes'
-import 'splitpanes/dist/splitpanes.css'
+import { DockviewVue } from 'dockview-vue'
+import type { DockviewApi, DockviewReadyEvent, VueComponent } from 'dockview-vue'
+import 'dockview-vue/dist/styles/dockview.css'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
-import VitalStatsPanel from '@/components/VitalStatsPanel.vue'
-import CommoditiesPanel from '@/components/CommoditiesPanel.vue'
-import UtilitiesPanel from '@/components/UtilitiesPanel.vue'
-import BuildingsPanel from '@/components/BuildingsPanel.vue'
-import ConstructionQueuePanel from '@/components/ConstructionQueuePanel.vue'
 import BuildDialog from '@/components/BuildDialog.vue'
-import AlertsPanel from '@/components/AlertsPanel.vue'
 import FloatingWindow from '@/components/FloatingWindow.vue'
 import BuildingDetailsHud from '@/components/BuildingDetailsHud.vue'
+import DockVitalStatsPanel from '@/components/dock/DockVitalStatsPanel.vue'
+import DockUtilitiesPanel from '@/components/dock/DockUtilitiesPanel.vue'
+import DockCommoditiesPanel from '@/components/dock/DockCommoditiesPanel.vue'
+import DockBuildingsPanel from '@/components/dock/DockBuildingsPanel.vue'
+import DockConstructionQueuePanel from '@/components/dock/DockConstructionQueuePanel.vue'
+import DockAlertsPanel from '@/components/dock/DockAlertsPanel.vue'
+import {
+  COLONY_DOCK_COMPONENT,
+  COLONY_DOCK_CONTEXT_KEY,
+  buildDefaultColonyLayout,
+  loadPersistedColonyLayout,
+  savePersistedColonyLayout,
+  type ColonyDockContext,
+} from '@/dock/colonyDock'
 import type { ColonyState } from '@/worldModel/model'
 import {
   isTauri,
@@ -318,113 +333,108 @@ async function setBuildingPaused(buildingId: string, paused: boolean): Promise<v
   })
 }
 
-// ─── Panel layout persistence ───────────────────────────────────────────────────
+// ─── Dock panel context (issue #321) ────────────────────────────────────────
+//
+// A single computed bag, provided to the whole dockview subtree, that every
+// `Dock*Panel.vue` wrapper reads via `inject`. See `colonyDock.ts`'s
+// `ColonyDockContext` doc comment for why provide/inject rather than
+// dockview's own `params`.
 
-interface PersistedLayout {
-  /** [left-column %, center-column %, alerts-column %] */
-  outer: number[]
-  /** left column vertical split: [vital-stats %, commodities %] */
-  left: number[]
-  /** center column vertical split: [buildings %, construction-queue %] */
-  center: number[]
-  /** Whether `center` reflects a deliberate drag rather than an emptiness-driven default. */
-  centerTouched: boolean
-}
+const dockContext = computed<ColonyDockContext>(() => ({
+  population: selectedColony.value?.population ?? 0,
+  stability: selectedColony.value?.stability ?? 0,
+  availableLabour: selectedColony.value?.available_labour ?? 0,
+  populationTrend: populationTrend.value,
+  slotsUsed: screen.value?.slots_used ?? 0,
+  slotCapacity: screen.value?.slot_capacity ?? 0,
+  labourAvailable: screen.value?.labour_available ?? 0,
+  labourTotal: screen.value?.labour_total ?? 0,
+  labourEmployed: screen.value?.labour_employed ?? 0,
+  labourUnemployed: screen.value?.labour_unemployed ?? 0,
+  resources: screen.value ? screen.value.resources : null,
+  stockpile: screen.value ? screen.value.stockpile : null,
+  buildings: screen.value ? screen.value.buildings : null,
+  constructionQueue: screen.value ? screen.value.construction_queue : null,
+  cancelingIds: cancelingIds.value,
+  notifications: worldStore.notifications,
+  eventLog: worldStore.eventLog,
+  setCommodityReserve,
+  viewBuildingDetails: openBuildingDetails,
+  setBuildingPriority,
+  setBuildingLock,
+  renameBuilding,
+  setBuildingPaused,
+  cancelConstruction,
+  openBuildDialog: () => {
+    showBuildDialog.value = true
+  },
+  clearEventLog: () => worldStore.clearEventLog(),
+}))
 
-// Bumped to `.v2` because the split shape changed from 2+4 panes to the
-// 3-column (3 + 2 + 2) arrangement (UI-rework PR4); a stale entry would have
-// the wrong number of sizes. Bumped to v3 when the left column gained a third
-// pane for the utilities panel (issue #304) — a persisted v2 entry has only two
-// left sizes and would leave the new pane unsized. Bumped to v4 when the
-// center split gained emptiness-driven defaults (issue #339) — `center` is no
-// longer meaningful on its own without the `centerTouched` flag.
-const STORAGE_KEY = 'outpost3.colony-view.layout.v4'
-const DEFAULT_OUTER = [30, 45, 25]
-const DEFAULT_LEFT = [34, 26, 40]
-// Building list gets the space by default (issue #339) — construction is
-// empty most of the early game, so it no longer starts out larger than the
-// building list the way `[45, 55]` used to.
-const DEFAULT_CENTER_FILLED = [62, 38]
-// Compact "nothing under construction" default: the queue panel collapses to
-// just enough room for its heading row, handing the rest to the buildings.
-const DEFAULT_CENTER_EMPTY = [88, 12]
+provide(COLONY_DOCK_CONTEXT_KEY, dockContext)
 
-function loadPersistedLayout(): PersistedLayout {
-  const fallback = {
-    outer: DEFAULT_OUTER,
-    left: DEFAULT_LEFT,
-    center: DEFAULT_CENTER_FILLED,
-    centerTouched: false,
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return fallback
-    const p = JSON.parse(raw) as Partial<PersistedLayout>
-    const outer = Array.isArray(p.outer) && p.outer.length === 3 ? p.outer : DEFAULT_OUTER
-    const left = Array.isArray(p.left) && p.left.length === 3 ? p.left : DEFAULT_LEFT
-    const center = Array.isArray(p.center) && p.center.length === 2 ? p.center : DEFAULT_CENTER_FILLED
-    const centerTouched = p.centerTouched === true
-    return { outer, left, center, centerTouched }
-  } catch {
-    // corrupt entry — fall back to defaults
-    return fallback
-  }
-}
+// ─── Dock layout wiring + persistence (issue #321) ──────────────────────────
 
-const persistedLayout = loadPersistedLayout()
-const outerSizes = ref<number[]>(persistedLayout.outer)
-const leftSizes = ref<number[]>(persistedLayout.left)
-const centerSizes = ref<number[]>(persistedLayout.center)
-/** Once the player drags the queue/building-list divider, their choice sticks
- * regardless of the queue's emptiness — only an untouched split auto-adjusts. */
-const centerTouched = ref<boolean>(persistedLayout.centerTouched)
+const dockApi = ref<DockviewApi | null>(null)
 
-/** Nothing currently under construction — drives the collapsed default split. */
-const constructionQueueEmpty = computed(
-  () => !screen.value || screen.value.construction_queue.length === 0,
-)
+// `dockview-vue`'s own `VueComponent` type isn't compatible with this
+// project's `exactOptionalPropertyTypes: true` tsconfig setting (a type-only
+// mismatch between the library and our stricter config, not a real runtime
+// concern) — cast through `unknown` rather than loosening the project-wide
+// compiler option for one third-party type.
+const dockComponents = {
+  [COLONY_DOCK_COMPONENT.vitalStats]: DockVitalStatsPanel,
+  [COLONY_DOCK_COMPONENT.utilities]: DockUtilitiesPanel,
+  [COLONY_DOCK_COMPONENT.commodities]: DockCommoditiesPanel,
+  [COLONY_DOCK_COMPONENT.buildings]: DockBuildingsPanel,
+  [COLONY_DOCK_COMPONENT.constructionQueue]: DockConstructionQueuePanel,
+  [COLONY_DOCK_COMPONENT.alerts]: DockAlertsPanel,
+} as unknown as Record<string, VueComponent>
 
-/** The center split actually handed to Splitpanes: the player's own drag once
- * they've made one, otherwise an emptiness-driven default so the building
- * list gets the space while the queue is empty and expands back out once
- * something is queued. */
-const effectiveCenterSizes = computed<number[]>(() =>
-  centerTouched.value
-    ? centerSizes.value
-    : constructionQueueEmpty.value
-      ? DEFAULT_CENTER_EMPTY
-      : DEFAULT_CENTER_FILLED,
-)
+/** Disposes the `onDidLayoutChange` subscription registered in `onDockReady`. */
+let dockLayoutChangeSubscription: { dispose(): void } | null = null
 
-function savePersistedLayout(): void {
-  try {
-    const payload: PersistedLayout = {
-      outer: outerSizes.value,
-      left: leftSizes.value,
-      center: centerSizes.value,
-      centerTouched: centerTouched.value,
+function onDockReady(event: DockviewReadyEvent): void {
+  dockApi.value = event.api
+  // Registered before the layout is built so the *initial* default
+  // arrangement gets persisted too — attaching this after
+  // `buildDefaultColonyLayout` would mean nothing is saved until the
+  // player makes their own change, leaving a first-launch persistence gap.
+  dockLayoutChangeSubscription = event.api.onDidLayoutChange(() => {
+    savePersistedColonyLayout(event.api.toJSON())
+  })
+  const saved = loadPersistedColonyLayout()
+  let restored = false
+  if (saved) {
+    try {
+      event.api.fromJSON(saved as Parameters<DockviewApi['fromJSON']>[0])
+      restored = true
+    } catch {
+      // corrupt/incompatible persisted layout — fall through to the default
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
-  } catch {
-    // storage full or blocked — non-fatal
+  }
+  if (!restored) {
+    buildDefaultColonyLayout(event.api)
   }
 }
 
-function onOuterResized(payload: SplitpanesResizedPayload): void {
-  outerSizes.value = payload.panes.map((p) => p.size)
-  savePersistedLayout()
+/** Discard the current arrangement and rebuild the default 3-column layout
+ * — the "remaining detail" question from the issue's decision comment about
+ * a panel menu is left for a follow-up, but a reset affordance was called
+ * out as worth having regardless. Doesn't call `clearPersistedColonyLayout`
+ * directly: `api.clear()` and each `addPanel` below already fire
+ * `onDidLayoutChange`, which persists the rebuilt default as the new saved
+ * state once `buildDefaultColonyLayout` finishes — an explicit clear first
+ * would only add a transient empty-layout write in between. */
+function resetLayout(): void {
+  if (!dockApi.value) return
+  dockApi.value.clear()
+  buildDefaultColonyLayout(dockApi.value)
 }
 
-function onLeftResized(payload: SplitpanesResizedPayload): void {
-  leftSizes.value = payload.panes.map((p) => p.size)
-  savePersistedLayout()
-}
-
-function onCenterResized(payload: SplitpanesResizedPayload): void {
-  centerSizes.value = payload.panes.map((p) => p.size)
-  centerTouched.value = true
-  savePersistedLayout()
-}
+onUnmounted(() => {
+  dockLayoutChangeSubscription?.dispose()
+})
 </script>
 
 <template>
@@ -446,82 +456,28 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
           </button>
           <h2 class="colony-title" data-testid="colony-title">{{ selectedColony?.name }}</h2>
         </div>
+        <button
+          class="btn-reset-layout"
+          data-testid="btn-reset-layout"
+          title="Discard your dragged/resized/floated panel arrangement and restore the default layout"
+          @click="resetLayout"
+        >
+          Reset Layout
+        </button>
       </div>
 
+      <!-- Moveable, resizable, dockable panel layout (issue #321) — replaces
+           the old Splitpanes 3-column arrangement with a real dock
+           framework: panels can be dragged to new positions, resized,
+           stacked as tabs, or popped into floating groups, and the whole
+           arrangement persists to localStorage (see `colonyDock.ts`). -->
       <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
-        <Splitpanes class="default-theme colony-splitpanes" @resized="onOuterResized">
-          <!-- Left column: vital statistics over the commodity stockpile. -->
-          <Pane :size="outerSizes[0]" min-size="15">
-            <Splitpanes horizontal @resized="onLeftResized">
-              <Pane :size="leftSizes[0]" min-size="10">
-                <VitalStatsPanel
-                  :population="selectedColony.population"
-                  :stability="selectedColony.stability"
-                  :available-labour="selectedColony.available_labour"
-                  :population-trend="populationTrend"
-                  :slots-used="screen?.slots_used ?? 0"
-                  :slot-capacity="screen?.slot_capacity ?? 0"
-                  :labour-employed="screen?.labour_employed ?? 0"
-                  :labour-unemployed="screen?.labour_unemployed ?? 0"
-                />
-              </Pane>
-              <!-- Utilities sit between vitals and commodities (issue #304):
-                   power/housing/research are colony-local and unshippable, so
-                   they must not read as stock a hauler could collect. -->
-              <Pane :size="leftSizes[1]" min-size="10">
-                <UtilitiesPanel :resources="screen ? screen.resources : null" />
-              </Pane>
-              <Pane :size="leftSizes[2]" min-size="10">
-                <CommoditiesPanel
-                  :stockpile="screen ? screen.stockpile : null"
-                  @set-reserve="setCommodityReserve"
-                />
-              </Pane>
-            </Splitpanes>
-          </Pane>
-
-          <!-- Center column: the buildings list over the construction queue. -->
-          <Pane :size="outerSizes[1]" min-size="20">
-            <!-- Resizable split (issue #339): the construction queue defaults
-                 to a compact size while empty and expands back out once
-                 something is queued, but a deliberate drag on this divider
-                 always wins over that emptiness-driven default — see
-                 `effectiveCenterSizes`. -->
-            <Splitpanes horizontal @resized="onCenterResized">
-              <Pane :size="effectiveCenterSizes[0]" min-size="15">
-                <BuildingsPanel
-                  :buildings="screen ? screen.buildings : null"
-                  :slots-used="screen?.slots_used ?? 0"
-                  :slot-capacity="screen?.slot_capacity ?? 0"
-                  :labour-available="screen?.labour_available ?? 0"
-                  :labour-total="screen?.labour_total ?? 0"
-                  @view-details="openBuildingDetails"
-                  @set-priority="setBuildingPriority"
-                  @set-lock="setBuildingLock"
-                  @rename="renameBuilding"
-                  @set-paused="setBuildingPaused"
-                />
-              </Pane>
-              <Pane :size="effectiveCenterSizes[1]" min-size="6">
-                <ConstructionQueuePanel
-                  :queue="screen ? screen.construction_queue : null"
-                  :canceling-ids="cancelingIds"
-                  @open-build="showBuildDialog = true"
-                  @cancel="cancelConstruction"
-                />
-              </Pane>
-            </Splitpanes>
-          </Pane>
-
-          <!-- Right column: alerts + event log. -->
-          <Pane :size="outerSizes[2]" min-size="12">
-            <AlertsPanel
-              :notifications="worldStore.notifications"
-              :event-log="worldStore.eventLog"
-              @clear-log="worldStore.clearEventLog()"
-            />
-          </Pane>
-        </Splitpanes>
+        <DockviewVue
+          class="dockview-theme-abyss colony-dockview"
+          data-testid="colony-dockview"
+          :components="dockComponents"
+          @ready="onDockReady"
+        />
       </div>
 
       <BuildDialog
@@ -597,6 +553,20 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
 }
 .btn-map:hover { background: #1a1a2a; border-color: #558; }
 
+.btn-reset-layout {
+  background: #151520;
+  border: 1px solid #446;
+  border-radius: 3px;
+  color: #8cf;
+  padding: 0.3rem 0.7rem;
+  font-family: monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  align-self: flex-start;
+}
+.btn-reset-layout:hover { background: #1a1a2a; border-color: #558; }
+
 .panel-layout {
   flex: 1;
   min-height: 320px;
@@ -607,16 +577,23 @@ function onCenterResized(payload: SplitpanesResizedPayload): void {
 </style>
 
 <style>
-/* Splitpanes theme overrides — unscoped so they reach the library's own
-   root elements, which render outside this component's scoped attribute. */
-.colony-splitpanes.default-theme .splitpanes__pane {
-  background: #0d0d15;
+/* Unscoped — `DockviewVue`'s own root element isn't part of this
+   component's scoped-CSS output (it's a third-party component's root, not
+   an element this template literally emits), so a `<style scoped>` sizing
+   rule silently never applies to it and the host collapses to 0 height.
+   Layered on top of the built-in `dockview-theme-abyss` theme rather than
+   replacing it wholesale. */
+.colony-dockview {
+  width: 100%;
+  height: 100%;
 }
-.colony-splitpanes.default-theme .splitpanes__splitter {
-  background: #14141e;
-  border-color: #223;
-}
-.colony-splitpanes.default-theme .splitpanes__splitter:hover {
-  background: #1a1a2a;
+.colony-dockview.dockview-theme-abyss {
+  --dv-background-color: #0d0d15;
+  --dv-group-view-background-color: #0d0d15;
+  --dv-tabs-and-actions-container-background-color: #14141e;
+  --dv-activegroup-visiblepanel-tab-background-color: #1a1a2a;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #14141e;
+  --dv-tab-divider-color: #223;
+  --dv-separator-border: #223;
 }
 </style>

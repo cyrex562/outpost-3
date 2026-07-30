@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { reactive } from 'vue'
+import { defineComponent, h, onMounted, reactive } from 'vue'
 import ColonyView from '@/views/ColonyView.vue'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
@@ -21,15 +21,48 @@ vi.mock('@/services/tauriBridge', () => ({
   getTechTree: vi.fn().mockResolvedValue([]),
 }))
 
+/**
+ * Real `dockview-vue` needs `ResizeObserver` and real layout measurement,
+ * neither of which jsdom provides — matching this issue's own testing note
+ * ("most drag-to-dock behaviour isn't assertable in jsdom"). This stub
+ * renders every registered panel component directly (ignoring dockview's
+ * actual grid/tab/position bookkeeping, which `colonyDock.test.ts` covers
+ * with a plain mock `addPanel` recorder instead) and fires `ready` with a
+ * minimal fake `DockviewApi`, which is enough for `ColonyView.vue`'s own
+ * behaviour (opening the build dialog, floating the building-details
+ * window, etc.) to be exercised end-to-end.
+ */
+const DockviewVueStub = defineComponent({
+  name: 'dockview',
+  props: { components: { type: Object, default: () => ({}) } },
+  emits: ['ready'],
+  setup(props, { emit }) {
+    const fakeApi = {
+      addPanel: vi.fn(),
+      onDidLayoutChange: () => ({ dispose: () => {} }),
+      fromJSON: vi.fn(),
+      toJSON: () => ({}),
+      clear: vi.fn(),
+    }
+    onMounted(() => emit('ready', { api: fakeApi }))
+    return () =>
+      h(
+        'div',
+        { 'data-testid': 'colony-dockview-stub' },
+        Object.values(props.components ?? {}).map((comp) => h(comp as never)),
+      )
+  },
+})
+
 const STUBS = {
-  VitalStatsPanel: true,
-  CommoditiesPanel: true,
-  BuildingsPanel: true,
-  ConstructionQueuePanel: true,
+  dockview: DockviewVueStub,
+  DockVitalStatsPanel: true,
+  DockUtilitiesPanel: true,
+  DockCommoditiesPanel: true,
+  DockBuildingsPanel: true,
+  DockConstructionQueuePanel: true,
+  DockAlertsPanel: true,
   BuildDialog: true,
-  AlertsPanel: true,
-  Splitpanes: true,
-  Pane: true,
 }
 
 function seedColonies(): void {
@@ -66,6 +99,7 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     routerPush.mockReset()
     routerReplace.mockReset()
     routeParams.colonyId = undefined
+    window.localStorage.clear()
   })
 
   it('selects the colony named by the route param', () => {
@@ -113,6 +147,16 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
   it('shows the empty state when no colonies exist', () => {
     const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
     expect(wrapper.find('[data-testid="no-colonies"]').exists()).toBe(true)
+  })
+
+  it('renders the dock layout and a reset-layout button (issue #321)', () => {
+    seedColonies()
+    routeParams.colonyId = 'colony-1'
+
+    const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
+
+    expect(wrapper.find('[data-testid="colony-dockview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="btn-reset-layout"]').exists()).toBe(true)
   })
 
   it('opens a floating window (not a route navigation) when a building requests details (issue #339)', async () => {
@@ -163,20 +207,17 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
       manual_override: false,
     }
 
-    // Mount with the real BuildingsPanel (not stubbed) so its actual
-    // "view details" button emits the real event ColonyView listens for —
-    // Splitpanes/Pane need slot-rendering stubs instead of the default
-    // auto-stub (which drops slot content) so BuildingsPanel actually mounts.
-    // BuildingDetailsHud is stubbed since it fetches over tauriBridge, which
-    // isn't mocked in this suite — only the floating window shell matters here.
+    // Mount with the real BuildingsPanel and its Dock wrapper (not stubbed)
+    // so its actual "view details" button emits the real event ColonyView's
+    // dock context listens for. BuildingDetailsHud is stubbed since it
+    // fetches over tauriBridge, which isn't mocked in this suite — only the
+    // floating window shell matters here.
     const wrapper = mount(ColonyView, {
       global: {
         stubs: {
           ...STUBS,
-          BuildingsPanel: false,
+          DockBuildingsPanel: false,
           BuildingDetailsHud: true,
-          Splitpanes: { template: '<div><slot /></div>' },
-          Pane: { template: '<div><slot /></div>' },
         },
       },
     })
@@ -239,10 +280,8 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
       global: {
         stubs: {
           ...STUBS,
-          BuildingsPanel: false,
+          DockBuildingsPanel: false,
           BuildingDetailsHud: true,
-          Splitpanes: { template: '<div><slot /></div>' },
-          Pane: { template: '<div><slot /></div>' },
         },
       },
     })
