@@ -27,9 +27,10 @@ const router = createRouter({
     { path: '/colonies', component: ColoniesListView, name: 'colonies' },
     { path: '/colony/:colonyId?', component: ColonyView, name: 'colony' },
     {
-      // Deep link into the colony dashboard's building-details dock panel
-      // (issue #322) rather than a separate routed page — same component as
-      // the `colony` route above, just with `buildingType` also present.
+      // Deep link into the colony dashboard's floating building-details
+      // window (issue #322) rather than a separate routed page — same
+      // component as the `colony` route above, just with `buildingType`
+      // also present.
       path: '/colony/:colonyId/facility/:buildingType',
       component: ColonyView,
       name: 'facility',
