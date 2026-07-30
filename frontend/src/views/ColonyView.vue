@@ -18,7 +18,7 @@
  * shell's footer/stats bars (UI-rework PR3), not in this view.
  */
 
-import { computed, onMounted, provide, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { DockviewVue } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent, VueComponent } from 'dockview-vue'
@@ -38,7 +38,6 @@ import {
   COLONY_DOCK_COMPONENT,
   COLONY_DOCK_CONTEXT_KEY,
   buildDefaultColonyLayout,
-  clearPersistedColonyLayout,
   loadPersistedColonyLayout,
   savePersistedColonyLayout,
   type ColonyDockContext,
@@ -392,13 +391,16 @@ const dockComponents = {
   [COLONY_DOCK_COMPONENT.alerts]: DockAlertsPanel,
 } as unknown as Record<string, VueComponent>
 
+/** Disposes the `onDidLayoutChange` subscription registered in `onDockReady`. */
+let dockLayoutChangeSubscription: { dispose(): void } | null = null
+
 function onDockReady(event: DockviewReadyEvent): void {
   dockApi.value = event.api
   // Registered before the layout is built so the *initial* default
   // arrangement gets persisted too — attaching this after
   // `buildDefaultColonyLayout` would mean nothing is saved until the
   // player makes their own change, leaving a first-launch persistence gap.
-  event.api.onDidLayoutChange(() => {
+  dockLayoutChangeSubscription = event.api.onDidLayoutChange(() => {
     savePersistedColonyLayout(event.api.toJSON())
   })
   const saved = loadPersistedColonyLayout()
@@ -416,16 +418,23 @@ function onDockReady(event: DockviewReadyEvent): void {
   }
 }
 
-/** Discard the persisted arrangement and rebuild the default 3-column
- * layout — the "remaining detail" question from the issue's decision
- * comment about a panel menu is left for a follow-up, but a reset
- * affordance was called out as worth having regardless. */
+/** Discard the current arrangement and rebuild the default 3-column layout
+ * — the "remaining detail" question from the issue's decision comment about
+ * a panel menu is left for a follow-up, but a reset affordance was called
+ * out as worth having regardless. Doesn't call `clearPersistedColonyLayout`
+ * directly: `api.clear()` and each `addPanel` below already fire
+ * `onDidLayoutChange`, which persists the rebuilt default as the new saved
+ * state once `buildDefaultColonyLayout` finishes — an explicit clear first
+ * would only add a transient empty-layout write in between. */
 function resetLayout(): void {
   if (!dockApi.value) return
-  clearPersistedColonyLayout()
   dockApi.value.clear()
   buildDefaultColonyLayout(dockApi.value)
 }
+
+onUnmounted(() => {
+  dockLayoutChangeSubscription?.dispose()
+})
 </script>
 
 <template>
