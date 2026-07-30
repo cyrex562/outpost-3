@@ -505,18 +505,57 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Moveable, resizable, dockable panel layout (issue #321) — replaces
-           the old Splitpanes 3-column arrangement with a real dock
-           framework: panels can be dragged to new positions, resized,
-           stacked as tabs, or popped into floating groups, and the whole
-           arrangement persists to localStorage (see `colonyDock.ts`). -->
-      <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
-        <DockviewVue
-          class="dockview-theme-abyss colony-dockview"
-          data-testid="colony-dockview"
-          :components="dockComponents"
-          @ready="onDockReady"
-        />
+      <!-- `.colony-body` is `FloatingWindow`'s host (its own dedicated
+           `position: relative` container per its own convention — see
+           `PlanetView.vue`'s `.map-host` — rather than the whole
+           `.colony-view`, which also holds `.colony-header`'s controls; a
+           `fill-host` window would otherwise be free to overlap them) and
+           traps dockview's own internal stacking context via `isolation:
+           isolate` — dockview's *own* float-a-tab feature (a player
+           dragging a dock tab loose, independent of this building-details
+           window) uses z-index values in the high 900s internally, which
+           would otherwise escape past this window's much lower z-index
+           since nothing between them establishes a stacking context. -->
+      <div class="colony-body">
+        <!-- Moveable, resizable, dockable panel layout (issue #321) —
+             replaces the old Splitpanes 3-column arrangement with a real
+             dock framework: panels can be dragged to new positions,
+             resized, stacked as tabs, or popped into floating groups, and
+             the whole arrangement persists to localStorage (see
+             `colonyDock.ts`). -->
+        <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
+          <DockviewVue
+            class="dockview-theme-abyss colony-dockview"
+            data-testid="colony-dockview"
+            :components="dockComponents"
+            @ready="onDockReady"
+          />
+        </div>
+
+        <!-- Building details float above the whole dock (issue #322,
+             revised) rather than living inside it, so inspecting a building
+             never disturbs the dragged/resized dock arrangement
+             underneath. -->
+        <FloatingWindow
+          v-if="selectedBuildingType && selectedColony"
+          :title="selectedBuildingType"
+          storage-key="outpost3.colony-view.building-details-window"
+          closable
+          fill-host
+          :initial-x="40"
+          :initial-y="40"
+          :initial-width="520"
+          :initial-height="480"
+          @close="closeBuildingDetails"
+        >
+          <BuildingDetailsHud
+            owner-type="colony"
+            :owner-id="selectedColony.id"
+            :building-type="selectedBuildingType"
+            as-page
+            @close="closeBuildingDetails"
+          />
+        </FloatingWindow>
       </div>
 
       <BuildDialog
@@ -528,30 +567,6 @@ onUnmounted(() => {
         @queue="queueBuilding"
         @close="showBuildDialog = false"
       />
-
-      <!-- Building details float above the whole dock (issue #322, revised)
-           rather than living inside it, so inspecting a building never
-           disturbs the dragged/resized dock arrangement underneath. -->
-      <FloatingWindow
-        v-if="selectedBuildingType && selectedColony"
-        :title="selectedBuildingType"
-        storage-key="outpost3.colony-view.building-details-window"
-        closable
-        fill-host
-        :initial-x="40"
-        :initial-y="40"
-        :initial-width="520"
-        :initial-height="480"
-        @close="closeBuildingDetails"
-      >
-        <BuildingDetailsHud
-          owner-type="colony"
-          :owner-id="selectedColony.id"
-          :building-type="selectedBuildingType"
-          as-page
-          @close="closeBuildingDetails"
-        />
-      </FloatingWindow>
     </template>
   </div>
 </template>
@@ -603,9 +618,22 @@ onUnmounted(() => {
 }
 .btn-reset-layout:hover { background: #1a1a2a; border-color: #558; }
 
-.panel-layout {
+/* `FloatingWindow`'s host (see the template comment above it): a dedicated
+   `position: relative` container for the dock + the building-details
+   window, excluding `.colony-header`'s controls. `isolation: isolate`
+   traps dockview's own internal stacking context (its float-a-tab feature
+   uses z-index values in the high 900s) so it can't escape past the
+   building-details window's much lower z-index. */
+.colony-body {
   flex: 1;
   min-height: 320px;
+  display: flex;
+  position: relative;
+  isolation: isolate;
+}
+
+.panel-layout {
+  flex: 1;
   border: 1px solid #223;
   border-radius: 4px;
   overflow: hidden;
