@@ -1440,7 +1440,7 @@ mod tests {
 
         engine.state.colonies[idx]
             .buildings
-            .push(PlacedBuilding::new("refinery", 1));
+            .push(PlacedBuilding::new("refinery", 2));
         engine.state.colonies[idx]
             .buildings
             .push(PlacedBuilding::new("solar_array_mk1", 1));
