@@ -1319,6 +1319,89 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that water's crating round trip (issue #380) works
+    /// against the real content pack: a `water_bottling_plant` bottles
+    /// banked water into shippable `water_container` cargo, then — switched
+    /// to the other side of the same pick-one pair — unpacks it straight
+    /// back into usable water.
+    #[test]
+    fn water_bottling_plant_crates_and_uncrates_water_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Bottling Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("water_tank", 0));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("water_bottling_plant", 1));
+        // Power source — water_bottling_plant draws 3kW and isn't exempt
+        // from brownout throttling (only Power-category buildings are).
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+        // Seed banked water directly so bottle_water has something to
+        // consume on the first sol, independent of any production chain.
+        engine.state.colonies[idx].resources.deposit("water", 200.0);
+
+        // Default (no active_recipes entry) should be bottle_water — it's
+        // authored first, matching the pick-one convention.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("water_container") > 0.0,
+            "water_bottling_plant should default to bottle_water and produce water_container"
+        );
+
+        // Switch to unbottle_water and confirm the round trip: crated cargo
+        // converts back into usable, banked water.
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "water_bottling_plant".into(),
+                recipe_id: "unbottle_water".into(),
+            })
+            .unwrap();
+        let water_container_before = engine.state.colonies[idx].pool.amount("water_container");
+        let water_before = engine.state.colonies[idx].resources.amount("water");
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("water_container") < water_container_before,
+            "unbottle_water should consume water_container cargo"
+        );
+        assert!(
+            engine.state.colonies[idx].resources.amount("water") > water_before,
+            "unbottle_water should deposit usable water back into the resource pool"
+        );
+    }
+
     /// Real-engine proof that the fabricator's new component recipes (#208)
     /// actually work against the real content pack: seed processed metals,
     /// switch `fabricator` through each of the three new recipes, and
@@ -1836,8 +1919,9 @@ mod tests {
             engine.state.colonies[idx].resources.amount("power") > 0.0,
             "colony_hq should produce power (hq_generate_power)"
         );
+        // `water` is also a colony resource, not cargo, since issue #380.
         assert!(
-            pool.amount("water") > 0.0,
+            engine.state.colonies[idx].resources.amount("water") > 0.0,
             "colony_hq should produce water (hq_pump_water)"
         );
         assert!(
@@ -1929,6 +2013,11 @@ mod tests {
             "fabrication_complex",
             "air_miner",
             "chem_plant",
+            // Every real landing kit includes a free water_tank (issue
+            // #380) — without it, sol 1's water would evaporate before
+            // sol 2's chem_plant could consume it, since water is now a
+            // per-sol colony resource rather than a persistent commodity.
+            "water_tank",
         ] {
             engine.state.colonies[idx]
                 .buildings
@@ -1941,7 +2030,11 @@ mod tests {
         engine.apply(&Command::AdvanceColonySol).unwrap();
         {
             let pool = &engine.state.colonies[idx].pool;
-            assert!(pool.amount("water") > 0.0, "ice_miner should produce water");
+            // `water` is a colony resource, not cargo, since issue #380.
+            assert!(
+                engine.state.colonies[idx].resources.amount("water") > 0.0,
+                "ice_miner should produce water"
+            );
             assert!(
                 pool.amount("structural_ore") > 0.0,
                 "excavation_rig should produce ore"

@@ -218,6 +218,29 @@
     - id: structural_metal
       quantity: 10.0
 
+- id: water_tank
+  name: Water Tank
+  description: >
+    Banks water instead of letting it evaporate at the end of the sol —
+    water's own `battery_bank` equivalent (issue #348/#380). Free and
+    automatic: every colony starts with one (`starter_kit: true`,
+    `slot_cost: 0`), so the founding supply package's water seed has
+    somewhere to land rather than evaporating before the colony's first
+    production sol. No recipe: it draws no water and produces none, it only
+    lets what the colony already has carry into the next sol, up to its
+    capacity.
+  category: storage
+  starter_kit: true
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 0
+  slot_cost: 0
+  construction_turns: 1
+  storage:
+    - id: water
+      quantity: 150.0
+
 # ── Tier 1 (basic_construction / basic_power / resource_extraction) ────────
 # Pre-redesign starter set — still Tier 1 (cheap, no deep prerequisites),
 # now unlocked by research rather than available at founding. Useful as a
@@ -421,6 +444,27 @@
   storage:
     - id: power
       quantity: 40.0
+
+- id: water_bottling_plant
+  name: Water Bottling Plant
+  description: >
+    Crates banked water into shippable `water_container` cargo, or unpacks
+    containers back into usable water — a switchable pair of recipes
+    (`bottle_water`/`unbottle_water`, recipes.yaml), not both at once. This
+    is water's crating route (issue #348/#380): utilities move between
+    colonies only once converted into a real commodity a convoy can carry,
+    the same way power would need crating into charged cells.
+  category: processing
+  power_delta: 3.0
+  worker_slots: 1
+  default_priority: 6
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 18.0
 
 - id: hydrocarbon_well
   name: Hydrocarbon Well

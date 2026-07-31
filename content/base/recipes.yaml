@@ -14,6 +14,37 @@
     - id: water
       quantity: 24.0
 
+- id: bottle_water
+  name: Bottle Water
+  description: >
+    Crates banked water into shippable `water_container` cargo (issue
+    #348/#380's crating route). Switchable against `unbottle_water` — a
+    water_bottling_plant runs one or the other, not both.
+  building: water_bottling_plant
+  cycle_sols: 1
+  inputs:
+    - id: water
+      quantity: 20.0
+  outputs:
+    - id: water_container
+      quantity: 20.0
+  power_draw: 3.0
+
+- id: unbottle_water
+  name: Unbottle Water
+  description: >
+    Unpacks `water_container` cargo back into usable, banked water — the
+    receiving side of #348/#380's crating route.
+  building: water_bottling_plant
+  cycle_sols: 1
+  inputs:
+    - id: water_container
+      quantity: 20.0
+  outputs:
+    - id: water
+      quantity: 20.0
+  power_draw: 3.0
+
 - id: grow_rations
   name: Grow Rations
   building: hydroponic_bay
