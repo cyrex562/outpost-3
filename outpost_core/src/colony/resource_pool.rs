@@ -11,12 +11,21 @@
 //! nothing, so `power`, `housing`, and `research` all flowed over trade routes
 //! despite being marked non-tradeable.
 //!
-//! Resources do **not** persist across sols. [`ColonyResourcePool::clear`] runs
-//! at the end of every colony sol, so the pool always reports *this* sol's
-//! throughput (or standing capacity) rather than an accumulated total. That
-//! also fixes a pair of unbounded-accumulation bugs: `power` netted a positive
-//! surplus every sol and banked it forever, and `housing` — a capacity check
-//! that consumes nothing — grew by a full habitat's worth every sol.
+//! Resources do **not** persist across sols by default. [`ColonyResourcePool::clear`]
+//! runs at the end of every colony sol, so the pool always reports *this*
+//! sol's throughput (or standing capacity) rather than an accumulated total.
+//! That also fixes a pair of unbounded-accumulation bugs: `power` netted a
+//! positive surplus every sol and banked it forever, and `housing` — a
+//! capacity check that consumes nothing — grew by a full habitat's worth
+//! every sol.
+//!
+//! **Storage is an opt-in building (issue #348).** A colony with a battery,
+//! tank, or bunker for a given resource calls [`ColonyResourcePool::bank_and_clear`]
+//! instead of [`ColonyResourcePool::clear`] — it caps each amount at the
+//! colony's built capacity for that resource rather than dropping it to zero,
+//! so banked stock survives into the next sol up to what was actually built.
+//! Anything above capacity, and every resource with none, still evaporates
+//! exactly as before.
 
 use std::collections::HashMap;
 
@@ -73,6 +82,28 @@ impl ColonyResourcePool {
     /// produced disappears from the readout instead of lingering at 0.
     pub fn clear(&mut self) {
         self.amounts.clear();
+    }
+
+    /// Cap every amount at its built storage capacity, evaporating the rest —
+    /// called at the end of each colony sol in place of [`Self::clear`] once a
+    /// colony has any storage buildings (issue #348).
+    ///
+    /// `capacities` is keyed by resource id (see
+    /// [`crate::colony::production::storage_capacities`]); a resource absent
+    /// from the map, or present at `0.0`, has no storage and behaves exactly
+    /// like [`Self::clear`] — the whole amount evaporates. A resource with
+    /// capacity keeps `min(amount, capacity)`, which next sol's production
+    /// then deposits on top of, so a full battery/tank/bunker still discards
+    /// what it cannot hold rather than accumulating without bound.
+    ///
+    /// Entries left at `0.0` are removed, matching [`Self::clear`]'s "absent
+    /// rather than lingering at zero" behaviour.
+    pub fn bank_and_clear(&mut self, capacities: &HashMap<String, f64>) {
+        self.amounts.retain(|resource_id, amount| {
+            let capacity = capacities.get(resource_id).copied().unwrap_or(0.0);
+            *amount = amount.min(capacity.max(0.0));
+            *amount > 0.0
+        });
     }
 
     /// Iterate over `(resource_id, amount)` pairs present this sol.
@@ -134,5 +165,52 @@ mod tests {
         assert_eq!(pool.amount("power"), 0.0);
         assert_eq!(pool.amount("housing"), 0.0);
         assert_eq!(pool.iter().count(), 0, "entries are removed, not zeroed");
+    }
+
+    #[test]
+    fn bank_and_clear_keeps_up_to_capacity_and_evaporates_the_rest() {
+        let mut pool = ColonyResourcePool::new();
+        pool.deposit("power", 24.0);
+        pool.deposit("housing", 110.0); // no storage capacity authored for housing
+
+        let mut capacities = HashMap::new();
+        capacities.insert("power".to_owned(), 10.0);
+        pool.bank_and_clear(&capacities);
+
+        assert!(
+            (pool.amount("power") - 10.0).abs() < f64::EPSILON,
+            "banked amount is capped at the built capacity"
+        );
+        assert_eq!(
+            pool.amount("housing"),
+            0.0,
+            "a resource with no storage capacity still evaporates fully"
+        );
+    }
+
+    #[test]
+    fn bank_and_clear_with_no_capacities_behaves_exactly_like_clear() {
+        let mut pool = ColonyResourcePool::new();
+        pool.deposit("power", 24.0);
+
+        pool.bank_and_clear(&HashMap::new());
+
+        assert!(pool.is_empty());
+        assert_eq!(pool.amount("power"), 0.0);
+    }
+
+    #[test]
+    fn bank_and_clear_never_grows_an_amount_that_is_already_below_capacity() {
+        let mut pool = ColonyResourcePool::new();
+        pool.deposit("power", 3.0);
+
+        let mut capacities = HashMap::new();
+        capacities.insert("power".to_owned(), 10.0);
+        pool.bank_and_clear(&capacities);
+
+        assert!(
+            (pool.amount("power") - 3.0).abs() < f64::EPSILON,
+            "bank_and_clear caps, it does not top up"
+        );
     }
 }

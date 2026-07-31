@@ -398,6 +398,30 @@
     - id: structural_metal
       quantity: 15.0
 
+- id: battery_bank
+  name: Battery Bank
+  description: >
+    Banks surplus power instead of letting it evaporate at the end of the
+    sol (issue #348's storage-is-a-building-not-a-property-of-the-substance
+    model — the worked example for the mechanism). No recipe: it draws no
+    power and produces none, it only lets what the colony already generates
+    carry into the next sol, up to its capacity. Surplus beyond that still
+    evaporates exactly as it did before this building existed.
+  category: storage
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+  storage:
+    - id: power
+      quantity: 40.0
+
 - id: hydrocarbon_well
   name: Hydrocarbon Well
   description: >
