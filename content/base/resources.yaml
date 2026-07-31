@@ -68,3 +68,26 @@
     package's water seed banks rather than evaporating on the first sol.
   kind: flow
   unit: L
+
+- id: waste
+  name: Waste
+  description: >
+    Industrial byproduct (issue #348/#381), a per-sol flow like power and
+    water. Banked by a `waste_bunker`'s built storage capacity, or shipped
+    once crated into a commodity (see #389). A colony whose waste production
+    exceeds its `waste_processing` capacity plus available bunker storage in
+    a sol contaminates its own hex — see #387 for that mechanic, not yet
+    wired up as of this resource's introduction.
+  kind: flow
+  unit: kg
+
+- id: waste_processing
+  name: Waste Processing Capacity
+  description: >
+    Standing capacity to process waste, provided by a `recycling_plant` —
+    the same authoring pattern as `housing`: re-established every sol by the
+    buildings that provide it, not drawn down. Nothing checks it against
+    `waste` production yet; that comparison (and the hex-contamination
+    consequence of exceeding it) is #387's scope, not this resource's.
+  kind: capacity
+  unit: kg/sol

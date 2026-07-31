@@ -1404,6 +1404,251 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that refining recipes now emit `waste` as a
+    /// byproduct alongside their main output (issue #386).
+    #[test]
+    fn refinery_recipes_emit_waste_byproduct_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Waste Byproduct Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("refinery", 2));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 100.0);
+
+        // Default recipe is refine_ore_to_plate; it should now also emit waste.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("structural_metal") > 0.0,
+            "refine_ore_to_plate should still produce structural_metal"
+        );
+        assert!(
+            engine.state.colonies[idx].resources.amount("waste") > 0.0,
+            "refine_ore_to_plate should emit waste as a byproduct (issue #386)"
+        );
+
+        // Switch to the conductive recipe and confirm it also emits waste.
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "refinery".into(),
+                recipe_id: "smelt_conductive_ore".into(),
+            })
+            .unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("conductive_ore", 100.0);
+        let waste_before = engine.state.colonies[idx].resources.amount("waste");
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("conductive_metal") > 0.0,
+            "smelt_conductive_ore should still produce conductive_metal"
+        );
+        assert!(
+            engine.state.colonies[idx].resources.amount("waste") >= waste_before,
+            "smelt_conductive_ore should also emit waste as a byproduct (issue #386)"
+        );
+    }
+
+    /// Real-engine proof that a `waste_bunker` banks waste across sols up to
+    /// its built capacity, while unbanked waste still evaporates (issue #386,
+    /// mirroring the #348 `battery_bank` storage-carryover proof).
+    #[test]
+    fn waste_bunker_carries_waste_across_sols_up_to_its_capacity() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Waste Bunker Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("waste_bunker", 0));
+        // Seed a large amount of waste directly — well beyond the bunker's
+        // 40kg capacity — so this proof is independent of any recipe chain.
+        engine.state.colonies[idx].resources.deposit("waste", 500.0);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let waste_after = engine.state.colonies[idx].resources.amount("waste");
+        assert!(
+            (waste_after - 40.0).abs() < 1e-6,
+            "waste_bunker should bank waste up to its 40kg capacity, got {waste_after}"
+        );
+
+        // A second sol with no further waste production should hold steady
+        // at capacity rather than draining or growing further.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            (engine.state.colonies[idx].resources.amount("waste") - 40.0).abs() < 1e-6,
+            "banked waste should carry over unchanged with no new production"
+        );
+    }
+
+    /// Real-engine proof that unbanked waste evaporates every sol exactly
+    /// like unbanked power (issue #386) — with no storage building present,
+    /// a seeded amount does not survive `bank_and_clear`.
+    #[test]
+    fn waste_evaporates_every_sol_without_a_storage_building() {
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Waste Evaporation Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        // No waste_bunker placed — this colony has zero waste storage capacity.
+        engine.state.colonies[idx].resources.deposit("waste", 500.0);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].resources.amount("waste"),
+            0.0,
+            "waste should evaporate every sol with no storage building present"
+        );
+    }
+
+    /// Real-engine proof that `waste_processing` capacity behaves like
+    /// `housing`: a standing capacity re-established every sol by the
+    /// `recycling_plant`, not a stock that accumulates or drains (issue #386).
+    #[test]
+    fn recycling_plant_reestablishes_waste_processing_capacity_each_sol() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Recycling Plant Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("recycling_plant", 0));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let capacity_sol1 = engine.state.colonies[idx]
+            .resources
+            .amount("waste_processing");
+        assert!(
+            capacity_sol1 > 0.0,
+            "recycling_plant should provide waste_processing capacity"
+        );
+
+        // A second sol should re-establish the same standing capacity, not
+        // accumulate it (unlike a stock) or drain it (unlike a draw).
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let capacity_sol2 = engine.state.colonies[idx]
+            .resources
+            .amount("waste_processing");
+        assert!(
+            (capacity_sol2 - capacity_sol1).abs() < 1e-6,
+            "waste_processing capacity should be re-established each sol, not accumulated: sol1={capacity_sol1}, sol2={capacity_sol2}"
+        );
+    }
+
     /// Real-engine proof that the fabricator's new component recipes (#208)
     /// actually work against the real content pack: seed processed metals,
     /// switch `fabricator` through each of the three new recipes, and
