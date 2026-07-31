@@ -342,3 +342,45 @@ describe('PlanetHexMap layered tile colour (#316)', () => {
     expect(fill).toBe(plain.find('polygon').attributes('fill'))
   })
 })
+
+describe('PlanetHexMap contamination overlay (#387)', () => {
+  function parseRgb(s: string): { r: number; g: number; b: number } {
+    const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(s)
+    if (!m) throw new Error(`unexpected fill format: ${s}`)
+    return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) }
+  }
+
+  it('shifts fill toward the contamination colour as severity increases', () => {
+    const hexes = [
+      makeHex({ q: 0, r: 0, site_id: 'clean', contamination: 0 }),
+      makeHex({ q: 1, r: 0, site_id: 'fouled', contamination: 1 }),
+    ]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const [clean, fouled] = wrapper.findAll('polygon').map((p) => parseRgb(p.attributes('fill')!))
+    // Full severity should blend toward the sickly yellow-green
+    // contamination colour (#9acd1a) — greener and less blue than a
+    // pristine hex on the same terrain.
+    expect(fouled.g).toBeGreaterThan(clean.g)
+    expect(fouled.b).toBeLessThan(clean.b)
+  })
+
+  it('renders no contamination tint when contamination is absent or zero', () => {
+    const hexes = [makeHex({ q: 0, r: 0, site_id: 'no-contam' })]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const fill = wrapper.find('polygon').attributes('fill')!
+    const zero = mount(PlanetHexMap, {
+      props: {
+        map: makeMap([makeHex({ q: 0, r: 0, site_id: 'zero-contam', contamination: 0 })]),
+        selectedSite: null,
+      },
+    })
+    expect(fill).toBe(zero.find('polygon').attributes('fill'))
+  })
+
+  it('shows a contamination warning in the tooltip when severity is above zero', async () => {
+    const hexes = [makeHex({ q: 0, r: 0, site_id: 'fouled', contamination: 0.42 })]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    await wrapper.find('g').trigger('mouseenter')
+    expect(wrapper.text()).toContain('Contaminated · 42%')
+  })
+})

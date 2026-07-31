@@ -382,6 +382,12 @@ export interface PlanetHex {
    * to a biome-derived approximation when absent.
    */
   vegetation_density?: number
+  /**
+   * Contamination severity in `[0.0, 1.0]` from waste overflow (issue
+   * #387). `0.0`/absent is pristine — optional for the same fixture/
+   * older-snapshot reason as `water_coverage`.
+   */
+  contamination?: number
   deposits: { commodity_id: string; richness: number }[]
   habitable: boolean
   suitability: number

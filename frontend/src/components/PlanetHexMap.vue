@@ -302,7 +302,34 @@ function terrainColor(hex: PlanetHex): string {
   const watered = applyWaterIce(base, hex)
   const vegetated = applyVegetation(watered, hex)
   const elevated = applyElevationShading(vegetated, hex.elevation)
-  return applyTemperatureTint(elevated, hex.temperature)
+  const tinted = applyTemperatureTint(elevated, hex.temperature)
+  return applyContamination(tinted, hex)
+}
+
+/** This hex's contamination severity in `[0, 1]` (issue #387). */
+function contamination(hex: PlanetHex): number {
+  return typeof hex.contamination === 'number' ? hex.contamination : 0
+}
+
+// Sickly yellow-green, applied last (on top of every other layer) so
+// contamination always reads as an overlay warning rather than competing
+// with terrain/water/vegetation for the base color.
+const CONTAMINATION_COLOR = '#9acd1a'
+
+/** Blend the contamination warning tint over a color, by severity. */
+function applyContamination(rgbOrHex: string, hex: PlanetHex): string {
+  const severity = contamination(hex)
+  if (severity <= 0) return rgbOrHex
+  const base = parseRgb(rgbOrHex)
+  const target = parseHex(CONTAMINATION_COLOR)
+  if (!base || !target) return rgbOrHex
+  // Capped below full-strength so even a maximally contaminated hex still
+  // shows its underlying terrain, rather than reading as a flat color swatch.
+  const strength = Math.min(severity, 1) * 0.6
+  const r = clamp255(base.r + (target.r - base.r) * strength)
+  const g = clamp255(base.g + (target.g - base.g) * strength)
+  const b = clamp255(base.b + (target.b - base.b) * strength)
+  return `rgb(${r}, ${g}, ${b})`
 }
 
 /** This hex's water/ice surface coverage in `[0, 1]`, real or derived. */
@@ -685,6 +712,9 @@ defineExpose({ focusSite, resetView })
       <div class="tt-row">
         <span class="tt-label">Suitability</span>
         <span>{{ hoveredHex.suitability.toFixed(1) }}</span>
+      </div>
+      <div class="tt-row" v-if="contamination(hoveredHex) > 0">
+        <span class="tt-warn">Contaminated · {{ (contamination(hoveredHex) * 100).toFixed(0) }}%</span>
       </div>
       <div class="tt-row" v-if="!hoveredHex.habitable">
         <span class="tt-warn">Impassable</span>

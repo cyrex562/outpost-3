@@ -216,6 +216,9 @@ pub struct PlanetHexWire {
     pub water_coverage: f32,
     /// Vegetation density in this cell, in `[0.0, 1.0]` (issue #316).
     pub vegetation_density: f32,
+    /// Contamination severity in `[0.0, 1.0]` from waste overflow (issue
+    /// #387). `0.0` is pristine.
+    pub contamination: f32,
     /// Resource deposits present in this cell.
     pub deposits: Vec<DepositWire>,
     /// Whether a colony could be founded on this cell.
@@ -416,6 +419,7 @@ fn build_planet_map_wire(
                 temperature: format!("{:?}", cell.temperature),
                 water_coverage: cell.water_coverage,
                 vegetation_density: cell.vegetation_density,
+                contamination: cell.contamination,
                 deposits: cell
                     .deposits
                     .iter()
