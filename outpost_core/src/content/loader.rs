@@ -100,12 +100,19 @@ impl PackLoader {
             }
         }
 
-        // Supply packages are physically shipped to a new colony, so unlike
-        // recipes they may only name tradeable commodities — you can't load
-        // `power` onto a lander.
+        // Supply packages are physically shipped to a new colony. Most
+        // colony-local resources genuinely can't be loaded onto a lander
+        // (you can't crate `power`) — but a resource with a storage building
+        // in the starter kit (water/`water_tank`, since issue #380) can be,
+        // exactly like a tradeable commodity, so this accepts either kind
+        // rather than commodities only. A resource seed that lands with
+        // nowhere to bank it simply evaporates at the end of the founding
+        // sol (see `materialize_founded_colony`'s doc comment) — that's a
+        // design decision each such resource's starter-kit storage building
+        // needs to account for, not something the loader can enforce.
         for pkg in supply_packages.values() {
             for ing in &pkg.commodities {
-                if !commodity_ids.contains(ing.id.as_str()) {
+                if !producible_ids.contains(ing.id.as_str()) {
                     return Err(ContentError::UnknownCommodityRef {
                         file: "supplies.yaml".to_string(),
                         id: pkg.id.clone(),

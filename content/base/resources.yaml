@@ -54,3 +54,17 @@
     warehouse.
   kind: flow
   unit: RP
+
+- id: water
+  name: Water
+  description: >
+    Potable water, drawn per capita each sol (issue #348/#380). Reclassified
+    from a tradeable commodity to a utility: it works exactly like `power` —
+    a per-sol flow by default, banked by a `water_tank`'s built storage
+    capacity (see `BuildingDef.storage`), moved between colonies only once
+    crated into the `water_container` commodity by a `water_bottling_plant`
+    (see recipes.yaml's `bottle_water`). Every colony starts with one free
+    `water_tank` (starter-kit, zero slot cost), so the founding supply
+    package's water seed banks rather than evaporating on the first sol.
+  kind: flow
+  unit: L

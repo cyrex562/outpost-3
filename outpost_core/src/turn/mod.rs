@@ -1614,6 +1614,62 @@ mod tests {
              is a colony resource now, so it is not a declared commodity"
         );
     }
+    /// Issue #380: `water` reclassified from commodity to resource must
+    /// become untradeable the same structural way `power`/`housing` already
+    /// are — not just for a stale pre-existing pool entry (the test above),
+    /// but going forward: even a fresh deposit lands in `ColonyResourcePool`
+    /// and is invisible to `run_trade_flow`'s tradeable-id set, which is
+    /// built solely from `Colony.pool.commodity_ids()`.
+    #[test]
+    fn water_declared_as_a_resource_cannot_be_traded_even_with_a_route_and_stock() {
+        use crate::content::types::{ResourceDef, ResourceKind};
+        use crate::content::ContentRegistry;
+        use crate::trade::TradeRoute;
+
+        let mut registry = ContentRegistry::default();
+        registry.insert_resource(ResourceDef {
+            id: "water".into(),
+            name: "Water".into(),
+            description: String::new(),
+            kind: ResourceKind::Flow,
+            unit: "L".into(),
+        });
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Wet"), 100);
+        state.add_colony(Colony::new("Dry"), 100);
+        state.registry = Some(registry);
+
+        // A generous surplus, deposited directly into the resource pool —
+        // exactly where real production (colony_hq's hq_pump_water, etc.)
+        // would put it once water is declared a resource.
+        state.colonies[0].resources.deposit("water", 1000.0);
+
+        let (a, b) = (state.colonies[0].id, state.colonies[1].id);
+        state.trade_network.add_route(TradeRoute::new(a, b, 50.0));
+
+        let mut proc = TurnProcessor::with_cadence(0, 1);
+        proc.advance(&mut state);
+        proc.advance(&mut state);
+
+        assert_eq!(
+            state.colonies[1].resources.amount("water"),
+            0.0,
+            "a resource-classified id is never a dispatch target for trade \
+             either — nothing in run_trade_flow writes to ColonyResourcePool"
+        );
+        assert_eq!(
+            state.colonies[1].pool.amount("water"),
+            0.0,
+            "water must not appear in the receiving colony's commodity pool \
+             at all — it was never in the tradeable id set to begin with"
+        );
+        assert!(
+            (state.colonies[0].resources.amount("water") - 1000.0).abs() < 0.001,
+            "the sender's own banked water must be untouched by a route that \
+             structurally can never move it"
+        );
+    }
     /// End-to-end: the reserve is actually wired into the strategic pass.
     ///
     /// The unit tests above drive `run_trade_flow` directly. This one goes

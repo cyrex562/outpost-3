@@ -7341,12 +7341,27 @@ impl GameEngine {
         // per-100-colonist and scaled linearly by starting_population;
         // `supply_overrides` amounts (issue #167) are already absolute final
         // quantities and are deposited as-is.
+        //
+        // Routed through `ColonyStores` rather than a raw `pool.deposit`
+        // (issue #380) — a supply package can name a colony-local resource
+        // id (water, since #380) as well as a tradeable commodity, and only
+        // `ColonyStores` knows which store a given id actually belongs in.
+        // A resource-classified seed still needs somewhere to land: it's
+        // deposited directly into `ColonyResourcePool` here, then the
+        // landing kit placed just below (which always includes a free
+        // `water_tank`) is what keeps it from evaporating at the end of the
+        // very first sol instead of being wasted.
         if let Some((ings, already_absolute)) = supplies {
             #[allow(clippy::cast_precision_loss)]
             let scale = (starting_population as f64) / 100.0;
             let idx = self
                 .find_colony_index(colony_id)
                 .expect("colony was just inserted");
+            let empty_registry = content::ContentRegistry::default();
+            let supply_registry = self.state.registry.as_ref().unwrap_or(&empty_registry);
+            let colony = &mut self.state.colonies[idx];
+            let mut stores =
+                colony::ColonyStores::new(&mut colony.pool, &mut colony.resources, supply_registry);
             for ing in &ings {
                 let qty = if already_absolute {
                     ing.quantity
@@ -7354,7 +7369,7 @@ impl GameEngine {
                     ing.quantity * scale
                 };
                 if qty > 0.0 {
-                    self.state.colonies[idx].pool.deposit(&ing.id, qty);
+                    stores.deposit(&ing.id, qty);
                 }
             }
         }
@@ -17499,6 +17514,112 @@ mod tests {
             (colony.pool.amount("food_ration") - 600.0).abs() < 0.001,
             "expected 600 food_ration, got {}",
             colony.pool.amount("food_ration")
+        );
+    }
+
+    /// Issue #380: a resource-classified supply-package ingredient (water,
+    /// reclassified from commodity to resource) is deposited into
+    /// `ColonyResourcePool`, not `ColonyPool` — and, given the founding kit's
+    /// free storage building, survives the first sol's `bank_and_clear`
+    /// capped at that building's capacity rather than evaporating outright.
+    #[test]
+    fn found_colony_at_site_seeds_a_resource_from_supply_and_it_survives_via_the_free_tank() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let resources_yaml = "\
+- id: water
+  name: Water
+  kind: flow
+  unit: L
+";
+        let buildings_yaml = "\
+- id: water_tank
+  name: Water Tank
+  category: storage
+  starter_kit: true
+  slot_cost: 0
+  storage:
+    - id: water
+      quantity: 120.0
+";
+        let supplies_yaml = "\
+- id: standard
+  name: Standard
+  commodities:
+    - id: water
+      quantity: 400.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("resources.yaml", resources_yaml),
+            ("buildings.yaml", buildings_yaml),
+            ("supplies.yaml", supplies_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
+            .unwrap();
+        let pm = engine.state.home_map().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Alpha".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: Some("standard".into()),
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+
+        let colony = &engine.state.colonies[0];
+        assert_eq!(
+            colony.pool.amount("water"),
+            0.0,
+            "water must not land in the commodity pool — it's a resource now"
+        );
+        assert!(
+            (colony.resources.amount("water") - 400.0).abs() < 0.001,
+            "the full seeded amount should be available immediately at \
+             founding (starting_population 100 -> scale 1.0 -> 400), got {}",
+            colony.resources.amount("water")
+        );
+        assert!(
+            colony
+                .buildings
+                .iter()
+                .any(|b| b.building_type == "water_tank"),
+            "the founding kit should include the free starter-kit water_tank"
+        );
+
+        // The first sol caps the seeded 400 at the tank's 120 capacity,
+        // rather than evaporating the whole thing the way an unbanked
+        // resource would.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let colony = &engine.state.colonies[0];
+        assert!(
+            (colony.resources.amount("water") - 120.0).abs() < 0.001,
+            "the founding seed should survive capped at the tank's \
+             capacity rather than evaporating outright, got {}",
+            colony.resources.amount("water")
         );
     }
 

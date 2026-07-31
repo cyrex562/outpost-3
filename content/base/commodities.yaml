@@ -1,14 +1,20 @@
 # Base-colony commodity definitions.
 # All authored records live here — never hardcoded in kernel code.
 
-- id: water
-  name: Water
+- id: water_container
+  name: Water Container
   description: >
-    Potable water is the most essential survival resource.
-    Harvested from ice deposits or atmospheric condensation.
+    Water crated into sealed containers for shipment (issue #348/#380).
+    Water itself is a colony-local utility (see `resources.yaml`), not cargo
+    — this is what a `water_bottling_plant` produces from banked water so a
+    colony can still export a surplus by convoy, the same way `power` would
+    need crating into charged cells to travel. `bottle_water` (recipes.yaml)
+    is the recipe; unpacking on arrival is the mirror-image recipe a
+    receiving colony's own bottling plant runs in reverse.
   category: consumable
   phase: liquid
-  base_value: 5.0
+  base_value: 6.0
+  weight: 1.2
   tradeable: true
 
 - id: food_ration
