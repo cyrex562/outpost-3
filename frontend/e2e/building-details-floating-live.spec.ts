@@ -1,18 +1,20 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * Drives the building-details dock panel (issue #322) against a live
- * `outpost_web` backend.
+ * Drives the floating building-details window (issue #322, revised) against
+ * a live `outpost_web` backend.
  *
  * Selecting a building used to navigate to a routed `/facility/:type` page,
- * then (issue #339) opened a floating window over the colony view. Per
- * #321's dock framework, it's now a closeable panel inside that same
- * dockview, split alongside the buildings list rather than replacing or
- * covering it — the colony context (including the list just clicked) stays
- * visible the whole time. This spec checks that end-to-end: clicking a
- * building opens the panel with the right content next to the buildings
- * list, the URL does not change, and closing the panel's tab removes it
- * while leaving the rest of the dock intact.
+ * then (issue #339) opened a floating window over the colony view, then
+ * briefly (issue #322's first pass) became a dock panel split alongside the
+ * buildings list inside #321's dockview framework. That last step turned out
+ * to compete for space with — and could disturb — the player's own dragged
+ * dock arrangement, so it opens as a `FloatingWindow` layered above the
+ * whole dock instead: the buildings list (and every other dock panel) stays
+ * visible and untouched underneath, and the URL does not change. This spec
+ * checks that end-to-end: clicking a building opens the floating window with
+ * the right content, the dock underneath remains interactive, and the
+ * window's own close button dismisses it without disturbing the dock.
  *
  * Requires the `outpost_web` backend that `playwright.config.ts` starts
  * alongside the preview server.
@@ -20,7 +22,7 @@ import { test, expect } from '@playwright/test'
 
 const API = 'http://localhost:3000'
 
-test('selecting a building opens a dock panel alongside the buildings list', async ({
+test('selecting a building opens a floating details window above the dock', async ({
   page,
   request,
 }) => {
@@ -46,7 +48,7 @@ test('selecting a building opens a dock panel alongside the buildings list', asy
   const known = new Set(preexisting.Colonies.map((c) => c.id))
 
   const found = await request.post(`${API}/api/command`, {
-    data: { kind: 'found_colony', name: 'Dock Details Fixture', starting_population: 100 },
+    data: { kind: 'found_colony', name: 'Floating Details Fixture', starting_population: 100 },
   })
   expect(found.ok()).toBeTruthy()
 
@@ -65,24 +67,25 @@ test('selecting a building opens a dock panel alongside the buildings list', asy
   await expect(page).toHaveURL(new RegExp(colonyId!))
   await expect(page.getByTestId('buildings-panel')).toBeVisible({ timeout: 15_000 })
 
-  // ── Selecting a building opens the details panel, not a route change ──
+  // ── Selecting a building opens the floating window, not a route change ──
   await page.getByTestId('view-details-colony_hq').click()
-  await expect(page.getByTestId('facility-page')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('floating-window')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('facility-page')).toBeVisible()
   await expect(page).toHaveURL(new RegExp(colonyId!))
   await expect(page).not.toHaveURL(/#\/facility/)
 
-  // The buildings list stays visible alongside the details panel — split,
-  // not tabbed — which is the whole point of docking it this way.
+  // The dock underneath — buildings list included — stays visible and
+  // usable while the window floats above it.
   await expect(page.getByTestId('buildings-panel')).toBeVisible()
   await expect(page.getByText('Colony HQ 1')).toBeVisible()
 
-  // ── Closing the panel's own control removes it; the rest of the dock stays ──
-  await page.getByTestId('facility-back').click()
-  await expect(page.getByTestId('facility-page')).toBeHidden()
+  // ── Dismissing the window closes it and leaves the dock untouched ──
+  await page.getByTestId('fw-close').click()
+  await expect(page.getByTestId('floating-window')).toBeHidden()
   await expect(page.getByTestId('buildings-panel')).toBeVisible()
 })
 
-test('deep-linking /colony/:colonyId/facility/:buildingType opens the details panel', async ({
+test('deep-linking /colony/:colonyId/facility/:buildingType opens the floating window', async ({
   page,
   request,
 }) => {
@@ -116,9 +119,10 @@ test('deep-linking /colony/:colonyId/facility/:buildingType opens the details pa
   expect(deploy.ok()).toBeTruthy()
 
   // Visiting the facility route directly lands on the colony dashboard with
-  // the details panel already open — a deep link into the panel rather than
-  // a separate routed page (issue #322 decision).
+  // the floating window already open — a deep link into the window rather
+  // than a separate routed page.
   await page.goto(`/#/colony/${colonyId}/facility/colony_hq`)
   await expect(page.getByTestId('buildings-panel')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByTestId('facility-page')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('floating-window')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('facility-page')).toBeVisible()
 })

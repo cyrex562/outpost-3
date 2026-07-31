@@ -12,11 +12,13 @@
  * `Dock*Panel.vue` components (registered with `DockviewVue`) that read
  * colony data via `provide`/`inject` (`colonyDock.ts`) rather than through
  * dockview's own per-panel `params`, since every one of them shows the same
- * single colony and there's nothing to parameterise per panel instance. A
- * seventh, `DockBuildingDetailsPanel`, is the odd one out: it only exists
- * once a building is clicked, retargets in place on subsequent clicks, and
- * does use dockview's `params` mechanism (it's the one panel that genuinely
- * varies per instance) — see issue #322's decision comment.
+ * single colony and there's nothing to parameterise per panel instance.
+ *
+ * Building details are deliberately *not* one of those dock panels (issue
+ * #322, revised): they open in a `FloatingWindow` layered above the whole
+ * dock instead, so the detail view can float over — rather than compete for
+ * space inside — the docked arrangement, and closing it can't disturb
+ * whatever layout the player has dragged/resized the six panels into.
  *
  * Turn control (Advance Turn) and system-wide stats now live in the app
  * shell's footer/stats bars (UI-rework PR3), not in this view.
@@ -30,19 +32,19 @@ import 'dockview-vue/dist/styles/dockview.css'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
 import BuildDialog from '@/components/BuildDialog.vue'
+import FloatingWindow from '@/components/FloatingWindow.vue'
+import BuildingDetailsHud from '@/components/BuildingDetailsHud.vue'
 import DockVitalStatsPanel from '@/components/dock/DockVitalStatsPanel.vue'
 import DockUtilitiesPanel from '@/components/dock/DockUtilitiesPanel.vue'
 import DockCommoditiesPanel from '@/components/dock/DockCommoditiesPanel.vue'
 import DockBuildingsPanel from '@/components/dock/DockBuildingsPanel.vue'
 import DockConstructionQueuePanel from '@/components/dock/DockConstructionQueuePanel.vue'
 import DockAlertsPanel from '@/components/dock/DockAlertsPanel.vue'
-import DockBuildingDetailsPanel from '@/components/dock/DockBuildingDetailsPanel.vue'
 import {
   COLONY_DOCK_COMPONENT,
   COLONY_DOCK_CONTEXT_KEY,
   buildDefaultColonyLayout,
   loadPersistedColonyLayout,
-  openBuildingDetailsPanel,
   savePersistedColonyLayout,
   type ColonyDockContext,
 } from '@/dock/colonyDock'
@@ -241,22 +243,27 @@ async function cancelConstruction(projectId: string): Promise<void> {
   }
 }
 
-// ─── Building details (issue #182, dock panel as of #322) ──────────────────────
+// ─── Building details (issue #182; floating window per #339, revised #322) ─────
 //
-// Selecting a building used to navigate to the routed `/facility/:type` page
-// (then, per #339, a floating window) — both hid or covered the rest of the
-// colony dashboard while inspecting a building. Per #321's dock framework
-// and #322's decision comment, it's now a closeable panel inside the same
-// dockview: a single reusable inspector that retargets on each building
-// click (see `openBuildingDetailsPanel`'s doc comment for why single rather
-// than one-panel-per-building). `/colony/:colonyId/facility/:buildingType`
-// stays live as a deep link — see the `routeBuildingType` watcher below —
-// rather than routing to a separate page.
+// Selecting a building opens `BuildingDetailsHud` in a `FloatingWindow`
+// layered above the whole colony dashboard (dock panels included) rather
+// than navigating to a routed page or opening as a dock panel of its own —
+// a single reusable window that retargets to whichever building was last
+// clicked, closeable without disturbing the docked layout underneath.
+// `/colony/:colonyId/facility/:buildingType` stays live as a deep link — see
+// the `routeBuildingType` watcher below — rather than routing to a separate
+// page.
+
+const selectedBuildingType = ref<string | null>(null)
 
 function openBuildingDetails(buildingType: string): void {
   const col = selectedColony.value
-  if (!col || !dockApi.value) return
-  openBuildingDetailsPanel(dockApi.value, buildingType)
+  if (!col) return
+  selectedBuildingType.value = buildingType
+}
+
+function closeBuildingDetails(): void {
+  selectedBuildingType.value = null
 }
 
 // ─── Per-building staffing (issue #307) ────────────────────────────────────────
@@ -340,7 +347,6 @@ async function setBuildingPaused(buildingId: string, paused: boolean): Promise<v
 // dockview's own `params`.
 
 const dockContext = computed<ColonyDockContext>(() => ({
-  colonyId: selectedColony.value?.id ?? '',
   population: selectedColony.value?.population ?? 0,
   stability: selectedColony.value?.stability ?? 0,
   availableLabour: selectedColony.value?.available_labour ?? 0,
@@ -389,7 +395,6 @@ const dockComponents = {
   [COLONY_DOCK_COMPONENT.buildings]: DockBuildingsPanel,
   [COLONY_DOCK_COMPONENT.constructionQueue]: DockConstructionQueuePanel,
   [COLONY_DOCK_COMPONENT.alerts]: DockAlertsPanel,
-  [COLONY_DOCK_COMPONENT.buildingDetails]: DockBuildingDetailsPanel,
 } as unknown as Record<string, VueComponent>
 
 /** Disposes the `onDidLayoutChange` subscription registered in `onDockReady`. */
@@ -422,21 +427,21 @@ function onDockReady(event: DockviewReadyEvent): void {
 /**
  * `/colony/:colonyId/facility/:buildingType` (also reachable via the
  * `facility` route name, e.g. from `BuildingsListView`) is kept as a
- * deep link into the building-details panel rather than its own routed page
- * (issue #322 decision) — both route names resolve to this same component,
- * so visiting either just opens the panel once the dock is ready. Re-fires
- * when the dock becomes ready or the route's `buildingType` actually
- * changes (not once at mount), so a second facility link clicked while
- * already on this colony retargets the panel instead of being a no-op.
+ * deep link into the floating building-details window rather than its own
+ * routed page — both route names resolve to this same component, so
+ * visiting either just opens the window. Re-fires when the route's
+ * `buildingType` actually changes (not once at mount), so a second facility
+ * link clicked while already on this colony retargets the window instead of
+ * being a no-op.
  *
- * Deliberately watches only `dockApi`/`routeBuildingType`, not
- * `selectedColony` — `selectedColony` is a computed over `worldStore.world`,
- * which is replaced wholesale on every server-pushed event (any sol
- * advance, any command from any client), so including it here would re-run
- * this watcher — and therefore reopen the panel — on unrelated world ticks,
- * even after the player closed it via the dock's own tab close control.
- * `selectedColony` is still checked, just inside the callback rather than
- * as a tracked dependency, so this stays a no-op until a colony resolves.
+ * Deliberately watches only `routeBuildingType`, not `selectedColony` —
+ * `selectedColony` is a computed over `worldStore.world`, which is replaced
+ * wholesale on every server-pushed event (any sol advance, any command from
+ * any client), so including it here would re-run this watcher — and
+ * therefore reopen the window — on unrelated world ticks, even after the
+ * player closed it via its own close button. `selectedColony` is still
+ * checked, just inside the callback rather than as a tracked dependency, so
+ * this stays a no-op until a colony resolves.
  */
 const routeBuildingType = computed((): string | null => {
   const raw = route.params.buildingType
@@ -444,10 +449,10 @@ const routeBuildingType = computed((): string | null => {
 })
 
 watch(
-  () => [dockApi.value, routeBuildingType.value] as const,
-  ([api, buildingType]) => {
-    if (!api || !buildingType || !selectedColony.value) return
-    openBuildingDetailsPanel(api, buildingType)
+  routeBuildingType,
+  (buildingType) => {
+    if (!buildingType || !selectedColony.value) return
+    selectedBuildingType.value = buildingType
   },
   { immediate: true },
 )
@@ -500,18 +505,57 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Moveable, resizable, dockable panel layout (issue #321) — replaces
-           the old Splitpanes 3-column arrangement with a real dock
-           framework: panels can be dragged to new positions, resized,
-           stacked as tabs, or popped into floating groups, and the whole
-           arrangement persists to localStorage (see `colonyDock.ts`). -->
-      <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
-        <DockviewVue
-          class="dockview-theme-abyss colony-dockview"
-          data-testid="colony-dockview"
-          :components="dockComponents"
-          @ready="onDockReady"
-        />
+      <!-- `.colony-body` is `FloatingWindow`'s host (its own dedicated
+           `position: relative` container per its own convention — see
+           `PlanetView.vue`'s `.map-host` — rather than the whole
+           `.colony-view`, which also holds `.colony-header`'s controls; a
+           `fill-host` window would otherwise be free to overlap them) and
+           traps dockview's own internal stacking context via `isolation:
+           isolate` — dockview's *own* float-a-tab feature (a player
+           dragging a dock tab loose, independent of this building-details
+           window) uses z-index values in the high 900s internally, which
+           would otherwise escape past this window's much lower z-index
+           since nothing between them establishes a stacking context. -->
+      <div class="colony-body">
+        <!-- Moveable, resizable, dockable panel layout (issue #321) —
+             replaces the old Splitpanes 3-column arrangement with a real
+             dock framework: panels can be dragged to new positions,
+             resized, stacked as tabs, or popped into floating groups, and
+             the whole arrangement persists to localStorage (see
+             `colonyDock.ts`). -->
+        <div v-if="selectedColony" class="panel-layout" :data-testid="`colony-detail-${selectedColony.id}`">
+          <DockviewVue
+            class="dockview-theme-abyss colony-dockview"
+            data-testid="colony-dockview"
+            :components="dockComponents"
+            @ready="onDockReady"
+          />
+        </div>
+
+        <!-- Building details float above the whole dock (issue #322,
+             revised) rather than living inside it, so inspecting a building
+             never disturbs the dragged/resized dock arrangement
+             underneath. -->
+        <FloatingWindow
+          v-if="selectedBuildingType && selectedColony"
+          :title="selectedBuildingType"
+          storage-key="outpost3.colony-view.building-details-window"
+          closable
+          fill-host
+          :initial-x="40"
+          :initial-y="40"
+          :initial-width="520"
+          :initial-height="480"
+          @close="closeBuildingDetails"
+        >
+          <BuildingDetailsHud
+            owner-type="colony"
+            :owner-id="selectedColony.id"
+            :building-type="selectedBuildingType"
+            as-page
+            @close="closeBuildingDetails"
+          />
+        </FloatingWindow>
       </div>
 
       <BuildDialog
@@ -574,9 +618,22 @@ onUnmounted(() => {
 }
 .btn-reset-layout:hover { background: #1a1a2a; border-color: #558; }
 
-.panel-layout {
+/* `FloatingWindow`'s host (see the template comment above it): a dedicated
+   `position: relative` container for the dock + the building-details
+   window, excluding `.colony-header`'s controls. `isolation: isolate`
+   traps dockview's own internal stacking context (its float-a-tab feature
+   uses z-index values in the high 900s) so it can't escape past the
+   building-details window's much lower z-index. */
+.colony-body {
   flex: 1;
   min-height: 320px;
+  display: flex;
+  position: relative;
+  isolation: isolate;
+}
+
+.panel-layout {
+  flex: 1;
   border: 1px solid #223;
   border-radius: 4px;
   overflow: hidden;

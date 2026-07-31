@@ -24,15 +24,11 @@ export const COLONY_DOCK_COMPONENT = {
   buildings: 'buildings',
   constructionQueue: 'construction-queue',
   alerts: 'alerts',
-  buildingDetails: 'building-details',
 } as const
 
 export type ColonyDockPanelId = (typeof COLONY_DOCK_COMPONENT)[keyof typeof COLONY_DOCK_COMPONENT]
 
-/** Human-readable tab titles for the default layout / any future panel menu.
- * `buildingDetails` isn't part of the default layout (it only exists once a
- * building is clicked) so it has no fallback title here — its tab title is
- * always set to the building type on open, see `openBuildingDetailsPanel`. */
+/** Human-readable tab titles for the default layout / any future panel menu. */
 export const COLONY_DOCK_TITLES: Record<ColonyDockPanelId, string> = {
   [COLONY_DOCK_COMPONENT.vitalStats]: 'Vitals',
   [COLONY_DOCK_COMPONENT.utilities]: 'Utilities',
@@ -40,16 +36,6 @@ export const COLONY_DOCK_TITLES: Record<ColonyDockPanelId, string> = {
   [COLONY_DOCK_COMPONENT.buildings]: 'Buildings',
   [COLONY_DOCK_COMPONENT.constructionQueue]: 'Construction Queue',
   [COLONY_DOCK_COMPONENT.alerts]: 'Alerts',
-  [COLONY_DOCK_COMPONENT.buildingDetails]: 'Building Details',
-}
-
-/** Per-panel params for the building-details panel (issue #322) — the one
- * dock panel that isn't identical for every instance, since which building
- * it shows varies. Passed through dockview's own `params` mechanism (see
- * `DockBuildingDetailsPanel.vue`) rather than `ColonyDockContext`, unlike
- * every other panel here. */
-export interface BuildingDetailsPanelParams {
-  buildingType: string
 }
 
 /** Minimal shape `buildDefaultColonyLayout` needs from a `DockviewApi` —
@@ -60,26 +46,8 @@ export interface DockPanelAdder {
     id: string
     title?: string
     component: string
-    params?: object
     position?: { referencePanel: string; direction: 'left' | 'right' | 'above' | 'below' | 'within' }
   }): unknown
-}
-
-/** Minimal shape of an already-added dockview panel that
- * {@link openBuildingDetailsPanel} needs to retarget it in place. */
-export interface DockPanelHandle {
-  api: {
-    updateParameters(params: object): void
-    setTitle(title: string): void
-    setActive(): void
-  }
-}
-
-/** {@link DockPanelAdder} plus `getPanel`, so a single reusable
- * building-details panel can be found and retargeted instead of stacking a
- * new tab per building clicked. */
-export interface DockPanelManager extends DockPanelAdder {
-  getPanel(id: string): DockPanelHandle | undefined
 }
 
 /**
@@ -121,49 +89,6 @@ export function buildDefaultColonyLayout(api: DockPanelAdder): void {
     title: COLONY_DOCK_TITLES[c.alerts],
     component: c.alerts,
     position: { referencePanel: c.buildings, direction: 'right' },
-  })
-}
-
-/**
- * Open the building-details panel for `buildingType`, or retarget it if it's
- * already open (issue #322 decision: a single reusable inspector rather than
- * one panel per building — the dock's tabbed stacks make "several open at
- * once" cheap if that's wanted later, but a single retargeting panel matches
- * this dock's existing fixed-panel-id shape and the previous floating-window
- * behaviour it replaces). Splits alongside the buildings list rather than
- * tabbing with it (`within` would stack it in the same group, hiding the
- * buildings list whenever details are active) — the whole point per the
- * issue is that the colony context, including the list just clicked, stays
- * visible while reading a building's detail.
- *
- * `addPanel` with a `position.referencePanel` that doesn't resolve to a
- * currently-open panel throws (real `dockview-core` behaviour, not this
- * project's) — since panels are user-closeable and layouts persist across
- * sessions, the buildings list may not be open when this runs (e.g. a
- * `/facility/:type` deep link visited after closing it, or restoring an
- * older saved layout). Falls back to an unpositioned `addPanel` (dockview
- * places it in a new group) rather than throwing and silently dropping the
- * player's click.
- */
-export function openBuildingDetailsPanel(api: DockPanelManager, buildingType: string): void {
-  const id = COLONY_DOCK_COMPONENT.buildingDetails
-  const existing = api.getPanel(id)
-  const params: BuildingDetailsPanelParams = { buildingType }
-  if (existing) {
-    existing.api.updateParameters(params)
-    existing.api.setTitle(buildingType)
-    existing.api.setActive()
-    return
-  }
-  const buildingsPanel = api.getPanel(COLONY_DOCK_COMPONENT.buildings)
-  api.addPanel({
-    id,
-    title: buildingType,
-    component: id,
-    params,
-    ...(buildingsPanel
-      ? { position: { referencePanel: COLONY_DOCK_COMPONENT.buildings, direction: 'right' as const } }
-      : {}),
   })
 }
 
@@ -220,7 +145,6 @@ export function clearPersistedColonyLayout(): void {
  * per-panel-instance parameterisation to thread through `params` anyway.
  */
 export interface ColonyDockContext {
-  colonyId: string
   population: number
   stability: number
   availableLabour: number
