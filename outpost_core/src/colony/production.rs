@@ -1053,6 +1053,24 @@ pub fn storage_capacities(
     capacities
 }
 
+/// Scale a colony's habitability modifier down for hex contamination (issue
+/// #387), at the point of use rather than baked into
+/// [`crate::colony::Colony::habitability_modifier`] itself — contamination
+/// changes sol to sol and is a per-hex, per-colony consequence, whereas
+/// `habitability_modifier` is the body's own (slower-changing, mitigation-
+/// driven) environmental score. Keeping the two factors separate and
+/// multiplying them together at the call site avoids double-counting either
+/// one into the other.
+///
+/// `contamination` of `0.0` (pristine) leaves the modifier untouched;
+/// `1.0` (maximally contaminated) halves it. Never drives the modifier to
+/// zero — even a fully fouled hex still supports some reduced output,
+/// consistent with contamination being a penalty, not a colony-killer.
+#[must_use]
+pub fn contamination_habitability_factor(contamination: f32) -> f32 {
+    (1.0 - contamination.clamp(0.0, 1.0) * 0.5).max(0.5)
+}
+
 /// Yield fraction an extraction recipe manages with **no matching deposit**
 /// present (issue #317).
 ///
@@ -1609,6 +1627,29 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Contamination habitability factor (issue #387) ───────────────────────
+
+    #[test]
+    fn contamination_habitability_factor_is_neutral_at_zero() {
+        assert!((contamination_habitability_factor(0.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contamination_habitability_factor_halves_at_full_severity() {
+        assert!((contamination_habitability_factor(1.0) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contamination_habitability_factor_is_linear_between() {
+        assert!((contamination_habitability_factor(0.5) - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contamination_habitability_factor_clamps_out_of_range_input() {
+        assert!((contamination_habitability_factor(-1.0) - 1.0).abs() < 1e-6);
+        assert!((contamination_habitability_factor(2.0) - 0.5).abs() < 1e-6);
+    }
     use crate::colony::{ColonyPool, ColonyResourcePool};
     use crate::content::types::{
         BuildingCategory, BuildingDef, Ingredient, RecipeDef, DEFAULT_BUILDING_PRIORITY,

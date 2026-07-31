@@ -227,6 +227,9 @@ fn default_water_coverage() -> f32 {
 fn default_vegetation_density() -> f32 {
     0.0
 }
+fn default_contamination() -> f32 {
+    0.0
+}
 
 /// A single hex cell in the planet map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -261,6 +264,21 @@ pub struct HexCell {
     pub vegetation_density: f32,
     /// Resource deposits present in this cell (may be empty).
     pub deposits: Vec<Deposit>,
+    /// Contamination severity in `[0.0, 1.0]` from waste overflow (issue
+    /// #387) — `0.0` is pristine. Raised only by
+    /// [`PlanetMap::contaminate`], called when a colony sitting on this
+    /// cell overflows its waste storage/processing for a sol. Never
+    /// decays on its own; remediation is issue #388's scope. Reduces
+    /// deposit richness read for extraction
+    /// (`colony_deposit_richness`) and a colony's effective habitability
+    /// at the point of use (`process_production_scaled`'s
+    /// `productivity_multiplier`), rather than being folded into
+    /// [`crate::system::Body::habitability`] itself — contamination is a
+    /// per-hex, per-colony consequence, not a property of the body, so
+    /// keeping it a separate multiplicative factor avoids double-counting
+    /// against the body-level habitability score.
+    #[serde(default = "default_contamination")]
+    pub contamination: f32,
 }
 
 impl HexCell {
@@ -280,6 +298,7 @@ impl HexCell {
             water_coverage: default_water_coverage(),
             vegetation_density: default_vegetation_density(),
             deposits: Vec::new(),
+            contamination: default_contamination(),
         }
     }
 
@@ -632,6 +651,57 @@ impl PlanetMap {
         if cell.deposits[index].richness <= 0.0 {
             cell.deposits.remove(index);
         }
+    }
+
+    /// Deposit richness reference for scaling a sol's waste overflow into a
+    /// contamination increment (issue #387) — chosen to match
+    /// `waste_bunker`'s authored 40kg capacity, so overflowing by "about one
+    /// bunker's worth" in a single sol is a meaningfully large step, not a
+    /// rounding error.
+    pub const CONTAMINATION_OVERFLOW_SCALE_KG: f64 = 40.0;
+
+    /// Ceiling on how much a single sol's overflow can raise contamination
+    /// by (issue #387). Contamination never decays on its own (remediation
+    /// is #388's scope), so this caps how fast a single bad sol can spike
+    /// severity — sustained overflow across many sols still saturates a hex,
+    /// just not instantly from one large production burst.
+    pub const CONTAMINATION_MAX_INCREMENT_PER_SOL: f32 = 0.1;
+
+    /// Convert a sol's waste overflow (kg over processing + storage
+    /// capacity) into a contamination increment for
+    /// [`PlanetMap::contaminate`] (issue #387). Zero or negative overflow
+    /// (no overflow that sol) yields zero. Scales linearly from `0.0` at
+    /// zero overflow up to [`Self::CONTAMINATION_MAX_INCREMENT_PER_SOL`] at
+    /// [`Self::CONTAMINATION_OVERFLOW_SCALE_KG`] overflow, and holds flat at
+    /// that ceiling beyond it — overflowing by "about one bunker's worth"
+    /// already does a full sol's worth of damage, and a larger production
+    /// burst doesn't do proportionally more in a single sol.
+    #[must_use]
+    pub fn contamination_increment_for_overflow(overflow_kg: f64) -> f32 {
+        if overflow_kg <= 0.0 {
+            return 0.0;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let fraction = (overflow_kg / Self::CONTAMINATION_OVERFLOW_SCALE_KG).min(1.0) as f32;
+        fraction * Self::CONTAMINATION_MAX_INCREMENT_PER_SOL
+    }
+
+    /// Raise a cell's contamination by `delta`, clamped to `[0.0, 1.0]`
+    /// (issue #387). A no-op if `coord` has no cell — contamination is only
+    /// ever a consequence of a colony that's already placed and overflowing
+    /// its waste storage, never a way to contaminate empty ground. There is
+    /// deliberately no matching "decrease" path here: contamination never
+    /// decays on its own, and remediation (issue #388) is expected to call
+    /// its own dedicated mutator rather than reuse this one with a negative
+    /// delta, so the two consequences stay independently auditable.
+    pub fn contaminate(&mut self, coord: HexCoord, delta: f32) {
+        if delta <= 0.0 {
+            return;
+        }
+        let Some(cell) = self.cells.get_mut(&coord) else {
+            return;
+        };
+        cell.contamination = (cell.contamination + delta).clamp(0.0, 1.0);
     }
 
     /// Return the best landing site in the map, by [`Self::site_score`].
@@ -2695,6 +2765,48 @@ mod tests {
         let cell = map.cell(center).expect("cell");
         assert_eq!(cell.deposits.len(), 1);
         assert!((cell.deposits[0].richness - 0.5).abs() < 1e-6);
+    }
+
+    // ── Hex contamination (issue #387) ────────────────────────────────────────
+
+    #[test]
+    fn contaminate_raises_and_clamps_at_one() {
+        let (mut map, center) = flat_map(4);
+        map.contaminate(center, 0.3);
+        assert!((map.cell(center).unwrap().contamination - 0.3).abs() < 1e-6);
+        map.contaminate(center, 0.3);
+        assert!((map.cell(center).unwrap().contamination - 0.6).abs() < 1e-6);
+        map.contaminate(center, 10.0);
+        assert!(
+            (map.cell(center).unwrap().contamination - 1.0).abs() < 1e-6,
+            "contamination must clamp at 1.0"
+        );
+    }
+
+    #[test]
+    fn contaminate_zero_or_negative_delta_is_a_no_op() {
+        let (mut map, center) = flat_map(4);
+        map.contaminate(center, 0.0);
+        map.contaminate(center, -0.5);
+        assert_eq!(map.cell(center).unwrap().contamination, 0.0);
+    }
+
+    #[test]
+    fn contaminate_missing_coord_does_not_panic() {
+        let (mut map, _center) = flat_map(4);
+        map.contaminate(HexCoord::new(9999, 9999), 0.5);
+    }
+
+    #[test]
+    fn contamination_increment_scales_with_overflow_and_caps_per_sol() {
+        assert_eq!(PlanetMap::contamination_increment_for_overflow(0.0), 0.0);
+        assert_eq!(PlanetMap::contamination_increment_for_overflow(-5.0), 0.0);
+        // Half the reference scale (40kg) yields half the max-per-sol step.
+        let half = PlanetMap::contamination_increment_for_overflow(20.0);
+        assert!((half - 0.05).abs() < 1e-6, "got {half}");
+        // A huge overflow still caps at the per-sol ceiling.
+        let capped = PlanetMap::contamination_increment_for_overflow(10_000.0);
+        assert!((capped - PlanetMap::CONTAMINATION_MAX_INCREMENT_PER_SOL).abs() < 1e-6);
     }
 
     #[test]

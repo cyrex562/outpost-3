@@ -3128,6 +3128,29 @@ impl GameEngine {
                             )
                         })
                         .collect();
+                    // Per-colony hex contamination (issue #387), looked up the
+                    // same way as the deposit richness above — a colony's own
+                    // hex's contamination scales its habitability modifier
+                    // down at the point of use, without mutating the stored
+                    // modifier itself. Colonies with no hex placement (none
+                    // today, but outposts share this code shape) read 0.0.
+                    let colony_contamination: std::collections::HashMap<ColonyId, f32> = self
+                        .state
+                        .colonies
+                        .iter()
+                        .map(|c| {
+                            let contamination = self
+                                .state
+                                .planet_maps
+                                .values()
+                                .find_map(|pm| {
+                                    let node = pm.colonies.iter().find(|n| n.colony_id == c.id)?;
+                                    pm.cell(node.coord).map(|cell| cell.contamination)
+                                })
+                                .unwrap_or(0.0);
+                            (c.id, contamination)
+                        })
+                        .collect();
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -3171,7 +3194,10 @@ impl GameEngine {
                             power_scalar,
                             maintenance_scalar,
                             maintenance_enabled,
-                            colony.habitability_modifier,
+                            colony.habitability_modifier
+                                * colony::contamination_habitability_factor(
+                                    colony_contamination.get(&colony.id).copied().unwrap_or(0.0),
+                                ),
                             &colony.active_recipes,
                             &colony.category_modifiers,
                             deposits,
@@ -3198,6 +3224,47 @@ impl GameEngine {
                             .into_iter()
                             .map(|r| (r.building_id, r))
                             .collect();
+                    }
+
+                    // ── Step 3a1: Waste overflow contamination (issue #387) ──
+                    // Runs immediately after this sol's production, so
+                    // `colony.resources.amount("waste")` reflects what was
+                    // just produced (this sol's figure), and strictly before
+                    // next sol's Step 2b `bank_and_clear` silently evaporates
+                    // whatever doesn't fit — contamination observes the same
+                    // overflow that step is about to discard, it doesn't
+                    // change what `bank_and_clear` does.
+                    let mut contaminations: Vec<(system::BodyId, map::HexCoord, f32)> = Vec::new();
+                    for colony in &self.state.colonies {
+                        let bunker_capacity =
+                            colony::storage_capacities(&colony.buildings, registry)
+                                .get("waste")
+                                .copied()
+                                .unwrap_or(0.0);
+                        let overflow = colony.resources.amount("waste")
+                            - colony.resources.amount("waste_processing")
+                            - bunker_capacity;
+                        let increment =
+                            map::PlanetMap::contamination_increment_for_overflow(overflow);
+                        if increment <= 0.0 {
+                            continue;
+                        }
+                        let Some((body_id, coord)) =
+                            self.state.planet_maps.iter().find_map(|(body_id, pm)| {
+                                pm.colonies
+                                    .iter()
+                                    .find(|n| n.colony_id == colony.id)
+                                    .map(|n| (body_id.clone(), n.coord))
+                            })
+                        else {
+                            continue;
+                        };
+                        contaminations.push((body_id, coord, increment));
+                    }
+                    for (body_id, coord, increment) in contaminations {
+                        if let Some(pm) = self.state.planet_maps.get_mut(&body_id) {
+                            pm.contaminate(coord, increment);
+                        }
                     }
 
                     // ── Step 3a2: Deposit depletion (issue #317, opt-in) ─────
@@ -7202,9 +7269,15 @@ impl GameEngine {
             if let Some(node) = pm.colonies.iter().find(|n| n.colony_id == colony_id) {
                 placed = true;
                 if let Some(cell) = pm.cells.get(&node.coord) {
+                    // Contamination (issue #387) scales the hex's own
+                    // deposits down toward zero as severity approaches 1.0 —
+                    // a "the ground itself is fouled" penalty, distinct from
+                    // the body-level abundance flavor merged in below, which
+                    // contamination does not touch.
+                    let contamination_factor = 1.0 - cell.contamination;
                     for d in &cell.deposits {
                         let entry = out.entry(d.commodity_id.clone()).or_insert(0.0_f32);
-                        *entry = entry.max(d.richness);
+                        *entry = entry.max(d.richness * contamination_factor);
                     }
                 }
                 break;
@@ -17620,6 +17693,136 @@ mod tests {
             "the founding seed should survive capped at the tank's \
              capacity rather than evaporating outright, got {}",
             colony.resources.amount("water")
+        );
+    }
+
+    /// Issue #387: a colony that produces more waste in a sol than its
+    /// processing capacity plus bunker storage can absorb contaminates its
+    /// own hex — proven end to end via a real `AdvanceColonySol`, not a
+    /// direct call into the contamination mutator.
+    #[test]
+    fn waste_overflow_contaminates_the_colonys_own_hex() {
+        use crate::content::loader::PackLoader;
+
+        let pack_yaml = "id: t\nname: T\nversion: '0.1.0'\n";
+        let resources_yaml = "\
+- id: waste
+  name: Waste
+  kind: flow
+  unit: kg
+";
+        // No storage or processing buildings at all — the colony's entire
+        // waste production overflows every sol it runs.
+        let buildings_yaml = "\
+- id: waste_source
+  name: Waste Source
+  category: processing
+";
+        let recipes_yaml = "\
+- id: generate_waste
+  name: Generate Waste
+  building: waste_source
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: waste
+      quantity: 500.0
+";
+        let files: Vec<(&str, &str)> = vec![
+            ("pack.yaml", pack_yaml),
+            ("resources.yaml", resources_yaml),
+            ("buildings.yaml", buildings_yaml),
+            ("recipes.yaml", recipes_yaml),
+        ];
+        let registry = PackLoader::load(&files).unwrap();
+
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
+            .unwrap();
+        let pm = engine.state.home_map().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Fouled".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+        let colony_id = engine.state.colonies[0].id;
+        engine.state.colonies[0]
+            .buildings
+            .push(colony::PlacedBuilding::new("waste_source", 0));
+
+        let coord_before = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        assert_eq!(
+            engine
+                .state
+                .home_map()
+                .unwrap()
+                .cell(coord_before)
+                .unwrap()
+                .contamination,
+            0.0,
+            "a freshly founded colony's hex must start pristine"
+        );
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        // 500kg produced, 0 processing capacity, 0 bunker capacity ->
+        // 500kg overflow -> capped at the per-sol increment ceiling (0.1).
+        let contamination = engine
+            .state
+            .home_map()
+            .unwrap()
+            .cell(coord_before)
+            .unwrap()
+            .contamination;
+        assert!(
+            (contamination - map::PlanetMap::CONTAMINATION_MAX_INCREMENT_PER_SOL).abs() < 1e-6,
+            "expected contamination capped at the per-sol ceiling, got {contamination}"
+        );
+
+        // A second overflowing sol keeps raising it — contamination is
+        // cumulative across sols, not a one-shot flag.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let contamination_after_two = engine
+            .state
+            .home_map()
+            .unwrap()
+            .cell(coord_before)
+            .unwrap()
+            .contamination;
+        assert!(
+            contamination_after_two > contamination,
+            "a second overflowing sol should raise contamination further, \
+             got {contamination_after_two} (was {contamination})"
         );
     }
 
