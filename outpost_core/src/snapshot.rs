@@ -63,7 +63,10 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 13: `pending_colonies` field added to `FullStateBlob` (issue #359) —
 /// directly-founded colonies now arrive after a distance-derived transit delay instead
 /// of materialising instantly, and the in-flight queue must round-trip through snapshot.
-pub const SCHEMA_VERSION: u32 = 13;
+/// Schema version 14: `surface_expeditions`/`surface_expedition_range_bonus_hexes` fields
+/// added to `FullStateBlob` (issue #340) — deployed surface expeditions and their
+/// tech-driven range bonus now round-trip through snapshot.
+pub const SCHEMA_VERSION: u32 = 14;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -209,6 +212,12 @@ struct FullStateBlob {
     // ── #359 Direct-founding transit delay ───────────────────────────────────
     #[serde(default)]
     pending_colonies: Vec<crate::PendingColony>,
+
+    // ── #340 Surface expeditions ─────────────────────────────────────────────
+    #[serde(default)]
+    surface_expeditions: crate::expedition::SurfaceExpeditionRegistry,
+    #[serde(default)]
+    surface_expedition_range_bonus_hexes: f32,
 }
 
 fn default_infrastructure_scalar() -> f32 {
@@ -275,6 +284,8 @@ impl FullStateBlob {
             infrastructure_time_scalar: state.infrastructure_time_scalar,
             outpost_range_bonus_au: state.outpost_range_bonus_au,
             pending_colonies: state.pending_colonies.clone(),
+            surface_expeditions: state.surface_expeditions.clone(),
+            surface_expedition_range_bonus_hexes: state.surface_expedition_range_bonus_hexes,
         }
     }
 
@@ -340,6 +351,8 @@ impl FullStateBlob {
             infrastructure_time_scalar: self.infrastructure_time_scalar,
             outpost_range_bonus_au: self.outpost_range_bonus_au,
             pending_colonies: self.pending_colonies,
+            surface_expeditions: self.surface_expeditions,
+            surface_expedition_range_bonus_hexes: self.surface_expedition_range_bonus_hexes,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
@@ -1190,6 +1203,52 @@ mod tests {
         assert_eq!(r.eta_sol, 25);
         assert_eq!(r.status, ExpeditionStatus::InTransit);
         assert!((r.supplies_remaining - 87.5).abs() < 1e-4);
+    }
+
+    // ── surface expeditions round-trip (issue #340) ───────────────────────
+
+    #[test]
+    fn round_trip_preserves_deployed_surface_expedition() {
+        use crate::expedition::SurfaceExpedition;
+        use crate::map::HexCoord;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Prospect"), 200);
+        let colony_id = state.colonies[0].id;
+        state.surface_expedition_range_bonus_hexes = 2.5;
+
+        let exp = SurfaceExpedition::new(
+            colony_id,
+            HexCoord { q: 4, r: -2 },
+            "structural_ore",
+            0.75,
+            12,
+        );
+        let exp_id = exp.id;
+        state.surface_expeditions.deploy(exp);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert!(
+            (restored.surface_expedition_range_bonus_hexes - 2.5).abs() < 1e-6,
+            "surface_expedition_range_bonus_hexes must survive round-trip"
+        );
+        assert_eq!(
+            restored.surface_expeditions.expeditions.len(),
+            1,
+            "deployed surface expedition count must survive round-trip"
+        );
+        let r = restored
+            .surface_expeditions
+            .get(&exp_id)
+            .expect("expedition id must be stable across round-trip");
+        assert_eq!(r.colony_id, colony_id);
+        assert_eq!(r.target_hex, HexCoord { q: 4, r: -2 });
+        assert_eq!(r.commodity_id, "structural_ore");
+        assert!((r.richness - 0.75).abs() < 1e-6);
+        assert_eq!(r.sol_deployed, 12);
     }
 
     // ── on-disk file round-trip ───────────────────────────────────────────

@@ -807,6 +807,7 @@ fn load_content_pack_from_dir(pack_dir: &std::path::Path) -> Result<ContentRegis
         "supplies.yaml",
         "systems.yaml",
         "anomalies.yaml",
+        "expedition_failures.yaml",
     ];
     let mut raw_contents: Vec<(String, String)> = Vec::new();
 

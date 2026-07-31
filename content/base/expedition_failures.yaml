@@ -1,0 +1,34 @@
+# Failure-effect tables rolled when a surface expedition launch fails
+# (issue #340, DESIGN.md §9B).
+#
+# Reuses the same weighted-outcome shape as `anomalies.yaml`: each entry's
+# `trigger_probability` is checked once, at launch, against the deploying
+# expedition; on a trigger, `outcomes` are weighted-random and exactly one is
+# applied against the launching colony (colonist and/or resource loss).
+
+- id: surface_expedition_mishap
+  trigger_probability: 0.08
+  outcomes:
+    - id: crew_lost
+      weight: 1.0
+      description: >
+        The advance crew lost contact crossing broken terrain; the
+        expedition returns short-handed.
+      colonists_lost: 1
+      resources_lost: {}
+    - id: equipment_lost
+      weight: 2.0
+      description: >
+        A transport failure destroys a portion of the expedition's
+        equipment before it can be deployed.
+      colonists_lost: 0
+      resources_lost:
+        structural_ore: 25.0
+    - id: total_loss
+      weight: 1.0
+      description: >
+        The expedition is lost entirely — crew, equipment, and the resources
+        that funded it.
+      colonists_lost: 2
+      resources_lost:
+        structural_ore: 50.0
