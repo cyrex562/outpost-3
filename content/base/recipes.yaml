@@ -89,6 +89,20 @@
     - id: housing
       quantity: 110.0
 
+- id: process_waste
+  name: Process Waste
+  description: >
+    Standing waste-processing capacity, authored the same way as `housing`
+    (issue #381) — re-established every sol, not drawn down. Nothing checks
+    it against actual `waste` production yet; that comparison, and the
+    hex-contamination consequence of exceeding it, is #387's scope.
+  building: recycling_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: waste_processing
+      quantity: 40.0
+
 - id: generate_power_solar_mk1
   name: Generate Power (Solar Mk1)
   building: solar_array_mk1
@@ -368,6 +382,11 @@
 - id: refine_ore_to_plate
   name: Refine Ore to Plate
   building: refinery
+  description: >
+    Slag and off-cuts byproduct waste alongside the plate (issue #381) —
+    representative of the broader "most processing produces some waste"
+    intent; not every recipe in the pack is authored with a waste output
+    yet, that's ongoing content work rather than this issue's scope.
   cycle_sols: 1
   inputs:
     - id: structural_ore
@@ -375,6 +394,8 @@
   outputs:
     - id: structural_metal
       quantity: 4.0
+    - id: waste
+      quantity: 1.0
 
 - id: refine_plate_to_components
   name: Refine Plate to Components
@@ -397,6 +418,8 @@
   outputs:
     - id: conductive_metal
       quantity: 3.0
+    - id: waste
+      quantity: 1.0
 
 - id: mine_conductive_ore
   name: Mine Conductive Ore

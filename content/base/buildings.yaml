@@ -466,6 +466,48 @@
     - id: structural_metal
       quantity: 18.0
 
+- id: recycling_plant
+  name: Recycling Plant
+  description: >
+    Provides standing waste-processing capacity (issue #381's `process_waste`
+    recipe) — the same authoring shape as a habitat's housing capacity, not
+    a stock that's drawn down. Does not yet gate anything on its own; a
+    colony producing more waste than this capacity plus its `waste_bunker`
+    storage will contaminate its own hex once #387 wires that consequence up.
+  category: processing
+  power_delta: 5.0
+  worker_slots: 1
+  default_priority: 6
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+
+- id: waste_bunker
+  name: Waste Bunker
+  description: >
+    Banks surplus waste instead of letting it evaporate at the end of the
+    sol — waste's own `battery_bank`/`water_tank` equivalent (issue #381).
+    No recipe: it draws no waste and produces none, it only lets what the
+    colony already generates carry into the next sol, up to its capacity.
+  category: storage
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 20.0
+  storage:
+    - id: waste
+      quantity: 40.0
+
 - id: hydrocarbon_well
   name: Hydrocarbon Well
   description: >
