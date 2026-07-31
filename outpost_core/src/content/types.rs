@@ -229,6 +229,13 @@ pub enum BuildingCategory {
     /// [`BuildingDef::grants_slot_capacity`] rather than into a standing
     /// building.
     Infrastructure,
+    /// Hex-contamination cleanup (issue #388).
+    ///
+    /// Projects in this category typically complete into
+    /// [`BuildingDef::contamination_reduction`] rather than into a standing
+    /// building — the same "project, not a building" shape
+    /// [`Self::Infrastructure`] gives site preparation.
+    Remediation,
     /// Generic / uncategorised.
     Other,
 }
@@ -344,6 +351,19 @@ pub struct BuildingDef {
     /// Empty (the default) means this building grants no storage.
     #[serde(default)]
     pub storage: Vec<Ingredient>,
+    /// Contamination this project removes from its colony's hex on
+    /// completion, in the same `[0.0, 1.0]` severity units as
+    /// [`crate::map::HexCell::contamination`] (issue #388).
+    ///
+    /// Non-zero makes this a **remediation project rather than a building**,
+    /// the same shape [`Self::grants_slot_capacity`] gives site preparation
+    /// (issue #306): it completes into a reduction of the colony's hex's
+    /// contamination and never becomes a [`PlacedBuilding`], so it occupies
+    /// no slot, employs nobody, and runs no recipe.
+    ///
+    /// `0.0` — the default — leaves a building behaving exactly as before.
+    #[serde(default)]
+    pub contamination_reduction: f32,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).

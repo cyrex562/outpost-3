@@ -111,6 +111,23 @@
     bonuses:
       - food_production_15_percent
 
+- id: bioremediation
+  name: Bioremediation
+  description: >
+    Engineered microbial and chemical treatment processes for cleaning up
+    contaminated ground (issue #388) — the technology gate for a colony's
+    hex-remediation projects, which reduce the hex contamination waste
+    overflow causes (issue #387).
+  category: life_sciences
+  tier: 2
+  research_cost: 400.0
+  prerequisites:
+    - hydroponics
+  unlocks:
+    buildings:
+      - hex_remediation
+    bonuses: []
+
 - id: advanced_materials
   name: Advanced Materials Processing
   description: >

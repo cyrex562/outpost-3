@@ -1586,6 +1586,122 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that `hex_remediation` is tech-gated behind
+    /// `bioremediation` and, once researched, a completed project lowers the
+    /// colony's own hex's contamination (issue #388).
+    #[test]
+    fn hex_remediation_requires_bioremediation_and_lowers_contamination_from_real_pack() {
+        use outpost_core::{Command, EngineError, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
+            .unwrap();
+        let pm = engine.state.home_map().unwrap();
+        let coord = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Fouled Real Pack".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+        let Event::ColonyFoundedAtSite { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFoundedAtSite, got {events:?}")
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_metal", 100.0);
+
+        engine.state.home_map_mut().unwrap().contaminate(coord, 0.5);
+
+        // Before `bioremediation` is researched, queuing hex_remediation is refused.
+        let refused = engine.apply(&Command::QueueConstruction {
+            colony_id,
+            building_type: "hex_remediation".into(),
+            slot_cost: 0,
+            labor_per_turn: 2,
+            construction_cost: vec![("structural_metal".to_string(), 25.0)],
+            construction_turns: 3,
+        });
+        assert!(
+            matches!(refused, Err(EngineError::TechLocked { .. })),
+            "expected TechLocked before bioremediation is researched, got {refused:?}"
+        );
+
+        engine
+            .state
+            .tech_state
+            .researched
+            .insert("bioremediation".into());
+
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "hex_remediation".into(),
+                slot_cost: 0,
+                labor_per_turn: 2,
+                construction_cost: vec![("structural_metal".to_string(), 25.0)],
+                construction_turns: 3,
+            })
+            .expect("hex_remediation should be queueable once bioremediation is researched");
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let remediated = evs
+            .iter()
+            .any(|e| matches!(e, Event::ContaminationRemediated { .. }));
+        assert!(
+            remediated,
+            "expected ContaminationRemediated once the project completes, got {evs:?}"
+        );
+        let contamination_after = engine
+            .state
+            .home_map()
+            .unwrap()
+            .cell(coord)
+            .unwrap()
+            .contamination;
+        assert!(
+            contamination_after < 0.5,
+            "the hex's contamination should have dropped, got {contamination_after}"
+        );
+    }
+
     /// Real-engine proof that `waste_processing` capacity behaves like
     /// `housing`: a standing capacity re-established every sol by the
     /// `recycling_plant`, not a stock that accumulates or drains (issue #386).

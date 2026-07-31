@@ -689,11 +689,13 @@ impl PlanetMap {
     /// Raise a cell's contamination by `delta`, clamped to `[0.0, 1.0]`
     /// (issue #387). A no-op if `coord` has no cell — contamination is only
     /// ever a consequence of a colony that's already placed and overflowing
-    /// its waste storage, never a way to contaminate empty ground. There is
-    /// deliberately no matching "decrease" path here: contamination never
-    /// decays on its own, and remediation (issue #388) is expected to call
-    /// its own dedicated mutator rather than reuse this one with a negative
-    /// delta, so the two consequences stay independently auditable.
+    /// its waste storage, never a way to contaminate empty ground.
+    ///
+    /// Contamination never decays on its own — the only way it goes down is
+    /// [`Self::remediate`], a deliberately separate mutator (issue #388)
+    /// rather than this one called with a negative delta, so the "waste
+    /// fouled it" and "a project cleaned it up" consequences stay
+    /// independently auditable in the turn pipeline.
     pub fn contaminate(&mut self, coord: HexCoord, delta: f32) {
         if delta <= 0.0 {
             return;
@@ -702,6 +704,21 @@ impl PlanetMap {
             return;
         };
         cell.contamination = (cell.contamination + delta).clamp(0.0, 1.0);
+    }
+
+    /// Lower a cell's contamination by `delta`, floored at `0.0` (issue
+    /// #388). A no-op if `coord` has no cell, or if `delta` is non-positive
+    /// — mirrors [`Self::contaminate`]'s shape exactly, just subtracting
+    /// instead of adding. The sole caller is a completed remediation
+    /// project's turn-pipeline handler; nothing else reduces contamination.
+    pub fn remediate(&mut self, coord: HexCoord, delta: f32) {
+        if delta <= 0.0 {
+            return;
+        }
+        let Some(cell) = self.cells.get_mut(&coord) else {
+            return;
+        };
+        cell.contamination = (cell.contamination - delta).max(0.0);
     }
 
     /// Return the best landing site in the map, by [`Self::site_score`].
@@ -2795,6 +2812,35 @@ mod tests {
     fn contaminate_missing_coord_does_not_panic() {
         let (mut map, _center) = flat_map(4);
         map.contaminate(HexCoord::new(9999, 9999), 0.5);
+    }
+
+    #[test]
+    fn remediate_lowers_and_floors_at_zero() {
+        let (mut map, center) = flat_map(4);
+        map.contaminate(center, 0.6);
+        map.remediate(center, 0.25);
+        assert!((map.cell(center).unwrap().contamination - 0.35).abs() < 1e-6);
+        map.remediate(center, 10.0);
+        assert_eq!(
+            map.cell(center).unwrap().contamination,
+            0.0,
+            "remediation must floor at 0.0, not go negative"
+        );
+    }
+
+    #[test]
+    fn remediate_zero_or_negative_delta_is_a_no_op() {
+        let (mut map, center) = flat_map(4);
+        map.contaminate(center, 0.5);
+        map.remediate(center, 0.0);
+        map.remediate(center, -0.5);
+        assert!((map.cell(center).unwrap().contamination - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn remediate_missing_coord_does_not_panic() {
+        let (mut map, _center) = flat_map(4);
+        map.remediate(HexCoord::new(9999, 9999), 0.5);
     }
 
     #[test]
