@@ -1404,6 +1404,91 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that waste's crating round trip (issue #389) works
+    /// against the real content pack: a `waste_compactor` crates banked
+    /// waste into shippable `waste_container` cargo, then — switched to the
+    /// other side of the same pick-one pair — unpacks it straight back into
+    /// usable, bunker-storable waste.
+    #[test]
+    fn waste_compactor_crates_and_uncrates_waste_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Compactor Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("waste_bunker", 1));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("waste_compactor", 1));
+        // Power source — waste_compactor draws 3kW and isn't exempt from
+        // brownout throttling (only Power-category buildings are).
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+        // Seed banked waste directly so crate_waste has something to
+        // consume on the first sol, independent of any production chain.
+        engine.state.colonies[idx].resources.deposit("waste", 200.0);
+
+        // Default (no active_recipes entry) should be crate_waste: with no
+        // active_recipes entry, the pick-one default is the lexicographically
+        // smallest recipe id for the building (production.rs), and
+        // "crate_waste" < "uncrate_waste".
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("waste_container") > 0.0,
+            "waste_compactor should default to crate_waste and produce waste_container"
+        );
+
+        // Switch to uncrate_waste and confirm the round trip: crated cargo
+        // converts back into usable, banked waste.
+        engine
+            .apply(&Command::SetActiveRecipe {
+                colony_id,
+                building_type: "waste_compactor".into(),
+                recipe_id: "uncrate_waste".into(),
+            })
+            .unwrap();
+        let waste_container_before = engine.state.colonies[idx].pool.amount("waste_container");
+        let waste_before = engine.state.colonies[idx].resources.amount("waste");
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            engine.state.colonies[idx].pool.amount("waste_container") < waste_container_before,
+            "uncrate_waste should consume waste_container cargo"
+        );
+        assert!(
+            engine.state.colonies[idx].resources.amount("waste") > waste_before,
+            "uncrate_waste should deposit usable waste back into the resource pool"
+        );
+    }
+
     /// Real-engine proof that refining recipes now emit `waste` as a
     /// byproduct alongside their main output (issue #386).
     #[test]

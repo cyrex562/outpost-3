@@ -17,6 +17,23 @@
   weight: 1.2
   tradeable: true
 
+- id: waste_container
+  name: Waste Container
+  description: >
+    Waste crated into sealed containers for shipment (issue #348/#389).
+    Waste itself is a colony-local utility (see `resources.yaml`), not cargo
+    — this is what a `waste_compactor` produces from banked waste so a
+    colony can convoy a surplus to another colony with spare
+    `waste_processing` capacity, per #381's own taxonomy ("waste ...
+    convoy, to a colony with spare capacity"). `crate_waste` (recipes.yaml)
+    is the recipe; unpacking on arrival is the mirror-image recipe a
+    receiving colony's own compactor runs in reverse.
+  category: consumable
+  phase: solid
+  base_value: 1.0
+  weight: 1.5
+  tradeable: true
+
 - id: food_ration
   name: Food Ration
   description: >

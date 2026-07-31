@@ -45,6 +45,39 @@
       quantity: 20.0
   power_draw: 3.0
 
+- id: crate_waste
+  name: Crate Waste
+  description: >
+    Crates banked waste into shippable `waste_container` cargo (issue
+    #348/#389's crating route). Switchable against `uncrate_waste` — a
+    waste_compactor runs one or the other, not both.
+  building: waste_compactor
+  cycle_sols: 1
+  inputs:
+    - id: waste
+      quantity: 20.0
+  outputs:
+    - id: waste_container
+      quantity: 20.0
+  power_draw: 3.0
+
+- id: uncrate_waste
+  name: Uncrate Waste
+  description: >
+    Unpacks `waste_container` cargo back into usable, bunker-storable waste
+    — the receiving side of #348/#389's crating route, letting a colony with
+    spare `waste_processing` capacity genuinely absorb another colony's
+    surplus.
+  building: waste_compactor
+  cycle_sols: 1
+  inputs:
+    - id: waste_container
+      quantity: 20.0
+  outputs:
+    - id: waste
+      quantity: 20.0
+  power_draw: 3.0
+
 - id: grow_rations
   name: Grow Rations
   building: hydroponic_bay
