@@ -665,6 +665,267 @@ pub enum ExpeditionError {
     UnknownChoice(String),
 }
 
+// ─── Surface expeditions — reaching off-colony deposits (issue #340) ────────
+//
+// See DESIGN.md §9B. A colony *builds* a surface expedition targeting a hex
+// within its reach; once deployed it yields resources every sol from that
+// hex's deposit, continuously, until recalled — not a one-off haul like
+// `Expedition` or a system-scale survey like `ExpeditionState`. Cost is
+// entirely up front; recall returns the expedition, not the outlay.
+
+/// Stable identifier for a surface expedition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SurfaceExpeditionId(pub Uuid);
+
+impl SurfaceExpeditionId {
+    /// Create a new random [`SurfaceExpeditionId`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for SurfaceExpeditionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Base range in hexes a surface expedition can reach over flat (`Plains`,
+/// difficulty `1.0`) terrain, before any tech-driven bonus. A balance dial —
+/// DESIGN.md §17 flags surface-expedition range/yield numbers as TBD via the
+/// harness, so this is a reasonable starting placeholder, not a tuned value.
+pub const BASE_SURFACE_EXPEDITION_RANGE_HEXES: u32 = 6;
+
+/// Compute how many hexes a surface expedition can reach from its origin.
+///
+/// `path_difficulty` is the terrain difficulty ([`crate::map::Terrain::difficulty`])
+/// along the route — rougher terrain (a value above `1.0`) shrinks the usable
+/// range; an impassable route (`f32::INFINITY`, e.g. crossing `Ocean`) collapses
+/// range to `0`. `tech_range_bonus_hexes` is an additive bonus (from researched
+/// tech) applied after the terrain scaling, per DESIGN.md §9B ("terrain
+/// difficulty on the path plus the colony's unlocked tech together set how
+/// far it can reach").
+#[must_use]
+pub fn surface_expedition_range_hexes(path_difficulty: f32, tech_range_bonus_hexes: f32) -> u32 {
+    if !path_difficulty.is_finite() || path_difficulty <= 0.0 {
+        return 0;
+    }
+    let terrain_scalar = 1.0 / path_difficulty.max(1.0);
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let base = (BASE_SURFACE_EXPEDITION_RANGE_HEXES as f32 * terrain_scalar).floor() as u32;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let bonus = tech_range_bonus_hexes.max(0.0).floor() as u32;
+    base.saturating_add(bonus)
+}
+
+/// Base continuous yield (units/sol) a surface expedition extracts at
+/// deposit `richness == 1.0`. A balance dial, see
+/// [`BASE_SURFACE_EXPEDITION_RANGE_HEXES`]'s doc comment.
+pub const SURFACE_EXPEDITION_BASE_YIELD_PER_SOL: f64 = 5.0;
+
+/// Compute a surface expedition's continuous per-sol yield from its target
+/// deposit's richness.
+///
+/// Mirrors the `0.5 + richness * 0.5` deposit-richness ratio
+/// `colony::production::compute_deposit_ratio` already uses for a colony's
+/// own extraction, so the arithmetic is identical whether a commodity comes
+/// from a colony's own hex or a deployed expedition (DESIGN.md §9B: "this
+/// keeps the per-sol extraction arithmetic identical to a colony's").
+#[must_use]
+pub fn surface_expedition_yield_per_sol(richness: f32) -> f64 {
+    let ratio = 0.5 + f64::from(richness.clamp(0.0, 1.0)) * 0.5;
+    SURFACE_EXPEDITION_BASE_YIELD_PER_SOL * ratio
+}
+
+/// Up-front cost (in `structural_ore`) to deploy a surface expedition at
+/// zero distance, before the per-hex distance surcharge. Entirely up front —
+/// DESIGN.md §9B: "there is no per-sol crew upkeep". Balance dial, see
+/// [`BASE_SURFACE_EXPEDITION_RANGE_HEXES`]'s doc comment.
+pub const SURFACE_EXPEDITION_BASE_COST_ORE: f64 = 50.0;
+
+/// Additional up-front cost (in `structural_ore`) per hex of distance from
+/// the launching colony. Balance dial.
+pub const SURFACE_EXPEDITION_COST_PER_HEX_ORE: f64 = 10.0;
+
+/// Compute the up-front `structural_ore` cost to deploy a surface expedition
+/// `distance_hexes` from its launching colony.
+#[must_use]
+pub fn surface_expedition_cost_ore(distance_hexes: u32) -> f64 {
+    SURFACE_EXPEDITION_BASE_COST_ORE
+        + f64::from(distance_hexes) * SURFACE_EXPEDITION_COST_PER_HEX_ORE
+}
+
+/// A constructed surface expedition deployed to a hex within a colony's
+/// reach, continuously extracting one commodity until recalled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceExpedition {
+    /// Stable identifier for this deployment.
+    pub id: SurfaceExpeditionId,
+    /// Colony that launched, funds, and receives the yield of this expedition.
+    pub colony_id: ColonyId,
+    /// Target hex on the colony's planet map.
+    pub target_hex: HexCoord,
+    /// Commodity this expedition extracts. Contention is per resource, not
+    /// per hex (DESIGN.md §9B) — a second expedition may target the same hex
+    /// provided it extracts a different commodity.
+    pub commodity_id: String,
+    /// Deposit richness recorded at deploy time; terrain's effect on yield is
+    /// already baked into this figure (DESIGN.md §9B), so extraction never
+    /// re-applies a terrain multiplier.
+    pub richness: f32,
+    /// Sol at which this expedition was deployed.
+    pub sol_deployed: u64,
+}
+
+impl SurfaceExpedition {
+    /// Construct a newly deployed surface expedition.
+    #[must_use]
+    pub fn new(
+        colony_id: ColonyId,
+        target_hex: HexCoord,
+        commodity_id: impl Into<String>,
+        richness: f32,
+        sol_deployed: u64,
+    ) -> Self {
+        Self {
+            id: SurfaceExpeditionId::new(),
+            colony_id,
+            target_hex,
+            commodity_id: commodity_id.into(),
+            richness,
+            sol_deployed,
+        }
+    }
+
+    /// This expedition's continuous per-sol yield.
+    #[must_use]
+    pub fn yield_per_sol(&self) -> f64 {
+        surface_expedition_yield_per_sol(self.richness)
+    }
+}
+
+/// In-memory store for all currently deployed surface expeditions.
+///
+/// Unlike [`ExpeditionRegistry`], entries are removed outright on recall —
+/// there is no terminal `Completed`/`Aborted` phase to retain, since a
+/// surface expedition's only lifecycle events are deploy and recall.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SurfaceExpeditionRegistry {
+    /// All currently deployed expeditions, keyed by their stable id.
+    pub expeditions: HashMap<SurfaceExpeditionId, SurfaceExpedition>,
+}
+
+impl SurfaceExpeditionRegistry {
+    /// Register a newly deployed expedition, returning its id.
+    pub fn deploy(&mut self, expedition: SurfaceExpedition) -> SurfaceExpeditionId {
+        let id = expedition.id;
+        self.expeditions.insert(id, expedition);
+        id
+    }
+
+    /// Look up an expedition by id.
+    #[must_use]
+    pub fn get(&self, id: &SurfaceExpeditionId) -> Option<&SurfaceExpedition> {
+        self.expeditions.get(id)
+    }
+
+    /// Iterate over all deployed expeditions.
+    pub fn iter(&self) -> impl Iterator<Item = (&SurfaceExpeditionId, &SurfaceExpedition)> {
+        self.expeditions.iter()
+    }
+
+    /// Recall a deployed expedition, removing it and returning its final state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExpeditionError::NotFound`] if `id` is not currently deployed.
+    pub fn recall(
+        &mut self,
+        id: &SurfaceExpeditionId,
+    ) -> Result<SurfaceExpedition, ExpeditionError> {
+        self.expeditions.remove(id).ok_or(ExpeditionError::NotFound)
+    }
+
+    /// Returns `true` if a currently-deployed expedition already targets
+    /// `target_hex` extracting `commodity_id`.
+    ///
+    /// Contention is per resource, not per hex (DESIGN.md §9B): two
+    /// expeditions may share a hex provided they extract different
+    /// commodities, so this only blocks an exact hex+commodity match.
+    #[must_use]
+    pub fn contends(&self, target_hex: HexCoord, commodity_id: &str) -> bool {
+        self.expeditions
+            .values()
+            .any(|e| e.target_hex == target_hex && e.commodity_id == commodity_id)
+    }
+}
+
+// ─── Surface expedition failure table (issue #340) ──────────────────────────
+
+/// Content-pack entry describing the failure-effect table rolled when a
+/// surface expedition launch fails (issue #340).
+///
+/// Reuses the weighted-outcome mechanism [`AnomalyOutcome`]/
+/// [`resolve_anomaly_outcome`] already established for survey expeditions —
+/// DESIGN.md §9B: "failure resolves from a content-authored effect table ...
+/// reusing the `AnomalyDef`/`AnomalyOutcome` mechanism ... rather than
+/// hardcoding failure effects in the kernel."
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceExpeditionFailureDef {
+    /// Unique content-pack identifier.
+    pub id: String,
+    /// Probability (0-1) that launching a surface expedition triggers this
+    /// failure table at all.
+    pub trigger_probability: f32,
+    /// Possible failure outcomes, weighted.
+    pub outcomes: Vec<SurfaceExpeditionFailureOutcome>,
+}
+
+/// One possible effect applied when a surface expedition's launch fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceExpeditionFailureOutcome {
+    /// Identifier of this outcome variant.
+    pub id: String,
+    /// Probability weight relative to other outcomes (normalised at resolution).
+    pub weight: f32,
+    /// Player-facing description of what happened.
+    pub description: String,
+    /// Colonists lost from the launching colony's population.
+    #[serde(default)]
+    pub colonists_lost: u32,
+    /// Resources lost from the launching colony's pool (commodity id → quantity).
+    #[serde(default)]
+    pub resources_lost: HashMap<String, f64>,
+}
+
+/// Pick which [`SurfaceExpeditionFailureOutcome`] a failed launch resolves
+/// to, given a `[0,1)` roll weighted by each outcome's `weight` — identical
+/// selection logic to [`resolve_anomaly_outcome`].
+#[must_use]
+pub fn resolve_surface_expedition_failure(
+    def: &SurfaceExpeditionFailureDef,
+    roll: f32,
+) -> Option<&SurfaceExpeditionFailureOutcome> {
+    let total_weight: f32 = def.outcomes.iter().map(|o| o.weight.max(0.0)).sum();
+    if total_weight <= 0.0 {
+        return def.outcomes.first();
+    }
+    let target = roll.clamp(0.0, 0.999_999) * total_weight;
+    let mut cumulative = 0.0;
+    for outcome in &def.outcomes {
+        cumulative += outcome.weight.max(0.0);
+        if target < cumulative {
+            return Some(outcome);
+        }
+    }
+    def.outcomes.last()
+}
+
 // ─── Travel Time ──────────────────────────────────────────────────────────────
 
 /// Compute transit turns from one body to another given a propulsion multiplier.
@@ -937,6 +1198,119 @@ mod tests {
         let fast = travel_time_turns(4.0, 4.0); // 4 turns
         assert_eq!(slow, 16);
         assert_eq!(fast, 4);
+    }
+
+    // ── Surface expedition range/yield ────────────────────────────────────────
+
+    #[test]
+    fn surface_expedition_range_shrinks_with_terrain_difficulty() {
+        let flat = surface_expedition_range_hexes(1.0, 0.0);
+        let hills = surface_expedition_range_hexes(1.8, 0.0);
+        assert_eq!(flat, BASE_SURFACE_EXPEDITION_RANGE_HEXES);
+        assert!(hills < flat, "rougher terrain should shrink range");
+    }
+
+    #[test]
+    fn surface_expedition_range_is_zero_over_impassable_terrain() {
+        assert_eq!(surface_expedition_range_hexes(f32::INFINITY, 0.0), 0);
+    }
+
+    #[test]
+    fn surface_expedition_range_tech_bonus_is_additive() {
+        let base = surface_expedition_range_hexes(1.0, 0.0);
+        let boosted = surface_expedition_range_hexes(1.0, 3.0);
+        assert_eq!(boosted, base + 3);
+    }
+
+    #[test]
+    fn surface_expedition_yield_scales_with_richness() {
+        let low = surface_expedition_yield_per_sol(0.1);
+        let high = surface_expedition_yield_per_sol(1.0);
+        assert!(low > 0.0);
+        assert!(high > low);
+        assert!((high - SURFACE_EXPEDITION_BASE_YIELD_PER_SOL).abs() < 1e-9);
+    }
+
+    // ── Surface expedition registry ───────────────────────────────────────────
+
+    #[test]
+    fn surface_expedition_deploy_and_recall_round_trip() {
+        let mut registry = SurfaceExpeditionRegistry::default();
+        let colony = sample_colony_id();
+        let hex = HexCoord::new(2, 3);
+        let expedition = SurfaceExpedition::new(colony, hex, "structural_ore", 0.8, 10);
+        let id = registry.deploy(expedition);
+
+        assert!(registry.get(&id).is_some());
+        let recalled = registry.recall(&id).unwrap();
+        assert_eq!(recalled.colony_id, colony);
+        assert!(registry.get(&id).is_none());
+    }
+
+    #[test]
+    fn surface_expedition_recall_unknown_id_errors() {
+        let mut registry = SurfaceExpeditionRegistry::default();
+        let err = registry.recall(&SurfaceExpeditionId::new());
+        assert!(matches!(err, Err(ExpeditionError::NotFound)));
+    }
+
+    #[test]
+    fn surface_expedition_contention_is_per_resource_not_per_hex() {
+        let mut registry = SurfaceExpeditionRegistry::default();
+        let hex = HexCoord::new(5, 5);
+        registry.deploy(SurfaceExpedition::new(
+            sample_colony_id(),
+            hex,
+            "structural_ore",
+            0.5,
+            0,
+        ));
+
+        assert!(registry.contends(hex, "structural_ore"));
+        assert!(
+            !registry.contends(hex, "conductive_ore"),
+            "same hex, different resource, must not contend"
+        );
+        assert!(!registry.contends(HexCoord::new(6, 6), "structural_ore"));
+    }
+
+    // ── Surface expedition failure table ──────────────────────────────────────
+
+    fn sample_failure_def() -> SurfaceExpeditionFailureDef {
+        SurfaceExpeditionFailureDef {
+            id: "surface_expedition_mishap".to_string(),
+            trigger_probability: 0.2,
+            outcomes: vec![
+                SurfaceExpeditionFailureOutcome {
+                    id: "crew_lost".to_string(),
+                    weight: 1.0,
+                    description: "The crew was lost.".to_string(),
+                    colonists_lost: 2,
+                    resources_lost: HashMap::new(),
+                },
+                SurfaceExpeditionFailureOutcome {
+                    id: "cargo_lost".to_string(),
+                    weight: 1.0,
+                    description: "Equipment was destroyed.".to_string(),
+                    colonists_lost: 0,
+                    resources_lost: {
+                        let mut m = HashMap::new();
+                        m.insert("structural_ore".to_string(), 25.0);
+                        m
+                    },
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn surface_expedition_failure_resolves_by_weight() {
+        let def = sample_failure_def();
+        let low_roll = resolve_surface_expedition_failure(&def, 0.1).unwrap();
+        assert_eq!(low_roll.id, "crew_lost");
+
+        let high_roll = resolve_surface_expedition_failure(&def, 0.9).unwrap();
+        assert_eq!(high_roll.id, "cargo_lost");
     }
 
     // ── Registry serde round-trip ─────────────────────────────────────────────

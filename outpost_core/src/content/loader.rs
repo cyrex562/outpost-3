@@ -13,7 +13,7 @@ use super::{
         ResourceDef, StarSystemDef, SupplyPackage,
     },
 };
-use crate::expedition::AnomalyDef;
+use crate::expedition::{AnomalyDef, SurfaceExpeditionFailureDef};
 
 /// Named raw file: a `(filename, yaml_text)` pair.
 pub type RawFile<'a> = (&'a str, &'a str);
@@ -59,6 +59,8 @@ impl PackLoader {
         let star_systems = collect_table::<StarSystemDef>(files, &["systems.yaml"])?;
         let anomalies = collect_table::<AnomalyDef>(files, &["anomalies.yaml"])?;
         let colonization_costs = collect_table::<ColonizationCost>(files, &["colonization.yaml"])?;
+        let surface_expedition_failures =
+            collect_table::<SurfaceExpeditionFailureDef>(files, &["expedition_failures.yaml"])?;
 
         // ── 3. Cross-reference validation ─────────────────────────────────
         // An id must be declared exactly once, as either a commodity or a
@@ -156,6 +158,7 @@ impl PackLoader {
             star_systems,
             anomalies,
             colonization_costs,
+            surface_expedition_failures,
         })
     }
 }
@@ -283,6 +286,12 @@ impl HasId for StarSystemDef {
 }
 
 impl HasId for AnomalyDef {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl HasId for SurfaceExpeditionFailureDef {
     fn id(&self) -> &str {
         &self.id
     }
@@ -779,5 +788,54 @@ mod tests {
             metal_per_slot("arcology_foundation") < metal_per_slot("colony_infrastructure"),
             "the top tier must undercut the mid tier per slot"
         );
+    }
+
+    // ── Surface expedition failure table (issue #340) ────────────────────────
+
+    /// Read the real `content/base/expedition_failures.yaml`, or `None` when
+    /// the repository layout doesn't include `content/` beside the crate.
+    fn read_real_expedition_failures_yaml() -> Option<String> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let root = std::path::Path::new(&manifest).parent()?.to_path_buf();
+        std::fs::read_to_string(
+            root.join("content")
+                .join("base")
+                .join("expedition_failures.yaml"),
+        )
+        .ok()
+    }
+
+    #[test]
+    fn real_expedition_failures_yaml_parses_and_has_valid_weights() {
+        let Some(yaml) = read_real_expedition_failures_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let defs: Vec<SurfaceExpeditionFailureDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/expedition_failures.yaml must parse");
+        assert!(!defs.is_empty());
+        for def in &defs {
+            assert!(
+                (0.0..=1.0).contains(&def.trigger_probability),
+                "{} has an out-of-range trigger_probability",
+                def.id
+            );
+            assert!(!def.outcomes.is_empty(), "{} has no outcomes", def.id);
+        }
+    }
+
+    #[test]
+    fn real_expedition_failures_yaml_loads_through_pack_loader() {
+        let Some(yaml) = read_real_expedition_failures_yaml() else {
+            return;
+        };
+        let owned = minimal_pack_files(&[("expedition_failures.yaml", yaml.as_str())]);
+        let raw: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let registry = PackLoader::load(&raw).expect("pack with expedition failures loads");
+        assert!(registry
+            .surface_expedition_failure("surface_expedition_mishap")
+            .is_some());
     }
 }

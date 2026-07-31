@@ -857,6 +857,43 @@ pub enum Command {
         choice_id: String,
     },
 
+    // ── Surface expeditions — reaching off-colony deposits (issue #340) ─────
+    /// Build and deploy a surface expedition from `colony_id` to `target_hex`
+    /// on the colony's own planet map, to continuously extract `commodity_id`
+    /// every sol until recalled. See [`expedition::SurfaceExpedition`] and
+    /// DESIGN.md §9B.
+    ///
+    /// Fails with [`EngineError::ColonyNotFound`] if `colony_id` is unknown;
+    /// [`EngineError::NoPlanetMap`] if the colony has no founding hex to
+    /// measure range from; [`EngineError::SurfaceExpeditionOutOfRange`] if
+    /// `target_hex` is beyond the colony's reach; [`EngineError::InvalidArgument`]
+    /// if `target_hex` has no `commodity_id` deposit or is already being
+    /// worked by another expedition for the same commodity; and
+    /// [`EngineError::InsufficientResources`] if the colony cannot cover the
+    /// up-front cost. The launch may still fail after these checks pass (a
+    /// content-authored mishap roll) — see [`Event::SurfaceExpeditionFailed`].
+    LaunchSurfaceExpedition {
+        /// Colony that launches, funds, and (on success) receives the yield
+        /// of this expedition.
+        colony_id: ColonyId,
+        /// Target hex on the colony's own planet map.
+        target_hex: map::HexCoord,
+        /// Commodity id this expedition will extract.
+        commodity_id: String,
+    },
+
+    /// Recall a deployed surface expedition.
+    ///
+    /// Removes it outright — recall returns the expedition, not the
+    /// up-front outlay (DESIGN.md §9B).
+    ///
+    /// Fails with [`EngineError::InvalidArgument`] if `expedition_id` is not
+    /// currently deployed.
+    RecallSurfaceExpedition {
+        /// Expedition to recall.
+        expedition_id: expedition::SurfaceExpeditionId,
+    },
+
     /// Evaluate all tracked victory conditions against current game metrics.
     ///
     /// Emits [`Event::VictoryAchieved`] for newly satisfied conditions.
@@ -2022,6 +2059,54 @@ pub enum Event {
         outcome: expedition::SurveyOutcome,
     },
 
+    // ── Surface expeditions — reaching off-colony deposits (issue #340) ─────
+    /// A surface expedition was successfully deployed.
+    SurfaceExpeditionLaunched {
+        /// Identifier of the new expedition.
+        expedition_id: expedition::SurfaceExpeditionId,
+        /// Colony that launched and is funding the expedition.
+        colony_id: ColonyId,
+        /// Target hex being worked.
+        target_hex: map::HexCoord,
+        /// Commodity being extracted.
+        commodity_id: String,
+    },
+
+    /// A surface expedition's launch failed (content-authored mishap roll).
+    ///
+    /// The up-front cost was already spent; no expedition was deployed.
+    SurfaceExpeditionFailed {
+        /// Colony whose launch attempt failed.
+        colony_id: ColonyId,
+        /// Target hex the failed launch was aimed at.
+        target_hex: map::HexCoord,
+        /// Commodity the failed launch would have extracted.
+        commodity_id: String,
+        /// The resolved failure outcome (description, and any colonist/
+        /// resource loss applied).
+        outcome: expedition::SurfaceExpeditionFailureOutcome,
+    },
+
+    /// A deployed surface expedition produced its continuous per-sol yield.
+    SurfaceExpeditionYielded {
+        /// Expedition that produced the yield.
+        expedition_id: expedition::SurfaceExpeditionId,
+        /// Colony that received the yield.
+        colony_id: ColonyId,
+        /// Commodity produced.
+        commodity_id: String,
+        /// Quantity actually added to the colony pool this sol.
+        amount: f64,
+    },
+
+    /// A surface expedition was recalled.
+    SurfaceExpeditionRecalled {
+        /// Expedition that was recalled.
+        expedition_id: expedition::SurfaceExpeditionId,
+        /// Colony that recalled it.
+        colony_id: ColonyId,
+    },
+
     /// A [`Command::DebugGrantColonyResources`] testing-mode grant landed in
     /// a colony's pool.
     DebugResourcesGranted {
@@ -2234,6 +2319,18 @@ pub enum EngineError {
     /// [`Command::ContinueAfterVictory`] to resume play.
     #[error("game over: victory already achieved")]
     GameOver,
+    /// The target hex is farther from the colony's founding hex than its
+    /// current surface-expedition range allows (issue #340).
+    #[error(
+        "target hex is {distance_hexes} hexes away, exceeding the max surface expedition \
+         range of {max_range_hexes} hexes (research a range tech, or pick a closer hex)"
+    )]
+    SurfaceExpeditionOutOfRange {
+        /// Actual wrapped hex distance from the colony's founding hex.
+        distance_hexes: u32,
+        /// The current max allowed range, in hexes.
+        max_range_hexes: u32,
+    },
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -3629,6 +3726,42 @@ impl GameEngine {
                     }
 
                     events.extend(survey_events);
+                }
+
+                // ── Step 4g: Surface expedition yield (issue #340) ────────
+                // Every deployed surface expedition yields continuously,
+                // every sol, until recalled — not a one-off haul (DESIGN.md
+                // §9B). A colony no longer present (destroyed mid-campaign)
+                // is silently skipped rather than panicking; its expedition
+                // stays deployed but produces nothing until recalled.
+                {
+                    let yields: Vec<(expedition::SurfaceExpeditionId, ColonyId, String, f64)> =
+                        self.state
+                            .surface_expeditions
+                            .iter()
+                            .map(|(id, exp)| {
+                                (
+                                    *id,
+                                    exp.colony_id,
+                                    exp.commodity_id.clone(),
+                                    exp.yield_per_sol(),
+                                )
+                            })
+                            .collect();
+
+                    for (expedition_id, colony_id, commodity_id, amount) in yields {
+                        let Ok(idx) = self.find_colony_index(colony_id) else {
+                            continue;
+                        };
+                        let deposited =
+                            self.state.colonies[idx].pool.deposit(&commodity_id, amount);
+                        events.push(Event::SurfaceExpeditionYielded {
+                            expedition_id,
+                            colony_id,
+                            commodity_id,
+                            amount: deposited,
+                        });
+                    }
                 }
 
                 // ── Step 5: Directive evaluation ──────────────────────────
@@ -5652,6 +5785,141 @@ impl GameEngine {
                 Ok(events)
             }
 
+            Command::LaunchSurfaceExpedition {
+                colony_id,
+                target_hex,
+                commodity_id,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+
+                let (body_id, origin_hex) = self
+                    .colony_founding_hex(*colony_id)
+                    .ok_or(EngineError::NoPlanetMap)?;
+                let pm = self
+                    .state
+                    .planet_maps
+                    .get(&body_id)
+                    .ok_or(EngineError::NoPlanetMap)?;
+
+                let target = pm.wrap_coord(*target_hex);
+                let distance = origin_hex.wrapped_distance(target, pm.width);
+
+                // Terrain difficulty on the path shrinks reach (DESIGN.md
+                // §9B); averaging the origin and target cells' difficulty is
+                // a simple stand-in for full path terrain sampling.
+                let origin_difficulty = pm.cell(origin_hex).map_or(1.0, map::HexCell::difficulty);
+                let target_difficulty = pm.cell(target).map_or(1.0, map::HexCell::difficulty);
+                let path_difficulty =
+                    if origin_difficulty.is_finite() && target_difficulty.is_finite() {
+                        f32::midpoint(origin_difficulty, target_difficulty)
+                    } else {
+                        f32::INFINITY
+                    };
+
+                let max_range = expedition::surface_expedition_range_hexes(
+                    path_difficulty,
+                    self.state.surface_expedition_range_bonus_hexes,
+                );
+                if distance > max_range {
+                    return Err(EngineError::SurfaceExpeditionOutOfRange {
+                        distance_hexes: distance,
+                        max_range_hexes: max_range,
+                    });
+                }
+
+                let richness = pm
+                    .cell(target)
+                    .and_then(|c| c.deposits.iter().find(|d| d.commodity_id == *commodity_id))
+                    .map(|d| d.richness)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "target hex has no {commodity_id} deposit"
+                        ))
+                    })?;
+
+                if self
+                    .state
+                    .surface_expeditions
+                    .contends(target, commodity_id)
+                {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "another expedition is already extracting {commodity_id} at this hex"
+                    )));
+                }
+
+                let cost = expedition::surface_expedition_cost_ore(distance);
+                let mut cost_map = std::collections::HashMap::new();
+                cost_map.insert("structural_ore".to_string(), cost);
+                let reserves = self.state.colonies[idx].commodity_reserves.clone();
+                charge_colonization_cost(&mut self.state.colonies[idx].pool, &reserves, &cost_map)?;
+
+                // Content-authored mishap roll (issue #340) — reuses the same
+                // weighted-outcome mechanism survey-expedition anomalies use.
+                let failure_def = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .and_then(|r| r.surface_expedition_failure("surface_expedition_mishap"))
+                    .cloned();
+                if let Some(def) = failure_def {
+                    let roll_id = uuid::Uuid::new_v4();
+                    let trigger_roll = expedition::deterministic_roll(roll_id, self.state.sol);
+                    if trigger_roll < def.trigger_probability {
+                        let outcome_roll =
+                            expedition::deterministic_roll(roll_id, self.state.sol ^ 1);
+                        if let Some(outcome) =
+                            expedition::resolve_surface_expedition_failure(&def, outcome_roll)
+                        {
+                            let outcome = outcome.clone();
+                            if outcome.colonists_lost > 0 {
+                                #[allow(clippy::cast_precision_loss)]
+                                let lost = outcome.colonists_lost as f32;
+                                self.state.populations[idx].count =
+                                    (self.state.populations[idx].count - lost).max(0.0);
+                            }
+                            for (commodity, qty) in &outcome.resources_lost {
+                                self.state.colonies[idx].pool.withdraw(commodity, *qty);
+                            }
+                            return Ok(vec![Event::SurfaceExpeditionFailed {
+                                colony_id: *colony_id,
+                                target_hex: target,
+                                commodity_id: commodity_id.clone(),
+                                outcome,
+                            }]);
+                        }
+                    }
+                }
+
+                let new_expedition = expedition::SurfaceExpedition::new(
+                    *colony_id,
+                    target,
+                    commodity_id.clone(),
+                    richness,
+                    self.state.sol,
+                );
+                let eid = new_expedition.id;
+                self.state.surface_expeditions.deploy(new_expedition);
+
+                Ok(vec![Event::SurfaceExpeditionLaunched {
+                    expedition_id: eid,
+                    colony_id: *colony_id,
+                    target_hex: target,
+                    commodity_id: commodity_id.clone(),
+                }])
+            }
+
+            Command::RecallSurfaceExpedition { expedition_id } => {
+                let recalled = self
+                    .state
+                    .surface_expeditions
+                    .recall(expedition_id)
+                    .map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+                Ok(vec![Event::SurfaceExpeditionRecalled {
+                    expedition_id: *expedition_id,
+                    colony_id: recalled.colony_id,
+                }])
+            }
+
             Command::EvaluateVictory => {
                 let snap = self.build_victory_snapshot();
                 let mut events = Vec::new();
@@ -6928,6 +7196,22 @@ impl GameEngine {
             }
         }
         placed.then_some(out)
+    }
+
+    /// Which body and hex a colony was founded on, if it was placed via
+    /// `Command::FoundColonyAtSite` on a seeded planet map (issue #340).
+    ///
+    /// Used to measure a surface expedition's range from its launching
+    /// colony. Returns `None` for a colony with no planet-map placement (e.g.
+    /// the bare `Command::FoundColony` test/fixture path) — surface
+    /// expeditions have nothing to measure range from in that case.
+    fn colony_founding_hex(&self, colony_id: ColonyId) -> Option<(system::BodyId, map::HexCoord)> {
+        self.state.planet_maps.iter().find_map(|(body_id, pm)| {
+            pm.colonies
+                .iter()
+                .find(|n| n.colony_id == colony_id)
+                .map(|n| (body_id.clone(), n.coord))
+        })
     }
 
     /// Convoy transit time in sols for a trade route between two colonies
@@ -20340,5 +20624,364 @@ mod tests {
             victory_achieved,
             "VictoryAchieved must be emitted for deep-space expedition return"
         );
+    }
+
+    // ── Surface expeditions — reaching off-colony deposits (issue #340) ─────
+
+    /// Seed a small planet map and found a colony at its first habitable
+    /// site, returning the engine and the new colony's id.
+    fn engine_with_founded_colony() -> (GameEngine, ColonyId) {
+        let mut engine = GameEngine::with_seed(0);
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                width: 40,
+                height: 10,
+            })
+            .unwrap();
+
+        let pm = engine.state.home_map().unwrap();
+        let site_id = pm
+            .sites
+            .iter()
+            .find(|(_, &coord)| pm.cells.get(&coord).is_some_and(|c| c.is_habitable()))
+            .map(|(&sid, _)| sid)
+            .expect("at least one habitable site");
+
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Prospect".into(),
+                starting_population: 50,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+        let colony_id = engine.state.colonies[0].id;
+        (engine, colony_id)
+    }
+
+    /// Force a hex to `Plains` terrain (difficulty `1.0`) and plant a
+    /// deposit for `commodity_id` at `richness`, so range/yield math in
+    /// tests is deterministic rather than depending on generated terrain.
+    /// Wraps `coord` into the home map's stored range first (mirroring what
+    /// `Command::LaunchSurfaceExpedition` does internally), then forces that
+    /// cell to `Plains` terrain (difficulty `1.0`) and plants a deposit for
+    /// `commodity_id` at `richness`. Returns the wrapped coordinate actually
+    /// mutated, so callers pass the same value on to the command.
+    fn force_plains_deposit(
+        engine: &mut GameEngine,
+        coord: map::HexCoord,
+        commodity_id: &str,
+        richness: f32,
+    ) -> map::HexCoord {
+        let home = engine.state.home_map_mut().unwrap();
+        let wrapped = home.wrap_coord(coord);
+        let cell = home
+            .cells
+            .get_mut(&wrapped)
+            .expect("coord must be a real cell on this map");
+        cell.terrain = map::Terrain::Plains;
+        cell.deposits
+            .push(map::Deposit::new(commodity_id, richness));
+        wrapped
+    }
+
+    #[test]
+    fn launch_surface_expedition_succeeds_within_range_and_charges_cost() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+        let target = force_plains_deposit(
+            &mut engine,
+            map::HexCoord::new(origin.q + 2, origin.r),
+            "structural_ore",
+            0.6,
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 500.0);
+        let ore_before = engine.state.colonies[idx].pool.amount("structural_ore");
+
+        let events = engine
+            .apply(&Command::LaunchSurfaceExpedition {
+                colony_id,
+                target_hex: target,
+                commodity_id: "structural_ore".to_string(),
+            })
+            .unwrap();
+
+        let launched = events.iter().find_map(|e| match e {
+            Event::SurfaceExpeditionLaunched {
+                expedition_id,
+                target_hex,
+                commodity_id,
+                ..
+            } => Some((*expedition_id, *target_hex, commodity_id.clone())),
+            _ => None,
+        });
+        let (eid, launched_hex, commodity) =
+            launched.expect("SurfaceExpeditionLaunched must be emitted on success");
+        assert_eq!(launched_hex, target);
+        assert_eq!(commodity, "structural_ore");
+        assert_eq!(engine.state.surface_expeditions.expeditions.len(), 1);
+        assert!(engine.state.surface_expeditions.get(&eid).is_some());
+
+        let ore_after = engine.state.colonies[idx].pool.amount("structural_ore");
+        let expected_cost = expedition::surface_expedition_cost_ore(2);
+        assert!(
+            (ore_before - ore_after - expected_cost).abs() < 1e-6,
+            "expected cost {expected_cost} to be charged up front, before={ore_before} after={ore_after}"
+        );
+    }
+
+    #[test]
+    fn launch_surface_expedition_fails_out_of_range() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        // Far beyond BASE_SURFACE_EXPEDITION_RANGE_HEXES over flat terrain.
+        let target = map::HexCoord::new(origin.q + 500, origin.r);
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 500.0);
+
+        let result = engine.apply(&Command::LaunchSurfaceExpedition {
+            colony_id,
+            target_hex: target,
+            commodity_id: "structural_ore".to_string(),
+        });
+        assert!(matches!(
+            result,
+            Err(EngineError::SurfaceExpeditionOutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn launch_surface_expedition_fails_without_matching_deposit() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+        // Force the target cell's terrain without a matching deposit.
+        let target = {
+            let home = engine.state.home_map_mut().unwrap();
+            let wrapped = home.wrap_coord(map::HexCoord::new(origin.q + 1, origin.r));
+            home.cells.get_mut(&wrapped).unwrap().terrain = map::Terrain::Plains;
+            wrapped
+        };
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 500.0);
+
+        let result = engine.apply(&Command::LaunchSurfaceExpedition {
+            colony_id,
+            target_hex: target,
+            commodity_id: "structural_ore".to_string(),
+        });
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn launch_surface_expedition_fails_without_enough_resources() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+        let target = force_plains_deposit(
+            &mut engine,
+            map::HexCoord::new(origin.q + 1, origin.r),
+            "structural_ore",
+            0.5,
+        );
+        // No resources granted — the colony starts with an empty pool.
+
+        let result = engine.apply(&Command::LaunchSurfaceExpedition {
+            colony_id,
+            target_hex: target,
+            commodity_id: "structural_ore".to_string(),
+        });
+        assert!(matches!(
+            result,
+            Err(EngineError::InsufficientResources { .. })
+        ));
+    }
+
+    #[test]
+    fn surface_expedition_contention_blocks_same_hex_same_commodity_only() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+        let target = force_plains_deposit(
+            &mut engine,
+            map::HexCoord::new(origin.q + 1, origin.r),
+            "structural_ore",
+            0.5,
+        );
+        force_plains_deposit(&mut engine, target, "conductive_ore", 0.5);
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 500.0);
+        engine.state.colonies[idx]
+            .pool
+            .deposit("conductive_ore", 500.0);
+
+        engine
+            .apply(&Command::LaunchSurfaceExpedition {
+                colony_id,
+                target_hex: target,
+                commodity_id: "structural_ore".to_string(),
+            })
+            .unwrap();
+
+        // Same hex, same commodity — must be rejected.
+        let blocked = engine.apply(&Command::LaunchSurfaceExpedition {
+            colony_id,
+            target_hex: target,
+            commodity_id: "structural_ore".to_string(),
+        });
+        assert!(matches!(blocked, Err(EngineError::InvalidArgument(_))));
+
+        // Same hex, different commodity — allowed (contention is per resource).
+        let allowed = engine.apply(&Command::LaunchSurfaceExpedition {
+            colony_id,
+            target_hex: target,
+            commodity_id: "conductive_ore".to_string(),
+        });
+        assert!(allowed.is_ok());
+        assert_eq!(engine.state.surface_expeditions.expeditions.len(), 2);
+    }
+
+    #[test]
+    fn surface_expedition_yields_continuously_and_recall_stops_it() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+        let target = force_plains_deposit(
+            &mut engine,
+            map::HexCoord::new(origin.q + 1, origin.r),
+            "structural_ore",
+            1.0,
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 500.0);
+
+        let events = engine
+            .apply(&Command::LaunchSurfaceExpedition {
+                colony_id,
+                target_hex: target,
+                commodity_id: "structural_ore".to_string(),
+            })
+            .unwrap();
+        let eid = events
+            .iter()
+            .find_map(|e| match e {
+                Event::SurfaceExpeditionLaunched { expedition_id, .. } => Some(*expedition_id),
+                _ => None,
+            })
+            .unwrap();
+
+        let ore_before_sol = engine.state.colonies[idx].pool.amount("structural_ore");
+        let advance_events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            advance_events
+                .iter()
+                .any(|e| matches!(e, Event::SurfaceExpeditionYielded { .. })),
+            "SurfaceExpeditionYielded must be emitted every sol while deployed"
+        );
+        let ore_after_sol = engine.state.colonies[idx].pool.amount("structural_ore");
+        assert!(
+            ore_after_sol > ore_before_sol,
+            "continuous yield must add to the colony pool"
+        );
+
+        // Recall stops further yield and removes the expedition outright.
+        let recall_events = engine
+            .apply(&Command::RecallSurfaceExpedition { expedition_id: eid })
+            .unwrap();
+        assert!(recall_events
+            .iter()
+            .any(|e| matches!(e, Event::SurfaceExpeditionRecalled { .. })));
+        assert!(engine.state.surface_expeditions.get(&eid).is_none());
+
+        let ore_before_next_sol = engine.state.colonies[idx].pool.amount("structural_ore");
+        let post_recall_events = engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert!(
+            !post_recall_events
+                .iter()
+                .any(|e| matches!(e, Event::SurfaceExpeditionYielded { .. })),
+            "a recalled expedition must not keep yielding"
+        );
+        let ore_after_next_sol = engine.state.colonies[idx].pool.amount("structural_ore");
+        assert!((ore_after_next_sol - ore_before_next_sol).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recall_unknown_surface_expedition_errors() {
+        let (mut engine, _colony_id) = engine_with_founded_colony();
+        let result = engine.apply(&Command::RecallSurfaceExpedition {
+            expedition_id: expedition::SurfaceExpeditionId::new(),
+        });
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
     }
 }

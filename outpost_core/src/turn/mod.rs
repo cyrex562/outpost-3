@@ -313,6 +313,16 @@ pub struct GameState {
     /// zero turns).
     pub propulsion_transit_scalar: f32,
 
+    // ── Surface expeditions — reaching off-colony deposits (issue #340) ────
+    /// All currently deployed surface expeditions — see
+    /// [`crate::expedition::SurfaceExpeditionRegistry`].
+    pub surface_expeditions: crate::expedition::SurfaceExpeditionRegistry,
+    /// Additive tech-driven range bonus (in hexes) applied when computing a
+    /// surface expedition's max reach (see
+    /// [`crate::expedition::surface_expedition_range_hexes`]). Accumulated
+    /// the same way [`Self::outpost_range_bonus_au`] is for outposts.
+    pub surface_expedition_range_bonus_hexes: f32,
+
     // ── Outpost tech/range gating (issue #241) ─────────────────────────────
     /// Additive AU bonus to an outpost's max allowed range from its parent
     /// colony's home body, accumulated from every researched tech carrying
@@ -448,6 +458,8 @@ impl GameState {
             habitability_mitigations: HashSet::new(),
             outposts: Vec::new(),
             expedition_registry: crate::expedition::ExpeditionRegistry::default(),
+            surface_expeditions: crate::expedition::SurfaceExpeditionRegistry::default(),
+            surface_expedition_range_bonus_hexes: 0.0,
             tech_survey_modifiers: crate::expedition::SurveyModifiers::default(),
             propulsion_transit_scalar: 1.0,
             outpost_range_bonus_au: 0.0,

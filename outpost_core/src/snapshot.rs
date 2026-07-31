@@ -63,7 +63,10 @@ use crate::victory::{VictoryCondition, VictoryState};
 /// Schema version 13: `pending_colonies` field added to `FullStateBlob` (issue #359) —
 /// directly-founded colonies now arrive after a distance-derived transit delay instead
 /// of materialising instantly, and the in-flight queue must round-trip through snapshot.
-pub const SCHEMA_VERSION: u32 = 13;
+/// Schema version 14: `surface_expeditions`/`surface_expedition_range_bonus_hexes` fields
+/// added to `FullStateBlob` (issue #340) — deployed surface expeditions and their
+/// tech-driven range bonus now round-trip through snapshot.
+pub const SCHEMA_VERSION: u32 = 14;
 
 // ─── DDL ──────────────────────────────────────────────────────────────────────────────
 
@@ -209,6 +212,12 @@ struct FullStateBlob {
     // ── #359 Direct-founding transit delay ───────────────────────────────────
     #[serde(default)]
     pending_colonies: Vec<crate::PendingColony>,
+
+    // ── #340 Surface expeditions ─────────────────────────────────────────────
+    #[serde(default)]
+    surface_expeditions: crate::expedition::SurfaceExpeditionRegistry,
+    #[serde(default)]
+    surface_expedition_range_bonus_hexes: f32,
 }
 
 fn default_infrastructure_scalar() -> f32 {
@@ -275,6 +284,8 @@ impl FullStateBlob {
             infrastructure_time_scalar: state.infrastructure_time_scalar,
             outpost_range_bonus_au: state.outpost_range_bonus_au,
             pending_colonies: state.pending_colonies.clone(),
+            surface_expeditions: state.surface_expeditions.clone(),
+            surface_expedition_range_bonus_hexes: state.surface_expedition_range_bonus_hexes,
         }
     }
 
@@ -340,6 +351,8 @@ impl FullStateBlob {
             infrastructure_time_scalar: self.infrastructure_time_scalar,
             outpost_range_bonus_au: self.outpost_range_bonus_au,
             pending_colonies: self.pending_colonies,
+            surface_expeditions: self.surface_expeditions,
+            surface_expedition_range_bonus_hexes: self.surface_expedition_range_bonus_hexes,
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,

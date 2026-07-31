@@ -6,7 +6,7 @@ use super::types::{
     BuildingDef, ColonizationCost, CommodityDef, DefaultDirectiveDef, OrbitalStationBlueprint,
     PackManifest, RecipeDef, ResourceDef, StarSystemDef, SupplyPackage,
 };
-use crate::expedition::AnomalyDef;
+use crate::expedition::{AnomalyDef, SurfaceExpeditionFailureDef};
 
 /// In-memory registry produced by loading one or more content packs.
 ///
@@ -37,6 +37,9 @@ pub struct ContentRegistry {
     pub(super) star_systems: HashMap<String, StarSystemDef>,
     /// Anomaly definitions discoverable during survey expeditions (issue #235).
     pub(super) anomalies: HashMap<String, AnomalyDef>,
+    /// Failure-effect tables rolled when a surface expedition launch fails
+    /// (issue #340).
+    pub(super) surface_expedition_failures: HashMap<String, SurfaceExpeditionFailureDef>,
 }
 
 impl ContentRegistry {
@@ -53,6 +56,8 @@ impl ContentRegistry {
         self.colonization_costs.extend(other.colonization_costs);
         self.star_systems.extend(other.star_systems);
         self.anomalies.extend(other.anomalies);
+        self.surface_expedition_failures
+            .extend(other.surface_expedition_failures);
     }
 
     /// The manifest of the most-recently loaded pack.
@@ -216,6 +221,25 @@ impl ContentRegistry {
     /// Insert or replace an anomaly definition (used in tests and harness tooling).
     pub fn insert_anomaly(&mut self, def: AnomalyDef) {
         self.anomalies.insert(def.id.clone(), def);
+    }
+
+    /// Look up a surface-expedition failure table by id.
+    #[must_use]
+    pub fn surface_expedition_failure(&self, id: &str) -> Option<&SurfaceExpeditionFailureDef> {
+        self.surface_expedition_failures.get(id)
+    }
+
+    /// All surface-expedition failure tables as an iterator.
+    pub fn surface_expedition_failures(
+        &self,
+    ) -> impl Iterator<Item = &SurfaceExpeditionFailureDef> {
+        self.surface_expedition_failures.values()
+    }
+
+    /// Insert or replace a surface-expedition failure table (used in tests
+    /// and harness tooling).
+    pub fn insert_surface_expedition_failure(&mut self, def: SurfaceExpeditionFailureDef) {
+        self.surface_expedition_failures.insert(def.id.clone(), def);
     }
 }
 
