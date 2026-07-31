@@ -3064,24 +3064,37 @@ impl GameEngine {
                 }
 
                 // ── Step 2b: Reset colony resources ─────────────────────────
-                // Colony-local resources are per-sol, not stockpiled (issue
-                // #304): power not drawn this sol is lost, and housing is a
-                // standing capacity its habitats re-establish rather than a
-                // stock that grows. As ordinary commodities both accumulated
-                // without bound.
+                // Colony-local resources are per-sol, not stockpiled by
+                // default (issue #304): power not drawn this sol is lost, and
+                // housing is a standing capacity its habitats re-establish
+                // rather than a stock that grows. As ordinary commodities both
+                // accumulated without bound.
                 //
-                // The clear sits *between* needs and production, which is
+                // Issue #348 makes storage an opt-in building: a colony with
+                // any battery/tank/bunker for a resource banks up to its
+                // built capacity instead of losing everything, via
+                // `bank_and_clear` rather than a blanket `clear`. A colony
+                // with no storage buildings at all gets an empty capacity
+                // map, which behaves exactly like the pre-#348 `clear()`.
+                //
+                // This sits *between* needs and production, which is
                 // load-bearing in both directions. Needs (Step 2) draw on what
                 // production banked last sol, so clearing any earlier would
                 // starve the colony instantly. And production (Step 3) runs
                 // after, so once the sol finishes the pool still holds this
-                // sol's figures — that is what the colony screen reports and
-                // what makes the values observable at all.
+                // sol's figures (banked carryover plus whatever was just
+                // produced) — that is what the colony screen reports and what
+                // makes the values observable at all.
+                let empty_registry = content::ContentRegistry::default();
+                let storage_registry = self.state.registry.as_ref().unwrap_or(&empty_registry);
                 for colony in &mut self.state.colonies {
-                    colony.resources.clear();
+                    let capacities =
+                        colony::storage_capacities(&colony.buildings, storage_registry);
+                    colony.resources.bank_and_clear(&capacities);
                 }
                 for out in &mut self.state.outposts {
-                    out.resources.clear();
+                    let capacities = colony::storage_capacities(&out.buildings, storage_registry);
+                    out.resources.bank_and_clear(&capacities);
                 }
 
                 // ── Step 3: Production ──────────────────────────────────────
@@ -8379,6 +8392,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
 
@@ -8425,6 +8439,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
         engine
@@ -8567,6 +8582,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
 
@@ -8625,6 +8641,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
         engine
@@ -8804,6 +8821,7 @@ mod tests {
             default_priority: 2,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
 
@@ -9129,6 +9147,7 @@ mod tests {
             default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9351,6 +9370,7 @@ mod tests {
             default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9600,6 +9620,7 @@ mod tests {
             default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -9932,6 +9953,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -10377,6 +10399,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -10396,6 +10419,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         reg.insert_building(BuildingDef {
@@ -10414,6 +10438,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -10551,6 +10576,164 @@ mod tests {
         assert_eq!(result.building_type, "research_lab");
         assert_eq!(result.building_id, lab_id);
         assert!(result.scale > 0.0);
+    }
+
+    // ── Storage-as-a-building (issue #348 worked example) ────────────────────
+    //
+    // No `needs_config` is set in either test below, so Step 2 (needs
+    // resolution) is a no-op — these are pure production/banking traces with
+    // nothing consuming the power a `solar_panel` deposits every sol.
+
+    fn storage_test_registry() -> content::ContentRegistry {
+        use content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef, ResourceDef};
+        let mut reg = content::ContentRegistry::default();
+
+        reg.insert_resource(ResourceDef {
+            id: "power".into(),
+            name: "Power".into(),
+            description: String::new(),
+            kind: content::types::ResourceKind::Flow,
+            unit: "MW".into(),
+        });
+
+        reg.insert_building(BuildingDef {
+            id: "solar_panel".into(),
+            name: "Solar Panel".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "generate_power_flow".into(),
+            name: "Generate Power".into(),
+            building: "solar_panel".into(),
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "power".into(),
+                quantity: 20.0,
+            }],
+            cycle_sols: 1,
+            power_draw: 0.0,
+            concurrent: false,
+            line: None,
+        });
+
+        // Mirrors `battery_bank` in content/base/buildings.yaml, at a smaller
+        // capacity so a single generator overflows it within one sol.
+        reg.insert_building(BuildingDef {
+            id: "battery_bank".into(),
+            name: "Battery Bank".into(),
+            description: String::new(),
+            category: BuildingCategory::Storage,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![Ingredient {
+                id: "power".into(),
+                quantity: 12.0,
+            }],
+        });
+
+        reg
+    }
+
+    fn setup_storage_colony(engine: &mut GameEngine, with_battery: bool) -> colony::ColonyId {
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Storage Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        engine.state.registry = Some(storage_test_registry());
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("solar_panel", 1));
+        if with_battery {
+            engine.state.colonies[idx]
+                .buildings
+                .push(colony::PlacedBuilding::new("battery_bank", 1));
+        }
+
+        colony_id
+    }
+
+    #[test]
+    fn power_surplus_evaporates_every_sol_without_a_storage_building() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_storage_colony(&mut engine, false);
+
+        for sol in 1..=3 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            let power = engine.state.colonies[idx].resources.amount("power");
+            assert!(
+                (power - 20.0).abs() < f64::EPSILON,
+                "sol {sol}: power should be exactly this sol's production (20.0) with \
+                 nothing to bank it, got {power}"
+            );
+        }
+    }
+
+    #[test]
+    fn battery_bank_carries_surplus_power_across_sols_up_to_its_capacity() {
+        let mut engine = GameEngine::with_seed(42);
+        let colony_id = setup_storage_colony(&mut engine, true);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+
+        // Sol 1: nothing banked yet (the pool started empty), so this is just
+        // the first sol's own production — identical to the no-battery case.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let power_sol1 = engine.state.colonies[idx].resources.amount("power");
+        assert!(
+            (power_sol1 - 20.0).abs() < f64::EPSILON,
+            "sol 1: nothing to bank yet, got {power_sol1}"
+        );
+
+        // Sol 2: sol 1's 20.0 is capped at the battery's 12.0 capacity before
+        // this sol's 20.0 is produced on top — 12.0 + 20.0 = 32.0. Strictly
+        // more than the no-battery case's 20.0, proving carryover happened.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let power_sol2 = engine.state.colonies[idx].resources.amount("power");
+        assert!(
+            (power_sol2 - 32.0).abs() < f64::EPSILON,
+            "sol 2: 12.0 banked + 20.0 produced should be 32.0, got {power_sol2}"
+        );
+
+        // Sol 3: the trace repeats (32.0 capped at 12.0, plus 20.0) rather
+        // than compounding further — proving the excess above capacity still
+        // evaporates each sol instead of accumulating without bound.
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let power_sol3 = engine.state.colonies[idx].resources.amount("power");
+        assert!(
+            (power_sol3 - 32.0).abs() < f64::EPSILON,
+            "sol 3: should plateau at 32.0 rather than keep growing, got {power_sol3}"
+        );
     }
 
     // ── Per-instance staffing commands (issue #307 stage 3) ──────────────────
@@ -12498,6 +12681,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -12754,6 +12938,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
 
@@ -12809,6 +12994,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         engine.state.registry = Some(reg);
         engine
@@ -13123,6 +13309,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -13803,6 +13990,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -13884,6 +14072,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -13956,6 +14145,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -16458,6 +16648,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -16553,6 +16744,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -16668,6 +16860,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -16900,6 +17093,7 @@ mod tests {
                 default_priority: 3,
                 grants_slot_capacity: 0,
                 starter_kit: in_kit,
+                storage: vec![],
             });
         }
         engine.state.registry = Some(registry);
@@ -18255,6 +18449,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         reg.insert_building(BuildingDef {
@@ -18273,6 +18468,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {

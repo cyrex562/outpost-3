@@ -1027,6 +1027,32 @@ fn compute_power_grid_scaled(
     PowerGrid { capacity, demand }
 }
 
+/// Sum each resource's banking capacity across every completed building the
+/// colony has (issue #348).
+///
+/// Counts every placed instance regardless of staffing or `paused` state —
+/// storage is passive capacity, not something that needs a crew to hold a
+/// charge. Buildings with an empty [`crate::content::types::BuildingDef::storage`]
+/// (the default) contribute nothing, so a colony with no storage buildings at
+/// all gets an empty map back, which is what makes every resource fall back
+/// to the pre-#348 "evaporates every sol" behaviour.
+#[must_use]
+pub fn storage_capacities(
+    buildings: &[PlacedBuilding],
+    registry: &ContentRegistry,
+) -> std::collections::HashMap<String, f64> {
+    let mut capacities = std::collections::HashMap::new();
+    for placed in buildings {
+        let Some(bdef) = registry.building(&placed.building_type) else {
+            continue;
+        };
+        for entry in &bdef.storage {
+            *capacities.entry(entry.id.clone()).or_insert(0.0) += entry.quantity;
+        }
+    }
+    capacities
+}
+
 /// Yield fraction an extraction recipe manages with **no matching deposit**
 /// present (issue #317).
 ///
@@ -1673,6 +1699,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         // Mine: extracts ore; needs 30 kW; 2 workers
@@ -1692,6 +1719,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_ore".into(),
@@ -1725,6 +1753,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "smelt_iron".into(),
@@ -2180,6 +2209,7 @@ mod tests {
             default_priority: DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         };
         for id in ["eater_a", "eater_b"] {
             reg.insert_building(building(id));
@@ -2329,6 +2359,7 @@ mod tests {
             default_priority: DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         };
         reg.insert_building(building("miner"));
         reg.insert_recipe(RecipeDef {
@@ -2877,6 +2908,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         reg.insert_building(BuildingDef {
@@ -2898,6 +2930,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "advanced_smelt".into(),
@@ -3097,6 +3130,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
 
         reg.insert_building(BuildingDef {
@@ -3119,6 +3153,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "recycle".into(),
@@ -3521,6 +3556,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "refine_alloy".into(),
@@ -3656,6 +3692,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore".into(),
@@ -3689,6 +3726,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "pump_water".into(),
@@ -3952,6 +3990,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "hq_generate_power".into(),
@@ -4093,6 +4132,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         reg.insert_recipe(RecipeDef {
             id: "hybrid_alt_a".into(),
@@ -4194,6 +4234,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         };
         reg.insert_building(building("hq"));
         reg.insert_building(building("refinery"));
@@ -4387,6 +4428,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         let recipe = |id: &str, line: &str, inputs: Vec<(&str, f64)>, outputs: Vec<(&str, f64)>| {
             let ing = |v: Vec<(&str, f64)>| {
@@ -4492,6 +4534,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         };
         reg.insert_building(b("complex"));
         reg.insert_building(b("legacy"));
@@ -4710,6 +4753,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         assert!(lines_for_building("silo", &empty, &reg).is_empty());
@@ -4737,6 +4781,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         });
         let r = |id: &str, line: Option<&str>, con: bool, i: &[(&str, f64)], o: &[(&str, f64)]| {
             RecipeDef {

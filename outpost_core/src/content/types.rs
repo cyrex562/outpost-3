@@ -321,6 +321,29 @@ pub struct BuildingDef {
     /// `false` — the default — leaves a building to be built normally.
     #[serde(default)]
     pub starter_kit: bool,
+    /// Per-resource banking capacity this building grants (issue #348).
+    ///
+    /// A colony-local resource (`power`, `water`, ...) is still a per-sol flow
+    /// by default — unbanked surplus evaporates at the end of the sol, exactly
+    /// as before this field existed. Building something with a `storage` entry
+    /// for a resource id is what converts that flow into a stock: up to the
+    /// summed capacity across every such building the colony has, the amount
+    /// on hand survives into the next sol instead of being cleared.
+    ///
+    /// Storage is deliberately modelled as a plain building attribute — the
+    /// same `Vec<Ingredient>` shape as [`Self::maintenance`] — rather than a
+    /// third [`ResourceKind`] variant: whether a resource carries over is a
+    /// property of what the *player has built*, not of how the resource is
+    /// authored. `Ingredient::quantity` here means banking capacity, not a
+    /// per-sol amount.
+    ///
+    /// Capacity counts every completed instance of the building regardless of
+    /// staffing or `paused` state — a battery holds its charge whether or not
+    /// its (nonexistent) crew is on shift.
+    ///
+    /// Empty (the default) means this building grants no storage.
+    #[serde(default)]
+    pub storage: Vec<Ingredient>,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).

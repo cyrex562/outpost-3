@@ -25,9 +25,9 @@ pub use labour::{allocate_from, allocate_labour, LabourAllocation, LabourCandida
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
 pub use production::{
     building_io_summary, line_selection_key, lines_for_building, process_production,
-    process_production_scaled, BuildingIoSummary, BuildingProductionResult, LineProductionResult,
-    PowerGrid, ProductionInput, ProductionShortfall, ProductionStepOutcome, RecipeLine,
-    ShortfallReason,
+    process_production_scaled, storage_capacities, BuildingIoSummary, BuildingProductionResult,
+    LineProductionResult, PowerGrid, ProductionInput, ProductionShortfall, ProductionStepOutcome,
+    RecipeLine, ShortfallReason,
 };
 pub use resource_pool::ColonyResourcePool;
 pub use stores::ColonyStores;

@@ -837,6 +837,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         }];
         let researched = HashSet::new();
         let result = unlocked_buildings(buildings.iter(), &researched);
@@ -862,6 +863,7 @@ mod tests {
             default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
             grants_slot_capacity: 0,
             starter_kit: false,
+            storage: vec![],
         }];
 
         let empty: HashSet<TechId> = HashSet::new();
