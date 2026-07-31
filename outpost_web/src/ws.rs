@@ -1371,8 +1371,10 @@ mod tests {
         // consume on the first sol, independent of any production chain.
         engine.state.colonies[idx].resources.deposit("water", 200.0);
 
-        // Default (no active_recipes entry) should be bottle_water — it's
-        // authored first, matching the pick-one convention.
+        // Default (no active_recipes entry) should be bottle_water: with no
+        // active_recipes entry, the pick-one default is the lexicographically
+        // smallest recipe id for the building (production.rs), and
+        // "bottle_water" < "unbottle_water".
         engine.apply(&Command::AdvanceColonySol).unwrap();
         assert!(
             engine.state.colonies[idx].pool.amount("water_container") > 0.0,
