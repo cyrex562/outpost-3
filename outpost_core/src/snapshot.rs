@@ -1205,6 +1205,52 @@ mod tests {
         assert!((r.supplies_remaining - 87.5).abs() < 1e-4);
     }
 
+    // ── surface expeditions round-trip (issue #340) ───────────────────────
+
+    #[test]
+    fn round_trip_preserves_deployed_surface_expedition() {
+        use crate::expedition::SurfaceExpedition;
+        use crate::map::HexCoord;
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Prospect"), 200);
+        let colony_id = state.colonies[0].id;
+        state.surface_expedition_range_bonus_hexes = 2.5;
+
+        let exp = SurfaceExpedition::new(
+            colony_id,
+            HexCoord { q: 4, r: -2 },
+            "structural_ore",
+            0.75,
+            12,
+        );
+        let exp_id = exp.id;
+        state.surface_expeditions.deploy(exp);
+
+        let mut snap = Snapshot::open_in_memory().unwrap();
+        snap.save(&state).unwrap();
+        let restored = snap.load().unwrap();
+
+        assert!(
+            (restored.surface_expedition_range_bonus_hexes - 2.5).abs() < 1e-6,
+            "surface_expedition_range_bonus_hexes must survive round-trip"
+        );
+        assert_eq!(
+            restored.surface_expeditions.expeditions.len(),
+            1,
+            "deployed surface expedition count must survive round-trip"
+        );
+        let r = restored
+            .surface_expeditions
+            .get(&exp_id)
+            .expect("expedition id must be stable across round-trip");
+        assert_eq!(r.colony_id, colony_id);
+        assert_eq!(r.target_hex, HexCoord { q: 4, r: -2 });
+        assert_eq!(r.commodity_id, "structural_ore");
+        assert!((r.richness - 0.75).abs() < 1e-6);
+        assert_eq!(r.sol_deployed, 12);
+    }
+
     // ── on-disk file round-trip ───────────────────────────────────────────
 
     #[test]

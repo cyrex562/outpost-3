@@ -5862,11 +5862,20 @@ impl GameEngine {
                     .and_then(|r| r.surface_expedition_failure("surface_expedition_mishap"))
                     .cloned();
                 if let Some(def) = failure_def {
-                    let roll_id = uuid::Uuid::new_v4();
-                    let trigger_roll = expedition::deterministic_roll(roll_id, self.state.sol);
+                    // Salted from the launch's own stable inputs (colony,
+                    // target hex, commodity, sol) rather than a fresh random
+                    // id, so replaying the same command against the same
+                    // state always resolves to the same roll — matching
+                    // every other `deterministic_roll` use in the engine.
+                    #[allow(clippy::cast_sign_loss)]
+                    let hex_salt = (i64::from(target.q) as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ (i64::from(target.r) as u64).wrapping_mul(0x85EB_CA6B_C2B2_AE35);
+                    let base_salt =
+                        self.state.sol ^ hex_salt ^ expedition::string_salt(commodity_id);
+                    let trigger_roll = expedition::deterministic_roll(*colony_id, base_salt);
                     if trigger_roll < def.trigger_probability {
                         let outcome_roll =
-                            expedition::deterministic_roll(roll_id, self.state.sol ^ 1);
+                            expedition::deterministic_roll(*colony_id, base_salt ^ 1);
                         if let Some(outcome) =
                             expedition::resolve_surface_expedition_failure(&def, outcome_roll)
                         {
@@ -20983,5 +20992,88 @@ mod tests {
             expedition_id: expedition::SurfaceExpeditionId::new(),
         });
         assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+    }
+
+    /// A content-authored failure table with `trigger_probability: 1.0` and a
+    /// single weighted outcome, so the mishap roll is forced to fire and
+    /// resolves deterministically to that one outcome.
+    fn always_fails_registry() -> content::ContentRegistry {
+        let mut reg = content::ContentRegistry::default();
+        reg.insert_surface_expedition_failure(expedition::SurfaceExpeditionFailureDef {
+            id: "surface_expedition_mishap".to_string(),
+            trigger_probability: 1.0,
+            outcomes: vec![expedition::SurfaceExpeditionFailureOutcome {
+                id: "total_loss".to_string(),
+                weight: 1.0,
+                description: "Lost entirely.".to_string(),
+                colonists_lost: 2,
+                resources_lost: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert("structural_ore".to_string(), 30.0);
+                    m
+                },
+            }],
+        });
+        reg
+    }
+
+    #[test]
+    fn launch_surface_expedition_mishap_applies_content_authored_losses() {
+        let (mut engine, colony_id) = engine_with_founded_colony();
+        engine.state.registry = Some(always_fails_registry());
+        let origin = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
+        let target = force_plains_deposit(
+            &mut engine,
+            map::HexCoord::new(origin.q + 1, origin.r),
+            "structural_ore",
+            0.5,
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_ore", 500.0);
+        let ore_after_cost = engine.state.colonies[idx].pool.amount("structural_ore")
+            - expedition::surface_expedition_cost_ore(1);
+        let colonists_before = engine.state.populations[idx].count;
+
+        let events = engine
+            .apply(&Command::LaunchSurfaceExpedition {
+                colony_id,
+                target_hex: target,
+                commodity_id: "structural_ore".to_string(),
+            })
+            .unwrap();
+
+        let failed = events.iter().find_map(|e| match e {
+            Event::SurfaceExpeditionFailed { outcome, .. } => Some(outcome.clone()),
+            _ => None,
+        });
+        let outcome = failed.expect("SurfaceExpeditionFailed must be emitted on a forced mishap");
+        assert_eq!(outcome.id, "total_loss");
+        assert_eq!(
+            engine.state.surface_expeditions.expeditions.len(),
+            0,
+            "a failed launch must not deploy an expedition"
+        );
+        assert_eq!(
+            engine.state.populations[idx].count,
+            colonists_before - 2.0,
+            "colonist loss from the failure outcome must be applied"
+        );
+        let ore_after_failure = engine.state.colonies[idx].pool.amount("structural_ore");
+        assert!(
+            (ore_after_failure - (ore_after_cost - 30.0)).abs() < 1e-6,
+            "resource loss from the failure outcome must be applied on top of the up-front cost"
+        );
     }
 }
