@@ -1541,6 +1541,51 @@ mod tests {
         );
     }
 
+    /// Real-engine proof that unbanked waste evaporates every sol exactly
+    /// like unbanked power (issue #386) — with no storage building present,
+    /// a seeded amount does not survive `bank_and_clear`.
+    #[test]
+    fn waste_evaporates_every_sol_without_a_storage_building() {
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Waste Evaporation Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        // No waste_bunker placed — this colony has zero waste storage capacity.
+        engine.state.colonies[idx].resources.deposit("waste", 500.0);
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        assert_eq!(
+            engine.state.colonies[idx].resources.amount("waste"),
+            0.0,
+            "waste should evaporate every sol with no storage building present"
+        );
+    }
+
     /// Real-engine proof that `waste_processing` capacity behaves like
     /// `housing`: a standing capacity re-established every sol by the
     /// `recycling_plant`, not a stock that accumulates or drains (issue #386).
