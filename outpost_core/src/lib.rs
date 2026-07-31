@@ -7260,6 +7260,7 @@ impl GameEngine {
     ) -> Option<std::collections::HashMap<String, f32>> {
         let mut out = std::collections::HashMap::new();
         let mut placed = false;
+        let mut contamination_factor = 1.0_f32;
         // Search every seeded surface, not just the founding planet's (issue
         // #300). A colony node lives in exactly one map, so this finds it
         // wherever it was founded; scanning the home map alone would silently
@@ -7269,15 +7270,10 @@ impl GameEngine {
             if let Some(node) = pm.colonies.iter().find(|n| n.colony_id == colony_id) {
                 placed = true;
                 if let Some(cell) = pm.cells.get(&node.coord) {
-                    // Contamination (issue #387) scales the hex's own
-                    // deposits down toward zero as severity approaches 1.0 —
-                    // a "the ground itself is fouled" penalty, distinct from
-                    // the body-level abundance flavor merged in below, which
-                    // contamination does not touch.
-                    let contamination_factor = 1.0 - cell.contamination;
+                    contamination_factor = 1.0 - cell.contamination;
                     for d in &cell.deposits {
                         let entry = out.entry(d.commodity_id.clone()).or_insert(0.0_f32);
-                        *entry = entry.max(d.richness * contamination_factor);
+                        *entry = entry.max(d.richness);
                     }
                 }
                 break;
@@ -7288,6 +7284,18 @@ impl GameEngine {
             for (k, v) in self.body_deposit_richness(body_id) {
                 let entry = out.entry(k).or_insert(0.0_f32);
                 *entry = entry.max(v);
+            }
+        }
+        // Contamination (issue #387) scales the whole merged figure — hex
+        // deposits and body-level abundance alike — down toward zero as
+        // severity approaches 1.0. Applied after the `.max()` merge above,
+        // not only to the hex-sourced entries: the colony is extracting from
+        // this specific (fouled) hex regardless of which source produced the
+        // higher number for a given commodity, so an untouched body-level
+        // abundance figure must not be able to silently mask the penalty.
+        if contamination_factor < 1.0 {
+            for v in out.values_mut() {
+                *v *= contamination_factor;
             }
         }
         placed.then_some(out)
@@ -16530,6 +16538,91 @@ mod tests {
             richness.get("structural_ore").copied(),
             Some(0.75),
             "the off-world colony's own hex deposit must be visible to gating"
+        );
+    }
+
+    /// Issue #387: contamination must not be maskable by a high body-level
+    /// abundance figure for the same commodity. `colony_deposit_richness`
+    /// merges hex-specific deposits with body-level `BodyDeposit` flavor via
+    /// `.max()` — if contamination only scaled the hex-sourced entry, an
+    /// untouched body-level figure at or above the contaminated hex value
+    /// would silently win the merge and erase the penalty. The fix applies
+    /// contamination to the whole merged result, so it always wins.
+    #[test]
+    fn contamination_scales_the_merged_richness_even_when_body_abundance_would_otherwise_mask_it() {
+        let (mut engine, body_id) = engine_with_second_habitable_body();
+        let site_id = habitable_site_on(&engine, &body_id);
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Fouled Offworld".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+        let colony_id = engine.state.colonies[0].id;
+
+        let coord = engine
+            .state
+            .map_for_body(&body_id)
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        // Hex-level deposit at 0.5 richness, heavily contaminated.
+        engine
+            .state
+            .map_for_body_mut(&body_id)
+            .unwrap()
+            .cells
+            .get_mut(&coord)
+            .unwrap()
+            .deposits
+            .push(map::Deposit {
+                commodity_id: "structural_ore".into(),
+                richness: 0.5,
+            });
+        engine
+            .state
+            .map_for_body_mut(&body_id)
+            .unwrap()
+            .contaminate(coord, 0.9);
+
+        // Body-level abundance for the same commodity is higher than the
+        // hex's raw (uncontaminated) richness — the exact condition under
+        // which the pre-fix `.max()` merge would have masked the penalty.
+        engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .get_mut(&body_id)
+            .unwrap()
+            .deposits
+            .push(system::BodyDeposit {
+                commodity_id: "structural_ore".into(),
+                abundance: 0.8,
+            });
+
+        let richness = engine
+            .colony_deposit_richness(colony_id, Some(&body_id))
+            .expect("a placed colony must report deposit gating");
+        let got = richness.get("structural_ore").copied().unwrap_or(0.0);
+        assert!(
+            got < 0.8,
+            "contamination must reduce the merged richness even when body-level \
+             abundance (0.8) exceeds the raw hex richness (0.5), got {got}"
+        );
+        assert!(
+            (got - 0.8 * 0.1).abs() < 1e-4,
+            "expected the merged max (0.8, from body abundance) scaled by the \
+             0.9-severity contamination factor (0.1), got {got}"
         );
     }
 
