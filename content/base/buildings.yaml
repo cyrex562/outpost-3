@@ -1083,6 +1083,29 @@
     - id: structural_metal
       quantity: 40.0
 
+- id: hex_remediation
+  name: Hex Remediation
+  description: >
+    A one-shot cleanup project (issue #388) that lowers the colony's hex's
+    waste contamination (issue #387) by 0.3 severity on completion, gated
+    behind `bioremediation`. Costs labour and materials like any other
+    construction project rather than being instant once unlocked — neglect
+    that let waste overflow is a real cost, recoverable but not free.
+    Contamination never decays on its own, so remediation is the only way
+    down; queue it again for a hex that's still contaminated afterward.
+  category: remediation
+  contamination_reduction: 0.3
+  slot_cost: 0
+  power_delta: 0.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 2
+  construction_turns: 3
+  tech_prerequisite: bioremediation
+  construction_cost:
+    - id: structural_metal
+      quantity: 25.0
+
 - id: colony_infrastructure
   name: Colony Infrastructure
   description: >

@@ -1375,6 +1375,27 @@ pub enum Event {
         /// The colony's total capacity after the expansion.
         slot_capacity: u32,
     },
+    /// A remediation project completed and lowered the colony's hex's
+    /// contamination (issue #388).
+    ///
+    /// Fires *instead of* [`Event::BuildingConstructed`], mirroring
+    /// [`Event::SlotCapacityExpanded`]'s "project, not a placed building"
+    /// shape: the project's product is a contamination reduction, so
+    /// nothing is placed. Absent if the colony has no hex placement (no
+    /// planet-map node) — the project's materials/labour are still spent,
+    /// but there is nowhere to apply the reduction.
+    ContaminationRemediated {
+        /// Colony whose hex was cleaned up.
+        colony_id: ColonyId,
+        /// Content-pack key of the completed project.
+        building_type: String,
+        /// Contamination severity the project removed (before flooring at
+        /// `0.0` — the hex's actual contamination may have dropped by less
+        /// than this if it was already below the requested reduction).
+        reduction: f32,
+        /// The hex's contamination after remediation.
+        contamination_after: f32,
+    },
     /// A colony's construction project made no progress because the player's own
     /// commodity reserve withheld the materials (issue #355).
     ///
@@ -2829,6 +2850,28 @@ impl GameEngine {
                             .collect()
                     })
                     .unwrap_or_default();
+                // Remediation projects, snapshotted for the same borrow
+                // reason (issue #388). Only contamination-reducing building
+                // types appear, so an absent key means "this is a normal
+                // building" — the identical shape `slot_grants` uses.
+                let remediation_grants: std::collections::HashMap<String, f32> = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .map(|reg| {
+                        reg.buildings()
+                            .filter(|def| def.contamination_reduction > 0.0)
+                            .map(|def| (def.id.clone(), def.contamination_reduction))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // Completed remediation projects, resolved to a hex and
+                // applied in a second pass below — `self.state.planet_maps`
+                // needs a mutable borrow to call `PlanetMap::remediate`,
+                // which can't happen while `self.state.colonies` is
+                // mutably borrowed by the loop just below (same shape as
+                // #387's overflow-contamination two-pass handling).
+                let mut remediations: Vec<(ColonyId, String, f32)> = Vec::new();
 
                 for colony in &mut self.state.colonies {
                     // Labour for the sol the project is about to work, withdrawn
@@ -2888,6 +2931,16 @@ impl GameEngine {
                                 });
                                 continue;
                             }
+                            // Remediation completes into a hex contamination
+                            // reduction, not into a standing building (issue
+                            // #388) — resolved and applied in the second
+                            // pass below, once this loop's mutable borrow of
+                            // `self.state.colonies` has ended.
+                            if let Some(reduction) = remediation_grants.get(&building_type).copied()
+                            {
+                                remediations.push((colony.id, building_type, reduction));
+                                continue;
+                            }
                             // Seed the staffing priority from the building's
                             // authored default (issue #307), so a greenhouse comes
                             // out of construction already ahead of an ore mine.
@@ -2910,6 +2963,37 @@ impl GameEngine {
                             });
                         }
                     }
+                }
+
+                // Apply completed remediation projects (issue #388): resolve
+                // each colony to its hex the same way #387's overflow step
+                // does, then lower that hex's contamination. A colony with
+                // no planet-map placement still spent the project's
+                // materials/labour, but has nowhere to apply the reduction —
+                // no event fires for it, matching how deposit depletion
+                // silently skips an unplaced colony too.
+                for (colony_id, building_type, reduction) in remediations {
+                    let Some((body_id, coord)) =
+                        self.state.planet_maps.iter().find_map(|(body_id, pm)| {
+                            pm.colonies
+                                .iter()
+                                .find(|n| n.colony_id == colony_id)
+                                .map(|n| (body_id.clone(), n.coord))
+                        })
+                    else {
+                        continue;
+                    };
+                    let Some(pm) = self.state.planet_maps.get_mut(&body_id) else {
+                        continue;
+                    };
+                    pm.remediate(coord, reduction);
+                    let contamination_after = pm.cell(coord).map_or(0.0, |cell| cell.contamination);
+                    events.push(Event::ContaminationRemediated {
+                        colony_id,
+                        building_type,
+                        reduction,
+                        contamination_after,
+                    });
                 }
 
                 // ── Step 1b: Outpost construction (issue #233) ──────────────
@@ -8489,6 +8573,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
 
@@ -8536,6 +8621,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -8679,6 +8765,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
 
@@ -8738,6 +8825,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -8918,6 +9006,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
 
@@ -9244,6 +9333,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9467,6 +9557,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9717,6 +9808,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -9838,6 +9930,220 @@ mod tests {
         assert_eq!(
             engine.state.colonies[idx].build_queue.projects[0].slot_cost, 0,
             "the caller's slot_cost must be overridden to 0"
+        );
+    }
+
+    // ── Contamination remediation (issue #388) ──
+
+    /// A registry holding one normal building and one remediation project.
+    fn registry_with_remediation() -> content::ContentRegistry {
+        let mut reg = content::ContentRegistry::default();
+        let base = |id: &str| content::types::BuildingDef {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            category: content::BuildingCategory::Production,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 2,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+            contamination_reduction: 0.0,
+        };
+        reg.insert_building(base("smelter"));
+        reg.insert_building(content::types::BuildingDef {
+            category: content::BuildingCategory::Remediation,
+            contamination_reduction: 0.3,
+            slot_cost: 0,
+            ..base("hex_remediation")
+        });
+        reg
+    }
+
+    #[test]
+    fn a_completed_remediation_project_lowers_contamination_instead_of_placing_a_building() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_remediation());
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
+            .unwrap();
+        let pm = engine.state.home_map().unwrap();
+        let coord0 = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord0)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Fouled".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+        let Event::ColonyFoundedAtSite { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFoundedAtSite, got {events:?}")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 40.0);
+
+        let coord = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        engine.state.home_map_mut().unwrap().contaminate(coord, 0.5);
+
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "hex_remediation".into(),
+                slot_cost: 0,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 40.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let evs = engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let remediated = evs
+            .iter()
+            .find_map(|e| match e {
+                Event::ContaminationRemediated {
+                    reduction,
+                    contamination_after,
+                    ..
+                } => Some((*reduction, *contamination_after)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected ContaminationRemediated, got {evs:?}"));
+        assert!((remediated.0 - 0.3).abs() < 1e-6);
+        assert!((remediated.1 - 0.2).abs() < 1e-4);
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::BuildingConstructed { .. })),
+            "remediation must not place a building"
+        );
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(engine.state.colonies[idx].buildings.is_empty());
+        assert!(engine.state.colonies[idx].pool.amount("steel") < 1e-6);
+        assert!(
+            (engine
+                .state
+                .home_map()
+                .unwrap()
+                .cell(coord)
+                .unwrap()
+                .contamination
+                - 0.2)
+                .abs()
+                < 1e-4,
+            "the hex's actual contamination must have dropped"
+        );
+    }
+
+    /// A remediation project that would reduce contamination below zero
+    /// simply floors it, mirroring `PlanetMap::remediate`'s own floor.
+    #[test]
+    fn remediation_floors_contamination_at_zero_rather_than_going_negative() {
+        let mut engine = GameEngine::new();
+        engine.state.registry = Some(registry_with_remediation());
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 7,
+                width: 3,
+                height: 3,
+            })
+            .unwrap();
+        let pm = engine.state.home_map().unwrap();
+        let coord0 = pm.best_landing_site().unwrap();
+        let site_id = *pm
+            .sites
+            .iter()
+            .find(|(_, &c)| c == coord0)
+            .map(|(id, _)| id)
+            .unwrap();
+        drop(pm);
+        let events = engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "BarelyFouled".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: None,
+            })
+            .unwrap();
+        let Event::ColonyFoundedAtSite { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFoundedAtSite, got {events:?}")
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].pool.deposit("steel", 40.0);
+
+        let coord = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        // Only 0.1 contamination, well under the project's 0.3 reduction.
+        engine.state.home_map_mut().unwrap().contaminate(coord, 0.1);
+
+        engine
+            .apply(&Command::QueueConstruction {
+                colony_id,
+                building_type: "hex_remediation".into(),
+                slot_cost: 0,
+                labor_per_turn: 0,
+                construction_cost: vec![("steel".to_string(), 40.0)],
+                construction_turns: 2,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        assert_eq!(
+            engine
+                .state
+                .home_map()
+                .unwrap()
+                .cell(coord)
+                .unwrap()
+                .contamination,
+            0.0,
+            "remediation must floor at 0.0, not go negative"
         );
     }
 
@@ -10050,6 +10356,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -10496,6 +10803,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -10516,6 +10824,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
 
         reg.insert_building(BuildingDef {
@@ -10535,6 +10844,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -10709,6 +11019,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         reg.insert_recipe(RecipeDef {
             id: "generate_power_flow".into(),
@@ -10747,6 +11058,7 @@ mod tests {
                 id: "power".into(),
                 quantity: 12.0,
             }],
+            contamination_reduction: 0.0,
         });
 
         reg
@@ -12778,6 +13090,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -13035,6 +13348,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
 
@@ -13091,6 +13405,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         engine.state.registry = Some(reg);
         engine
@@ -13406,6 +13721,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -14087,6 +14403,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -14169,6 +14486,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -14242,6 +14560,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -16830,6 +17149,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -16926,6 +17246,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -17042,6 +17363,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -17275,6 +17597,7 @@ mod tests {
                 grants_slot_capacity: 0,
                 starter_kit: in_kit,
                 storage: vec![],
+                contamination_reduction: 0.0,
             });
         }
         engine.state.registry = Some(registry);
@@ -18867,6 +19190,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
 
         reg.insert_building(BuildingDef {
@@ -18886,6 +19210,7 @@ mod tests {
             grants_slot_capacity: 0,
             starter_kit: false,
             storage: vec![],
+            contamination_reduction: 0.0,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
