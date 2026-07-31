@@ -466,6 +466,28 @@
     - id: structural_metal
       quantity: 18.0
 
+- id: waste_compactor
+  name: Waste Compactor
+  description: >
+    Crates banked waste into shippable `waste_container` cargo, or unpacks
+    containers back into usable (bunker-storable) waste — a switchable pair
+    of recipes (`crate_waste`/`uncrate_waste`, recipes.yaml), not both at
+    once. This is waste's crating route (issue #348/#389): a colony with
+    spare `waste_processing` capacity can genuinely absorb another colony's
+    surplus by convoy, per #381's own taxonomy, the same way water needed
+    crating into `water_container` to travel.
+  category: processing
+  power_delta: 3.0
+  worker_slots: 1
+  default_priority: 6
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  tech_prerequisite: basic_construction
+  construction_cost:
+    - id: structural_metal
+      quantity: 18.0
+
 - id: recycling_plant
   name: Recycling Plant
   description: >
