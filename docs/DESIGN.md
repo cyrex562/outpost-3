@@ -198,7 +198,7 @@ So the honest summary: the standalones' only advantages are research throughput 
 |---|---|---|---|
 | power | yes | batteries | powerline; or crated as charged cells |
 | water | yes (see below) | tanks | pipeline; or crated for convoy |
-| atmosphere | yes | — | none — its raw gasses are tradeable commodities |
+| atmosphere (breathable mix) | yes | — | none — the colony maintains its own mix in place; its *raw gasses* (the unprocessed inputs) are a separate, tradeable commodity |
 | waste | yes | bunkers | convoy, to a colony with spare capacity |
 | waste processing | yes (`capacity`) | n/a | n/a |
 | housing | yes (`capacity`) | n/a | none |
