@@ -763,6 +763,55 @@ mod tests {
         }
     }
 
+    // ── Contamination remediation (issue #388) ────────────────────────────────
+
+    /// The authored remediation projects are free of slot cost, mirroring
+    /// #306's site-preparation guard.
+    ///
+    /// Unlike `grants_slot_capacity`, the engine does not force
+    /// `contamination_reduction`-bearing projects' `slot_cost` to `0` at
+    /// queue time — a badly-authored high-`slot_cost` remediation project
+    /// really could deadlock a full colony the way #306's engine-level
+    /// coercion exists specifically to prevent. This test is the content-side
+    /// guard against that class of authoring mistake, so a future
+    /// remediation building shipping with a nonzero `slot_cost` fails CI
+    /// instead of shipping a real deadlock.
+    #[test]
+    fn authored_remediation_projects_are_slot_free_and_cost_materials() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+
+        let remediating: Vec<_> = buildings
+            .iter()
+            .filter(|b| b.contamination_reduction > 0.0)
+            .collect();
+        assert!(
+            !remediating.is_empty(),
+            "expected at least the authored hex_remediation project"
+        );
+
+        for b in &remediating {
+            assert_eq!(
+                b.slot_cost, 0,
+                "{} would deadlock a full colony if it consumed a slot — see #388's note on effective_slot_cost not coercing this the way #306's does",
+                b.id
+            );
+            assert!(
+                !b.construction_cost.is_empty(),
+                "{} must be paid for in materials, not granted free",
+                b.id
+            );
+            assert_eq!(
+                b.worker_slots, 0,
+                "{} is a remediation project, not a staffed building",
+                b.id
+            );
+        }
+    }
+
     /// Larger tiers must buy capacity more cheaply per slot, or there is no
     /// reason to ever research past the first.
     #[test]
