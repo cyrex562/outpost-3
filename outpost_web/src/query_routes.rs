@@ -265,12 +265,15 @@ pub struct InfraEdgeWire {
     pub from_colony_id: String,
     /// Id of the colony the edge runs to.
     pub to_colony_id: String,
-    /// Infrastructure type (`road`, `rail`, `pipeline`).
+    /// Infrastructure type (`road`, `rail`, `pipeline`, `powerline`).
     pub infra_type: String,
-    /// Cargo throughput per turn (before tech modifiers).
+    /// Cargo (or, for a powerline, power) throughput per turn, before tech
+    /// modifiers.
     pub throughput: f32,
     /// Construction cost (abstract resource units).
     pub cost: f32,
+    /// Fraction of throughput lost in transit, in `[0.0, 1.0]` (issue #383).
+    pub loss_pct: f32,
 }
 
 /// `GET /api/colony-screen/:id` — the full colony management screen bundle.
@@ -452,6 +455,7 @@ fn build_planet_map_wire(
             infra_type: format!("{:?}", e.infra_type).to_lowercase(),
             throughput: e.throughput,
             cost: e.cost,
+            loss_pct: e.loss_pct,
         })
         .collect();
 

@@ -28,7 +28,7 @@ type Mode = 'navigate' | 'build'
 const mode = ref<Mode>('navigate')
 const fromColonyId = ref<string | null>(null)
 const toColonyId = ref<string | null>(null)
-const infraType = ref<'road' | 'rail' | 'pipeline'>('road')
+const infraType = ref<'road' | 'rail' | 'pipeline' | 'powerline'>('road')
 const busy = ref(false)
 
 async function refresh(): Promise<void> {
@@ -170,6 +170,7 @@ async function demolish(edge: InfraEdge): Promise<void> {
             <option value="road">Road</option>
             <option value="rail">Rail</option>
             <option value="pipeline">Pipeline</option>
+            <option value="powerline">Powerline</option>
           </select>
           <button class="btn primary" data-testid="btn-build" :disabled="!canBuild" @click="build">Build</button>
         </div>
@@ -178,7 +179,7 @@ async function demolish(edge: InfraEdge): Promise<void> {
           <div v-for="e in edges" :key="`${e.from_colony_id}-${e.to_colony_id}-${e.infra_type}`" class="edge-row">
             <span class="edge-desc">
               {{ nameOf(e.from_colony_id) }} ↔ {{ nameOf(e.to_colony_id) }} · {{ e.infra_type }}
-              ({{ e.throughput.toFixed(0) }}/turn)
+              ({{ e.throughput.toFixed(0) }}/turn, {{ (e.loss_pct * 100).toFixed(0) }}% loss)
             </span>
             <button class="btn danger" :disabled="busy" @click="demolish(e)">Demolish</button>
           </div>

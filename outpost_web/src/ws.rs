@@ -415,6 +415,7 @@ pub(crate) fn client_command_to_core(
                 "road" => InfraType::Road,
                 "rail" => InfraType::Rail,
                 "pipeline" => InfraType::Pipeline,
+                "powerline" => InfraType::Powerline,
                 _ => return Err(format!("unknown infra_type: {infra_type}")),
             };
             Ok(Command::BuildInfrastructure {

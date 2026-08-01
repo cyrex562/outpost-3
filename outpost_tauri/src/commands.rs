@@ -249,7 +249,8 @@ pub enum ClientCommand {
         recipe_id: String,
     },
     /// Build an infrastructure edge between two colonies (map/nav plan phase
-    /// A3b). `infra_type` is `"road"`, `"rail"`, or `"pipeline"`.
+    /// A3b). `infra_type` is `"road"`, `"rail"`, `"pipeline"`, or
+    /// `"powerline"` (issue #383).
     BuildInfrastructure {
         from_colony: String,
         to_colony: String,
@@ -727,15 +728,16 @@ fn parse_tier(s: &str) -> Result<outpost_core::interrupt::Tier, CmdError> {
     }
 }
 
-/// Parse an infrastructure-type string (`road`/`rail`/`pipeline`) into
-/// [`outpost_core::map::InfraType`] (map/nav plan phase A3b). Mirrors the
-/// `outpost_web` WS mapping.
+/// Parse an infrastructure-type string (`road`/`rail`/`pipeline`/`powerline`)
+/// into [`outpost_core::map::InfraType`] (map/nav plan phase A3b; powerline
+/// added by issue #383). Mirrors the `outpost_web` WS mapping.
 fn parse_infra_type(s: &str) -> Result<outpost_core::map::InfraType, CmdError> {
     use outpost_core::map::InfraType;
     match s.to_lowercase().as_str() {
         "road" => Ok(InfraType::Road),
         "rail" => Ok(InfraType::Rail),
         "pipeline" => Ok(InfraType::Pipeline),
+        "powerline" => Ok(InfraType::Powerline),
         _ => Err(CmdError::InvalidArg(format!("unknown infra_type: {s}"))),
     }
 }
@@ -2276,12 +2278,15 @@ pub struct InfraEdgeWire {
     pub from_colony_id: String,
     /// Id of the colony the edge runs to.
     pub to_colony_id: String,
-    /// Infrastructure type (`road`, `rail`, `pipeline`).
+    /// Infrastructure type (`road`, `rail`, `pipeline`, `powerline`).
     pub infra_type: String,
-    /// Cargo throughput per turn (before tech modifiers).
+    /// Cargo (or, for a powerline, power) throughput per turn, before tech
+    /// modifiers.
     pub throughput: f32,
     /// Construction cost (abstract resource units).
     pub cost: f32,
+    /// Fraction of throughput lost in transit, in `[0.0, 1.0]` (issue #383).
+    pub loss_pct: f32,
 }
 
 /// A starter supply package option surfaced in the founding wizard.
@@ -2459,6 +2464,7 @@ fn build_planet_map_wire(
             infra_type: format!("{:?}", e.infra_type).to_lowercase(),
             throughput: e.throughput,
             cost: e.cost,
+            loss_pct: e.loss_pct,
         })
         .collect();
 

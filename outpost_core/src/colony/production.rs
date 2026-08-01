@@ -426,6 +426,7 @@ pub fn process_production(
         labor_available,
         registry,
         1.0,
+        0.0, // power_import (issue #383)
         1.0,
         true,
         1.0,
@@ -493,6 +494,7 @@ pub fn process_production_scaled(
     labor_available: f32,
     registry: &ContentRegistry,
     power_scalar: f32,
+    power_import: f64,
     maintenance_scalar: f32,
     maintenance_enabled: bool,
     productivity_multiplier: f32,
@@ -503,7 +505,14 @@ pub fn process_production_scaled(
     difficulty_scalar: &crate::modifier::DifficultyScalar,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
-    let power_grid = compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
+    // `power_import` folds in this sol's net cross-colony powerline transfer
+    // (issue #383) — positive for a colony drawing a surplus neighbor's power
+    // net of transmission loss, negative for a colony exporting its own
+    // surplus out. Callers that haven't resolved transfers (e.g. outposts,
+    // which have no edges) pass `0.0`.
+    let mut power_grid =
+        compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
+    power_grid.capacity = (power_grid.capacity + power_import).max(0.0);
     let brownout_ratio = power_grid.supply_ratio();
 
     // ── Step 2: three-pass resolution ─────────────────────────────────────────
@@ -994,7 +1003,12 @@ fn workforce(labor_available: f32) -> u32 {
 /// Compute the colony power grid, scaling consumer power draws by
 /// `power_scalar` (issue #161). Generators are unaffected. Pass `1.0` for
 /// the neutral (no-difficulty) case.
-fn compute_power_grid_scaled(
+///
+/// `pub(crate)` so [`crate::lib`]'s per-sol turn loop can compute each
+/// colony's raw capacity/demand *before* running production, to resolve
+/// cross-colony powerline transfers (issue #383) ahead of the pass that
+/// actually applies them.
+pub(crate) fn compute_power_grid_scaled(
     buildings: &[ProductionInput],
     registry: &ContentRegistry,
     power_scalar: f32,
@@ -1025,6 +1039,73 @@ fn compute_power_grid_scaled(
     }
 
     PowerGrid { capacity, demand }
+}
+
+/// Resolve cross-colony power transfer over `Powerline` infrastructure edges
+/// (issue #383), given each colony's raw (pre-transfer) [`PowerGrid`].
+///
+/// For every powerline edge, whichever endpoint has surplus capacity
+/// (`capacity > demand`) sends toward whichever has a deficit, capped by the
+/// edge's `throughput` and net of its `loss_pct` — the importer receives
+/// `sent * (1.0 - loss_pct)`, and the exporter's surplus is drawn down by the
+/// full `sent` amount (the loss is a transit cost the exporter's grid still
+/// "pays," not the importer's). Edges are resolved in order, so a colony
+/// with several powerlines can export to (or import from) more than one
+/// neighbor in the same sol, each draining/filling its running balance.
+///
+/// Returns a per-colony net import: positive means "add this much capacity,"
+/// negative means "this colony exported this much of its own surplus" — feed
+/// straight into [`process_production_scaled`]'s `power_import` parameter.
+/// A colony absent from the edge list, or with no powerline neighbor able to
+/// trade, is simply absent from the returned map.
+#[must_use]
+#[allow(clippy::implicit_hasher)]
+pub fn resolve_power_transfers(
+    grids: &std::collections::HashMap<crate::ColonyId, PowerGrid>,
+    edges: &[crate::map::InfraEdge],
+) -> std::collections::HashMap<crate::ColonyId, f64> {
+    let mut balance: std::collections::HashMap<crate::ColonyId, f64> = grids
+        .iter()
+        .map(|(id, g)| (*id, g.capacity - g.demand))
+        .collect();
+    let mut net_import: std::collections::HashMap<crate::ColonyId, f64> =
+        std::collections::HashMap::new();
+
+    for edge in edges {
+        if edge.infra_type != crate::map::InfraType::Powerline {
+            continue;
+        }
+        let (Some(&bal_from), Some(&bal_to)) = (balance.get(&edge.from), balance.get(&edge.to))
+        else {
+            continue;
+        };
+
+        let (exporter, importer, available, needed) = if bal_from > 0.0 && bal_to < 0.0 {
+            (edge.from, edge.to, bal_from, -bal_to)
+        } else if bal_to > 0.0 && bal_from < 0.0 {
+            (edge.to, edge.from, bal_to, -bal_from)
+        } else {
+            continue;
+        };
+
+        let loss = f64::from(edge.loss_pct.clamp(0.0, 0.99));
+        let throughput = f64::from(edge.throughput.max(0.0));
+        // How much the exporter must send for the importer to receive
+        // `needed`, net of loss — capped by both sides' balance and the
+        // edge's own throughput.
+        let sent = available.min(needed / (1.0 - loss)).min(throughput);
+        if sent <= 0.0 {
+            continue;
+        }
+        let delivered = sent * (1.0 - loss);
+
+        *balance.entry(exporter).or_insert(0.0) -= sent;
+        *balance.entry(importer).or_insert(0.0) += delivered;
+        *net_import.entry(exporter).or_insert(0.0) -= sent;
+        *net_import.entry(importer).or_insert(0.0) += delivered;
+    }
+
+    net_import
 }
 
 /// Sum each resource's banking capacity across every completed building the
@@ -1650,6 +1731,141 @@ mod tests {
         assert!((contamination_habitability_factor(-1.0) - 1.0).abs() < 1e-6);
         assert!((contamination_habitability_factor(2.0) - 0.5).abs() < 1e-6);
     }
+
+    // ── Cross-colony power transfer (issue #383) ──────────────────────────────
+
+    fn powerline_edge(
+        from: Uuid,
+        to: Uuid,
+        throughput: f32,
+        loss_pct: f32,
+    ) -> crate::map::InfraEdge {
+        crate::map::InfraEdge {
+            from,
+            to,
+            infra_type: crate::map::InfraType::Powerline,
+            cost: 0.0,
+            throughput,
+            loss_pct,
+        }
+    }
+
+    #[test]
+    fn resolve_power_transfers_moves_surplus_to_deficit_net_of_loss() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let grids = std::collections::HashMap::from([
+            (
+                a,
+                PowerGrid {
+                    capacity: 100.0,
+                    demand: 20.0,
+                },
+            ), // 80 surplus
+            (
+                b,
+                PowerGrid {
+                    capacity: 10.0,
+                    demand: 50.0,
+                },
+            ), // 40 deficit
+        ]);
+        let edges = vec![powerline_edge(a, b, 1000.0, 0.5)];
+
+        let imports = resolve_power_transfers(&grids, &edges);
+
+        // b needs 40, net of 50% loss the exporter must send 80 to deliver 40 —
+        // a's surplus (80) exactly covers it.
+        assert!((imports[&b] - 40.0).abs() < 1e-6);
+        assert!((imports[&a] - (-80.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resolve_power_transfers_caps_at_edge_throughput() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let grids = std::collections::HashMap::from([
+            (
+                a,
+                PowerGrid {
+                    capacity: 1000.0,
+                    demand: 0.0,
+                },
+            ), // huge surplus
+            (
+                b,
+                PowerGrid {
+                    capacity: 0.0,
+                    demand: 1000.0,
+                },
+            ), // huge deficit
+        ]);
+        let edges = vec![powerline_edge(a, b, 50.0, 0.0)];
+
+        let imports = resolve_power_transfers(&grids, &edges);
+
+        // Capped by the edge's throughput, not by either colony's balance.
+        assert!((imports[&b] - 50.0).abs() < 1e-6);
+        assert!((imports[&a] - (-50.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resolve_power_transfers_ignores_non_powerline_edges() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let grids = std::collections::HashMap::from([
+            (
+                a,
+                PowerGrid {
+                    capacity: 100.0,
+                    demand: 0.0,
+                },
+            ),
+            (
+                b,
+                PowerGrid {
+                    capacity: 0.0,
+                    demand: 100.0,
+                },
+            ),
+        ]);
+        let mut edge = powerline_edge(a, b, 1000.0, 0.0);
+        edge.infra_type = crate::map::InfraType::Road;
+        let edges = vec![edge];
+
+        let imports = resolve_power_transfers(&grids, &edges);
+        assert!(imports.is_empty(), "a road edge must not carry power");
+    }
+
+    #[test]
+    fn resolve_power_transfers_no_transfer_when_both_have_surplus() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let grids = std::collections::HashMap::from([
+            (
+                a,
+                PowerGrid {
+                    capacity: 100.0,
+                    demand: 10.0,
+                },
+            ),
+            (
+                b,
+                PowerGrid {
+                    capacity: 100.0,
+                    demand: 10.0,
+                },
+            ),
+        ]);
+        let edges = vec![powerline_edge(a, b, 1000.0, 0.0)];
+
+        let imports = resolve_power_transfers(&grids, &edges);
+        assert!(
+            imports.is_empty(),
+            "no deficit colony means nothing to transfer"
+        );
+    }
+
     use crate::colony::{ColonyPool, ColonyResourcePool};
     use crate::content::types::{
         BuildingCategory, BuildingDef, Ingredient, RecipeDef, DEFAULT_BUILDING_PRIORITY,
@@ -1707,6 +1923,7 @@ mod tests {
             labor_available,
             registry,
             power_scalar,
+            0.0, // power_import (issue #383)
             maintenance_scalar,
             maintenance_enabled,
             productivity_multiplier,
@@ -2070,6 +2287,7 @@ mod tests {
             labor,
             reg,
             1.0,
+            0.0, // power_import (issue #383)
             1.0,
             true,
             1.0,
@@ -2621,6 +2839,7 @@ mod tests {
             100.0,
             reg,
             1.0,
+            0.0, // power_import (issue #383)
             1.0,
             true,
             1.0,
@@ -5019,6 +5238,7 @@ mod tests {
             1000.0,
             &reg,
             1.0,
+            0.0, // power_import (issue #383)
             1.0,
             false,
             1.0,

@@ -897,6 +897,7 @@ impl PlanetMap {
             infra_type,
             cost,
             throughput,
+            loss_pct: infra_type.base_loss_pct(),
         };
         self.edges.push(edge.clone());
         Ok(edge)
@@ -926,6 +927,11 @@ pub enum InfraType {
     Rail,
     /// Buried pipeline — moderate cost, high fluid throughput.
     Pipeline,
+    /// Powerline — carries the `power` utility between two colonies, net of
+    /// transmission loss (issue #383). Unlike Road/Rail/Pipeline it moves no
+    /// cargo and wires up no [`crate::trade::TradeRoute`]; see
+    /// [`InfraType::carries_cargo`].
+    Powerline,
 }
 
 impl InfraType {
@@ -936,16 +942,22 @@ impl InfraType {
             InfraType::Road => 1.0,
             InfraType::Rail => 3.5,
             InfraType::Pipeline => 2.5,
+            InfraType::Powerline => 2.0,
         }
     }
 
     /// Baseline cargo throughput (units per turn) before tech modifiers.
+    ///
+    /// For [`InfraType::Powerline`] this is a power throughput cap (kW), not
+    /// cargo — the field is reused rather than duplicated because both are
+    /// "how much this edge can carry per sol" in their own unit.
     #[must_use]
     pub fn base_throughput(self) -> f32 {
         match self {
             InfraType::Road => 50.0,
             InfraType::Rail => 200.0,
             InfraType::Pipeline => 150.0,
+            InfraType::Powerline => 100.0,
         }
     }
 
@@ -953,6 +965,31 @@ impl InfraType {
     #[must_use]
     pub fn throughput_with_tech(self, tech_multiplier: f32) -> f32 {
         self.base_throughput() * tech_multiplier.max(1.0)
+    }
+
+    /// Fraction of what enters this edge that is lost in transit, in
+    /// `[0.0, 1.0]` (issue #383's capacity + transmission loss model).
+    ///
+    /// Road/Rail/Pipeline carry `0.0` for now — cargo trade over
+    /// [`crate::trade::TradeRoute`] has no loss concept yet (only capacity);
+    /// wiring cargo loss is future balance work. Powerline loss is real
+    /// today: [`crate::colony::resolve_power_transfers`] nets it out of every
+    /// cross-colony transfer.
+    #[must_use]
+    pub fn base_loss_pct(self) -> f32 {
+        match self {
+            InfraType::Road | InfraType::Rail | InfraType::Pipeline => 0.0,
+            InfraType::Powerline => 0.12,
+        }
+    }
+
+    /// Whether this infrastructure kind carries shippable cargo and should
+    /// wire up a [`crate::trade::TradeRoute`] when built. `false` for
+    /// [`InfraType::Powerline`], which transfers the `power` utility instead
+    /// (issue #383) — a powerline does not unlock commodity trade.
+    #[must_use]
+    pub fn carries_cargo(self) -> bool {
+        !matches!(self, InfraType::Powerline)
     }
 }
 
@@ -967,8 +1004,11 @@ pub struct InfraEdge {
     pub infra_type: InfraType,
     /// Construction cost (in abstract resource units).
     pub cost: f32,
-    /// Cargo throughput per turn (before tech modifiers).
+    /// Cargo (or, for a powerline, power) throughput per turn, before tech
+    /// modifiers.
     pub throughput: f32,
+    /// Fraction of throughput lost in transit, in `[0.0, 1.0]` (issue #383).
+    pub loss_pct: f32,
 }
 
 // ─── Map Errors ──────────────────────────────────────────────────────────────
@@ -2326,6 +2366,33 @@ mod tests {
         // Road < Pipeline < Rail (base values).
         assert!(InfraType::Road.base_throughput() < InfraType::Pipeline.base_throughput());
         assert!(InfraType::Pipeline.base_throughput() < InfraType::Rail.base_throughput());
+    }
+
+    #[test]
+    fn powerline_carries_no_cargo_and_has_real_loss() {
+        assert!(!InfraType::Powerline.carries_cargo());
+        assert!(InfraType::Road.carries_cargo());
+        assert!(InfraType::Rail.carries_cargo());
+        assert!(InfraType::Pipeline.carries_cargo());
+
+        assert!(InfraType::Powerline.base_loss_pct() > 0.0);
+        assert_eq!(InfraType::Road.base_loss_pct(), 0.0);
+        assert_eq!(InfraType::Rail.base_loss_pct(), 0.0);
+        assert_eq!(InfraType::Pipeline.base_loss_pct(), 0.0);
+    }
+
+    #[test]
+    fn add_edge_stores_loss_pct_from_infra_type() {
+        let mut map = PlanetMap::generate(5, 6, 6);
+        let id_a = uuid::Uuid::new_v4();
+        let id_b = uuid::Uuid::new_v4();
+        let (coord_a, coord_b) = two_habitable_coords(&map);
+        map.place_colony(id_a, coord_a).unwrap();
+        map.place_colony(id_b, coord_b).unwrap();
+
+        let edge = map.add_edge(id_a, id_b, InfraType::Powerline).unwrap();
+        assert!((edge.loss_pct - InfraType::Powerline.base_loss_pct()).abs() < f32::EPSILON);
+        assert!((edge.throughput - InfraType::Powerline.base_throughput()).abs() < 1e-4);
     }
 
     // ── Elevation & temperature (issue #187) ─────────────────────────────────

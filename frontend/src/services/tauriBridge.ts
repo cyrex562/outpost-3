@@ -400,12 +400,14 @@ export interface PlanetHex {
 export interface InfraEdge {
   from_colony_id: string
   to_colony_id: string
-  /** `road` | `rail` | `pipeline`. */
+  /** `road` | `rail` | `pipeline` | `powerline`. */
   infra_type: string
-  /** Cargo throughput per turn (before tech modifiers). */
+  /** Cargo (or, for a powerline, power) throughput per turn, before tech modifiers. */
   throughput: number
   /** Construction cost (abstract resource units). */
   cost: number
+  /** Fraction of throughput lost in transit, in `[0.0, 1.0]` (issue #383). */
+  loss_pct: number
 }
 
 export interface PlanetMap {

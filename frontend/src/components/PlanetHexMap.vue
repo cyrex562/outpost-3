@@ -68,6 +68,7 @@ const INFRA_COLOR: Record<string, string> = {
   road: '#b8a06a',
   rail: '#d8c85a',
   pipeline: '#6ab0d8',
+  powerline: '#e0c848',
 }
 
 interface RenderedEdge {
@@ -79,6 +80,8 @@ interface RenderedEdge {
   color: string
   width: number
   infra_type: string
+  /** Tooltip text summarizing throughput and transmission loss (issue #383). */
+  title: string
 }
 
 // Pixel-space width of one full map wrap: shifting a hex's `q` by the map's
@@ -96,6 +99,7 @@ const infraEdges = computed<RenderedEdge[]>(() => {
     const width = 1.2 + Math.min(4, e.throughput / 60)
     const color = INFRA_COLOR[e.infra_type] ?? '#889'
     const key = `${e.from_colony_id}-${e.to_colony_id}-${e.infra_type}`
+    const title = `${e.infra_type} · ${e.throughput.toFixed(0)}/turn · ${(e.loss_pct * 100).toFixed(0)}% loss`
 
     // The engine's `edge_cost` already routes construction cost through the
     // seam when that's shorter (issue #315); rendering must match, or a
@@ -108,7 +112,7 @@ const infraEdges = computed<RenderedEdge[]>(() => {
     if (Math.abs(to.cx - wrapW - from.cx) < Math.abs(toX - from.cx)) toX = to.cx - wrapW
     if (Math.abs(to.cx + wrapW - from.cx) < Math.abs(toX - from.cx)) toX = to.cx + wrapW
 
-    out.push({ key, x1: from.cx, y1: from.cy, x2: toX, y2: to.cy, color, width, infra_type: e.infra_type })
+    out.push({ key, x1: from.cx, y1: from.cy, x2: toX, y2: to.cy, color, width, infra_type: e.infra_type, title })
     if (toX !== to.cx) {
       // Mirror copy, shifted back by one map width, so the portion that
       // exits one side of the visible map re-enters on the other.
@@ -122,6 +126,7 @@ const infraEdges = computed<RenderedEdge[]>(() => {
         color,
         width,
         infra_type: e.infra_type,
+        title,
       })
     }
   }
@@ -673,7 +678,7 @@ defineExpose({ focusSite, resetView })
           stroke-linecap="round"
           class="infra-edge"
           :data-testid="`infra-edge-${edge.key}`"
-        />
+        ><title>{{ edge.title }}</title></line>
       </g>
 
       <!-- Colony markers, on top of the infrastructure layer. The labels are

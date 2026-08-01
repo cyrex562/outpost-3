@@ -1927,7 +1927,8 @@ pub enum Event {
     },
 
     // ── M1: Infrastructure events ─────────────────────────────────────────
-    /// An infrastructure edge was built and the corresponding trade route activated.
+    /// An infrastructure edge was built and, for a cargo-carrying kind, the
+    /// corresponding trade route activated.
     InfrastructureBuilt {
         /// Source colony.
         from_colony: ColonyId,
@@ -1937,17 +1938,21 @@ pub enum Event {
         infra_type: map::InfraType,
         /// Construction cost in abstract resource units.
         cost: f32,
-        /// Stable identifier of the trade route created for this edge.
-        route_id: uuid::Uuid,
+        /// Stable identifier of the trade route created for this edge, if
+        /// `infra_type` carries cargo ([`map::InfraType::carries_cargo`]).
+        /// `None` for a [`map::InfraType::Powerline`] (issue #383), which
+        /// transfers power instead and wires up no trade route.
+        route_id: Option<uuid::Uuid>,
     },
-    /// An infrastructure edge was demolished and its trade route removed.
+    /// An infrastructure edge was demolished and its trade route (if any) removed.
     InfrastructureDemolished {
         /// Source colony.
         from_colony: ColonyId,
         /// Destination colony.
         to_colony: ColonyId,
-        /// Stable identifier of the trade route that was removed.
-        route_id: uuid::Uuid,
+        /// Stable identifier of the trade route that was removed, if the
+        /// demolished edge carried cargo (see [`InfrastructureBuilt`]).
+        route_id: Option<uuid::Uuid>,
     },
 
     // ── M2: Environmental hazard events ───────────────────────────────────
@@ -3194,6 +3199,47 @@ impl GameEngine {
                         .difficulty_scalar
                         .scalar_for(&modifier::ModifiableQuantity::MaintenanceConsumption);
                     let maintenance_enabled = self.state.maintenance_enabled;
+                    // Cross-colony power transfer (issue #383): before any
+                    // colony's production actually runs, look at every
+                    // colony's raw (pre-transfer) power balance and walk
+                    // every `Powerline` edge on every body's map, moving
+                    // surplus toward deficit net of the edge's transmission
+                    // loss. The per-colony net (positive = imported,
+                    // negative = exported) then folds straight into that
+                    // colony's own `process_production_scaled` call below as
+                    // `power_import` — a surplus neighbor's power arrives
+                    // before brownout is computed, not after.
+                    let colony_power_grids: std::collections::HashMap<ColonyId, colony::PowerGrid> =
+                        self.state
+                            .colonies
+                            .iter()
+                            .map(|c| {
+                                let placed: Vec<colony::ProductionInput> = c
+                                    .buildings
+                                    .iter()
+                                    .filter(|b| !b.paused)
+                                    .map(colony::ProductionInput::from_placed)
+                                    .collect();
+                                (
+                                    c.id,
+                                    colony::compute_power_grid_scaled(
+                                        &placed,
+                                        registry,
+                                        power_scalar,
+                                        &c.active_recipes,
+                                    ),
+                                )
+                            })
+                            .collect();
+                    let power_edges: Vec<map::InfraEdge> = self
+                        .state
+                        .planet_maps
+                        .values()
+                        .flat_map(|pm| pm.edges.iter().cloned())
+                        .filter(|e| e.infra_type == map::InfraType::Powerline)
+                        .collect();
+                    let power_imports =
+                        colony::resolve_power_transfers(&colony_power_grids, &power_edges);
                     // Precompute deposit richness per colony (issue #239)
                     // before the mutable loop below — `colony_deposit_richness`
                     // takes `&self` and can't run once `self.state.colonies`
@@ -3276,6 +3322,7 @@ impl GameEngine {
                             labor,
                             registry,
                             power_scalar,
+                            power_imports.get(&colony.id).copied().unwrap_or(0.0),
                             maintenance_scalar,
                             maintenance_enabled,
                             colony.habitability_modifier
@@ -3447,6 +3494,7 @@ impl GameEngine {
                             outpost::OUTPOST_BASE_LABOR,
                             registry,
                             power_scalar,
+                            0.0, // power_import (issue #383)
                             maintenance_scalar,
                             maintenance_enabled,
                             1.0,
@@ -6319,18 +6367,27 @@ impl GameEngine {
                     .map_err(|e| EngineError::InvalidState(e.to_string()))?;
                 let cost = edge.cost;
                 let throughput = f64::from(edge.throughput);
-                // Wire up a trade route so auto-flow activates. Same transit
-                // derivation as `AddTradeRoute` — infrastructure links
-                // same-body colonies, so this resolves to the default in
-                // practice, but going through one path means the two can't
-                // drift apart later.
-                let transit = self.route_transit_sols(*from_colony, *to_colony);
-                let route = TradeRoute::with_transit(*from_colony, *to_colony, throughput, transit);
-                let route_id = route.id;
-                self.state.trade_network.add_route(route);
-                // Track the route so DemolishInfrastructure can remove it.
-                let key = canonical_infra_key(*from_colony, *to_colony);
-                self.state.infra_routes.insert(key, route_id);
+                // Wire up a trade route so auto-flow activates — but only for
+                // a cargo-carrying infra type (issue #383). A `Powerline`
+                // transfers the `power` utility instead
+                // (`colony::resolve_power_transfers`, run every sol) and
+                // unlocks no commodity trade. Same transit derivation as
+                // `AddTradeRoute` — infrastructure links same-body colonies,
+                // so this resolves to the default in practice, but going
+                // through one path means the two can't drift apart later.
+                let route_id = if infra_type.carries_cargo() {
+                    let transit = self.route_transit_sols(*from_colony, *to_colony);
+                    let route =
+                        TradeRoute::with_transit(*from_colony, *to_colony, throughput, transit);
+                    let route_id = route.id;
+                    self.state.trade_network.add_route(route);
+                    // Track the route so DemolishInfrastructure can remove it.
+                    let key = canonical_infra_key(*from_colony, *to_colony);
+                    self.state.infra_routes.insert(key, route_id);
+                    Some(route_id)
+                } else {
+                    None
+                };
                 Ok(vec![Event::InfrastructureBuilt {
                     from_colony: *from_colony,
                     to_colony: *to_colony,
@@ -6348,11 +6405,21 @@ impl GameEngine {
                 self.find_colony_index(*from_colony)?;
                 self.find_colony_index(*to_colony)?;
                 let key = canonical_infra_key(*from_colony, *to_colony);
-                let route_id = self.state.infra_routes.remove(&key).ok_or_else(|| {
-                    EngineError::InvalidArgument(format!(
+                // A cargo-carrying edge has a tracked trade route; a
+                // powerline (issue #383) does not. Either way, the edge
+                // itself must actually exist for this to be a valid demolish.
+                let route_id = self.state.infra_routes.remove(&key);
+                let edge_exists = self.state.planet_maps.values().any(|pm| {
+                    pm.edges.iter().any(|e| {
+                        (e.from == *from_colony && e.to == *to_colony)
+                            || (e.from == *to_colony && e.to == *from_colony)
+                    })
+                });
+                if route_id.is_none() && !edge_exists {
+                    return Err(EngineError::InvalidArgument(format!(
                         "no infrastructure edge between colonies {from_colony} and {to_colony}"
-                    ))
-                })?;
+                    )));
+                }
                 // Drop the edge from whichever body's surface carries it
                 // (issue #300) — scanning every map rather than only the
                 // founding planet's, so demolishing an off-world link doesn't
@@ -6363,8 +6430,10 @@ impl GameEngine {
                             || e.from == *to_colony && e.to == *from_colony)
                     });
                 }
-                // Remove the backing trade route.
-                self.state.trade_network.remove_route(route_id);
+                // Remove the backing trade route, if this edge had one.
+                if let Some(route_id) = route_id {
+                    self.state.trade_network.remove_route(route_id);
+                }
                 Ok(vec![Event::InfrastructureDemolished {
                     from_colony: *from_colony,
                     to_colony: *to_colony,
@@ -6859,6 +6928,7 @@ impl GameEngine {
                         to_colony_id: edge.to,
                         kind: format!("{:?}", edge.infra_type).to_lowercase(),
                         throughput: edge.throughput / edge.infra_type.base_throughput(),
+                        loss_pct: edge.loss_pct,
                     })
                     .collect();
 
@@ -19729,6 +19799,7 @@ mod tests {
         assert_eq!(fc, colony_a);
         assert_eq!(tc, colony_b);
         assert_eq!(it, map::InfraType::Road);
+        let route_id = route_id.expect("Road carries cargo and must wire up a trade route");
 
         // Edge stored on planet map.
         let pm = engine.state.home_map().unwrap();
@@ -19770,7 +19841,8 @@ mod tests {
                     None
                 }
             })
-            .unwrap();
+            .unwrap()
+            .expect("Rail carries cargo and must wire up a trade route");
         let route = engine
             .state
             .trade_network
@@ -19806,7 +19878,8 @@ mod tests {
                     None
                 }
             })
-            .unwrap();
+            .unwrap()
+            .expect("Pipeline carries cargo and must wire up a trade route");
 
         // Demolish.
         let demolish_events = engine
@@ -19828,7 +19901,7 @@ mod tests {
             demolished.is_some(),
             "InfrastructureDemolished event must be emitted"
         );
-        assert_eq!(demolished.unwrap(), route_id);
+        assert_eq!(demolished.unwrap(), Some(route_id));
 
         // Edge removed from planet map.
         let pm = engine.state.home_map().unwrap();
@@ -19858,6 +19931,82 @@ mod tests {
             to_colony: colony_b,
         });
         assert!(result.is_err(), "demolish without prior build must fail");
+    }
+
+    // ── Powerline infrastructure (issue #383) ──────────────────────────────
+
+    #[test]
+    fn build_powerline_wires_no_trade_route() {
+        let (mut engine, colony_a, colony_b) = setup_two_colony_map();
+
+        let events = engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+                infra_type: map::InfraType::Powerline,
+            })
+            .unwrap();
+
+        let route_id = events
+            .iter()
+            .find_map(|e| {
+                if let Event::InfrastructureBuilt { route_id, .. } = e {
+                    Some(*route_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(
+            route_id.is_none(),
+            "a powerline must not wire up a commodity trade route"
+        );
+        assert!(
+            engine.state.trade_network.routes.is_empty(),
+            "no trade route should exist after building only a powerline"
+        );
+
+        // The edge itself is still recorded on the planet map.
+        let pm = engine.state.home_map().unwrap();
+        assert!(pm.edges.iter().any(|e| e.from == colony_a
+            && e.to == colony_b
+            && e.infra_type == map::InfraType::Powerline));
+    }
+
+    #[test]
+    fn demolish_powerline_removes_edge_with_no_route_to_clean_up() {
+        let (mut engine, colony_a, colony_b) = setup_two_colony_map();
+
+        engine
+            .apply(&Command::BuildInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+                infra_type: map::InfraType::Powerline,
+            })
+            .unwrap();
+
+        let demolish_events = engine
+            .apply(&Command::DemolishInfrastructure {
+                from_colony: colony_a,
+                to_colony: colony_b,
+            })
+            .unwrap();
+
+        let demolished = demolish_events.iter().find_map(|e| {
+            if let Event::InfrastructureDemolished { route_id, .. } = e {
+                Some(*route_id)
+            } else {
+                None
+            }
+        });
+        assert!(
+            demolished.is_some(),
+            "InfrastructureDemolished event must be emitted"
+        );
+        assert_eq!(demolished.unwrap(), None);
+
+        let pm = engine.state.home_map().unwrap();
+        assert!(pm.edges.is_empty(), "powerline edge should be removed");
     }
 
     #[test]
