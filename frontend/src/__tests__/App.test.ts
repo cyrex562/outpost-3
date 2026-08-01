@@ -24,6 +24,7 @@ vi.mock('@/services/tauriBridge', () => ({
   loadGame: vi.fn(),
   setCustomDifficulty: vi.fn(),
   snapshot: vi.fn(),
+  getBalanceScalars: vi.fn().mockResolvedValue([]),
 }))
 
 /** Push `history.length` above 1 so the App's Escape handler doesn't
@@ -102,5 +103,36 @@ describe('App.vue shell structure (UI-rework PR2: no-scroll app shell)', () => {
     expect(wrapper.find('[data-testid="system-stats-bar"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="turn-control-bar"]').exists()).toBe(false)
     expect(wrapper.find('.app-main').exists()).toBe(true)
+  })
+})
+
+describe('App.vue balance-tuning access (issue #364)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routePath = '/colony'
+    primeHistory()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('does not put Balance in the main nav bar alongside real gameplay screens', () => {
+    const wrapper = mount(App, { global: { stubs: { RouterLink: true, RouterView: true } } })
+    const navText = wrapper.find('.header-nav').text()
+    expect(navText).not.toContain('Balance')
+  })
+
+  it('surfaces balance tuning as a Dev Tools toggle inside the menu instead', async () => {
+    const wrapper = mount(App, { global: { stubs: { RouterLink: true, RouterView: true } } })
+    await wrapper.find('[data-testid="app-menu-btn"]').trigger('click')
+    expect(wrapper.find('[data-testid="app-menu-dialog"]').exists()).toBe(true)
+
+    const balanceBtn = wrapper.find('[data-testid="btn-balance"]')
+    expect(balanceBtn.exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'BalanceTuningPanel' }).exists()).toBe(false)
+
+    await balanceBtn.trigger('click')
+    expect(wrapper.findComponent({ name: 'BalanceTuningPanel' }).exists()).toBe(true)
   })
 })
