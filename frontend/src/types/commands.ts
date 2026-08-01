@@ -178,7 +178,7 @@ export type Command =
       kind: 'build_infrastructure'
       from_colony: string
       to_colony: string
-      infra_type: 'road' | 'rail' | 'pipeline'
+      infra_type: 'road' | 'rail' | 'pipeline' | 'powerline'
     }
   | { kind: 'demolish_infrastructure'; from_colony: string; to_colony: string }
 

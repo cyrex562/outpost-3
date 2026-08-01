@@ -427,10 +427,12 @@ pub struct InfraEdge {
     pub from_colony_id: ColonyId,
     /// Destination colony node.
     pub to_colony_id: ColonyId,
-    /// Infrastructure category (e.g. `"road"`, `"pipeline"`, `"power_line"`).
+    /// Infrastructure category (e.g. `"road"`, `"pipeline"`, `"powerline"`).
     pub kind: String,
     /// Normalised throughput in `[0.0, 1.0]` (0 = blocked, 1 = full capacity).
     pub throughput: f32,
+    /// Fraction of throughput lost in transit, in `[0.0, 1.0]` (issue #383).
+    pub loss_pct: f32,
 }
 
 // ─── Interrupt digest ─────────────────────────────────────────────────────────
@@ -725,8 +727,10 @@ mod tests {
             to_colony_id: b,
             kind: "road".to_string(),
             throughput: 0.75,
+            loss_pct: 0.0,
         };
         assert_eq!(edge.kind, "road");
         assert!((edge.throughput - 0.75).abs() < f32::EPSILON);
+        assert_eq!(edge.loss_pct, 0.0);
     }
 }

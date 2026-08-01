@@ -748,6 +748,7 @@ mod tests {
             10.0,
             &reg,
             1.0,
+            0.0, // power_import (issue #383)
             1.0,
             true,
             1.0,
@@ -763,6 +764,7 @@ mod tests {
             10.0,
             &reg,
             2.0,
+            0.0, // power_import (issue #383)
             1.0,
             true,
             1.0,

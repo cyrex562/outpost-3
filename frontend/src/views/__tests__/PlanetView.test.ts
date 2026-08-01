@@ -177,7 +177,14 @@ describe('PlanetView (map/nav plan phase A1: persistent planet map)', () => {
   it('demolishes an existing edge from the edge list', async () => {
     getPlanetMap.mockResolvedValue(
       twoColonyMap([
-        { from_colony_id: 'colony-1', to_colony_id: 'colony-2', infra_type: 'road', throughput: 50, cost: 10 },
+        {
+          from_colony_id: 'colony-1',
+          to_colony_id: 'colony-2',
+          infra_type: 'road',
+          throughput: 50,
+          cost: 10,
+          loss_pct: 0,
+        },
       ]),
     )
     sendCommand.mockResolvedValueOnce([{ kind: 'infrastructure_demolished' }])

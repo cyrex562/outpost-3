@@ -23,10 +23,13 @@ pub use building::{
 };
 pub use labour::{allocate_from, allocate_labour, LabourAllocation, LabourCandidate, LabourPlan};
 pub use pool::{ColonyPool, RecipeOutcome, StockpileDelta};
+/// `pub(crate)` re-export — see [`production::compute_power_grid_scaled`]'s
+/// doc comment for why this stays crate-internal rather than a public API.
+pub(crate) use production::compute_power_grid_scaled;
 pub use production::{
     building_io_summary, contamination_habitability_factor, line_selection_key, lines_for_building,
-    process_production, process_production_scaled, storage_capacities, BuildingIoSummary,
-    BuildingProductionResult, LineProductionResult, PowerGrid, ProductionInput,
+    process_production, process_production_scaled, resolve_power_transfers, storage_capacities,
+    BuildingIoSummary, BuildingProductionResult, LineProductionResult, PowerGrid, ProductionInput,
     ProductionShortfall, ProductionStepOutcome, RecipeLine, ShortfallReason,
 };
 pub use resource_pool::ColonyResourcePool;
