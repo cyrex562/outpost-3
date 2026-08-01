@@ -15,6 +15,7 @@ import {
 } from '@/services/tauriBridge'
 import { useGameStore } from '@/stores/game'
 import CustomDifficultyPanel from '@/components/CustomDifficultyPanel.vue'
+import BalanceTuningPanel from '@/components/BalanceTuningPanel.vue'
 import SystemStatsBar from '@/components/SystemStatsBar.vue'
 import TurnControlBar from '@/components/TurnControlBar.vue'
 
@@ -28,6 +29,7 @@ const gameStore = useGameStore()
 const inGame = computed(() => route.path !== '/' && route.path !== '/menu')
 const showMenu = ref(false)
 const showDifficulty = ref(false)
+const showBalance = ref(false)
 const savePath = ref('outpost3.o3save')
 const availableSaves = ref<string[]>([])
 const menuError = ref<string | null>(null)
@@ -167,7 +169,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <RouterLink to="/installations" class="nav-link">Installations</RouterLink>
         <RouterLink to="/bodies" class="nav-link">Bodies</RouterLink>
         <RouterLink to="/buildings" class="nav-link">Buildings</RouterLink>
-        <RouterLink to="/balance" class="nav-link">Balance</RouterLink>
       </nav>
       <span
         v-if="!isTauri"
@@ -219,6 +220,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           </div>
           <div v-if="showDifficulty" class="difficulty-slot">
             <CustomDifficultyPanel :live="true" @change="onDifficultyChange" />
+          </div>
+        </section>
+
+        <section class="menu-section">
+          <h4>Dev Tools</h4>
+          <div class="row">
+            <button
+              class="menu-action"
+              data-testid="btn-balance"
+              @click="showBalance = !showBalance"
+            >{{ showBalance ? 'Hide Balance' : 'Balance Tuning…' }}</button>
+          </div>
+          <p v-if="showBalance" class="hint">
+            Tunes live simulation scalars — not a normal gameplay control. Changes take effect on
+            the next sol.
+          </p>
+          <div v-if="showBalance" class="difficulty-slot">
+            <BalanceTuningPanel />
           </div>
         </section>
 
