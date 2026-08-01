@@ -11,6 +11,9 @@
 const props = defineProps<{
   population: number
   stability: number
+  /** Morale scalar in [0, 1] (issue #382) — separate from stability, see
+   * `crate::morale`'s module doc comment in the engine. */
+  morale: number
   availableLabour: number
   /** Recent population samples, oldest first (indicative trend only). */
   populationTrend: number[]
@@ -35,6 +38,21 @@ function stabilityLabel(stability: number): string {
   if (stability > 0.6) return `${pct}% — Stable`
   if (stability >= 0.3) return `${pct}% — Uncertain`
   return `${pct}% — Critical`
+}
+
+// Morale reuses stability's bucketing/color scheme — same three-band read at
+// a glance, applied to a different (quality-of-life, not survival) scalar.
+function moraleClass(morale: number): string {
+  if (morale > 0.6) return 'stability-high'
+  if (morale >= 0.3) return 'stability-mid'
+  return 'stability-low'
+}
+
+function moraleLabel(morale: number): string {
+  const pct = (morale * 100).toFixed(0)
+  if (morale > 0.6) return `${pct}% — Content`
+  if (morale >= 0.3) return `${pct}% — Restless`
+  return `${pct}% — Miserable`
 }
 
 function sparklinePath(values: number[]): string {
@@ -102,6 +120,27 @@ function sparklinePath(values: number[]): string {
       </div>
       <span class="stability-label" :class="stabilityClass(props.stability)" data-testid="stability-label">
         {{ stabilityLabel(props.stability) }}
+      </span>
+    </div>
+
+    <div class="stat-block stability-section" data-testid="morale-section">
+      <span class="stat-label">Morale</span>
+      <div
+        class="stability-bar-track"
+        role="progressbar"
+        :aria-valuenow="Math.round(props.morale * 100)"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        data-testid="morale-bar"
+      >
+        <div
+          class="stability-bar-fill"
+          :class="moraleClass(props.morale)"
+          :style="{ width: `${(props.morale * 100).toFixed(1)}%` }"
+        />
+      </div>
+      <span class="stability-label" :class="moraleClass(props.morale)" data-testid="morale-label">
+        {{ moraleLabel(props.morale) }}
       </span>
     </div>
 

@@ -46,6 +46,14 @@ pub struct PopulationPool {
     /// At `1.0` the colony is fully stable; at `0.0` it is on the verge of
     /// collapse. Values outside this range are clamped by the engine.
     pub stability: f32,
+    /// Morale scalar in the range `[0.0, 1.0]` (issue #382).
+    ///
+    /// Separate from [`Self::stability`]: stability tracks life-support
+    /// survival needs (food, water, oxygen, housing, power), morale tracks
+    /// quality-of-life inputs (today: per-capita `networking_compute`) — see
+    /// `crate::morale`'s module doc comment for why the two aren't unified.
+    /// Values outside `[0.0, 1.0]` are clamped by the engine.
+    pub morale: f32,
     /// Fractional skill distribution — values must sum to `1.0`.
     ///
     /// Keys are [`SkillType`] variants. Missing keys are treated as `0.0`.
@@ -62,6 +70,7 @@ impl PopulationPool {
         Self {
             count,
             stability: 1.0,
+            morale: 1.0,
             skill_distribution,
         }
     }
@@ -80,6 +89,7 @@ impl PopulationPool {
         Self {
             count,
             stability: stability.clamp(0.0, 1.0),
+            morale: 1.0,
             skill_distribution,
         }
     }

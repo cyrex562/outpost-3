@@ -139,6 +139,8 @@ export interface ColonyScreenData {
   name: string
   population: number
   stability: number
+  /** Morale scalar in [0, 1] (issue #382) — separate from stability. */
+  morale: number
   slots_used: number
   slot_capacity: number
   labour_available: number

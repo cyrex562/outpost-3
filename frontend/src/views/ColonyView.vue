@@ -349,6 +349,10 @@ async function setBuildingPaused(buildingId: string, paused: boolean): Promise<v
 const dockContext = computed<ColonyDockContext>(() => ({
   population: selectedColony.value?.population ?? 0,
   stability: selectedColony.value?.stability ?? 0,
+  // Morale has no event-stream plumbing yet (issue #382) — sourced from the
+  // query-driven `screen` (ColonyScreenData), refreshed the same way
+  // stability's siblings below (labour, resources, ...) already are.
+  morale: screen.value?.morale ?? 0,
   availableLabour: selectedColony.value?.available_labour ?? 0,
   populationTrend: populationTrend.value,
   slotsUsed: screen.value?.slots_used ?? 0,

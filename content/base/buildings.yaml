@@ -1045,6 +1045,30 @@
     - id: components
       quantity: 5.0
 
+- id: comms_hub
+  name: Communications Hub
+  description: >
+    Data-network and compute infrastructure — produces networking_compute,
+    the utility population morale draws on per-capita and future
+    automation-tier buildings are expected to consume (issue #382). Same
+    services-category, automation-gated tier as trade_depot (sensor_array is
+    the automation-gated sibling but defense-category, not services) — this
+    one has a real recipe from the start since morale needs it to mean
+    anything.
+  category: services
+  power_delta: 6.0
+  worker_slots: 2
+  default_priority: 7
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 4
+  tech_prerequisite: automation
+  construction_cost:
+    - id: structural_metal
+      quantity: 25.0
+    - id: components
+      quantity: 10.0
+
 - id: physics_lab
   name: Physics Lab
   description: >

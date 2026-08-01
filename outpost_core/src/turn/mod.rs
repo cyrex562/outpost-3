@@ -162,6 +162,11 @@ pub struct GameState {
     /// When `None`, the needs step is skipped. Set via [`GameState::with_needs`]
     /// to enable stability dynamics.
     pub needs_config: Option<NeedsConfig>,
+    /// Morale configuration used for the per-turn morale resolution step
+    /// (issue #382).
+    ///
+    /// When `None`, the morale step is skipped — mirrors [`Self::needs_config`].
+    pub morale_config: Option<crate::morale::MoraleConfig>,
     /// System-wide research pool: research drained from all colonies each turn.
     pub research_pool: SystemResearchPool,
     /// System-wide technology research state.
@@ -420,6 +425,7 @@ impl GameState {
             month: 0,
             registry: None,
             needs_config: None,
+            morale_config: None,
             research_pool: SystemResearchPool::new(),
             tech_state: TechState::new(),
             tech_registry: None,

@@ -34,6 +34,17 @@
   kind: flow
   unit: MW
 
+- id: networking_compute
+  name: Networking / Compute
+  description: >
+    Data-network capacity and processing throughput, produced by comms_hub
+    and consumed by population morale on a per-capita basis (issue #382).
+    Colony-local for now, like power before its cross-colony transfer landed
+    (issue #383) — a network link sharing that same fixed-link capacity/loss
+    model is plausible future work.
+  kind: flow
+  unit: TFLOPS
+
 - id: housing
   name: Housing Capacity
   description: >

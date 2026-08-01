@@ -5,6 +5,7 @@ import VitalStatsPanel from '@/components/VitalStatsPanel.vue'
 const baseProps = {
   population: 240,
   stability: 0.75,
+  morale: 0.65,
   availableLabour: 12,
   populationTrend: [0, 0, 0],
   slotsUsed: 3,
@@ -21,6 +22,19 @@ describe('VitalStatsPanel (UI-rework PR4; evolved from PopulationPanel)', () => 
     expect(wrapper.find('[data-testid="build-slots"]').text()).toBe('3 / 8')
     expect(wrapper.find('[data-testid="stability-label"]').text()).toContain('Stable')
     expect(wrapper.find('[data-testid="stability-label"]').classes()).toContain('stability-high')
+  })
+
+  it('renders morale as a stat distinct from stability (issue #382)', () => {
+    const wrapper = mount(VitalStatsPanel, { props: baseProps })
+    expect(wrapper.find('[data-testid="morale-label"]').text()).toContain('Content')
+    expect(wrapper.find('[data-testid="morale-label"]').classes()).toContain('stability-high')
+    expect(wrapper.find('[data-testid="morale-bar"]').attributes('aria-valuenow')).toBe('65')
+  })
+
+  it('labels low morale as Miserable', () => {
+    const wrapper = mount(VitalStatsPanel, { props: { ...baseProps, morale: 0.1 } })
+    expect(wrapper.find('[data-testid="morale-label"]').text()).toContain('Miserable')
+    expect(wrapper.find('[data-testid="morale-label"]').classes()).toContain('stability-low')
   })
 
   it('labels low stability as Critical', () => {

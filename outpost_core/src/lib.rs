@@ -36,6 +36,7 @@ pub mod map;
 pub mod menace;
 pub mod migration;
 pub mod modifier;
+pub mod morale;
 pub mod needs;
 pub mod orbital;
 pub mod outpost;
@@ -3149,6 +3150,36 @@ impl GameEngine {
                             stability_delta: scaled_stability_delta,
                             population_delta: scaled_pop_delta,
                         });
+                    }
+                }
+
+                // ── Step 2a: Morale resolution (issue #382) ─────────────────
+                // Separate from Step 2's stability pipeline — see
+                // `crate::morale`'s module doc comment for why. Runs before
+                // Step 2b clears colony resources, same as Step 2, so this
+                // sol's `networking_compute` production is what's checked
+                // against, not next sol's.
+                if let Some(config) = self.state.morale_config.clone() {
+                    let empty_registry = content::ContentRegistry::default();
+                    let morale_registry = self.state.registry.as_ref().unwrap_or(&empty_registry);
+                    for (colony, pop) in self
+                        .state
+                        .colonies
+                        .iter_mut()
+                        .zip(self.state.populations.iter_mut())
+                    {
+                        let population_count = f64::from(pop.count);
+                        let report = morale::apply_morale_check_scaled(
+                            &mut colony::ColonyStores::new(
+                                &mut colony.pool,
+                                &mut colony.resources,
+                                morale_registry,
+                            ),
+                            population_count,
+                            &config,
+                            1.0,
+                        );
+                        pop.morale = (pop.morale + report.morale_delta).clamp(0.0, 1.0);
                     }
                 }
 
@@ -6820,6 +6851,7 @@ impl GameEngine {
                     name: c.name.clone(),
                     population: p.count,
                     stability: p.stability,
+                    morale: p.morale,
                     slots_used: c.slots_used(),
                     slot_capacity: c.slot_capacity,
                     labour_available: labour_available_now,
@@ -15187,6 +15219,112 @@ mod tests {
         assert!(
             final_stability < initial_stability,
             "stability should decline under starvation: initial={initial_stability}, final={final_stability}"
+        );
+    }
+
+    // ── Morale resolution (issue #382) ──────────────────────────────────────
+
+    /// Done-when: morale improves when networking_compute is abundant, and is
+    /// tracked separately from stability.
+    #[test]
+    fn morale_improves_under_abundant_compute() {
+        use crate::morale::MoraleConfig;
+
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Wired Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        engine.state.morale_config = Some(MoraleConfig::default_config());
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        // Start below neutral so there's room to improve.
+        engine.state.populations[idx].morale = 0.4;
+        let initial_morale = engine.state.populations[idx].morale;
+        let initial_stability = engine.state.populations[idx].stability;
+
+        for _ in 0..10 {
+            engine.state.colonies[idx]
+                .pool
+                .deposit("networking_compute", 1000.0);
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let final_morale = engine.state.populations[idx].morale;
+        assert!(
+            final_morale > initial_morale,
+            "morale should improve under abundant compute: initial={initial_morale}, final={final_morale}"
+        );
+        // No needs_config was set, so stability (a distinct field) must be untouched.
+        assert!(
+            (engine.state.populations[idx].stability - initial_stability).abs() < f32::EPSILON,
+            "morale resolution must not touch stability"
+        );
+    }
+
+    /// Done-when: morale declines when networking_compute is entirely absent.
+    #[test]
+    fn morale_declines_without_compute() {
+        use crate::morale::MoraleConfig;
+
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Unwired Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        engine.state.morale_config = Some(MoraleConfig::default_config());
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let initial_morale = engine.state.populations[idx].morale;
+
+        for _ in 0..10 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let final_morale = engine.state.populations[idx].morale;
+        assert!(
+            final_morale < initial_morale,
+            "morale should decline with no compute: initial={initial_morale}, final={final_morale}"
+        );
+    }
+
+    /// Done-when: morale resolution is a no-op while `morale_config` is unset —
+    /// mirrors the needs step's opt-in behaviour.
+    #[test]
+    fn morale_stays_at_default_without_morale_config() {
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "No Morale Config Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(engine.state.morale_config.is_none());
+
+        for _ in 0..5 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        assert!(
+            (engine.state.populations[idx].morale - 1.0).abs() < f32::EPSILON,
+            "morale must stay at its default when morale_config is unset"
         );
     }
 

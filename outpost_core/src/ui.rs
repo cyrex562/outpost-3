@@ -31,6 +31,9 @@ pub struct ColonyScreenData {
     pub population: f32,
     /// Stability scalar in `[0.0, 1.0]`.
     pub stability: f32,
+    /// Morale scalar in `[0.0, 1.0]` (issue #382) — separate from `stability`,
+    /// see `crate::morale`'s module doc comment.
+    pub morale: f32,
     /// Build slots currently in use.
     pub slots_used: u32,
     /// Total build slot capacity.
@@ -629,6 +632,7 @@ mod tests {
             name: "Alpha Base".to_string(),
             population: 100.0,
             stability: 0.8,
+            morale: 0.7,
             slots_used: 2,
             slot_capacity: 5,
             labour_available: 40.0,
