@@ -10,6 +10,7 @@ use outpost_core::colony::ColonyId;
 use outpost_core::content::loader::PackLoader;
 use outpost_core::difficulty::DifficultyPreset;
 use outpost_core::modifier::{DifficultyScalar, ModifiableQuantity};
+use outpost_core::morale::MoraleConfig;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::snapshot::Snapshot as SnapshotDb;
 use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
@@ -1058,6 +1059,7 @@ pub fn bootstrap(
     let mut engine = GameEngine::new();
     engine.state.registry = Some(registry);
     engine.state.needs_config = Some(NeedsConfig::default_survival());
+    engine.state.morale_config = Some(MoraleConfig::default_config());
 
     let _ = engine.apply(&Command::SetDifficulty {
         preset: parse_preset(&difficulty),

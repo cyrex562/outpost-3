@@ -147,6 +147,8 @@ export function clearPersistedColonyLayout(): void {
 export interface ColonyDockContext {
   population: number
   stability: number
+  /** Morale scalar in [0, 1] (issue #382) — separate from stability. */
+  morale: number
   availableLabour: number
   populationTrend: number[]
   slotsUsed: number

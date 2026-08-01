@@ -18,6 +18,7 @@ if (!ctx) throw new Error('DockVitalStatsPanel must be mounted inside a colony d
   <VitalStatsPanel
     :population="ctx.population"
     :stability="ctx.stability"
+    :morale="ctx.morale"
     :available-labour="ctx.availableLabour"
     :population-trend="ctx.populationTrend"
     :slots-used="ctx.slotsUsed"

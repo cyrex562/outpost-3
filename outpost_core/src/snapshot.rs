@@ -356,6 +356,7 @@ impl FullStateBlob {
             // Runtime-only fields that are reloaded from content packs after load:
             registry: None,
             needs_config: None,
+            morale_config: None,
             tech_registry: None,
             hazard_config: None,
         }

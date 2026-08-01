@@ -13,6 +13,7 @@ use outpost_core::content::loader::{PackLoader, RawFile};
 use outpost_core::content::registry::ContentRegistry;
 use outpost_core::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
 use outpost_core::modifier::ModifiableQuantity;
+use outpost_core::morale::MoraleConfig;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::system::SystemCommand;
 use outpost_core::tech::load_tech_registry;
@@ -707,6 +708,7 @@ async fn handle_new_game(
 
         // Build and install a default survival NeedsConfig.
         engine.state.needs_config = Some(NeedsConfig::default_survival());
+        engine.state.morale_config = Some(MoraleConfig::default_config());
 
         let mut events: Vec<outpost_core::Event> = Vec::new();
 
@@ -1848,6 +1850,58 @@ mod tests {
         assert!(
             (capacity_sol2 - capacity_sol1).abs() < 1e-6,
             "waste_processing capacity should be re-established each sol, not accumulated: sol1={capacity_sol1}, sol2={capacity_sol2}"
+        );
+    }
+
+    /// Real-engine proof that `comms_hub` (issue #382) actually produces
+    /// `networking_compute` against the real content pack — the utility
+    /// population morale draws on per-capita.
+    #[test]
+    fn comms_hub_produces_networking_compute_from_real_pack() {
+        use outpost_core::colony::PlacedBuilding;
+        use outpost_core::{Command, Event, GameEngine};
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+        let root = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let base_dir = root.join("content").join("base");
+        let registry = load_content_pack_from_dir(&base_dir).expect("base pack must load");
+
+        let mut engine = GameEngine::with_seed(0);
+        engine.state.registry = Some(registry);
+
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Comms Hub Test".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        let idx = engine
+            .state
+            .colonies
+            .iter()
+            .position(|c| c.id == colony_id)
+            .unwrap();
+
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("comms_hub", 0));
+        engine.state.colonies[idx]
+            .buildings
+            .push(PlacedBuilding::new("solar_array_mk1", 1));
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let compute = engine.state.colonies[idx]
+            .resources
+            .amount("networking_compute");
+        assert!(
+            compute > 0.0,
+            "comms_hub should produce networking_compute, got {compute}"
         );
     }
 

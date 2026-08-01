@@ -113,6 +113,15 @@
     - id: research
       quantity: 5.0
 
+- id: operate_comms_hub
+  name: Operate Communications Hub
+  building: comms_hub
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: networking_compute
+      quantity: 20.0
+
 - id: house_colonists_basic
   name: House Colonists (Basic)
   building: basic_habitat
