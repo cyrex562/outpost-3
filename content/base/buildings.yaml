@@ -1050,10 +1050,11 @@
   description: >
     Data-network and compute infrastructure — produces networking_compute,
     the utility population morale draws on per-capita and future
-    automation-tier buildings are expected to consume (issue #382). Sibling
-    to trade_depot/sensor_array: same services-category, automation-gated
-    placeholder tier, but this one has a real recipe from the start since
-    morale needs it to mean anything.
+    automation-tier buildings are expected to consume (issue #382). Same
+    services-category, automation-gated tier as trade_depot (sensor_array is
+    the automation-gated sibling but defense-category, not services) — this
+    one has a real recipe from the start since morale needs it to mean
+    anything.
   category: services
   power_delta: 6.0
   worker_slots: 2
