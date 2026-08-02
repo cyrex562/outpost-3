@@ -133,7 +133,8 @@ const infraEdges = computed<RenderedEdge[]>(() => {
   return out
 })
 
-const contentBounds = computed(() => {
+/** Unpadded pixel extent of the hex grid, or `null` when there are no hexes. */
+const rawExtent = computed<{ minX: number; minY: number; maxX: number; maxY: number } | null>(() => {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -144,16 +145,97 @@ const contentBounds = computed(() => {
     if (h.cx > maxX) maxX = h.cx
     if (h.cy > maxY) maxY = h.cy
   }
-  if (!isFinite(minX)) {
+  return isFinite(minX) ? { minX, minY, maxX, maxY } : null
+})
+
+const contentBounds = computed(() => {
+  const e = rawExtent.value
+  if (!e) {
     return { x: -HEX_SIZE, y: -HEX_SIZE, w: HEX_SIZE * 2, h: HEX_SIZE * 2 }
   }
   const pad = HEX_SIZE + 8
   return {
-    x: minX - pad,
-    y: minY - pad,
-    w: maxX - minX + pad * 2,
-    h: maxY - minY + pad * 2,
+    x: e.minX - pad,
+    y: e.minY - pad,
+    w: e.maxX - e.minX + pad * 2,
+    h: e.maxY - e.minY + pad * 2,
   }
+})
+
+/**
+ * Horizontal pixel shifts at which the whole map (hexes, deposits, infra
+ * edges, colony markers) must be redrawn so panning west/east never runs off
+ * into empty space — `PlanetMap.width` "wraps east-west" (see
+ * `tauriBridge.ts`), but until now only infra-edge line segments accounted
+ * for that (via the nearest-copy trick above); the tiles themselves were
+ * drawn exactly once and simply ended at the map's edge.
+ *
+ * Computed from the current viewBox so exactly enough repeats render to
+ * cover what's visible, at any zoom level — not a fixed "3 copies" that
+ * would run out at low zoom (a small body's map can need a dozen+ repeats to
+ * fill `MAX_VIEW_W`) or waste render cost at high zoom (where 1 is enough).
+ */
+const wrapShifts = computed<number[]>(() => {
+  const period = mapPixelWidth.value
+  const e = rawExtent.value
+  if (!e || !Number.isFinite(period) || period <= 1) return [0]
+  const vb = viewBox.value
+  // Copy k occupies [minX + k*period, maxX + k*period]; it overlaps the
+  // viewBox when minX+k*period <= vb.x+vb.w (bounds k from above → floor)
+  // and maxX+k*period >= vb.x (bounds k from below → ceil).
+  const kLow = Math.ceil((vb.x - e.maxX) / period)
+  const kHigh = Math.floor((vb.x + vb.w - e.minX) / period)
+  // Safety ceiling, not a realistic limit — MAX_VIEW_W / the narrowest real
+  // map width (`BodySize::Tiny`, 10 columns) needs well under this many.
+  const MAX_COPIES = 41
+  const shifts: number[] = []
+  for (let k = kLow; k <= kHigh && shifts.length < MAX_COPIES; k++) shifts.push(k * period)
+  return shifts.length ? shifts : [0]
+})
+
+// Pre-flattened (shift × item) views of the three renderable layers, each
+// with cx offset by its shift. Kept as plain sibling arrays (not an extra
+// wrapping `<g transform>` per shift) so the rendered DOM stays exactly the
+// structure it was before wrapping existed whenever wrapShifts is just
+// `[0]` (the common case, and every existing test's case) — a `<g>`
+// wrapper would shift every `find('g')`/`findAll('g')[i]` index in ways
+// unrelated to this feature.
+interface WrappedHex extends Positioned {
+  wrapKey: string
+}
+
+const wrappedPositioned = computed<WrappedHex[]>(() => {
+  const out: WrappedHex[] = []
+  for (const shift of wrapShifts.value) {
+    for (const h of positioned.value) {
+      out.push({ ...h, cx: h.cx + shift, wrapKey: `${shift}:${h.site_id || `${h.q}-${h.r}`}` })
+    }
+  }
+  return out
+})
+
+const wrappedOccupiedHexes = computed<WrappedHex[]>(() => {
+  const out: WrappedHex[] = []
+  for (const shift of wrapShifts.value) {
+    for (const h of occupiedHexes.value) {
+      out.push({ ...h, cx: h.cx + shift, wrapKey: `${shift}:marker-${h.site_id}` })
+    }
+  }
+  return out
+})
+
+interface WrappedEdge extends RenderedEdge {
+  wrapKey: string
+}
+
+const wrappedInfraEdges = computed<WrappedEdge[]>(() => {
+  const out: WrappedEdge[] = []
+  for (const shift of wrapShifts.value) {
+    for (const e of infraEdges.value) {
+      out.push({ ...e, x1: e.x1 + shift, x2: e.x2 + shift, wrapKey: `${shift}:${e.key}` })
+    }
+  }
+  return out
 })
 
 // ── ViewBox pan/zoom state ─────────────────────────────────────────────────
@@ -502,6 +584,21 @@ const legend = computed<{ commodity_id: string; color: string; code: string }[]>
     .map((id) => ({ commodity_id: id, color: depositColor(id), code: depositCode(id) }))
 })
 
+// Terrain is the base fill color every hex gets before the water/vegetation/
+// elevation/temperature/contamination overlays blend on top of it (see
+// `terrainColor()`), so it's the one tile property worth a swatch legend —
+// those other layers are continuous tints, not discrete categories, and
+// biome doesn't drive its own color at all (only a vegetation-strength
+// fallback). Both are still readable per-hex from the hover tooltip. Only
+// terrain values actually present on this map get a row, matching Deposits.
+const terrainLegend = computed<{ terrain: string; color: string }[]>(() => {
+  const seen = new Set<string>()
+  for (const h of props.map.hexes) seen.add(h.terrain)
+  return Array.from(seen)
+    .sort()
+    .map((terrain) => ({ terrain, color: TERRAIN_COLOR[terrain] ?? '#556' }))
+})
+
 /** Axial hex distance, matching the Rust `HexCoord::distance` cube-coordinate formula. */
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   const dq = Math.abs(a.q - b.q)
@@ -630,9 +727,15 @@ defineExpose({ focusSite, resetView })
       @wheel.prevent="onWheel"
       @mousedown="onMouseDown"
     >
+      <!-- `wrappedPositioned` repeats every hex at each entry in `wrapShifts`
+           (west/east panning must never run into empty space — the
+           underlying map wraps east-west); in the common case wrapShifts is
+           just `[0]`, so this renders identically to a plain `positioned`
+           loop. Click/hover handlers receive the wrapped-and-shifted copy,
+           which carries the same site_id/q/r as the real hex either way. -->
       <g
-        v-for="h in positioned"
-        :key="h.site_id || `${h.q}-${h.r}`"
+        v-for="h in wrappedPositioned"
+        :key="h.wrapKey"
         :class="classes(h)"
         @click="onHexClick(h)"
         @mouseenter="onHexEnter(h, $event)"
@@ -640,7 +743,7 @@ defineExpose({ focusSite, resetView })
         @mouseleave="onHexLeave"
       >
         <polygon :points="hexPoints(h.cx, h.cy)" :fill="terrainColor(h)" />
-        <g v-for="d in depositPositions(h)" :key="`${h.site_id}-${d.commodity_id}`">
+        <g v-for="d in depositPositions(h)" :key="`${h.wrapKey}-${d.commodity_id}`">
           <rect
             :x="d.cx - d.size / 2"
             :y="d.cy - d.size / 2"
@@ -667,8 +770,8 @@ defineExpose({ focusSite, resetView })
            the colony markers below, so nodes stay legible. -->
       <g class="infra-layer" data-testid="infra-layer">
         <line
-          v-for="edge in infraEdges"
-          :key="edge.key"
+          v-for="edge in wrappedInfraEdges"
+          :key="edge.wrapKey"
           :x1="edge.x1"
           :y1="edge.y1"
           :x2="edge.x2"
@@ -684,7 +787,7 @@ defineExpose({ focusSite, resetView })
       <!-- Colony markers, on top of the infrastructure layer. The labels are
            pointer-events:none, so clicks fall through to the occupied hex
            group below (which owns selection) — no marker click handler needed. -->
-      <g v-for="h in occupiedHexes" :key="`marker-${h.site_id}`" class="colony-marker">
+      <g v-for="h in wrappedOccupiedHexes" :key="h.wrapKey" class="colony-marker">
         <text :x="h.cx" :y="h.cy + 4" text-anchor="middle" class="colony-label">★</text>
         <text
           :x="h.cx"
@@ -744,12 +847,25 @@ defineExpose({ focusSite, resetView })
       </div>
     </div>
 
-    <div v-if="legend.length" class="legend" data-testid="planet-map-legend">
-      <div class="legend-title">Deposits</div>
-      <div v-for="e in legend" :key="e.commodity_id" class="legend-row">
-        <span class="legend-box" :style="{ background: e.color }">{{ e.code }}</span>
-        <span class="legend-label">{{ e.commodity_id }}</span>
-      </div>
+    <div
+      v-if="terrainLegend.length || legend.length"
+      class="legend"
+      data-testid="planet-map-legend"
+    >
+      <template v-if="terrainLegend.length">
+        <div class="legend-title" data-testid="planet-map-legend-terrain-title">Terrain</div>
+        <div v-for="t in terrainLegend" :key="t.terrain" class="legend-row">
+          <span class="legend-swatch" :style="{ background: t.color }" />
+          <span class="legend-label">{{ t.terrain }}</span>
+        </div>
+      </template>
+      <template v-if="legend.length">
+        <div class="legend-title" :class="{ 'legend-title-spaced': terrainLegend.length }">Deposits</div>
+        <div v-for="e in legend" :key="e.commodity_id" class="legend-row">
+          <span class="legend-box" :style="{ background: e.color }">{{ e.code }}</span>
+          <span class="legend-label">{{ e.commodity_id }}</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -867,6 +983,7 @@ defineExpose({ focusSite, resetView })
   max-width: 130px;
 }
 .legend-title { color: #668; margin-bottom: 0.2rem; }
+.legend-title-spaced { margin-top: 0.4rem; }
 .legend-row { display: flex; align-items: center; gap: 0.35rem; }
 .legend-box {
   display: inline-flex;
@@ -879,6 +996,14 @@ defineExpose({ focusSite, resetView })
   color: #000;
   font-size: 0.55rem;
   font-weight: bold;
+}
+.legend-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid #000;
+  flex-shrink: 0;
 }
 .legend-label { white-space: nowrap; }
 
