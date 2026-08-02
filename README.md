@@ -2,339 +2,121 @@
 
 # Outpost 3
 
-Turn-based grand-strategy colony game, star-system scale.
+A turn-based grand-strategy game about colonizing an entire **star system**, starting from a single colony. Depth comes from breadth and interconnection — many structures, commodities, production chains, and decisions spanning many sites — rather than spatial simulation. The same core loop (**specialize, connect, build**) applies at every scope, from a single colony's economy up to system-wide megaprojects.
 
----
-
-Option A — wasm-server-runner (simple):
-```
-$env:CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER = "wasm-server-runner"    # PowerShell
-cargo run -p outpost-client --target wasm32-unknown-unknown --no-default-features --features wasm
-```
-
-Option B — Trunk (alternative):
-```
-cargo install trunk
-trunk serve
-```
-
-### Architecture Diagram
-See `docs/diagrams/architecture.md` for a high-level diagram of the Phase 3.5 Desktop/WASM architecture (core <-> client and storage backends), with Mermaid source in `docs/diagrams/architecture.mmd`.
-
-Controls (current):
-- Pan: WASD or drag
-- Zoom: Mouse wheel
-- Space: Advance turn
-- B: Open build/placement
-- Esc: Close top-most modal
-
-## Overview
-
-Build sprawling settlements around wormhole gates, develop planetary economies, establish trade networks using trains traveling through wormhole connections, and create a thriving interstellar economic empire.
-
-### Core Features
-
-- **Colony Development** - Expand from small outpost to sprawling settlement
-- **Resource Extraction** - Mine, farm, and produce goods
-- **Industrial Production** - Build factories and production chains
-- **Wormhole Network** - Connect distant worlds via wormhole gates
-- **Train Logistics** - Manage cargo and passenger trains through wormholes
-- **Economic Simulation** - Dynamic markets, supply/demand, and trade
-- **Turn-Based Gameplay** - Strategic planning and simulation
+See **[docs/DESIGN.md](docs/DESIGN.md)** for the full design document — this README only covers building and running the project.
 
 ## Project Structure
 
 ```
 outpost-3/
-├── Cargo.toml              # Rust dependencies
-├── CLAUDE_RUST.md          # Rust best practices for AI assistants
-├── DESIGN.md               # Comprehensive game design document
-├── ROADMAP.md              # Feature implementation checklist
-├── README.md               # This file
-├── src/                    # Rust source code
-│   ├── main.rs            # Application entry point
-│   ├── domain/            # Domain models and business logic
-│   ├── events/            # Event sourcing infrastructure
-│   ├── commands/          # Command pattern implementations
-│   ├── queries/           # CQRS query side
-│   ├── services/          # Application services
-│   ├── web/               # HTTP handlers and routes
-│   ├── db/                # Database layer
-│   └── simulation/        # Turn-based simulation engine
-├── templates/             # Tera HTML templates
-├── static/                # CSS, JS, images
-├── tests/                 # Test suite
-└── migrations/            # SQL migrations
+├── Cargo.toml           # Rust workspace root
+├── outpost_core/        # Pure Rust simulation library — zero I/O, zero framework deps
+├── outpost_harness/     # CLI balance harness (`harness` binary) for tuning commodity graphs
+├── outpost_web/         # Axum HTTP/WebSocket host — wraps outpost_core, serves the frontend in browser mode
+├── outpost_tauri/       # Tauri desktop shell — the primary way to play (excluded from the root workspace, see below)
+├── frontend/            # Vue 3 + TypeScript + Vite UI, shared by outpost_web and outpost_tauri
+├── xtask/               # In-repo build orchestration (`cargo xtask`) — playtest/portable builds
+├── content/             # YAML/JSON content packs (buildings, commodities, recipes, tech, events, …)
+├── docs/                # Design doc, harness guide, issue breakdown
+├── godot/               # Legacy Godot 4 + C# implementation — read-only behavioral spec, not modified
+├── reference/           # harsh_realm — a reference Rust+Vue project, structural patterns only
+└── old/                 # Archived prior attempts (Bevy, Actix/HTMX, Python/FastAPI+Vue)
 ```
+
+`outpost_tauri` is deliberately **outside** the root `[workspace]` in `Cargo.toml` — it needs WebKit2GTK system libraries on Linux that aren't guaranteed to be present everywhere (including CI), so it's built/tested separately, on whichever machine actually has them.
 
 ## Prerequisites
 
-### Required
-
-- **Rust** - 1.70.0 or newer ([Install Rust](https://rustup.rs/))
-- **Cargo** - Comes with Rust installation
-
-### Optional
-
-- **SQLite** - Bundled with rusqlite, but can use system version
-
-## Installation
-
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd outpost-3
-```
-
-### 2. Build the Project
-
-```bash
-cargo build
-```
-
-This will:
-- Download and compile all dependencies
-- Build the application in debug mode
-- Create the SQLite database file
-
-### 3. Run the Application
-
-```bash
-cargo run
-```
-
-The server will start on `http://127.0.0.1:8080`
-
-## Usage
-
-### Starting the Game
-
-1. Open your browser and navigate to `http://127.0.0.1:8080`
-2. Click "View Your Colony" to see your starting colony
-3. Build facilities, manage resources, and advance turns
-
-### Basic Gameplay
-
-**Building Construction:**
-1. Go to Colony screen
-2. Select a building type from the dropdown
-3. Click "Construct" (if you have enough resources)
-4. Building will appear in the building list
-
-**Advancing Turns:**
-1. Click "Advance Turn" button
-2. Game processes:
-   - Resource extraction
-   - Production
-   - Population changes
-   - Economic calculations
-
-**Resource Management:**
-- Monitor resources in the Resources panel
-- Buildings consume resources and produce outputs
-- Balance production and consumption
+- **Rust** (stable, via [rustup](https://rustup.rs/)) — no pinned toolchain version.
+- **Node.js 18+** and npm, for the frontend.
+- To build/run `outpost_tauri` on Linux: WebKit2GTK and the other [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ## Development
 
-### Running in Development Mode
+### Browser mode (fastest loop, no Tauri prerequisites)
+
+Two processes, in separate terminals:
 
 ```bash
-cargo run
+# Terminal 1 — the game engine + API, on :3000
+cargo run -p outpost_web
+
+# Terminal 2 — the frontend dev server, on :5173, proxying /api and /ws to :3000
+cd frontend
+npm install
+npm run dev
 ```
 
-The application will:
-- Run with debug logging
-- Auto-reload on code changes (with cargo-watch)
-- Use SQLite database at `./outpost3.db`
+Open `http://localhost:5173`.
 
-### Running Tests
+### Desktop mode (Tauri — the primary way the game ships)
 
 ```bash
-# Run all tests
-cargo test
-
-# Run specific test
-cargo test test_name
-
-# Run with output
-cargo test -- --nocapture
+cd outpost_tauri
+cargo tauri dev
 ```
 
-### Building for Release
+This drives the same `frontend/` UI inside a native window, talking to `outpost_core` directly over Tauri IPC rather than through `outpost_web`'s HTTP/WebSocket layer.
+
+### Balance harness
+
+`outpost_harness` runs static flow-balance checks against a content-pack bundle, independent of either host:
 
 ```bash
-cargo build --release
+cargo run --bin harness -- check content/checks/<name>
 ```
 
-The optimized binary will be in `target/release/outpost3`
-
-### Database Management
-
-**Reset Database:**
-```bash
-rm outpost3.db
-cargo run  # Will recreate with fresh schema
-```
-
-**View Database:**
-```bash
-sqlite3 outpost3.db
-.tables
-SELECT * FROM events;
-```
-
-## Project Documentation
-
-### Key Documents
-
-- **[DESIGN.md](DESIGN.md)** - Comprehensive game design and technical architecture
-- **[ROADMAP.md](docs/archive/ROADMAP.md)** - Feature implementation checklist organized by phase
-- **[CLAUDE_RUST.md](CLAUDE_RUST.md)** - Rust best practices for AI assistants working on this project
-
-### Architecture Highlights
-
-**Event Sourcing:**
-- All state changes captured as immutable events
-- Complete audit trail of game history
-- State reconstruction by replaying events
-- Easy save/load implementation
-
-**Command Pattern:**
-- User actions encapsulated as commands
-- Validation before execution
-- Commands generate events
-- Clear separation of concerns
-
-**CQRS:**
-- Separate models for writes (commands) and reads (queries)
-- Optimized read projections
-- Scalable architecture
-
-**Domain-Driven Design:**
-- Pure domain logic (no I/O in domain layer)
-- Rich domain models
-- Clear boundaries between layers
-
-## Technology Stack
-
-### Backend
-
-- **Rust** - Systems programming language
-- **Actix-web** - High-performance web framework
-- **SQLite** - Embedded database
-- **r2d2** - Connection pooling
-- **Serde** - Serialization/deserialization
-- **Chrono** - Date and time handling
-- **Thiserror/Anyhow** - Error handling
-
-### Frontend
-
-- **Tera** - Template engine (Jinja2-like)
-- **HTMX** - Dynamic HTML without heavy JavaScript
-- **CSS** - Custom styling with CSS variables
-- **TypeScript** - (Future) Enhanced client-side features
-
-## Current Features (v0.1.0)
-
-### Implemented
-
-- ✅ Project structure and dependencies
-- ✅ Event sourcing infrastructure
-- ✅ Command pattern with validation
-- ✅ SQLite database with migrations
-- ✅ Actix-web server with routing
-- ✅ Basic colony screen UI
-- ✅ Resource display
-- ✅ Building construction (4 types)
-- ✅ Turn advancement
-- ✅ HTMX integration
-- ✅ Responsive CSS styling
-
-### In Development
-
-See [ROADMAP.md](docs/archive/ROADMAP.md) for detailed feature list and implementation plan.
-
-## Configuration
-
-Configuration is in `src/config.rs`. Default settings:
-
-```rust
-server.host = "127.0.0.1"
-server.port = 8080
-database.path = "outpost3.db"
-game.starting_credits = 10000
-```
-
-To customize, edit `src/config.rs` and rebuild.
-
-## Troubleshooting
-
-### Port Already in Use
-
-If port 8080 is already in use, change it in `src/config.rs`:
-
-```rust
-port: 8081,  // Or any available port
-```
-
-### Database Errors
-
-If you encounter database errors, try resetting:
+## Running Tests
 
 ```bash
-rm outpost3.db
-cargo run
+# Rust — whole workspace (outpost_core, outpost_harness, outpost_web)
+cargo test --workspace
+cargo clippy --workspace -- -D warnings
+cargo fmt --check --all
+
+# outpost_tauri — separate workspace, only where WebKit2GTK is available
+cargo check -p outpost_tauri
 ```
-
-### Compilation Errors
-
-Ensure you have the latest Rust version:
 
 ```bash
-rustup update
+# Frontend — from frontend/
+npm run type-check   # vue-tsc
+npm run test:unit    # vitest
+npm run build        # production build (also type-checks)
+npm run test:e2e     # Playwright, headless
 ```
 
-### HTMX Not Working
+See **[CLAUDE.md](CLAUDE.md)**'s Definition of Done for exactly which tiers apply to a given change.
 
-Make sure you have internet connection on first load (HTMX is loaded from CDN). For offline use, download HTMX and serve it locally.
+## Building a Playtest Version
+
+`cargo xtask` (aliased in `.cargo/config.toml`, so it works from the repo root) is the in-repo build orchestrator for producing a shareable build without going through a full installer — e.g. to hand a build to a playtester quickly.
+
+```bash
+cargo xtask help                    # list commands
+cargo xtask build-windows-portable  # build + zip a portable, installer-free Windows bundle under dist/
+cargo xtask install-windows         # Windows-only: build and install into %LOCALAPPDATA%\Outpost3\
+cargo xtask setup-windows           # install the Windows cross-compile target + cargo-xwin (Linux/macOS only)
+```
+
+- **`build-windows-portable`** builds the frontend, then `outpost_tauri`, and zips the result (`dist/outpost3-windows-portable-x86_64.zip`) — just unzip and run `Outpost3.exe`, no installer needed. Builds natively when run on Windows; best-effort cross-compiles via `cargo-xwin` when run from Linux/macOS (this sidesteps `outpost_tauri`'s Linux WebKit2GTK requirement, but is not the recommended release path — verify a cross-compiled build against a native one before shipping it).
+- **`install-windows`** (Windows-only) does the same build, but copies the result into a stable `%LOCALAPPDATA%\Outpost3\` location instead of a throwaway zip — convenient for repeat local playtesting (pin a shortcut to it) — and prints the path to its verbose log file (`%LOCALAPPDATA%\com.cyrex562.outpost3\logs\outpost3.log`) for attaching to bug reports.
+- **`setup-windows`** installs the `x86_64-pc-windows-msvc` Rust target and `cargo-xwin`, without building — only needed to prep the Linux/macOS cross-compile path.
+
+The **authoritative installer build** (NSIS/WiX) remains `cargo tauri build`, run natively on Windows from inside `outpost_tauri/` — `xtask` exists for a quick zip-and-go artifact, not to replace that.
+
+## Documentation
+
+- **[docs/DESIGN.md](docs/DESIGN.md)** — the authoritative game design document.
+- **[docs/HARNESS.md](docs/HARNESS.md)** — how the automated issue-implementation harness works.
+- **[docs/ISSUES.md](docs/ISSUES.md)** — issue breakdown.
+- **[CLAUDE.md](CLAUDE.md)** — conventions and the test/review/merge gate for AI coding assistants (and anyone else) working on this repo.
 
 ## Contributing
 
-This is an early prototype. Contributions welcome!
-
-### Development Workflow
-
-1. Check [ROADMAP.md](docs/archive/ROADMAP.md) for planned features
-2. Pick an uncompleted feature
-3. Implement following patterns in [CLAUDE_RUST.md](CLAUDE_RUST.md)
-4. Write tests
-5. Submit pull request
-
-### Code Style
-
-- Follow Rust idioms and best practices
-- Use the patterns defined in CLAUDE_RUST.md
-- Write tests for domain logic
-- Document complex algorithms
-- Keep commits focused and atomic
+Work is tracked as [GitHub issues](https://github.com/cyrex562/outpost-3/issues). Branch from `main`, follow the conventions and Definition of Done in [CLAUDE.md](CLAUDE.md), and open a PR.
 
 ## License
 
-MIT License (or specify your license)
-
-## Acknowledgments
-
-- Inspired by the original **Outpost** game
-- Wormhole mechanics from **Peter F. Hamilton's Commonwealth** universe
-- Built with amazing Rust ecosystem tools
-
-## Contact
-
-For questions, issues, or suggestions, please open an issue on GitHub.
-
----
-
-**Happy Building!**
-
-Build your empire across the stars, one wormhole at a time.
+MIT (see `Cargo.toml`).
