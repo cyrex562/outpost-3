@@ -10,8 +10,7 @@ if (!ctx) throw new Error('AlertsWindowPanel must be mounted with ColonyWindowCo
 
 <template>
   <AlertsPanel
-    :notifications="ctx.notifications"
-    :event-log="ctx.eventLog"
-    @clear-log="ctx.clearEventLog"
+    :log-entries="ctx.logEntries"
+    @clear-log="ctx.clearLog"
   />
 </template>

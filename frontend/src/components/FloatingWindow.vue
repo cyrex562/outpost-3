@@ -24,10 +24,30 @@
  * threshold, and bumps itself to the front of a shared z-order on any
  * click. Both `windowId` and the registry are optional — a `FloatingWindow`
  * used standalone (no id, no providing ancestor) behaves exactly as before.
+ *
+ * Resize handles on all four edges plus all four corners (colony details
+ * multi-window redesign) — not just the bottom-right corner grip. Each
+ * handle frees a different subset of the rect's four edges (a side handle
+ * frees one, a corner frees two); see `RESIZE_FREE_EDGES`.
  */
 
 import { inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { FLOATING_WINDOW_REGISTRY_KEY } from '@/composables/floatingWindowRegistry'
+import { FLOATING_WINDOW_REGISTRY_KEY, type FreeEdges } from '@/composables/floatingWindowRegistry'
+
+/** The eight resize handle directions. */
+type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
+/** Which of the rect's four edges each handle direction moves. */
+const RESIZE_FREE_EDGES: Record<ResizeDir, FreeEdges> = {
+  n: { left: false, right: false, top: true, bottom: false },
+  s: { left: false, right: false, top: false, bottom: true },
+  e: { left: false, right: true, top: false, bottom: false },
+  w: { left: true, right: false, top: false, bottom: false },
+  ne: { left: false, right: true, top: true, bottom: false },
+  nw: { left: true, right: false, top: true, bottom: false },
+  se: { left: false, right: true, top: false, bottom: true },
+  sw: { left: true, right: false, top: false, bottom: true },
+}
 
 const props = defineProps<{
   title: string
@@ -262,10 +282,10 @@ function savePersisted(): void {
   }
 }
 
-// ── Drag (title bar) + resize (corner grip) ────────────────────────────────
+// ── Drag (title bar) + resize (8 handles) ───────────────────────────────────
 // A single pointer origin serves both gestures; only one is active at a time.
 let dragging = false
-let resizing = false
+let resizeDir: ResizeDir | null = null
 let originClientX = 0
 let originClientY = 0
 let originX = 0
@@ -286,11 +306,13 @@ function onDragStart(e: MouseEvent): void {
   e.preventDefault()
 }
 
-function onResizeStart(e: MouseEvent): void {
+function onResizeStart(dir: ResizeDir, e: MouseEvent): void {
   if (e.button !== 0) return
-  resizing = true
+  resizeDir = dir
   originClientX = e.clientX
   originClientY = e.clientY
+  originX = rect.x
+  originY = rect.y
   originW = rect.w
   originH = rect.h
   e.preventDefault()
@@ -316,29 +338,71 @@ function onMove(e: MouseEvent): void {
     }
     rect.x = x
     rect.y = y
-  } else if (resizing) {
-    let w = Math.max(MIN_W, originW + (e.clientX - originClientX))
-    let h = Math.max(MIN_H, originH + (e.clientY - originClientY))
+  } else if (resizeDir) {
+    const free = RESIZE_FREE_EDGES[resizeDir]
+    const dx = e.clientX - originClientX
+    const dy = e.clientY - originClientY
+
+    // Right/bottom-only edges just grow the size; left/top edges also move
+    // the origin, keeping the opposite (anchored) edge fixed — computing x
+    // as `originX + (originW - w)` does that correctly even once `w` has
+    // been clamped to MIN_W, since it derives x from how much w actually
+    // changed rather than from the raw (possibly over-clamped) delta.
+    let x = originX
+    let y = originY
+    let w = originW
+    let h = originH
+    if (free.right) {
+      w = Math.max(MIN_W, originW + dx)
+    }
+    if (free.left) {
+      w = Math.max(MIN_W, originW - dx)
+      x = originX + (originW - w)
+    }
+    if (free.bottom) {
+      h = Math.max(MIN_H, originH + dy)
+    }
+    if (free.top) {
+      h = Math.max(MIN_H, originH - dy)
+      y = originY + (originH - h)
+    }
+
     if (registry && props.windowId) {
       const host = hostSize()
-      const snapped = registry.snapResize(
-        props.windowId,
-        { x: rect.x, y: rect.y, w, h },
-        host?.w ?? null,
-        host?.h ?? null,
-      )
-      w = snapped.w
-      h = snapped.h
+      const snapped = registry.snapResize(props.windowId, { x, y, w, h }, free, host?.w ?? null, host?.h ?? null)
+      // The registry doesn't know per-window minimums, so a snap can still
+      // land below MIN_W/MIN_H — re-clamp here, keeping whichever edge is
+      // anchored (the one `free` doesn't move) fixed, same as the pre-snap
+      // clamp above.
+      if (free.left) {
+        const right = snapped.x + snapped.w
+        w = Math.max(MIN_W, snapped.w)
+        x = right - w
+      } else {
+        w = Math.max(MIN_W, snapped.w)
+        x = snapped.x
+      }
+      if (free.top) {
+        const bottom = snapped.y + snapped.h
+        h = Math.max(MIN_H, snapped.h)
+        y = bottom - h
+      } else {
+        h = Math.max(MIN_H, snapped.h)
+        y = snapped.y
+      }
     }
+
+    rect.x = x
+    rect.y = y
     rect.w = w
     rect.h = h
   }
 }
 
 function onUp(): void {
-  if (dragging || resizing) {
+  if (dragging || resizeDir) {
     dragging = false
-    resizing = false
+    resizeDir = null
     // The geometry is now the player's choice, so stop auto-filling the host.
     userSized.value = true
     savePersisted()
@@ -455,13 +519,21 @@ if (registry) {
     <div class="fw-body">
       <slot />
     </div>
-    <div
-      v-if="!maximised"
-      class="fw-resize"
-      data-testid="fw-resize"
-      title="Resize"
-      @mousedown="onResizeStart"
-    />
+    <template v-if="!maximised">
+      <!-- Edge handles (resize from one side, opposite edge stays put). -->
+      <div class="fw-resize fw-resize-n" data-testid="fw-resize-n" title="Resize" @mousedown="onResizeStart('n', $event)" />
+      <div class="fw-resize fw-resize-s" data-testid="fw-resize-s" title="Resize" @mousedown="onResizeStart('s', $event)" />
+      <div class="fw-resize fw-resize-e" data-testid="fw-resize-e" title="Resize" @mousedown="onResizeStart('e', $event)" />
+      <div class="fw-resize fw-resize-w" data-testid="fw-resize-w" title="Resize" @mousedown="onResizeStart('w', $event)" />
+      <!-- Corner handles (resize from two sides at once). -->
+      <div class="fw-resize fw-resize-ne" data-testid="fw-resize-ne" title="Resize" @mousedown="onResizeStart('ne', $event)" />
+      <div class="fw-resize fw-resize-nw" data-testid="fw-resize-nw" title="Resize" @mousedown="onResizeStart('nw', $event)" />
+      <!-- Bottom-right keeps the plain `fw-resize` testid from before
+           multi-side resize existed, so it stays the one grip old tests and
+           any external tooling already key off. -->
+      <div class="fw-resize fw-resize-se" data-testid="fw-resize" title="Resize" @mousedown="onResizeStart('se', $event)" />
+      <div class="fw-resize fw-resize-sw" data-testid="fw-resize-sw" title="Resize" @mousedown="onResizeStart('sw', $event)" />
+    </template>
   </div>
 </template>
 
@@ -522,11 +594,46 @@ if (registry) {
 
 .fw-resize {
   position: absolute;
+  z-index: 2;
+}
+
+/* Edge handles — thin strips along each side, inset from the corners so
+   they don't compete with the corner handles for the same pixels.
+   Invisible hit areas with just a cursor change, matching how a desktop
+   OS's own window edges typically work — the corners (below) carry the
+   only visible resize affordance. */
+.fw-resize-n, .fw-resize-s { left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+.fw-resize-n { top: -3px; }
+.fw-resize-s { bottom: -3px; }
+.fw-resize-e, .fw-resize-w { top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+.fw-resize-e { right: -3px; }
+.fw-resize-w { left: -3px; }
+
+/* Corner handles — one visible grip mark per corner, mirroring the
+   original bottom-right-only diagonal-line style. */
+.fw-resize-ne, .fw-resize-nw, .fw-resize-se, .fw-resize-sw { width: 16px; height: 16px; }
+.fw-resize-se {
   right: 0;
   bottom: 0;
-  width: 16px;
-  height: 16px;
   cursor: nwse-resize;
   background: linear-gradient(135deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+}
+.fw-resize-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+  background: linear-gradient(-45deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+}
+.fw-resize-ne {
+  right: 0;
+  top: 0;
+  cursor: nesw-resize;
+  background: linear-gradient(45deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+}
+.fw-resize-sw {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+  background: linear-gradient(-135deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
 }
 </style>

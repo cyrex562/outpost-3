@@ -44,6 +44,17 @@ rows:
     hard: 1.30
     brutal: 1.60
 
+  # MoraleRate > 1.0 means faster morale swings (gain and loss alike) on
+  # harder difficulty. Mirrors StabilityRate's curve — morale and stability
+  # are independent systems (see outpost_core::morale) but there's no design
+  # reason for difficulty to affect them differently.
+  - quantity: MoraleRate
+    sandbox: 0.50
+    easy: 0.75
+    normal: 1.00
+    hard: 1.30
+    brutal: 1.60
+
   - quantity: StorageCapacity
     sandbox: 1.50
     easy: 1.20

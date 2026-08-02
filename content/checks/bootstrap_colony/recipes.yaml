@@ -40,6 +40,16 @@
       quantity: 1.0
   concurrent: true
 
+- id: hq_operate_baseline_comms
+  name: Baseline Comms (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: networking_compute
+      quantity: 5.0
+  concurrent: true
+
 - id: grow_rations_dome
   name: Grow Rations (Greenhouse Dome)
   building: greenhouse_dome

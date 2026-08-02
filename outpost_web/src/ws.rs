@@ -2451,6 +2451,17 @@ mod tests {
             pool.amount("oxygen") > 0.0,
             "colony_hq should produce oxygen (hq_scrub_oxygen)"
         );
+        // `networking_compute` is also a colony resource, not cargo (issue #382).
+        assert!(
+            engine.state.colonies[idx]
+                .resources
+                .amount("networking_compute")
+                > 0.0,
+            "colony_hq should produce a baseline networking_compute trickle \
+             (hq_operate_baseline_comms) — added so morale doesn't guarantee-crash \
+             to zero before the automation tech and comms_hub exist, see \
+             outpost_core/src/morale.rs"
+        );
 
         // Research (issue #310) is checked at the system pool rather than the
         // colony pool: `AdvanceColonySol`'s research-aggregation step drains
@@ -2480,10 +2491,11 @@ mod tests {
             vec![
                 "hq_conduct_research",
                 "hq_generate_power",
+                "hq_operate_baseline_comms",
                 "hq_pump_water",
                 "hq_scrub_oxygen"
             ],
-            "all four concurrent recipes should have run"
+            "all five concurrent recipes should have run"
         );
     }
 

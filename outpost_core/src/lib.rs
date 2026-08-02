@@ -3169,6 +3169,21 @@ impl GameEngine {
                 if let Some(config) = self.state.morale_config.clone() {
                     let empty_registry = content::ContentRegistry::default();
                     let morale_registry = self.state.registry.as_ref().unwrap_or(&empty_registry);
+                    // Difficulty scalars: the compute requirement scales with
+                    // ResourceConsumption (matching how every other per-capita
+                    // draw in Step 2 scales), and the resulting delta scales
+                    // with MoraleRate (matching how Step 2 scales
+                    // stability_delta by StabilityRate) — previously hard-coded
+                    // to 1.0 / left unscaled, so Easy/Hard/Brutal had zero
+                    // effect on morale at all.
+                    let consumption_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::ResourceConsumption);
+                    let morale_rate_scalar = self
+                        .state
+                        .difficulty_scalar
+                        .scalar_for(&modifier::ModifiableQuantity::MoraleRate);
                     for (colony, pop) in self
                         .state
                         .colonies
@@ -3184,9 +3199,10 @@ impl GameEngine {
                             ),
                             population_count,
                             &config,
-                            1.0,
+                            consumption_scalar,
                         );
-                        pop.morale = (pop.morale + report.morale_delta).clamp(0.0, 1.0);
+                        let scaled_morale_delta = report.morale_delta * morale_rate_scalar;
+                        pop.morale = (pop.morale + scaled_morale_delta).clamp(0.0, 1.0);
                     }
                 }
 
@@ -15551,6 +15567,93 @@ mod tests {
         assert!(
             (engine.state.populations[idx].morale - 1.0).abs() < f32::EPSILON,
             "morale must stay at its default when morale_config is unset"
+        );
+    }
+
+    /// Done-when (morale difficulty scaling bugfix): Easy decays morale
+    /// slower than Hard, matching the sibling `StabilityRate` scalar's
+    /// established behaviour — previously the morale resolution step never
+    /// read `difficulty_scalar` at all, so every preset decayed morale at
+    /// the exact same rate.
+    #[test]
+    fn easy_difficulty_decays_morale_slower_than_hard() {
+        use crate::difficulty::DifficultyPreset;
+        use crate::morale::MoraleConfig;
+
+        fn morale_after_five_sols_with_no_compute(preset: DifficultyPreset) -> f32 {
+            let mut engine = GameEngine::with_seed(42);
+            let events = engine
+                .apply(&Command::FoundColony {
+                    name: "Test Base".into(),
+                    starting_population: 100,
+                })
+                .unwrap();
+            let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+                panic!()
+            };
+            let colony_id = *colony_id;
+            engine.state.morale_config = Some(MoraleConfig::default_config());
+            engine
+                .apply(&Command::SetDifficulty { preset })
+                .expect("difficulty change should be accepted");
+            let idx = engine.find_colony_index(colony_id).unwrap();
+
+            // No networking_compute deposited any sol — composite satisfaction
+            // stays at 0, so every sol applies the pure decay term.
+            for _ in 0..5 {
+                engine.apply(&Command::AdvanceColonySol).unwrap();
+            }
+            engine.state.populations[idx].morale
+        }
+
+        let easy_morale = morale_after_five_sols_with_no_compute(DifficultyPreset::Easy);
+        let hard_morale = morale_after_five_sols_with_no_compute(DifficultyPreset::Hard);
+
+        assert!(
+            easy_morale > hard_morale,
+            "Easy should retain more morale than Hard after equal decay: easy={easy_morale}, hard={hard_morale}"
+        );
+    }
+
+    /// Done-when (starter-kit morale bugfix): a compute supply matching
+    /// colony_hq's new `hq_operate_baseline_comms` trickle (5.0/sol, see
+    /// content/base/recipes.yaml) at a 100-population colony — the morale
+    /// config's exact per-capita rate (0.1) means 5.0 is half of the 10.0
+    /// required for full satisfaction — holds morale roughly steady rather
+    /// than crashing, in clear contrast to the zero-compute case
+    /// (`morale_declines_without_compute`, above) that every starter-kit
+    /// colony was guaranteed to hit before this recipe existed.
+    #[test]
+    fn baseline_comms_trickle_rate_keeps_morale_from_crashing() {
+        use crate::morale::MoraleConfig;
+
+        let mut engine = GameEngine::with_seed(42);
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Starter Kit Base".into(),
+                starting_population: 100,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        engine.state.morale_config = Some(MoraleConfig::default_config());
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let initial_morale = engine.state.populations[idx].morale;
+
+        for _ in 0..20 {
+            engine.state.colonies[idx]
+                .pool
+                .deposit("networking_compute", 5.0);
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
+        let final_morale = engine.state.populations[idx].morale;
+        assert!(
+            (final_morale - initial_morale).abs() < 0.05,
+            "a colony_hq-only trickle should hold morale roughly steady over 20 sols, \
+             not crash it: initial={initial_morale}, final={final_morale}"
         );
     }
 

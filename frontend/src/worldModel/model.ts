@@ -10,6 +10,7 @@
  */
 
 import type { ColonySummary } from '@/types/api'
+import type { ServerEvent } from '@/types/events'
 
 /** Per-colony mutable state. */
 export interface ColonyState extends ColonySummary {
@@ -50,6 +51,22 @@ export interface Notification {
   message: string
   colony_id?: string
   timestamp_sol: number
+}
+
+/**
+ * One row in the colony log (colony details multi-window redesign's
+ * events/alerts unification) — every server event gets exactly one entry,
+ * not two competing lists. `tier`/`message` come straight from the
+ * reducer's own curated `Notification` for the minority of event kinds it
+ * classifies as alert-worthy; every other event still gets an entry here
+ * (built by `worldStore`, not the reducer — see its `handleServerMessage`),
+ * just tagged `'ambient'` with a generic message. `event` is the raw
+ * `ServerEvent` this entry came from, carrying every kind-specific field —
+ * the log's click-to-expand detail view reads it directly rather than
+ * needing a bespoke detail template per event kind.
+ */
+export interface LogEntry extends Notification {
+  event: ServerEvent
 }
 
 /** The initial (empty) world state before a snapshot arrives. */

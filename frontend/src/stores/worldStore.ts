@@ -4,18 +4,17 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { WorldState, ColonyState } from '@/worldModel/model'
+import type { WorldState, ColonyState, LogEntry } from '@/worldModel/model'
 import { EMPTY_WORLD_STATE } from '@/worldModel/model'
 import { applyEvent, hydrateFromSnapshot } from '@/worldModel/reducer'
 import type { ServerMessage } from '@/types/api'
-import type { ServerEvent } from '@/types/events'
 import { isTauri } from '@/services/tauriBridge'
 
 /** Connection status. */
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
-/** Maximum number of recent server events to keep in the event log. */
-const MAX_EVENT_LOG = 50
+/** Maximum number of recent entries to keep in the unified colony log. */
+const MAX_LOG_ENTRIES = 200
 
 interface HydrateInput {
   sol: number
@@ -23,13 +22,31 @@ interface HydrateInput {
   colonies: { id: string; name: string; population: number }[]
 }
 
+let _logSeq = 0
+function nextLogId(): string {
+  _logSeq += 1
+  return `log-${_logSeq}`
+}
+
 export const useWorldStore = defineStore('world', () => {
   const world = ref<WorldState>({ ...EMPTY_WORLD_STATE })
   // Desktop mode has no socket to connect to — declare connected up front.
   const connectionStatus = ref<ConnectionStatus>(isTauri ? 'connected' : 'disconnected')
   const lastError = ref<string | null>(null)
-  /** Rolling log of recent server events for the event log panel. */
-  const eventLog = ref<ServerEvent[]>([])
+  /**
+   * Rolling log of every server event — one entry each, whether or not the
+   * reducer classified it as alert-worthy (colony details multi-window
+   * redesign's events/alerts unification). The reducer's own `notifications`
+   * (below) stay a separate, curated, alert-only list — used for
+   * `SystemStatsBar`'s alert count and to decide when a new entry here also
+   * pops a toast (see `alertToast`) — this array is the comprehensive one
+   * the log panel actually renders.
+   */
+  const logEntries = ref<LogEntry[]>([])
+  /** Most recent alert-tier ('notable'/'urgent'/'blocking') log entry that
+   * hasn't been dismissed yet — the alert toast reads this. `null` when
+   * there's nothing to show or the player already dismissed it. */
+  const alertToast = ref<LogEntry | null>(null)
 
   const sol = computed(() => world.value.sol)
   const month = computed(() => world.value.month)
@@ -38,15 +55,45 @@ export const useWorldStore = defineStore('world', () => {
   const notifications = computed(() => world.value.notifications)
   const isConnected = computed(() => connectionStatus.value === 'connected')
 
+  /** Append a log entry, trimming from the front once past `MAX_LOG_ENTRIES`. */
+  function pushLogEntry(entry: LogEntry): void {
+    const next = [...logEntries.value, entry]
+    logEntries.value = next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next
+  }
+
   function handleServerMessage(msg: ServerMessage): void {
     switch (msg.type) {
       case 'snapshot':
         world.value = hydrateFromSnapshot(msg.state)
         break
-      case 'event':
+      case 'event': {
+        const prevNotifCount = world.value.notifications.length
         world.value = applyEvent(world.value, msg.event)
-        eventLog.value = [...eventLog.value.slice(-(MAX_EVENT_LOG - 1)), msg.event]
+        const added = world.value.notifications.slice(prevNotifCount)
+        if (added.length > 0) {
+          // The reducer already classified this event as alert-worthy —
+          // reuse its curated tier/message verbatim rather than re-deriving
+          // a generic one, and pop the toast.
+          for (const n of added) {
+            const entry: LogEntry = { ...n, event: msg.event }
+            pushLogEntry(entry)
+            alertToast.value = entry
+          }
+        } else {
+          // Not alert-worthy, but every event still gets a log row —
+          // otherwise-silent events (construction queued, directives,
+          // outposts, ...) are exactly what "otherwise be part of the log"
+          // covers.
+          pushLogEntry({
+            id: nextLogId(),
+            tier: 'ambient',
+            message: msg.event.kind.replace(/_/g, ' '),
+            timestamp_sol: world.value.sol,
+            event: msg.event,
+          })
+        }
         break
+      }
       case 'error':
         lastError.value = msg.message
         break
@@ -93,8 +140,12 @@ export const useWorldStore = defineStore('world', () => {
     world.value = { ...world.value, notifications: [] }
   }
 
-  function clearEventLog(): void {
-    eventLog.value = []
+  function clearLog(): void {
+    logEntries.value = []
+  }
+
+  function dismissAlertToast(): void {
+    alertToast.value = null
   }
 
   /** Hydrate the store from a Tauri `SnapshotPayload`. */
@@ -125,14 +176,16 @@ export const useWorldStore = defineStore('world', () => {
   function reset(): void {
     world.value = { ...EMPTY_WORLD_STATE }
     lastError.value = null
-    eventLog.value = []
+    logEntries.value = []
+    alertToast.value = null
   }
 
   return {
     world,
     connectionStatus,
     lastError,
-    eventLog,
+    logEntries,
+    alertToast,
     sol,
     month,
     colonies,
@@ -142,7 +195,8 @@ export const useWorldStore = defineStore('world', () => {
     handleServerMessage,
     setConnectionStatus,
     clearNotifications,
-    clearEventLog,
+    clearLog,
+    dismissAlertToast,
     hydrate,
     reset,
   }

@@ -22,6 +22,16 @@ export interface WindowRect {
   h: number
 }
 
+/** Which of a rect's four edges a resize gesture actually moves — the other
+ * two stay anchored. A single-side handle frees one; a corner handle frees
+ * two (e.g. the north-west corner frees `top` and `left`). */
+export interface FreeEdges {
+  left: boolean
+  right: boolean
+  top: boolean
+  bottom: boolean
+}
+
 export interface FloatingWindowRegistry {
   register(id: string, rect: WindowRect): void
   update(id: string, rect: WindowRect): void
@@ -29,8 +39,15 @@ export interface FloatingWindowRegistry {
   /** Snapped `{x, y}` for a move gesture (size held fixed), or the input's
    * own x/y unchanged if nothing is within snapping distance. */
   snapMove(id: string, proposed: WindowRect, hostW: number | null, hostH: number | null): { x: number; y: number }
-  /** Snapped `{w, h}` for a corner-resize gesture (origin held fixed). */
-  snapResize(id: string, proposed: WindowRect, hostW: number | null, hostH: number | null): { w: number; h: number }
+  /** Snapped rect for a resize gesture — only the edges marked `true` in
+   * `free` move; the rest stay exactly as given in `proposed`. */
+  snapResize(
+    id: string,
+    proposed: WindowRect,
+    free: FreeEdges,
+    hostW: number | null,
+    hostH: number | null,
+  ): WindowRect
   /** Moves `id` to the top of the z-order and returns its new z-index. */
   bringToFront(id: string): number
 }
@@ -122,27 +139,49 @@ export function createFloatingWindowRegistry(): FloatingWindowRegistry {
   function snapResize(
     id: string,
     proposed: WindowRect,
+    free: FreeEdges,
     hostW: number | null,
     hostH: number | null,
-  ): { w: number; h: number } {
-    const { x, y } = proposed
-    let { w, h } = proposed
+  ): WindowRect {
+    let { x, y, w, h } = proposed
 
-    const candidatesRight: number[] = []
-    const candidatesBottom: number[] = []
+    const candidatesX: number[] = []
+    const candidatesY: number[] = []
     for (const r of otherRects(id)) {
-      candidatesRight.push(r.x, r.x + r.w)
-      candidatesBottom.push(r.y, r.y + r.h)
+      candidatesX.push(r.x, r.x + r.w)
+      candidatesY.push(r.y, r.y + r.h)
     }
-    if (hostW !== null) candidatesRight.push(hostW)
-    if (hostH !== null) candidatesBottom.push(hostH)
+    if (hostW !== null) candidatesX.push(0, hostW)
+    if (hostH !== null) candidatesY.push(0, hostH)
 
-    const dw = bestSnapOffset([x + w], candidatesRight, SNAP_PX)
-    if (dw !== null) w += dw
-    const dh = bestSnapOffset([y + h], candidatesBottom, SNAP_PX)
-    if (dh !== null) h += dh
+    // Each edge snaps independently against its own axis of candidates.
+    // Left/top additionally shift x/y since they move the anchor itself
+    // (right/bottom stay fixed by construction — only w/h track a left/top
+    // move); right/bottom only ever change w/h, x/y untouched.
+    if (free.right) {
+      const d = bestSnapOffset([x + w], candidatesX, SNAP_PX)
+      if (d !== null) w += d
+    }
+    if (free.left) {
+      const d = bestSnapOffset([x], candidatesX, SNAP_PX)
+      if (d !== null) {
+        x += d
+        w -= d
+      }
+    }
+    if (free.bottom) {
+      const d = bestSnapOffset([y + h], candidatesY, SNAP_PX)
+      if (d !== null) h += d
+    }
+    if (free.top) {
+      const d = bestSnapOffset([y], candidatesY, SNAP_PX)
+      if (d !== null) {
+        y += d
+        h -= d
+      }
+    }
 
-    return { w, h }
+    return { x, y, w, h }
   }
 
   function bringToFront(_id: string): number {
