@@ -167,15 +167,17 @@ Well underway — the Rust workspace, `outpost_core` simulation kernel, `outpost
 
 ## Git Workflow
 
-- Branch from `main` for each issue: `issue-{N}-{slug}`
-- Commit message: `Issue #N: brief description\n\nCloses #N`
-- Open a PR against `main` once the [Definition of Done](#definition-of-done) gate is green and [review + judge](#automated-review--validation) have run.
+**Scope: every code change, not just the harness.** This workflow is the default for *any* feature or bugfix — picked from the issue tracker, worked through the automated harness, or requested directly in conversation with no tracked issue behind it at all. "I made a code change" already means "commit it, open a PR, and merge it" — that is the expected end state, not something to be asked for separately. Don't leave a working-tree diff sitting uncommitted waiting to be told to commit it.
+
+- Branch from `main`. For a tracked issue: `issue-{N}-{slug}`. For an ad-hoc change with no issue number, use a short descriptive slug instead (e.g. `fix-{slug}` or `feature-{slug}`).
+- Commit message: `Issue #N: brief description\n\nCloses #N` when there's a tracked issue; otherwise a plain, direct summary of the change (see recent `git log` for the house style) — no need to invent an issue number.
+- Run the applicable [Definition of Done](#definition-of-done) tiers for what the change actually touches (a one-file frontend tweak doesn't need the Rust tiers, etc.), and the [review + judge](#automated-review--validation) pass, scaled to the size of the change — Haiku is fine for small/mechanical diffs. Then open a PR against `main`.
 - **Merge is the default outcome, not a special case.** The user's own verification loop is pulling `main` on their desktop machine and building/running it there — the automated gate exists to catch what's cheaply catchable before that point, not to hold code back pending a human look. Auto-merge (no need to wait for anyone) once **all** of the following hold:
-  1. Every [Definition of Done](#definition-of-done) test tier either passed, or was genuinely environment-blocked and documented as such (see the environment-blocked-tiers note above) — a tier that ran and actually failed still blocks, always.
-  2. The code-review agent's findings are resolved — fixed on the spot, or filed as a follow-up issue. `unresolved_kind` is not `"needs_human_decision"`.
+  1. Every applicable [Definition of Done](#definition-of-done) test tier either passed, or was genuinely environment-blocked and documented as such (see the environment-blocked-tiers note above) — a tier that ran and actually failed still blocks, always.
+  2. The code-review agent's findings are resolved — fixed on the spot, or filed as a follow-up issue for later. `unresolved_kind` is not `"needs_human_decision"`.
   3. The judge agent's findings are resolved the same way — fixed (possibly after a re-judge pass), or filed as a follow-up issue. Not `"needs_human_decision"`.
-  This applies both to the automated harness and to working an issue directly in conversation — don't stop at "PR opened" and wait to be told to merge; merge it once the gate is green, then move on or report completion.
-- **Do not auto-merge** when: the user explicitly asked to review before merging *this specific PR*; the change is to `CLAUDE.md`/`docs/HARNESS.md`/the workflow scripts themselves (policy changes get a human look before they take effect — this file's own edits are never auto-merged by the rule it defines); or the review or judge agent genuinely could not resolve a finding without a human decision (`unresolved_kind: "needs_human_decision"`). In these cases, open the PR, summarize what's unresolved and why, and wait.
+  This applies uniformly: the automated harness, an issue worked directly in conversation, and an ad-hoc change with no issue at all. Don't stop at "PR opened" and wait to be told to merge; merge it once the gate is green, then move on or report completion.
+- **Do not commit/merge** when: the user explicitly asked to review before merging *this specific change*; the change is to `CLAUDE.md`/`docs/HARNESS.md`/the workflow scripts themselves (policy changes get a human look before they take effect — this file's own edits are never auto-merged by the rule it defines, and are left as an uncommitted working-tree diff for the user to review); or review/judge/testing turned up something that needs either a human decision before proceeding, or is real but belongs in a future change (file it as a new GitHub issue rather than blocking on it now). In these cases, open the PR (if one isn't already open), summarize what's unresolved and why, and wait — don't merge.
 - Never force-push, skip hooks, or bypass a failing check to get to green.
 
 ---
