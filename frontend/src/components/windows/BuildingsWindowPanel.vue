@@ -1,13 +1,11 @@
 <script setup lang="ts">
-/** `dockview-vue` panel wrapper for `BuildingsPanel` (issue #321). */
+/** Floating-window wrapper for `BuildingsPanel` (colony details multi-window redesign). */
 import { inject } from 'vue'
 import BuildingsPanel from '@/components/BuildingsPanel.vue'
-import { COLONY_DOCK_CONTEXT_KEY } from '@/dock/colonyDock'
+import { COLONY_WINDOW_CONTEXT_KEY } from '@/windows/colonyWindows'
 
-defineProps<{ params?: unknown }>()
-
-const ctx = inject(COLONY_DOCK_CONTEXT_KEY)
-if (!ctx) throw new Error('DockBuildingsPanel must be mounted inside a colony dockview with ColonyDockContext provided')
+const ctx = inject(COLONY_WINDOW_CONTEXT_KEY)
+if (!ctx) throw new Error('BuildingsWindowPanel must be mounted with ColonyWindowContext provided')
 </script>
 
 <template>

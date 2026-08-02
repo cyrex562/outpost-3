@@ -15,9 +15,19 @@
  * opens filling its host rather than at a fixed pixel size, so a large display
  * isn't mostly empty. A maximise/restore toggle and a clamp-to-host pass on
  * app resize keep it usable afterwards — see `fitToHost`/`clampToHost`.
+ *
+ * Multi-window snapping + z-order (colony details multi-window redesign):
+ * when a `windowId` prop is given AND an ancestor has `provide`d a
+ * `FloatingWindowRegistry` (`floatingWindowRegistry.ts`), this window
+ * registers its rect there, snaps its dragged/resized edges against every
+ * other registered window's edges (and the host's edges) within a small
+ * threshold, and bumps itself to the front of a shared z-order on any
+ * click. Both `windowId` and the registry are optional — a `FloatingWindow`
+ * used standalone (no id, no providing ancestor) behaves exactly as before.
  */
 
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { FLOATING_WINDOW_REGISTRY_KEY } from '@/composables/floatingWindowRegistry'
 
 const props = defineProps<{
   title: string
@@ -38,6 +48,10 @@ const props = defineProps<{
   fillHost?: boolean
   /** Show a dismiss (×) button in the title bar that emits `close`. */
   closable?: boolean
+  /** Opts into edge-snapping + shared z-order against sibling windows — see
+   * the multi-window snapping doc comment above. Ignored (with a console
+   * warning) if no ancestor provided a registry. */
+  windowId?: string
 }>()
 
 const emit = defineEmits<{
@@ -111,6 +125,29 @@ const rect = reactive<Rect>(
 )
 
 const rootRef = ref<HTMLElement | null>(null)
+
+// ── Multi-window snapping + z-order (opt-in, see the doc comment above) ────
+
+const registry = inject(FLOATING_WINDOW_REGISTRY_KEY, null)
+
+if (props.windowId && !registry) {
+  // A windowId with no providing ancestor is almost certainly a wiring bug
+  // (the parent forgot to `provide` a registry), not a legitimate standalone
+  // usage — standalone usage omits windowId entirely. Warn, don't throw:
+  // the window still works fine, just without snapping/shared z-order.
+  console.warn(
+    `FloatingWindow: windowId="${props.windowId}" was given but no FloatingWindowRegistry was provided by an ancestor — snapping and shared z-order are disabled for this window.`,
+  )
+}
+
+const zIndex = ref<number | null>(null)
+
+/** Bump this window to the front of the shared z-order. No-op without a registry. */
+function focusWindow(): void {
+  if (registry && props.windowId) {
+    zIndex.value = registry.bringToFront(props.windowId)
+  }
+}
 
 /** Whether the window is currently maximised to its host. */
 const maximised = ref(persisted?.maximised ?? false)
@@ -264,11 +301,37 @@ function onResizeStart(e: MouseEvent): void {
 function onMove(e: MouseEvent): void {
   if (dragging) {
     // Clamp to the top-left so the title bar can't be dragged out of reach.
-    rect.x = Math.max(0, originX + (e.clientX - originClientX))
-    rect.y = Math.max(0, originY + (e.clientY - originClientY))
+    let x = Math.max(0, originX + (e.clientX - originClientX))
+    let y = Math.max(0, originY + (e.clientY - originClientY))
+    if (registry && props.windowId) {
+      const host = hostSize()
+      const snapped = registry.snapMove(
+        props.windowId,
+        { x, y, w: rect.w, h: rect.h },
+        host?.w ?? null,
+        host?.h ?? null,
+      )
+      x = snapped.x
+      y = snapped.y
+    }
+    rect.x = x
+    rect.y = y
   } else if (resizing) {
-    rect.w = Math.max(MIN_W, originW + (e.clientX - originClientX))
-    rect.h = Math.max(MIN_H, originH + (e.clientY - originClientY))
+    let w = Math.max(MIN_W, originW + (e.clientX - originClientX))
+    let h = Math.max(MIN_H, originH + (e.clientY - originClientY))
+    if (registry && props.windowId) {
+      const host = hostSize()
+      const snapped = registry.snapResize(
+        props.windowId,
+        { x: rect.x, y: rect.y, w, h },
+        host?.w ?? null,
+        host?.h ?? null,
+      )
+      w = snapped.w
+      h = snapped.h
+    }
+    rect.w = w
+    rect.h = h
   }
 }
 
@@ -312,6 +375,11 @@ onMounted(() => {
     hostObserver = new ResizeObserver(onHostResize)
     hostObserver.observe(host)
   }
+
+  if (registry && props.windowId) {
+    registry.register(props.windowId, { ...rect })
+    zIndex.value = registry.bringToFront(props.windowId)
+  }
 })
 onUnmounted(() => {
   window.removeEventListener('mousemove', onMove)
@@ -319,7 +387,23 @@ onUnmounted(() => {
   window.removeEventListener('resize', onHostResize)
   hostObserver?.disconnect()
   hostObserver = null
+  if (registry && props.windowId) {
+    registry.unregister(props.windowId)
+  }
 })
+
+// Keep the registry's copy of this window's rect current — including
+// changes from the host-resize/maximise paths above, not just drag/resize
+// gestures — so a sibling window dragged later snaps against where this
+// one actually is right now, not where it was at mount.
+if (registry) {
+  watch(
+    () => ({ ...rect }),
+    (r) => {
+      if (props.windowId) registry.update(props.windowId, r)
+    },
+  )
+}
 </script>
 
 <template>
@@ -327,8 +411,16 @@ onUnmounted(() => {
     ref="rootRef"
     class="floating-window"
     :class="{ maximised }"
+    :data-window-id="windowId"
     data-testid="floating-window"
-    :style="{ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` }"
+    :style="{
+      left: `${rect.x}px`,
+      top: `${rect.y}px`,
+      width: `${rect.w}px`,
+      height: `${rect.h}px`,
+      zIndex: zIndex ?? undefined,
+    }"
+    @mousedown.capture="focusWindow"
   >
     <div class="fw-titlebar" data-testid="fw-titlebar" @mousedown="onDragStart">
       <span class="fw-title">{{ title }}</span>
