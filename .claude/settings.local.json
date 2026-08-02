@@ -28,7 +28,13 @@
       "Bash(\"/c/Program Files/dotnet/dotnet.exe\" test C:/Users/cyrex/Projects/outpost-3/tests/OutpostCore.Tests/OutpostCore.Tests.csproj --nologo)",
       "Bash(where dotnet *)",
       "Read(//c/Program Files \\(x86\\)/dotnet/**)",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Read(//home/box-admin/outpost-3/**)",
+      "Bash(npm -g config get prefix)",
+      "Bash(ls -d \"$(npm -g config get prefix 2>/dev/null)/lib/node_modules/@anthropic-ai/claude-code\")",
+      "Bash(awk '{print $2}')",
+      "Bash(env)",
+      "Bash(npm view *)"
     ]
   }
 }

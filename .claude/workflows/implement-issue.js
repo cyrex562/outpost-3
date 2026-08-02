@@ -5,9 +5,9 @@ export const meta = {
     { title: 'Select', detail: 'Choose next open issue respecting phase order and dependencies' },
     { title: 'Implement', detail: 'Write Rust/Vue code satisfying the issue spec' },
     { title: 'Test', detail: 'cargo test + clippy + fmt + frontend (vitest/type-check/build/playwright) + harness check if applicable' },
-    { title: 'Review', detail: 'Haiku/Sonnet code-review subagent audits the diff' },
-    { title: 'Judge', detail: 'Haiku subagent independently confirms acceptance criteria are met' },
-    { title: 'Ship', detail: 'Push branch, create PR, auto-merge only if tests + review + judge all pass' },
+    { title: 'Review', detail: 'Haiku/Sonnet code-review subagent audits the diff; fixes on the spot or files a follow-up issue' },
+    { title: 'Judge', detail: 'Haiku subagent independently confirms acceptance criteria; gaps get fixed or filed, not just flagged' },
+    { title: 'Ship', detail: 'Push branch, create PR, auto-merge unless a genuine human decision is needed' },
   ],
 }
 
@@ -110,7 +110,9 @@ ${targetIssue ? `The user requested issue #${targetIssue} specifically.` : `Pick
 Phase priority (lowest number = highest priority): ${PHASE_ORDER.join(' > ')}
 Within a phase: lowest issue number first.
 Skip issues labeled "in-progress" or "blocked".
-Skip issues with open "Depends on" references that are not yet closed.`}
+Skip issues with open "Depends on" references that are not yet closed.
+Skip issues whose own body says they are speculative/not currently planned/not near-term, or explicitly
+"Blocked on" something not yet done — treat that language as a soft block even without a label.`}
 
 Phase gates (issue numbers that must be CLOSED before starting a later phase):
 ${JSON.stringify(PHASE_GATES, null, 2)}
@@ -158,9 +160,9 @@ Issue body:
 ${selection.body}
 
 Tasks:
-1. Read /home/user/outpost-3/docs/DESIGN.md and extract the sections referenced in the issue body (e.g., "§5", "§7A", "§14"). Return a 300-500 word excerpt of the most relevant passages.
-2. List the key files in /home/user/outpost-3/reference/harsh_realm-main/crates/harsh-core/src/ that are most relevant to this issue (list file paths only, do not read them yet).
-3. If the issue mentions prior C# behavioral specs (e.g., "ColonyTurnProcessor.cs"), list those file paths in /home/user/outpost-3/godot/src/Core/
+1. Read docs/DESIGN.md (repo root) and extract the sections referenced in the issue body (e.g., "§5", "§7A", "§14"). Return a 300-500 word excerpt of the most relevant passages.
+2. List the key files in reference/harsh_realm-main/crates/harsh-core/src/ that are most relevant to this issue (list file paths only, do not read them yet).
+3. If the issue mentions prior C# behavioral specs (e.g., "ColonyTurnProcessor.cs"), list those file paths in godot/src/Core/
 
 Return a StructuredOutput with the gathered context.`,
   { label: 'gather-context', phase: 'Implement', schema: CONTEXT_SCHEMA }
@@ -214,11 +216,11 @@ You may read these for structural patterns but do NOT copy game logic — it is 
 3. Examine the existing Rust workspace structure (if it exists): look in the repo root for \`Cargo.toml\`, \`crates/\`, or \`outpost_core/\`.
 4. If this is a scaffold issue (#7), CREATE the Rust workspace. Otherwise, extend the existing one.
 5. Implement the feature exactly as specified in the issue "Task" and "Done when" sections.
-6. Write \`cargo test\`-runnable NUnit-equivalent tests (Rust \`#[test]\` functions) for every "Done when" bullet.
+6. Write \`cargo test\`-runnable tests (Rust \`#[test]\` functions) for every "Done when" bullet.
 7. Every new public type should have a doc comment (one line max).
 8. Run \`cargo build\` and \`cargo test\` to verify green. Fix any compile errors before stopping.
 9. Stage and commit: \`git add -A && git commit -m "<commit_message>"\`
-   Commit message format: "Phase N: <brief description>\\n\\nCloses #${selection.issue_number}"
+   Commit message format: "Issue #${selection.issue_number}: <brief description>\\n\\nCloses #${selection.issue_number}"
 
 Return a StructuredOutput describing what was done.`,
   { label: 'implement', phase: 'Implement', schema: IMPL_SCHEMA }
@@ -255,8 +257,9 @@ const TEST_SCHEMA = {
     frontend_type_check_passed: { type: 'boolean' },
     frontend_unit_passed: { type: 'boolean' },
     frontend_build_passed: { type: 'boolean' },
-    frontend_e2e_passed: { type: 'boolean' },
     frontend_e2e_applicable: { type: 'boolean' },
+    frontend_e2e_env_available: { type: 'boolean' },
+    frontend_e2e_passed: { type: 'boolean' },
     all_passed: { type: 'boolean' },
     failure_details: { type: 'string' },
   },
@@ -290,11 +293,23 @@ Run the following checks in order. Fix any failures before reporting (up to 3 at
    - \`npm run test:unit -- --run 2>&1\` — report frontend_unit_passed
    - \`npm run build 2>&1\` — report frontend_build_passed
    - If the diff affects a user-facing flow (new screen, new command wiring, changed navigation),
-     add or update a Playwright spec under \`frontend/e2e/\` covering the new behavior, then run
-     \`npm run test:e2e 2>&1\`. Set frontend_e2e_applicable=true and report frontend_e2e_passed.
+     add or update a Playwright spec under \`frontend/e2e/\` covering the new behavior.
+     Before running it, check whether a real browser is actually available in this environment:
+     \`~/.cache/ms-playwright\`, \`$PLAYWRIGHT_BROWSERS_PATH\` (verify the path exists, don't just check
+     the env var is set), \`/opt/pw-browsers\`, or a system chromium/chrome/chromium-browser binary.
+     - If NONE of those exist: set frontend_e2e_applicable=true, frontend_e2e_env_available=false,
+       frontend_e2e_passed=false, and say so explicitly in failure_details. Do NOT run
+       \`playwright install\` to work around it — CLAUDE.md forbids that. This is an environment gap,
+       not a code defect, and does not block merge per CLAUDE.md's auto-merge policy — but say so
+       clearly rather than silently omitting it.
+     - If a browser IS available: set frontend_e2e_env_available=true, run \`npm run test:e2e 2>&1\`,
+       and report frontend_e2e_passed truthfully. A genuine failure here (browser present, suite ran
+       and failed) DOES block merge like any other tier — this is a real regression, not an
+       environment gap, so don't paper over it.
      If the change has no user-facing surface, set frontend_e2e_applicable=false and skip it —
      say so explicitly in failure_details rather than silently omitting the field.
-   If not applicable, set all four frontend_* passed fields to true (vacuously) and frontend_e2e_applicable=false.
+   If not applicable, set all four frontend_* passed fields to true (vacuously), frontend_e2e_applicable=false,
+   frontend_e2e_env_available=true (vacuous).
 
 After all checks pass, stage any fmt/lint fixes with a new commit (do NOT amend):
 \`git add -A && git diff --cached --quiet || git commit -m "chore: apply cargo fmt fixes"\`
@@ -305,13 +320,38 @@ Return a StructuredOutput with all check results.`,
   { label: 'test', phase: 'Test', schema: TEST_SCHEMA }
 )
 
-if (!testResult || !testResult.all_passed) {
+// The tiers that can actually execute in every environment — these are a
+// hard gate. e2e is handled separately below since it may be genuinely
+// inapplicable-to-verify-here rather than failing.
+const coreTestsPassed =
+  !!testResult &&
+  testResult.cargo_test_passed &&
+  testResult.cargo_clippy_passed &&
+  testResult.cargo_fmt_passed &&
+  (testResult.harness_applicable ? testResult.harness_passed : true) &&
+  (!testResult.frontend_applicable ||
+    (testResult.frontend_type_check_passed && testResult.frontend_unit_passed && testResult.frontend_build_passed))
+
+if (!testResult || !coreTestsPassed) {
   const detail = testResult ? testResult.failure_details : 'agent returned null'
-  log(`❌ Tests failed: ${detail}`)
+  log(`❌ Core checks failed: ${detail}`)
   return { success: false, stage: 'test', selection, impl, testResult }
 }
 
-log(`✅ All checks passed`)
+// e2e blocks merge only when a browser was actually available and the suite
+// genuinely failed — not when the sandbox has no Playwright browser installed
+// at all (environment gap, documented in the PR instead of gating on it).
+// Mirrors the existing outpost_tauri/WebKit2GTK precedent in CLAUDE.md.
+const e2eGenuinelyFailed =
+  testResult.frontend_e2e_applicable && testResult.frontend_e2e_env_available && !testResult.frontend_e2e_passed
+
+if (testResult.frontend_e2e_applicable && !testResult.frontend_e2e_env_available) {
+  log(`⚠️ e2e could not run — no browser available in this sandbox. Every other tier is green; proceeding. Does not block merge.`)
+} else if (e2eGenuinelyFailed) {
+  log(`⚠️ e2e ran and FAILED — this DOES block merge (a real regression, not an environment gap).`)
+}
+
+log(`✅ Core checks passed`)
 log(`   cargo test: ${testResult.cargo_test_passed}`)
 log(`   clippy: ${testResult.cargo_clippy_passed}`)
 log(`   fmt: ${testResult.cargo_fmt_passed}`)
@@ -329,8 +369,11 @@ const REVIEW_SCHEMA = {
     fixed_blocking_findings: { type: 'boolean' },
     clean: { type: 'boolean' },
     summary: { type: 'string' },
+    unresolved_kind: { type: 'string', enum: ['none', 'needs_human_decision', 'follow_up_filed'] },
+    human_question: { type: 'string' },
+    filed_issue_url: { type: 'string' },
   },
-  required: ['blocking_findings', 'non_blocking_notes', 'clean', 'summary'],
+  required: ['blocking_findings', 'non_blocking_notes', 'clean', 'summary', 'unresolved_kind'],
 }
 
 // Sonnet for anything touching simulation logic in outpost_core; Haiku for
@@ -353,12 +396,25 @@ Review against CLAUDE.md's "Rust Best Practices" and "Critical Rules" sections (
 - Missing doc comments on new public items
 - Unjustified new external dependencies in outpost_core
 
-Classify findings as blocking (real bugs, panics, architecture violations — must be fixed before shipping)
-or non-blocking (style nits, optional simplifications — note and skip).
+Classify findings as blocking (real bugs, panics, architecture violations) or non-blocking (style nits,
+optional simplifications — note and skip, these never block merge).
 
-If you find blocking issues, fix them yourself, then re-verify (re-run the relevant \`cargo test\`/\`clippy\`
-commands) and set fixed_blocking_findings=true. Set clean=true only when there are no remaining blocking
-findings.
+For each blocking finding, in this order of preference:
+1. **Fix it yourself**, then re-verify (re-run the relevant \`cargo test\`/\`clippy\` commands). If every
+   blocking finding is resolved this way, set fixed_blocking_findings=true, clean=true,
+   unresolved_kind="none".
+2. If it's real but genuinely out of scope for this diff (a pre-existing problem elsewhere, a larger
+   refactor that deserves its own PR) — **file a new GitHub issue** describing it via the GitHub MCP
+   tool (mcp__github__create_issue) in ${OWNER}/${REPO}, referencing issue #${selection.issue_number}.
+   Set clean=true (this diff itself is fine to ship as-is), unresolved_kind="follow_up_filed", and
+   filed_issue_url to the created issue's URL.
+3. Only if it hinges on a genuine open question that only a human can answer (an ambiguous requirement,
+   a real design/scope tradeoff, not something you can reasonably decide) — leave it. Set clean=false,
+   unresolved_kind="needs_human_decision", and put the specific question in human_question. This blocks
+   merge; use it sparingly, only when you truly cannot decide or fix it yourself.
+
+Prefer options 1 or 2 whenever you reasonably can. Do not use option 3 just because a finding is
+inconvenient to fix — it's for genuine judgment calls only.
 
 Return a StructuredOutput with your findings.`,
   { label: 'code-review', phase: 'Review', schema: REVIEW_SCHEMA, model: reviewModel }
@@ -366,13 +422,26 @@ Return a StructuredOutput with your findings.`,
 
 if (!review) {
   log('⚠️ Review agent returned null — treating as unresolved, will not auto-merge')
-  review = { clean: false, blocking_findings: ['review agent failed to return a result'], non_blocking_notes: [], summary: '' }
+  review = {
+    clean: false,
+    blocking_findings: ['review agent failed to return a result'],
+    non_blocking_notes: [],
+    summary: '',
+    unresolved_kind: 'needs_human_decision',
+    human_question: 'Review agent failed to return a result.',
+  }
 }
 
-log(review.clean ? '✅ Code review clean' : `⚠️ Code review found ${review.blocking_findings.length} blocking finding(s)`)
+log(
+  review.clean
+    ? '✅ Code review clean'
+    : `⚠️ Code review found ${review.blocking_findings.length} blocking finding(s) — ${review.unresolved_kind}`
+)
+
+const reviewMergeable = review.clean === true
 
 // ---------------------------------------------------------------------------
-// Phase 5 — Judge
+// Phase 5 — Judge (with one bounded fix-and-rejudge pass)
 // ---------------------------------------------------------------------------
 phase('Judge')
 
@@ -387,10 +456,8 @@ const JUDGE_SCHEMA = {
   required: ['criteria_checked', 'criteria_met', 'all_met', 'reasoning'],
 }
 
-// Deliberately a separate, blind agent call — it must not see `review`'s
-// findings so its verdict isn't anchored by the reviewer's framing.
-let judge = await agent(
-  `You are an independent judge verifying that issue #${selection.issue_number} — "${selection.title}" —
+function judgePrompt() {
+  return `You are an independent judge verifying that issue #${selection.issue_number} — "${selection.title}" —
 is actually done, not just that its tests pass.
 
 Issue body (extract the "Done when" / acceptance-criteria bullets from this):
@@ -403,18 +470,113 @@ For each acceptance-criterion bullet in the issue, determine independently wheth
 genuinely satisfy it — not just that some test with a plausible name exists, but that the test's assertions
 would actually fail if the criterion were violated. List each criterion you checked and whether it's met.
 
-Return a StructuredOutput with your verdict.`,
-  { label: 'judge', phase: 'Judge', schema: JUDGE_SCHEMA, model: 'claude-haiku-4-5-20251001' }
-)
+Return a StructuredOutput with your verdict.`
+}
+
+// Deliberately a separate, blind agent call — it must not see `review`'s
+// findings so its verdict isn't anchored by the reviewer's framing.
+let judge = await agent(judgePrompt(), { label: 'judge', phase: 'Judge', schema: JUDGE_SCHEMA, model: 'claude-haiku-4-5-20251001' })
 
 if (!judge) {
   log('⚠️ Judge agent returned null — treating as unresolved, will not auto-merge')
   judge = { all_met: false, criteria_checked: [], criteria_met: [], reasoning: 'judge agent failed to return a result' }
 }
 
-log(judge.all_met ? '✅ Judge confirms acceptance criteria met' : '⚠️ Judge found unmet acceptance criteria')
+log(judge.all_met ? '✅ Judge confirms acceptance criteria met' : '⚠️ Judge found unmet acceptance criteria — attempting a fix')
 
-const gateGreen = testResult.all_passed && review.clean && judge.all_met
+let judgeUnresolvedKind = 'none'
+let judgeHumanQuestion = ''
+let judgeFiledIssueUrl = ''
+
+if (judge && !judge.all_met) {
+  const unmet = judge.criteria_checked.filter((c, i) => !judge.criteria_met[i])
+
+  const FIX_SCHEMA = {
+    type: 'object',
+    properties: {
+      fixed: { type: 'boolean' },
+      unfixable_reason: { type: 'string' },
+      needs_human_decision: { type: 'boolean' },
+      human_question: { type: 'string' },
+      summary: { type: 'string' },
+    },
+    required: ['fixed', 'summary'],
+  }
+
+  const fix = await agent(
+    `You are fixing gaps found by an independent judge in issue #${selection.issue_number} — "${selection.title}" —
+on branch \`${selection.branch_name}\`.
+
+The judge found these acceptance criteria NOT genuinely met:
+${unmet.map((c) => `- ${c}`).join('\n')}
+
+Judge's reasoning:
+${judge.reasoning}
+
+Task: close the gap for each unmet criterion — write the missing code/tests so the criterion is genuinely
+satisfied (not just a plausible-looking test that wouldn't actually catch a violation). Run
+\`cargo test --workspace\`, \`cargo clippy --workspace -- -D warnings\`, and \`cargo fmt --check --all\`
+(and the frontend gates, if you touch frontend/) after fixing, and commit your changes (do NOT amend the
+existing commit — new commit, message "fix: address judge findings for #${selection.issue_number}").
+
+If a gap can't be closed because it hinges on a genuine open question only a human can answer (an
+ambiguous requirement, a real design/scope decision) — do NOT guess. Set fixed=false,
+needs_human_decision=true, and put the specific question in human_question.
+
+If you successfully close the gap, set fixed=true.
+
+Return a StructuredOutput describing what happened.`,
+    { label: 'fix-judge-gaps', phase: 'Judge', schema: FIX_SCHEMA }
+  )
+
+  if (fix && fix.fixed) {
+    log(`🔧 Fixed judge-found gaps: ${fix.summary}`)
+    judge = await agent(judgePrompt(), { label: 're-judge', phase: 'Judge', schema: JUDGE_SCHEMA, model: 'claude-haiku-4-5-20251001' })
+    if (!judge) {
+      judge = { all_met: false, criteria_checked: [], criteria_met: [], reasoning: 'judge agent failed to return a result on re-judge' }
+    }
+    log(judge.all_met ? '✅ Re-judge confirms acceptance criteria now met' : '⚠️ Re-judge still finds unmet criteria')
+  }
+
+  if (!judge.all_met) {
+    if (fix && fix.needs_human_decision) {
+      judgeUnresolvedKind = 'needs_human_decision'
+      judgeHumanQuestion = fix.human_question || '(no question captured)'
+      log(`❓ Judge gap needs a human decision: ${judgeHumanQuestion}`)
+    } else {
+      // Not an open question — file a follow-up issue and let this diff ship;
+      // the gap is tracked separately rather than blocking indefinitely.
+      const ISSUE_FILE_SCHEMA = {
+        type: 'object',
+        properties: { filed: { type: 'boolean' }, issue_url: { type: 'string' } },
+        required: ['filed'],
+      }
+      const filed = await agent(
+        `File a new GitHub issue in ${OWNER}/${REPO} using the GitHub MCP tool (mcp__github__create_issue) for
+a gap found while verifying issue #${selection.issue_number} — "${selection.title}":
+
+Unmet criteria:
+${unmet.map((c) => `- ${c}`).join('\n')}
+
+Judge's reasoning:
+${judge.reasoning}
+${fix ? `\nFix attempt notes: ${fix.unfixable_reason || fix.summary}` : ''}
+
+Title it something like "Follow-up: <short description> (from #${selection.issue_number})". Body should
+reference #${selection.issue_number} and explain the gap so someone can pick it up. Return the created
+issue's URL.`,
+        { label: 'file-followup-issue', phase: 'Judge', schema: ISSUE_FILE_SCHEMA }
+      )
+      judgeUnresolvedKind = 'follow_up_filed'
+      judgeFiledIssueUrl = filed && filed.filed ? filed.issue_url : '(issue filing failed — see logs)'
+      log(`📋 Filed follow-up issue for unresolved judge gap: ${judgeFiledIssueUrl}`)
+    }
+  }
+}
+
+const judgeMergeable = judge.all_met || judgeUnresolvedKind === 'follow_up_filed'
+
+const gateGreen = coreTestsPassed && !e2eGenuinelyFailed && reviewMergeable && judgeMergeable
 
 // ---------------------------------------------------------------------------
 // Phase 6 — Ship
@@ -432,14 +594,22 @@ const SHIP_SCHEMA = {
   required: ['pushed', 'pr_url', 'pr_number', 'pr_created'],
 }
 
-const reviewSection = `## Review
+const e2eSection = !testResult.frontend_e2e_applicable
+  ? ''
+  : testResult.frontend_e2e_passed
+    ? `\n**e2e**: ✅ \`npm run test:e2e\` passed.\n`
+    : !testResult.frontend_e2e_env_available
+      ? `\n**e2e**: ⚠️ could not run — no Playwright browser available in the environment that produced this PR (checked \`~/.cache/ms-playwright\`, \`$PLAYWRIGHT_BROWSERS_PATH\`, \`/opt/pw-browsers\`, system chromium — none present). Every other Definition of Done tier is green. Per CLAUDE.md this is an environment gap, not a code defect, and does not block merge — a human or CI environment with real browsers should confirm before relying on it.\n`
+      : `\n**e2e**: ❌ ran and FAILED — this blocks merge (a real regression, not an environment gap).\n\n${testResult.failure_details}\n`
 
+const reviewSection = `## Review
+${e2eSection}
 **Code review** (${reviewModel}): ${review.clean ? '✅ clean' : `⚠️ ${review.blocking_findings.length} blocking finding(s)`}
-${review.blocking_findings.length ? review.blocking_findings.map((f) => `- [blocking] ${f}`).join('\n') + '\n' : ''}${review.non_blocking_notes.length ? review.non_blocking_notes.map((f) => `- [note] ${f}`).join('\n') + '\n' : ''}${review.summary}
+${review.blocking_findings.length ? review.blocking_findings.map((f) => `- [blocking] ${f}`).join('\n') + '\n' : ''}${review.non_blocking_notes.length ? review.non_blocking_notes.map((f) => `- [note] ${f}`).join('\n') + '\n' : ''}${review.unresolved_kind === 'needs_human_decision' ? `\n❓ **Needs a human decision:** ${review.human_question}\n` : ''}${review.unresolved_kind === 'follow_up_filed' ? `\n📋 **Follow-up filed:** ${review.filed_issue_url}\n` : ''}${review.summary}
 
 **Judge** (haiku): ${judge.all_met ? '✅ acceptance criteria met' : '⚠️ unmet acceptance criteria'}
 ${judge.criteria_checked.map((c, i) => `- [${judge.criteria_met[i] ? 'x' : ' '}] ${c}`).join('\n')}
-${judge.reasoning}`
+${judgeUnresolvedKind === 'needs_human_decision' ? `\n❓ **Needs a human decision:** ${judgeHumanQuestion}\n` : ''}${judgeUnresolvedKind === 'follow_up_filed' ? `\n📋 **Follow-up filed:** ${judgeFiledIssueUrl}\n` : ''}${judge.reasoning}`
 
 // Always push + open the PR — the review/judge findings above go straight
 // into the PR description regardless of whether the gate is green, so a
@@ -483,7 +653,9 @@ if (!ship || !ship.pr_created) {
 log(`📬 PR opened: ${ship.pr_url}`)
 
 if (!gateGreen) {
-  log(`⏸️  Gate not green (tests=${testResult.all_passed}, review=${review.clean}, judge=${judge.all_met}) — leaving PR open for human review, not merging`)
+  log(
+    `⏸️  Gate not green (core_tests=${coreTestsPassed}, e2e_blocking_failure=${e2eGenuinelyFailed}, review=${reviewMergeable}, judge=${judgeMergeable}) — leaving PR open for human review, not merging`
+  )
   return {
     success: true,
     merged: false,
@@ -505,7 +677,9 @@ const MERGE_SCHEMA = {
 const merge = await agent(
   `Merge pull request #${ship.pr_number} in ${OWNER}/${REPO} (branch \`${selection.branch_name}\` → \`${DEFAULT_BRANCH}\`).
 
-Tests, code review, and judge all passed — this PR is gated green per CLAUDE.md's auto-merge policy.
+Core tests, code review, and judge are all gated green per CLAUDE.md's auto-merge policy — e2e either
+passed or could not run in this environment (documented in the PR, not a blocker), and any review/judge
+follow-ups were fixed on the spot or filed as separate tracked issues rather than left blocking.
 
 Steps:
 1. Use (mcp__github__merge_pull_request) to merge with method "squash".

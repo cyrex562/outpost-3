@@ -7,9 +7,9 @@ The harness is a Claude Code workflow that automates the implementation loop:
 1. **Select** — picks the next open GitHub issue respecting phase order and dependency gates
 2. **Implement** — spawns a Rust/Vue coding agent with full design context to write the feature
 3. **Test** — runs `cargo test`, `cargo clippy`, `cargo fmt --check`, the balance harness, and — when the diff touches `frontend/src/` — `npm run type-check`, `npm run test:unit`, `npm run build`, and (for user-facing changes) `npm run test:e2e`. See CLAUDE.md's [Definition of Done](../CLAUDE.md#definition-of-done) for the full gate.
-4. **Review** — an independent code-review subagent (Sonnet if the diff touches `outpost_core/`, Haiku otherwise) audits the diff against CLAUDE.md's Rust Best Practices and Critical Rules; fixes blocking findings itself and re-verifies
-5. **Judge** — a separate, blind Haiku subagent checks the issue's acceptance criteria against the diff and its tests independently of the reviewer's findings
-6. **Ship** — pushes the branch and opens a PR with a `## Review` section summarizing both agents' verdicts; squash-merges and closes the issue **only if** tests + review + judge are all green. If the gate isn't green, the PR stays open for a human instead.
+4. **Review** — an independent code-review subagent (Sonnet if the diff touches `outpost_core/`, Haiku otherwise) audits the diff against CLAUDE.md's Rust Best Practices and Critical Rules. Blocking findings get fixed on the spot and re-verified, or — if real but out of scope for this diff — filed as a new GitHub issue instead. Only a finding that genuinely hinges on a human judgment call is left unresolved.
+5. **Judge** — a separate, blind Haiku subagent checks the issue's acceptance criteria against the diff and its tests independently of the reviewer's findings. If it finds a gap, a dedicated fix agent closes it and the judge re-runs once; if still unmet, the gap is either filed as a follow-up issue or, if it's a genuine open question, left for a human.
+6. **Ship** — pushes the branch and opens a PR with a `## Review` section summarizing both agents' verdicts; squash-merges and closes the issue **unless** a tier that actually failed (not just an environment-blocked one, like e2e with no browser installed) is red, or review/judge left something genuinely needing a human decision. See CLAUDE.md's [Git Workflow](../CLAUDE.md#git-workflow) auto-merge policy for the exact gate.
 
 ## Running the Harness
 
@@ -157,9 +157,9 @@ It is deliberately not assertable. A cost figure is only meaningful *relative to
 If the harness returns `success: false`:
 
 - `stage: "implement"` — the agent couldn't compile the code; check the branch manually
-- `stage: "test"` — tests, clippy, fmt, or a frontend/Playwright gate failed; the branch exists with the code, fix and push
+- `stage: "test"` — a core tier (`cargo test`/clippy/fmt, balance harness, or frontend type-check/unit/build) genuinely failed; e2e failing alone does NOT land here if it's an environment gap (no browser) rather than a real failure — the branch exists with the code, fix and push
 - `stage: "ship"` — the PR couldn't even be created (push or `create_pull_request` failed); branch is pushed, open the PR manually
 
-If the harness returns `success: true, merged: false`, everything up through Ship worked — a PR is open — but the auto-merge gate wasn't green: `testResult.all_passed`, `review.clean`, and `judge.all_met` must **all** be true to merge. Check the returned `review`/`judge` objects (or the PR's `## Review` section) for which one failed, decide whether to fix and re-run or merge manually, then act.
+If the harness returns `success: true, merged: false`, everything up through Ship worked — a PR is open — but the auto-merge gate wasn't green. Check the PR's `## Review` section for which of these is true: a tier actually failed (not just environment-blocked), or review/judge left an `unresolved_kind: "needs_human_decision"` finding — that's the only kind of finding that still blocks merge; anything fixable or file-able already was. Resolve the open question, then merge manually or re-run the harness targeting the issue number to retry from Test onward.
 
 After fixing, re-run the harness targeting the specific issue number to retry from Test onward.

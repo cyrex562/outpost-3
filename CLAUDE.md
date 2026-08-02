@@ -14,24 +14,6 @@ You write idiomatic, best-practices Rust targeting edition 2021. You keep simula
 
 ---
 
-## Technology Stack
-
-| Layer | Technology | Notes |
-|---|---|---|
-| **Sim core** | Pure Rust lib (`outpost_core`) | No I/O, no async, no framework deps |
-| **CLI / Harness** | Rust binary (`outpost_harness`) | Balance calculator + prototyping runner |
-| **Web host** | Rust + Axum (`outpost_web`) | Phase 6+; wraps core, serves Vue |
-| **Frontend** | Vue 3 + TypeScript + Vite | Phase 6+; Pinia state, strict TS |
-| **Content** | YAML / JSON pack files (`content/`) | Loaded at runtime; never hardcoded in kernel |
-| **Persistence** | SQLite (snapshot between turns) | NOT per-mutation live state |
-| **Testing (backend)** | `cargo test` (unit + integration) | All tests must pass before merge |
-| **Testing (frontend)** | `vitest` (unit/component) + `@playwright/test` (e2e) | All tiers must pass before merge |
-| **Review** | Haiku or Sonnet code-review subagent | Runs before every PR (see below) |
-| **Validation** | Haiku judge subagent | Independently confirms acceptance criteria before merge |
-| **Reference** | `reference/harsh_realm-main/` | Structural patterns only — different game |
-
----
-
 ## Rust Best Practices
 
 Applies to every file under `outpost_core/`, `outpost_harness/`, `outpost_web/`, and `outpost_tauri/`.
@@ -44,35 +26,6 @@ Applies to every file under `outpost_core/`, `outpost_harness/`, `outpost_web/`,
 - **Minimize cloning.** Prefer borrowing (`&T`) over `.clone()` in hot paths (the per-turn production/needs/hazard pipelines). Cloning is fine at command/query boundaries where ownership must transfer into a returned wire type.
 - **No new external dependencies in `outpost_core`** beyond what's already listed in [Critical Rules](#critical-rules) without discussing it with the user first — the zero-I/O guarantee is load-bearing for testability and the future WASM/embedded targets.
 - **Keep `outpost_tauri`/`outpost_web` thin.** Wire-layer crates translate `Command`/`Query`/`Event` to/from JSON and call into `outpost_core`; they should not contain simulation logic. If you find yourself writing game rules in a `#[tauri::command]` function, that logic belongs in `outpost_core` instead.
-
----
-
-## Project Structure
-
-```
-outpost-3/
-├── CLAUDE.md                        # This file
-├── docs/
-│   ├── DESIGN.md                    # Authoritative game design (read this first)
-│   ├── ISSUES.md                    # GitHub issue breakdown
-│   ├── HARNESS.md                   # How to use the implement-issue workflow
-│   ├── REVIEW.md                    # Codebase review (2026-07-08)
-│   └── TODO.md                      # Legacy Godot+C# task list (archived)
-├── content/                         # Data pack files (YAML/JSON)
-│   └── checks/                      # Balance harness test bundles
-├── reference/
-│   └── harsh_realm-main/            # Reference architecture (read-only)
-├── .claude/
-│   └── workflows/
-│       └── implement-issue.js       # Main implementation harness
-├── Cargo.toml                       # Workspace root (Phase 1+)
-├── outpost_core/                    # Pure sim library (Phase 1+)
-├── outpost_harness/                 # Balance harness binary (Phase 3+)
-├── outpost_web/                     # Axum web host (Phase 6+)
-├── frontend/                        # Vue 3 app (Phase 6+)
-└── godot/                           # Legacy Godot+C# implementation (behavioral spec)
-    └── src/Core/                    # C# code — read as spec, do not modify
-```
 
 ---
 
@@ -134,46 +87,31 @@ A feature, bugfix, or refactor is complete only when **all applicable tiers belo
 
 `outpost_tauri` cannot be built or type-checked in every environment (it needs WebKit2GTK system libs) — when that's the case, say so explicitly rather than silently skipping verification, and rely on `cargo build -p outpost_tauri`/`cargo check -p outpost_tauri` wherever it *is* available (e.g. CI, or a local dev machine) as part of the gate.
 
+**Environment-blocked tiers don't gate merge, but must be documented.** If a tier is genuinely inapplicable-to-verify in the current environment — no Playwright browser installed anywhere for `test:e2e` (never work around this with `playwright install`), no WebKit2GTK for `outpost_tauri` — say so explicitly in the PR and don't block merge on it. This is different from the tier running and failing: a real failure (browser present, suite ran, something broke) always blocks merge regardless of tier. The distinction is "couldn't check" vs. "checked and it's broken."
+
 ---
 
 ## Automated Review & Validation
 
 Before opening a PR (or before merging, for the automated harness), run two independent subagents against the diff:
 
-1. **Code-review agent** (Haiku or Sonnet — Haiku for small/mechanical diffs, Sonnet for anything touching simulation logic or cross-cutting concerns). Reviews the diff for correctness bugs, unhandled edge cases, and violations of the [Rust Best Practices](#rust-best-practices) / [Critical Rules](#critical-rules) above. Findings that are blocking (real bugs, panics on reachable input, violated architecture rules) must be fixed before shipping; non-blocking suggestions (style nits, optional simplifications) can be noted and skipped with a one-line reason.
+1. **Code-review agent** (Haiku or Sonnet — Haiku for small/mechanical diffs, Sonnet for anything touching simulation logic or cross-cutting concerns). Reviews the diff for correctness bugs, unhandled edge cases, and violations of the [Rust Best Practices](#rust-best-practices) / [Critical Rules](#critical-rules) above.
 2. **Judge agent** (Haiku). Given the original issue's acceptance criteria (its "Done when" / "Definition of Done" bullets) and the diff, independently confirms each criterion is actually met — not just that tests pass, but that the tests *test the right thing*. The judge should be blind to the review agent's findings so it isn't anchored by them; run it as a separate subagent call, not chained after the reviewer.
 
-Both agents' verdicts (pass/fail + findings) go in the PR description under a `## Review` section so a human skimming the PR later can see what was checked automatically. If either agent finds a blocking issue, fix it, re-run that agent (not the whole pair — no need to re-review passing dimensions), and only proceed once both are clean.
+Both agents' verdicts (pass/fail + findings) go in the PR description under a `## Review` section so a human skimming the PR later can see what was checked automatically.
+
+**Findings don't automatically block merge — resolve, don't just flag.** When either agent finds a real issue, resolve it one of three ways, in this order of preference:
+1. **Fix it on the spot** (the review agent already does this for blocking findings; the judge's gaps get a dedicated fix-and-re-judge pass), then re-verify.
+2. **File a new GitHub issue** for anything real but out of scope for this diff (a pre-existing problem elsewhere, a larger refactor), referencing the current issue/PR, and proceed — the diff itself still ships.
+3. **Leave it for a human** only when it genuinely hinges on a judgment call only a person can make (an ambiguous requirement, a real design/scope tradeoff) — not because it was inconvenient to fix. This is the only case that blocks merge; state the specific open question in the PR.
+
+Only option 3 (a genuine open question) should leave a PR unmerged. A findable bug or an out-of-scope-but-real issue should never be the reason a PR sits waiting for review — fix it or file it, then ship.
 
 ---
 
 ## Running Tests
 
-```bash
-# Rust — all tests
-cargo test --workspace
-
-# Rust — with output
-cargo test --workspace -- --nocapture
-
-# Rust — single crate
-cargo test -p outpost_core
-
-# Rust — lint
-cargo clippy --workspace -- -D warnings
-
-# Rust — format check
-cargo fmt --check --all
-```
-
-```bash
-# Frontend — from frontend/
-npm run type-check   # vue-tsc
-npm run test:unit    # vitest (unit + component)
-npm run build        # production build (also type-checks)
-npm run test:e2e     # Playwright, headless
-npm run test:e2e:ui  # Playwright, interactive UI mode (local debugging only)
-```
+See the [Definition of Done](#definition-of-done) table above for the exact commands per tier.
 
 Playwright uses the environment's pre-installed Chromium — never run `playwright install`; `frontend/playwright.config.ts` resolves the sandbox's browser automatically when present and falls back to Playwright's normal resolution otherwise. `e2e/app-shell.spec.ts` is a browser-only smoke suite (no `outpost_web` backend required); specs that exercise live game state must start `outpost_web` first.
 
@@ -230,14 +168,14 @@ Well underway — the Rust workspace, `outpost_core` simulation kernel, `outpost
 ## Git Workflow
 
 - Branch from `main` for each issue: `issue-{N}-{slug}`
-- Commit message: `Phase N: brief description\n\nCloses #N`
-- Open a PR against `main` once the [Definition of Done](#definition-of-done) gate is green and the [review + judge](#automated-review--validation) pass.
-- **Auto-merge policy**: merge the PR yourself (no need to wait for a human) once, and only once, **all** of the following hold:
-  1. Every applicable [Definition of Done](#definition-of-done) test tier is green.
-  2. The code-review agent found no blocking issues (or blocking issues were found and fixed, then re-reviewed clean).
-  3. The judge agent confirmed the issue's acceptance criteria are met.
+- Commit message: `Issue #N: brief description\n\nCloses #N`
+- Open a PR against `main` once the [Definition of Done](#definition-of-done) gate is green and [review + judge](#automated-review--validation) have run.
+- **Merge is the default outcome, not a special case.** The user's own verification loop is pulling `main` on their desktop machine and building/running it there — the automated gate exists to catch what's cheaply catchable before that point, not to hold code back pending a human look. Auto-merge (no need to wait for anyone) once **all** of the following hold:
+  1. Every [Definition of Done](#definition-of-done) test tier either passed, or was genuinely environment-blocked and documented as such (see the environment-blocked-tiers note above) — a tier that ran and actually failed still blocks, always.
+  2. The code-review agent's findings are resolved — fixed on the spot, or filed as a follow-up issue. `unresolved_kind` is not `"needs_human_decision"`.
+  3. The judge agent's findings are resolved the same way — fixed (possibly after a re-judge pass), or filed as a follow-up issue. Not `"needs_human_decision"`.
   This applies both to the automated harness and to working an issue directly in conversation — don't stop at "PR opened" and wait to be told to merge; merge it once the gate is green, then move on or report completion.
-- **Do not auto-merge** when: the user explicitly asked to review before merging; the change is to `CLAUDE.md`/`docs/HARNESS.md`/the workflow scripts themselves (policy changes get a human look before they take effect); the change touches `outpost_tauri` in a way that can't be verified in the current environment (missing WebKit2GTK libs) and no CI run has confirmed it; or any review/judge finding is ambiguous rather than clearly resolved. In these cases, open the PR, summarize review + judge results, and wait.
+- **Do not auto-merge** when: the user explicitly asked to review before merging *this specific PR*; the change is to `CLAUDE.md`/`docs/HARNESS.md`/the workflow scripts themselves (policy changes get a human look before they take effect — this file's own edits are never auto-merged by the rule it defines); or the review or judge agent genuinely could not resolve a finding without a human decision (`unresolved_kind: "needs_human_decision"`). In these cases, open the PR, summarize what's unresolved and why, and wait.
 - Never force-push, skip hooks, or bypass a failing check to get to green.
 
 ---
