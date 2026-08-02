@@ -438,6 +438,26 @@ pub(crate) fn client_command_to_core(
                 to_colony: to,
             })
         }
+        ClientCommand::AddTradeRoute {
+            colony_a,
+            colony_b,
+            throughput_cap,
+        } => {
+            let a = ColonyId::from_str(&colony_a)
+                .map_err(|_| format!("invalid colony_a: {colony_a}"))?;
+            let b = ColonyId::from_str(&colony_b)
+                .map_err(|_| format!("invalid colony_b: {colony_b}"))?;
+            Ok(Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap,
+            })
+        }
+        ClientCommand::RemoveTradeRoute { route_id } => {
+            let route_id = uuid::Uuid::from_str(&route_id)
+                .map_err(|_| format!("invalid route_id: {route_id}"))?;
+            Ok(Command::RemoveTradeRoute { route_id })
+        }
         ClientCommand::BeginOrbitalConstruction {
             blueprint_id,
             colony_id,
@@ -3062,6 +3082,88 @@ mod tests {
             ClientCommand::CancelConstruction {
                 colony_id: "not-a-uuid".into(),
                 project_id: "also-not-a-uuid".into(),
+            },
+            &state,
+        );
+        assert!(result.is_err());
+    }
+
+    /// Issue #363: `AddTradeRoute`/`RemoveTradeRoute` must translate off the
+    /// wire — this is what closes the gap the issue reports (the command
+    /// existed and was tested in the engine, but neither host exposed it).
+    #[test]
+    fn client_command_add_trade_route_translates_to_core_command() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+        use outpost_core::colony::ColonyId;
+        use outpost_core::Command;
+
+        let colony_a = ColonyId::new_v4();
+        let colony_b = ColonyId::new_v4();
+        let state = new_state(RuntimeConfig::default());
+
+        let core_cmd = client_command_to_core(
+            ClientCommand::AddTradeRoute {
+                colony_a: colony_a.to_string(),
+                colony_b: colony_b.to_string(),
+                throughput_cap: 42.0,
+            },
+            &state,
+        )
+        .expect("translation should succeed");
+
+        match core_cmd {
+            Command::AddTradeRoute {
+                colony_a: got_a,
+                colony_b: got_b,
+                throughput_cap,
+            } => {
+                assert_eq!(got_a, colony_a);
+                assert_eq!(got_b, colony_b);
+                assert!((throughput_cap - 42.0).abs() < 1e-9);
+            }
+            other => panic!("expected Command::AddTradeRoute, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn client_command_remove_trade_route_translates_to_core_command() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+        use outpost_core::Command;
+        use uuid::Uuid;
+
+        let route_id = Uuid::new_v4();
+        let state = new_state(RuntimeConfig::default());
+
+        let core_cmd = client_command_to_core(
+            ClientCommand::RemoveTradeRoute {
+                route_id: route_id.to_string(),
+            },
+            &state,
+        )
+        .expect("translation should succeed");
+
+        match core_cmd {
+            Command::RemoveTradeRoute {
+                route_id: got_route,
+            } => assert_eq!(got_route, route_id),
+            other => panic!("expected Command::RemoveTradeRoute, got {other:?}"),
+        }
+    }
+
+    /// Malformed UUIDs are rejected with a descriptive error rather than panicking.
+    #[test]
+    fn client_command_add_trade_route_rejects_invalid_ids() {
+        use crate::config::RuntimeConfig;
+        use crate::state::new_state;
+
+        let state = new_state(RuntimeConfig::default());
+        let result = client_command_to_core(
+            ClientCommand::AddTradeRoute {
+                colony_a: "not-a-uuid".into(),
+                colony_b: "also-not-a-uuid".into(),
+                throughput_cap: 10.0,
             },
             &state,
         );

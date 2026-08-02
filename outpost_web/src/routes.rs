@@ -38,6 +38,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/balance-scalars",
             get(query_routes::get_balance_scalars),
         )
+        .route("/api/trade-routes", get(query_routes::get_trade_routes))
         .route(
             "/api/colony-screen/:id",
             get(query_routes::get_colony_screen),
@@ -467,5 +468,118 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Issue #363, end-to-end at the `outpost_web` layer: `/api/command`
+    /// accepts `add_trade_route`/`remove_trade_route`, and `/api/trade-routes`
+    /// reflects the result — the two REST endpoints a browser-mode trade
+    /// screen would actually call.
+    #[tokio::test]
+    async fn shared_command_add_and_remove_trade_route_roundtrip() {
+        let state = new_state(RuntimeConfig::default());
+        let make_router = || build_router(Arc::clone(&state));
+
+        async fn found(router: Router, name: &str) -> String {
+            let cmd = json!({ "kind": "found_colony", "name": name, "starting_population": 100 });
+            let resp = router
+                .oneshot(
+                    Request::post("/api/command")
+                        .header("content-type", "application/json")
+                        .body(Body::from(cmd.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let events: Value = serde_json::from_slice(&body).unwrap();
+            events[0]["colony_id"].as_str().unwrap().to_string()
+        }
+
+        let colony_a = found(make_router(), "Alpha").await;
+        let colony_b = found(make_router(), "Beta").await;
+
+        // No routes yet.
+        let resp = make_router()
+            .oneshot(
+                Request::get("/api/trade-routes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let routes: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(routes.as_array().unwrap().len(), 0);
+
+        // Add a route between them.
+        let cmd = json!({
+            "kind": "add_trade_route",
+            "colony_a": colony_a,
+            "colony_b": colony_b,
+            "throughput_cap": 15.0,
+        });
+        let resp = make_router()
+            .oneshot(
+                Request::post("/api/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(cmd.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let events: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(events[0]["kind"], "trade_route_added");
+        let route_id = events[0]["route_id"].as_str().unwrap().to_string();
+
+        // Now it shows up.
+        let resp = make_router()
+            .oneshot(
+                Request::get("/api/trade-routes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let routes: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(routes.as_array().unwrap().len(), 1);
+
+        // Remove it.
+        let cmd = json!({ "kind": "remove_trade_route", "route_id": route_id });
+        let resp = make_router()
+            .oneshot(
+                Request::post("/api/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(cmd.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp = make_router()
+            .oneshot(
+                Request::get("/api/trade-routes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let routes: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(routes.as_array().unwrap().len(), 0);
     }
 }

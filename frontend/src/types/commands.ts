@@ -181,6 +181,22 @@ export type Command =
       infra_type: 'road' | 'rail' | 'pipeline' | 'powerline'
     }
   | { kind: 'demolish_infrastructure'; from_colony: string; to_colony: string }
+  | {
+      /**
+       * Create a manually-added trade route between two colonies (issue
+       * #363). Unlike `build_infrastructure`, this has no same-body
+       * requirement — the engine derives convoy transit time from body
+       * separation the same way either kind of route is created, falling
+       * back to a 1-sol default when the endpoints share a body or lack
+       * home-body context.
+       */
+      kind: 'add_trade_route'
+      colony_a: string
+      colony_b: string
+      /** Maximum units per commodity that may transit per strategic turn. */
+      throughput_cap: number
+    }
+  | { kind: 'remove_trade_route'; route_id: string }
 
 /** Directive trigger condition shape. */
 export interface DirectiveCondition {

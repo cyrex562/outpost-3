@@ -169,6 +169,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <RouterLink to="/installations" class="nav-link">Installations</RouterLink>
         <RouterLink to="/bodies" class="nav-link">Bodies</RouterLink>
         <RouterLink to="/buildings" class="nav-link">Buildings</RouterLink>
+        <RouterLink to="/trade" class="nav-link">Trade</RouterLink>
       </nav>
       <span
         v-if="!isTauri"

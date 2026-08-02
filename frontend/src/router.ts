@@ -15,6 +15,7 @@ import PlanetView from './views/PlanetView.vue'
 import SurfaceView from './views/SurfaceView.vue'
 import ColoniesListView from './views/ColoniesListView.vue'
 import BalanceView from './views/BalanceView.vue'
+import TradeView from './views/TradeView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -42,6 +43,7 @@ const router = createRouter({
     { path: '/bodies', component: SystemBodiesView, name: 'bodies' },
     { path: '/buildings', component: BuildingsListView, name: 'buildings' },
     { path: '/balance', component: BalanceView, name: 'balance' },
+    { path: '/trade', component: TradeView, name: 'trade' },
     { path: '/outpost/:outpostId', component: OutpostView, name: 'outpost' },
     {
       path: '/outpost/:outpostId/facility/:buildingType',

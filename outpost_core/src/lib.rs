@@ -1238,6 +1238,11 @@ pub enum Query {
     MenaceStatus,
     /// Return victory progress for all tracked conditions.
     VictoryStatus,
+    /// Return every trade route currently in the planetary trade network
+    /// (issue #363), infrastructure-linked or manually added alike — the two
+    /// are indistinguishable once created, both flowing through the same
+    /// [`trade::run_trade_flow`] pass.
+    TradeRoutes,
 }
 
 /// The result returned by [`GameEngine::query`].
@@ -1273,6 +1278,8 @@ pub enum QueryResult {
     MenaceStatus(Option<menace::MenaceState>),
     /// Victory progress for all tracked conditions.
     VictoryStatus(Vec<victory::VictoryProgress>),
+    /// Every trade route currently in the planetary trade network (issue #363).
+    TradeRoutes(Vec<TradeRoute>),
 }
 
 /// Lightweight colony summary returned by [`Query::ListColonies`].
@@ -7029,6 +7036,10 @@ impl GameEngine {
 
             Query::VictoryStatus => Ok(QueryResult::VictoryStatus(
                 self.state.victory_state.conditions.clone(),
+            )),
+
+            Query::TradeRoutes => Ok(QueryResult::TradeRoutes(
+                self.state.trade_network.routes.clone(),
             )),
         }
     }
@@ -15019,6 +15030,27 @@ mod tests {
         (id_a, id_b)
     }
 
+    /// Add a bare inner-planet body at `distance_au` and return its id, for
+    /// tests that need two colonies on measurably different bodies without a
+    /// full procedural system generation.
+    fn add_body_at_distance(
+        engine: &mut GameEngine,
+        name: &str,
+        distance_au: f32,
+    ) -> system::BodyId {
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: name.into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au,
+            }))
+            .unwrap();
+        match &events[0] {
+            Event::System(system::SystemEvent::BodyAdded { body_id, .. }) => body_id.clone(),
+            _ => panic!("expected BodyAdded"),
+        }
+    }
+
     #[test]
     fn add_trade_route_emits_event() {
         let mut engine = GameEngine::new();
@@ -15058,6 +15090,200 @@ mod tests {
             .unwrap();
         assert!(matches!(rm_evs[0], Event::TradeRouteRemoved { .. }));
         assert!(engine.state.trade_network.routes.is_empty());
+    }
+
+    /// Issue #363, "Done when" #1: a player can create a trade route between
+    /// two colonies regardless of whether they share a body. `AddTradeRoute`
+    /// has no same-body gate at all (unlike `BuildInfrastructure`, which
+    /// rejects two colonies on different bodies outright) — this pins that
+    /// the two colonies here, which live on different bodies, still get a
+    /// route.
+    #[test]
+    fn add_trade_route_succeeds_between_colonies_on_different_bodies() {
+        let mut engine = GameEngine::new();
+        let body_a = add_body_at_distance(&mut engine, "Near", 0.5);
+        let body_b = add_body_at_distance(&mut engine, "Far", 10.5);
+        let (a, b) = found_two_colonies(&mut engine);
+        engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id: a,
+                body_id: body_a,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id: b,
+                body_id: body_b,
+            })
+            .unwrap();
+
+        // The same pair rejected by BuildInfrastructure (different bodies)...
+        let infra_result = engine.apply(&Command::BuildInfrastructure {
+            from_colony: a,
+            to_colony: b,
+            infra_type: map::InfraType::Road,
+        });
+        assert!(
+            infra_result.is_err(),
+            "sanity check: infrastructure should refuse to link different bodies"
+        );
+
+        // ...must still be linkable by a manually-added trade route.
+        let evs = engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 20.0,
+            })
+            .unwrap();
+        assert!(matches!(evs[0], Event::TradeRouteAdded { .. }));
+        assert_eq!(engine.state.trade_network.routes.len(), 1);
+    }
+
+    /// Issue #363: `route_transit_sols` derives transit from body separation
+    /// when both endpoints have a known home body — `AddTradeRoute` already
+    /// calls it (it's what `BuildInfrastructure` shares to avoid the two
+    /// drifting apart), so a manually-added cross-body route should not fall
+    /// back to `trade::DEFAULT_TRANSIT_SOLS` the way a same-body route does.
+    #[test]
+    fn add_trade_route_between_distant_bodies_derives_transit_from_distance() {
+        let mut engine = GameEngine::new();
+        let body_a = add_body_at_distance(&mut engine, "Near", 0.5);
+        let body_b = add_body_at_distance(&mut engine, "Far", 10.5);
+        let (a, b) = found_two_colonies(&mut engine);
+        engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id: a,
+                body_id: body_a,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id: b,
+                body_id: body_b,
+            })
+            .unwrap();
+
+        engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 20.0,
+            })
+            .unwrap();
+
+        let route = &engine.state.trade_network.routes[0];
+        assert_eq!(
+            route.transit_sols,
+            10,
+            "transit should be distance-derived (10 AU apart), not the {}-sol same-body default",
+            trade::DEFAULT_TRANSIT_SOLS
+        );
+    }
+
+    /// Issue #363, "Done when" #2: a manually-added route behaves like any
+    /// other in the trade/convoy pipeline — dispatch, transit, and
+    /// `pending_inbound` accounting all apply the same as an
+    /// infrastructure-created route.
+    #[test]
+    fn cross_body_trade_route_dispatches_a_convoy_that_lands() {
+        let mut engine = GameEngine::new();
+        let body_a = add_body_at_distance(&mut engine, "Near", 0.5);
+        let body_b = add_body_at_distance(&mut engine, "Far", 2.5);
+        let (a, b) = found_two_colonies(&mut engine);
+        engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id: a,
+                body_id: body_a,
+            })
+            .unwrap();
+        engine
+            .apply(&Command::AssignColonyHomeBody {
+                colony_id: b,
+                body_id: body_b,
+            })
+            .unwrap();
+        let idx_a = engine.find_colony_index(a).unwrap();
+        let idx_b = engine.find_colony_index(b).unwrap();
+        engine.state.colonies[idx_a].pool.deposit("food", 100.0);
+
+        engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 20.0,
+            })
+            .unwrap();
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let in_flight: f64 = engine
+            .state
+            .trade_network
+            .convoys
+            .iter()
+            .map(|c| c.amount)
+            .sum();
+        assert!(
+            in_flight > 0.0,
+            "the cross-body route should dispatch a convoy just like a same-body one"
+        );
+        assert!(
+            (engine.state.trade_network.inbound_in_flight(b, "food") - in_flight).abs() < 1e-6,
+            "pending_inbound accounting should see the in-flight cargo"
+        );
+
+        // Route spans 2 AU -> 2-sol transit; let it fully arrive.
+        for _ in 0..5 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        assert!(
+            engine.state.colonies[idx_b].pool.amount("food") > 0.0,
+            "the convoy should eventually land at the destination"
+        );
+    }
+
+    /// Issue #363, "Done when" #3: both hosts need a way to list existing
+    /// trade routes for a UI, which needs `Query::TradeRoutes` on the core
+    /// side. Pins that it reflects routes as they're added and removed,
+    /// infrastructure-linked or manual alike.
+    #[test]
+    fn query_trade_routes_reflects_add_and_remove() {
+        let mut engine = GameEngine::new();
+        let (a, b) = found_two_colonies(&mut engine);
+
+        let QueryResult::TradeRoutes(routes) = engine.query(&Query::TradeRoutes).unwrap() else {
+            panic!("expected TradeRoutes result");
+        };
+        assert!(routes.is_empty());
+
+        let evs = engine
+            .apply(&Command::AddTradeRoute {
+                colony_a: a,
+                colony_b: b,
+                throughput_cap: 30.0,
+            })
+            .unwrap();
+        let route_id = match &evs[0] {
+            Event::TradeRouteAdded { route_id, .. } => *route_id,
+            _ => panic!("expected TradeRouteAdded"),
+        };
+
+        let QueryResult::TradeRoutes(routes) = engine.query(&Query::TradeRoutes).unwrap() else {
+            panic!("expected TradeRoutes result");
+        };
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].id, route_id);
+        assert_eq!(routes[0].colony_a, a);
+        assert_eq!(routes[0].colony_b, b);
+        assert!((routes[0].throughput_cap - 30.0).abs() < 1e-9);
+
+        engine
+            .apply(&Command::RemoveTradeRoute { route_id })
+            .unwrap();
+        let QueryResult::TradeRoutes(routes) = engine.query(&Query::TradeRoutes).unwrap() else {
+            panic!("expected TradeRoutes result");
+        };
+        assert!(routes.is_empty());
     }
 
     #[test]

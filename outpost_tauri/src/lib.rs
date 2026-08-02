@@ -90,6 +90,7 @@ pub fn run() {
             commands::delete_custom_preset,
             commands::list_outposts,
             commands::get_outpost_targets,
+            commands::get_trade_routes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Outpost 3");
