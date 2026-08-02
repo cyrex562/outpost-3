@@ -256,6 +256,24 @@ pub enum ClientCommand {
         /// Destination colony UUID.
         to_colony: String,
     },
+    /// Add a manually-created trade route between two colonies (issue #363).
+    ///
+    /// Unlike infrastructure-linked routes, this works between colonies on
+    /// different bodies — the engine derives convoy transit time from body
+    /// separation the same way either kind of route is created.
+    AddTradeRoute {
+        /// One colony endpoint UUID.
+        colony_a: String,
+        /// Other colony endpoint UUID.
+        colony_b: String,
+        /// Maximum units per commodity that may transit per strategic turn.
+        throughput_cap: f64,
+    },
+    /// Remove a trade route by its id (issue #363).
+    RemoveTradeRoute {
+        /// UUID of the route to remove.
+        route_id: String,
+    },
     /// Begin construction of an orbital station using a blueprint.
     BeginOrbitalConstruction {
         /// Content-pack blueprint identifier.
@@ -840,6 +858,22 @@ pub enum ServerEvent {
         /// New colony's name.
         name: String,
     },
+    /// A trade route was added to the planetary trade network (issue #363).
+    TradeRouteAdded {
+        /// Stable identifier for the new route.
+        route_id: String,
+        /// One colony endpoint UUID.
+        colony_a: String,
+        /// Other colony endpoint UUID.
+        colony_b: String,
+        /// Per-commodity throughput cap.
+        throughput_cap: f64,
+    },
+    /// A trade route was removed from the planetary trade network (issue #363).
+    TradeRouteRemoved {
+        /// UUID of the removed route.
+        route_id: String,
+    },
     /// A core event with no frontend representation; safely ignored.
     Ignored,
 }
@@ -1168,6 +1202,20 @@ impl ServerEvent {
                 colony_id: colony_id.to_string(),
                 name: name.clone(),
             },
+            Event::TradeRouteAdded {
+                route_id,
+                colony_a,
+                colony_b,
+                throughput_cap,
+            } => Self::TradeRouteAdded {
+                route_id: route_id.to_string(),
+                colony_a: colony_a.to_string(),
+                colony_b: colony_b.to_string(),
+                throughput_cap: *throughput_cap,
+            },
+            Event::TradeRouteRemoved { route_id } => Self::TradeRouteRemoved {
+                route_id: route_id.to_string(),
+            },
             // All remaining core events have no frontend representation.
             _ => Self::Ignored,
         }
@@ -1463,6 +1511,78 @@ mod tests {
             }
             _ => panic!("unexpected variant"),
         }
+    }
+
+    /// Issue #363: `AddTradeRoute` must be reachable over the wire — this is
+    /// what the frontend's trade-route UI sends, and it deserialises with no
+    /// same-body constraint (unlike `build_infrastructure`).
+    #[test]
+    fn client_command_add_trade_route_deserialises() {
+        let raw = r#"{"type":"command","seq":11,"command":{"kind":"add_trade_route","colony_a":"00000000-0000-0000-0000-000000000001","colony_b":"00000000-0000-0000-0000-000000000002","throughput_cap":25.5}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command:
+                    ClientCommand::AddTradeRoute {
+                        colony_a,
+                        colony_b,
+                        throughput_cap,
+                    },
+            } => {
+                assert_eq!(seq, 11);
+                assert_eq!(colony_a, "00000000-0000-0000-0000-000000000001");
+                assert_eq!(colony_b, "00000000-0000-0000-0000-000000000002");
+                assert!((throughput_cap - 25.5).abs() < 1e-9);
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn client_command_remove_trade_route_deserialises() {
+        let raw = r#"{"type":"command","seq":12,"command":{"kind":"remove_trade_route","route_id":"00000000-0000-0000-0000-000000000003"}}"#;
+        let msg: ClientMessage = serde_json::from_str(raw).expect("parse");
+        match msg {
+            ClientMessage::Command {
+                seq,
+                command: ClientCommand::RemoveTradeRoute { route_id },
+            } => {
+                assert_eq!(seq, 12);
+                assert_eq!(route_id, "00000000-0000-0000-0000-000000000003");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn server_event_trade_route_added_serialises() {
+        use uuid::Uuid;
+        let route_id = Uuid::new_v4();
+        let colony_a = Uuid::new_v4();
+        let colony_b = Uuid::new_v4();
+        let core_event = Event::TradeRouteAdded {
+            route_id,
+            colony_a,
+            colony_b,
+            throughput_cap: 15.0,
+        };
+        let se = ServerEvent::from_core(&core_event);
+        let json = serde_json::to_string(&se).expect("serialize");
+        assert!(json.contains("\"kind\":\"trade_route_added\""));
+        assert!(json.contains(&route_id.to_string()));
+        assert!(json.contains("15.0") || json.contains("15"));
+    }
+
+    #[test]
+    fn server_event_trade_route_removed_serialises() {
+        use uuid::Uuid;
+        let route_id = Uuid::new_v4();
+        let core_event = Event::TradeRouteRemoved { route_id };
+        let se = ServerEvent::from_core(&core_event);
+        let json = serde_json::to_string(&se).expect("serialize");
+        assert!(json.contains("\"kind\":\"trade_route_removed\""));
+        assert!(json.contains(&route_id.to_string()));
     }
 
     #[test]

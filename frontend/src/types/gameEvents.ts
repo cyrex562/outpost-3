@@ -118,6 +118,26 @@ export interface FastForwardEndedEvent {
   halting_reason: string | null
 }
 
+/**
+ * A trade route was added to the planetary trade network (issue #363).
+ * Works between colonies on different bodies, unlike infrastructure-linked
+ * routes — transit time is still derived from body separation when both
+ * colonies have a known home body.
+ */
+export interface TradeRouteAddedEvent {
+  kind: 'trade_route_added'
+  route_id: string
+  colony_a: string
+  colony_b: string
+  throughput_cap: number
+}
+
+/** A trade route was removed from the planetary trade network (issue #363). */
+export interface TradeRouteRemovedEvent {
+  kind: 'trade_route_removed'
+  route_id: string
+}
+
 /** Union of all known game event types. */
 export type GameEvent =
   | ColonySolAdvancedEvent
@@ -134,4 +154,6 @@ export type GameEvent =
   | OutpostPromotedEvent
   | TradeConvoyArrivedEvent
   | FastForwardEndedEvent
+  | TradeRouteAddedEvent
+  | TradeRouteRemovedEvent
   | OtherEvent

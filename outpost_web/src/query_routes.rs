@@ -346,6 +346,24 @@ pub async fn get_balance_scalars(State(state): State<AppState>) -> impl IntoResp
     }
 }
 
+/// `GET /api/trade-routes` — every trade route in the planetary trade
+/// network (issue #363), infrastructure-linked or manually added alike.
+///
+/// # Panics
+///
+/// Panics if the shared engine mutex is poisoned.
+pub async fn get_trade_routes(State(state): State<AppState>) -> impl IntoResponse {
+    let engine = state.engine.lock().expect("engine lock");
+    match engine.query(&outpost_core::Query::TradeRoutes) {
+        Ok(outpost_core::QueryResult::TradeRoutes(routes)) => Json(routes).into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "unexpected query result" })),
+        )
+            .into_response(),
+    }
+}
+
 /// `GET /api/body-surface/:id` — the surface of any system body, live if it has
 /// been settled and a procedurally-generated preview if it has not.
 ///
@@ -1150,6 +1168,27 @@ mod tests {
         let router = test_router();
         let response = router
             .oneshot(Request::get("/api/outposts").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    /// Issue #363: `/api/trade-routes` exposes `Query::TradeRoutes` — browser
+    /// mode's read side of the trade-route UI.
+    #[tokio::test]
+    async fn trade_routes_empty_list_on_fresh_engine() {
+        let router = test_router();
+        let response = router
+            .oneshot(
+                Request::get("/api/trade-routes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);

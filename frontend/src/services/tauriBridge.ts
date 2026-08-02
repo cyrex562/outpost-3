@@ -421,6 +421,31 @@ export interface PlanetMap {
   edges: InfraEdge[]
 }
 
+/**
+ * A trade route in the planetary trade network (issue #363) —
+ * infrastructure-linked or manually added alike; the two are
+ * indistinguishable once created.
+ */
+export interface TradeRoute {
+  id: string
+  colony_a: string
+  colony_b: string
+  /** Maximum units per commodity that may transit per strategic turn. */
+  throughput_cap: number
+  /** Sols a convoy spends in transit between the two endpoints. */
+  transit_sols: number
+}
+
+/**
+ * Fetch every trade route in the planetary trade network (issue #363).
+ * The read side of the trade-route UI — `add_trade_route`/`remove_trade_route`
+ * commands (sent via `gameStore.sendCommand`) are the write side.
+ */
+export async function getTradeRoutes(): Promise<TradeRoute[]> {
+  if (!isTauri) return fetchJson<TradeRoute[]>('/api/trade-routes')
+  return invoke<TradeRoute[]>('get_trade_routes')
+}
+
 export interface IngredientRow {
   commodity_id: string
   quantity: number

@@ -263,6 +263,18 @@ pub enum ClientCommand {
         from_colony: String,
         to_colony: String,
     },
+    /// Add a manually-created trade route between two colonies (issue #363).
+    ///
+    /// Unlike infrastructure-linked routes, this works between colonies on
+    /// different bodies — the engine derives transit time from body
+    /// separation the same way either kind of route is created.
+    AddTradeRoute {
+        colony_a: String,
+        colony_b: String,
+        throughput_cap: f64,
+    },
+    /// Remove a trade route by its id (issue #363).
+    RemoveTradeRoute { route_id: String },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -439,6 +451,15 @@ pub enum ServerEvent {
         halted: bool,
         halting_reason: Option<String>,
     },
+    /// A trade route was added to the planetary trade network (issue #363).
+    TradeRouteAdded {
+        route_id: String,
+        colony_a: String,
+        colony_b: String,
+        throughput_cap: f64,
+    },
+    /// A trade route was removed from the planetary trade network (issue #363).
+    TradeRouteRemoved { route_id: String },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
         core_kind: String,
@@ -672,6 +693,20 @@ impl ServerEvent {
                 outpost_id: outpost_id.to_string(),
                 building_type: building_type.clone(),
                 recipe_id: recipe_id.clone(),
+            },
+            Event::TradeRouteAdded {
+                route_id,
+                colony_a,
+                colony_b,
+                throughput_cap,
+            } => Self::TradeRouteAdded {
+                route_id: route_id.to_string(),
+                colony_a: colony_a.to_string(),
+                colony_b: colony_b.to_string(),
+                throughput_cap: *throughput_cap,
+            },
+            Event::TradeRouteRemoved { route_id } => Self::TradeRouteRemoved {
+                route_id: route_id.to_string(),
             },
             other => Self::Unknown {
                 core_kind: format!("{other:?}")
@@ -1569,6 +1604,19 @@ pub fn apply_command(
             from_colony: parse_colony(&from_colony)?,
             to_colony: parse_colony(&to_colony)?,
         },
+        ClientCommand::AddTradeRoute {
+            colony_a,
+            colony_b,
+            throughput_cap,
+        } => Command::AddTradeRoute {
+            colony_a: parse_colony(&colony_a)?,
+            colony_b: parse_colony(&colony_b)?,
+            throughput_cap,
+        },
+        ClientCommand::RemoveTradeRoute { route_id } => Command::RemoveTradeRoute {
+            route_id: Uuid::from_str(&route_id)
+                .map_err(|_| CmdError::InvalidArg(format!("bad route_id: {route_id}")))?,
+        },
     };
 
     match engine.apply(&core_cmd) {
@@ -2338,6 +2386,21 @@ pub fn get_balance_scalars(
     let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
     match engine.query(&outpost_core::Query::BalanceScalars) {
         Ok(outpost_core::QueryResult::BalanceScalars(rows)) => Ok(rows),
+        Ok(_) => Err(CmdError::Engine("unexpected query result".into())),
+        Err(e) => Err(CmdError::Engine(e.to_string())),
+    }
+}
+
+/// Return every trade route in the planetary trade network (issue #363),
+/// infrastructure-linked or manually added alike.
+#[tauri::command]
+pub fn get_trade_routes(
+    engine_state: State<'_, EngineState>,
+) -> CmdResult<Vec<outpost_core::trade::TradeRoute>> {
+    let guard = engine_state.engine.lock().unwrap();
+    let engine = guard.as_ref().ok_or(CmdError::NotInitialised)?;
+    match engine.query(&outpost_core::Query::TradeRoutes) {
+        Ok(outpost_core::QueryResult::TradeRoutes(routes)) => Ok(routes),
         Ok(_) => Err(CmdError::Engine("unexpected query result".into())),
         Err(e) => Err(CmdError::Engine(e.to_string())),
     }
