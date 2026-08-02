@@ -1,6 +1,11 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import FloatingWindow from '@/components/FloatingWindow.vue'
+import {
+  createFloatingWindowRegistry,
+  FLOATING_WINDOW_REGISTRY_KEY,
+  type FloatingWindowRegistry,
+} from '@/composables/floatingWindowRegistry'
 
 const KEY = 'test.floating-window'
 
@@ -369,5 +374,141 @@ describe('FloatingWindow host-relative sizing (issue #320)', () => {
     } finally {
       restore()
     }
+  })
+})
+
+describe('FloatingWindow multi-window snapping + z-order (colony details multi-window redesign)', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    document.body.innerHTML = ''
+  })
+
+  /**
+   * Mounts a `FloatingWindow` with a shared `registry` injected the same way
+   * a real providing ancestor would — `global.provide` on two separate
+   * `mount()` calls sharing the same registry instance simulates two
+   * sibling windows under one parent, without needing an actual wrapper
+   * component (the registry is a plain framework-agnostic object, so this
+   * is equivalent).
+   */
+  function mountWithRegistry(
+    registry: FloatingWindowRegistry,
+    extraProps: Record<string, unknown> = {},
+  ) {
+    return mount(FloatingWindow, {
+      props: {
+        title: 'Window',
+        storageKey: `${KEY}.${extraProps.windowId ?? 'default'}`,
+        initialX: 0,
+        initialY: 0,
+        initialWidth: 200,
+        initialHeight: 100,
+        ...extraProps,
+      },
+      global: { provide: { [FLOATING_WINDOW_REGISTRY_KEY as symbol]: registry } },
+      slots: { default: '<div data-testid="content">hi</div>' },
+      attachTo: document.body,
+    })
+  }
+
+  it('snaps a dragged window to a sibling registered under the same registry', async () => {
+    const registry = createFloatingWindowRegistry()
+    // Sibling sits with its left edge at x=300.
+    mountWithRegistry(registry, { windowId: 'a', initialX: 300, initialWidth: 200 })
+    const b = mountWithRegistry(registry, { windowId: 'b', initialX: 0, initialWidth: 200 })
+
+    // Drag "b" so its right edge (0+200=200 -> after drag ~296) lands just
+    // short of "a"'s left edge (300).
+    await b.get('[data-testid="fw-titlebar"]').trigger('mousedown', { button: 0, clientX: 0, clientY: 0 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 96, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await b.vm.$nextTick()
+
+    const s = styleOf(b.get('[data-testid="floating-window"]').element)
+    // b's right edge should land exactly on a's left edge (300), not the raw
+    // dragged position (96) — i.e. x snapped to 300-200=100.
+    expect(s.left).toBe('100px')
+  })
+
+  it('does not snap standalone windows with no registry provided', async () => {
+    // No provide() at all — matches PlanetView.vue's existing single-window usage.
+    const wrapper = mountWindow({ windowId: 'solo' })
+    await wrapper.get('[data-testid="fw-titlebar"]').trigger('mousedown', { button: 0, clientX: 100, clientY: 100 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 160, clientY: 145 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.left).toBe('70px')
+    expect(s.top).toBe('65px')
+  })
+
+  it('warns but still functions when windowId is given without a providing registry', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const wrapper = mountWindow({ windowId: 'orphan' })
+      expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(true)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0][0]).toContain('orphan')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('brings a window to the front of the shared z-order on click', async () => {
+    const registry = createFloatingWindowRegistry()
+    const a = mountWithRegistry(registry, { windowId: 'a' })
+    const b = mountWithRegistry(registry, { windowId: 'b' })
+    // onMounted's `bringToFront` call updates a ref; Vue batches the DOM
+    // patch reflecting it, so it isn't visible in `style` until a tick passes.
+    await a.vm.$nextTick()
+    await b.vm.$nextTick()
+
+    // "b" mounted after "a", so it's already on top by mount order — click "a"
+    // to bring it to front instead.
+    const zBeforeA = styleOf(a.get('[data-testid="floating-window"]').element).zIndex
+    const zBeforeB = styleOf(b.get('[data-testid="floating-window"]').element).zIndex
+    expect(Number(zBeforeB)).toBeGreaterThan(Number(zBeforeA))
+
+    await a.get('.fw-body').trigger('mousedown')
+    await a.vm.$nextTick()
+
+    const zAfterA = styleOf(a.get('[data-testid="floating-window"]').element).zIndex
+    expect(Number(zAfterA)).toBeGreaterThan(Number(zBeforeB))
+  })
+
+  it('brings a window to front even when the click is stopped from bubbling (the resize grip)', async () => {
+    const registry = createFloatingWindowRegistry()
+    const a = mountWithRegistry(registry, { windowId: 'a' })
+    const b = mountWithRegistry(registry, { windowId: 'b' })
+    await a.vm.$nextTick()
+    await b.vm.$nextTick()
+    const zBeforeB = styleOf(b.get('[data-testid="floating-window"]').element).zIndex
+
+    // The resize grip's mousedown handler calls stopPropagation() (so it
+    // doesn't also start a title-bar drag) — focus-on-click uses the
+    // capture phase specifically so it still fires despite that.
+    await a.get('[data-testid="fw-resize"]').trigger('mousedown', { button: 0, clientX: 0, clientY: 0 })
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await a.vm.$nextTick()
+
+    const zAfterA = styleOf(a.get('[data-testid="floating-window"]').element).zIndex
+    expect(Number(zAfterA)).toBeGreaterThan(Number(zBeforeB))
+  })
+
+  it('stops offering itself as a snap target after being unmounted', async () => {
+    const registry = createFloatingWindowRegistry()
+    const a = mountWithRegistry(registry, { windowId: 'a', initialX: 300, initialWidth: 200 })
+    a.unmount()
+
+    const b = mountWithRegistry(registry, { windowId: 'b', initialX: 0, initialWidth: 200 })
+    await b.get('[data-testid="fw-titlebar"]').trigger('mousedown', { button: 0, clientX: 0, clientY: 0 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 96, clientY: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await b.vm.$nextTick()
+
+    // "a" is gone — no snap should occur, so the raw dragged position stands.
+    const s = styleOf(b.get('[data-testid="floating-window"]').element)
+    expect(s.left).toBe('96px')
   })
 })

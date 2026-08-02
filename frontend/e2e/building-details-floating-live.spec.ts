@@ -7,14 +7,19 @@ import { test, expect } from '@playwright/test'
  * Selecting a building used to navigate to a routed `/facility/:type` page,
  * then (issue #339) opened a floating window over the colony view, then
  * briefly (issue #322's first pass) became a dock panel split alongside the
- * buildings list inside #321's dockview framework. That last step turned out
- * to compete for space with — and could disturb — the player's own dragged
- * dock arrangement, so it opens as a `FloatingWindow` layered above the
- * whole dock instead: the buildings list (and every other dock panel) stays
- * visible and untouched underneath, and the URL does not change. This spec
- * checks that end-to-end: clicking a building opens the floating window with
- * the right content, the dock underneath remains interactive, and the
- * window's own close button dismisses it without disturbing the dock.
+ * buildings list inside #321's `dockview-vue` framework. That last step
+ * turned out to compete for space with — and could disturb — the player's
+ * own dragged dock arrangement, so it opened as a `FloatingWindow` layered
+ * above the dock instead; the colony details multi-window redesign later
+ * replaced that dock with a set of panel windows of its own (see
+ * `colony-windows-live.spec.ts`), but building details still work the same
+ * way: a `FloatingWindow` layered above everything else, sharing the same
+ * snap/z-order registry (`window-id="building-details"`, distinct from the
+ * six panel windows' own ids so this spec can target it unambiguously even
+ * with all six also open). This spec checks that end-to-end: clicking a
+ * building opens the window with the right content, the buildings list
+ * underneath remains visible and usable, and the window's own close button
+ * dismisses it without disturbing anything else.
  *
  * Requires the `outpost_web` backend that `playwright.config.ts` starts
  * alongside the preview server.
@@ -68,20 +73,25 @@ test('selecting a building opens a floating details window above the dock', asyn
   await expect(page.getByTestId('buildings-panel')).toBeVisible({ timeout: 15_000 })
 
   // ── Selecting a building opens the floating window, not a route change ──
+  // Scoped to `data-window-id="building-details"`, not the bare
+  // `floating-window` testid — the six panel windows (colony details
+  // multi-window redesign) are also open by default and share that same
+  // testid, so an unscoped lookup would be ambiguous.
+  const detailsWindow = page.locator('[data-window-id="building-details"]')
   await page.getByTestId('view-details-colony_hq').click()
-  await expect(page.getByTestId('floating-window')).toBeVisible({ timeout: 10_000 })
+  await expect(detailsWindow).toBeVisible({ timeout: 10_000 })
   await expect(page.getByTestId('facility-page')).toBeVisible()
   await expect(page).toHaveURL(new RegExp(colonyId!))
   await expect(page).not.toHaveURL(/#\/facility/)
 
-  // The dock underneath — buildings list included — stays visible and
-  // usable while the window floats above it.
+  // The buildings panel underneath stays visible and usable while the
+  // window floats above it.
   await expect(page.getByTestId('buildings-panel')).toBeVisible()
   await expect(page.getByText('Colony HQ 1')).toBeVisible()
 
-  // ── Dismissing the window closes it and leaves the dock untouched ──
-  await page.getByTestId('fw-close').click()
-  await expect(page.getByTestId('floating-window')).toBeHidden()
+  // ── Dismissing the window closes it and leaves everything else untouched ──
+  await detailsWindow.getByTestId('fw-close').click()
+  await expect(detailsWindow).toBeHidden()
   await expect(page.getByTestId('buildings-panel')).toBeVisible()
 })
 
@@ -123,6 +133,6 @@ test('deep-linking /colony/:colonyId/facility/:buildingType opens the floating w
   // than a separate routed page.
   await page.goto(`/#/colony/${colonyId}/facility/colony_hq`)
   await expect(page.getByTestId('buildings-panel')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByTestId('floating-window')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('[data-window-id="building-details"]')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByTestId('facility-page')).toBeVisible()
 })

@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, h, nextTick, onMounted, reactive } from 'vue'
+import { nextTick, reactive } from 'vue'
 import ColonyView from '@/views/ColonyView.vue'
 import { useWorldStore } from '@/stores/worldStore'
 import { useGameStore } from '@/stores/game'
+import { COLONY_WINDOW_TITLES } from '@/windows/colonyWindows'
 
 const routerPush = vi.fn()
 const routerReplace = vi.fn()
@@ -25,46 +26,20 @@ vi.mock('@/services/tauriBridge', () => ({
 }))
 
 /**
- * Real `dockview-vue` needs `ResizeObserver` and real layout measurement,
- * neither of which jsdom provides — matching this issue's own testing note
- * ("most drag-to-dock behaviour isn't assertable in jsdom"). This stub
- * renders every registered panel component directly (ignoring dockview's
- * actual grid/tab/position bookkeeping, which `colonyDock.test.ts` covers
- * with a plain mock `addPanel` recorder instead) and fires `ready` with a
- * minimal fake `DockviewApi`, which is enough for `ColonyView.vue`'s own
- * behaviour (opening the build dialog, floating the building-details
- * window, etc.) to be exercised end-to-end.
+ * The six panel windows are stubbed by default — these tests care about the
+ * window-management shell (open/close/reopen/reset, the building-details
+ * window), not each panel's own internal rendering (that's each panel
+ * component's own test file). `BuildingsWindowPanel` is un-stubbed in tests
+ * that need its real "view details" button to emit the event ColonyView's
+ * window context listens for.
  */
-const DockviewVueStub = defineComponent({
-  name: 'dockview',
-  props: { components: { type: Object, default: () => ({}) } },
-  emits: ['ready'],
-  setup(props, { emit }) {
-    const fakeApi = {
-      addPanel: vi.fn(),
-      onDidLayoutChange: () => ({ dispose: () => {} }),
-      fromJSON: vi.fn(),
-      toJSON: () => ({}),
-      clear: vi.fn(),
-    }
-    onMounted(() => emit('ready', { api: fakeApi }))
-    return () =>
-      h(
-        'div',
-        { 'data-testid': 'colony-dockview-stub' },
-        Object.values(props.components ?? {}).map((comp) => h(comp as never)),
-      )
-  },
-})
-
 const STUBS = {
-  dockview: DockviewVueStub,
-  DockVitalStatsPanel: true,
-  DockUtilitiesPanel: true,
-  DockCommoditiesPanel: true,
-  DockBuildingsPanel: true,
-  DockConstructionQueuePanel: true,
-  DockAlertsPanel: true,
+  VitalStatsWindowPanel: true,
+  UtilitiesWindowPanel: true,
+  CommoditiesWindowPanel: true,
+  BuildingsWindowPanel: true,
+  ConstructionQueueWindowPanel: true,
+  AlertsWindowPanel: true,
   BuildDialog: true,
 }
 
@@ -93,6 +68,49 @@ function seedColonies(): void {
       commodity_pool: [],
       active_construction: [],
     },
+  }
+}
+
+function colonyScreenWithHqBuilding(overrides: Record<string, unknown> = {}) {
+  return {
+    colony_id: 'colony-1',
+    name: 'Alpha Base',
+    population: 100,
+    stability: 0.9,
+    morale: 0.85,
+    slots_used: 1,
+    slot_capacity: 5,
+    labour_available: 5,
+    labour_total: 10,
+    labour_demanded: 4,
+    labour_employed: 4,
+    labour_unemployed: 1,
+    resources: [],
+    buildings: [
+      {
+        building_id: 'hq-instance-1',
+        name: 'Colony HQ 1',
+        building_type: 'colony_hq',
+        labour_assigned: 0,
+        labour_demand: 0,
+        priority: 5,
+        labour_lock: null,
+        paused: false,
+        slot_cost: 1,
+        full_capacity: true,
+        scale: 1.0,
+        shortfall_reason: null,
+        shortfall_kind: null,
+        always_on: true,
+        running_recipe_ids: [],
+        inputs: [],
+        outputs: [],
+      },
+    ],
+    stockpile: [],
+    construction_queue: [],
+    manual_override: false,
+    ...overrides,
   }
 }
 
@@ -152,130 +170,127 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
     expect(wrapper.find('[data-testid="no-colonies"]').exists()).toBe(true)
   })
+})
 
-  it('renders the dock layout and a reset-layout button (issue #321)', () => {
-    seedColonies()
+describe('ColonyView panel windows (colony details multi-window redesign)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    routerReplace.mockReset()
     routeParams.colonyId = 'colony-1'
+    routeParams.buildingType = undefined
+    window.localStorage.clear()
+  })
 
+  it('opens all six panel windows by default, and shows the tool palette + reset-layout button', () => {
+    seedColonies()
     const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
 
-    expect(wrapper.find('[data-testid="colony-dockview"]').exists()).toBe(true)
+    for (const title of Object.values(COLONY_WINDOW_TITLES)) {
+      expect(wrapper.findAll('[data-testid="floating-window"]').some((w) => w.text().includes(title))).toBe(
+        true,
+      )
+    }
+    expect(wrapper.find('[data-testid="window-palette"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="btn-reset-layout"]').exists()).toBe(true)
   })
 
-  it('opens a floating window (not a route navigation, not a dock panel) when a building requests details (issue #322)', async () => {
+  it('closing a panel window via its own close button removes it, and the palette chip reopens it', async () => {
     seedColonies()
-    routeParams.colonyId = 'colony-1'
-    const gameStore = useGameStore()
-    gameStore.colonyScreen = {
-      colony_id: 'colony-1',
-      name: 'Alpha Base',
-      population: 100,
-      stability: 0.9,
-      morale: 0.85,
-      slots_used: 1,
-      slot_capacity: 5,
-      labour_available: 5,
-      labour_total: 10,
-      labour_demanded: 4,
-      labour_employed: 4,
-      labour_unemployed: 1,
-      resources: [
-        { resource_id: 'power', name: 'Power', amount: 24, kind: 'flow', unit: 'MW' },
-      ],
-      buildings: [
-        {
-          building_id: 'hq-instance-1',
-          name: 'Colony HQ 1',
-          building_type: 'colony_hq',
-          labour_assigned: 0,
-          labour_demand: 0,
-          priority: 5,
-          labour_lock: null,
-          paused: false,
-          slot_cost: 1,
-          full_capacity: true,
-          scale: 1.0,
-          shortfall_reason: null,
-          shortfall_kind: null,
-          always_on: true,
-          running_recipe_ids: ['hq_generate_power', 'hq_pump_water'],
-          inputs: [],
-          outputs: [
-            { commodity_id: 'power', quantity: 24 },
-            { commodity_id: 'water', quantity: 24 },
-          ],
-        },
-      ],
-      stockpile: [],
-      construction_queue: [],
-      manual_override: false,
-    }
+    const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
 
-    // Mount with the real BuildingsPanel and its Dock wrapper (not stubbed)
+    // Six panel windows are open; grab the Vitals one specifically.
+    const vitalsWindow = wrapper.get('[data-window-id="vital-stats"]')
+    await vitalsWindow.get('[data-testid="fw-close"]').trigger('click')
+    expect(wrapper.find('[data-window-id="vital-stats"]').exists()).toBe(false)
+
+    // Its palette chip should no longer read as "open".
+    const chip = wrapper.get('[data-testid="palette-toggle-vital-stats"]')
+    expect(chip.classes()).not.toContain('open')
+
+    await chip.trigger('click')
+    expect(wrapper.find('[data-window-id="vital-stats"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="palette-toggle-vital-stats"]').classes()).toContain('open')
+  })
+
+  it('a palette chip also closes an already-open window (not just a one-way opener)', async () => {
+    seedColonies()
+    const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
+
+    expect(wrapper.find('[data-window-id="alerts"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="palette-toggle-alerts"]').trigger('click')
+    expect(wrapper.find('[data-window-id="alerts"]').exists()).toBe(false)
+  })
+
+  it('persists the open-window set across a remount', async () => {
+    seedColonies()
+    const first = mount(ColonyView, { global: { stubs: STUBS } })
+    await first.get('[data-window-id="utilities"]').get('[data-testid="fw-close"]').trigger('click')
+    first.unmount()
+
+    const second = mount(ColonyView, { global: { stubs: STUBS } })
+    expect(second.find('[data-window-id="utilities"]').exists()).toBe(false)
+    expect(second.find('[data-window-id="commodities"]').exists()).toBe(true)
+  })
+
+  it('Reset Layout reopens every window', async () => {
+    seedColonies()
+    const wrapper = mount(ColonyView, { global: { stubs: STUBS } })
+    await wrapper.get('[data-window-id="buildings"]').get('[data-testid="fw-close"]').trigger('click')
+    expect(wrapper.find('[data-window-id="buildings"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="btn-reset-layout"]').trigger('click')
+
+    for (const title of Object.values(COLONY_WINDOW_TITLES)) {
+      expect(wrapper.findAll('[data-testid="floating-window"]').some((w) => w.text().includes(title))).toBe(
+        true,
+      )
+    }
+  })
+})
+
+describe('ColonyView building-details window (issue #322)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    routeParams.colonyId = 'colony-1'
+    routeParams.buildingType = undefined
+    window.localStorage.clear()
+  })
+
+  it('opens a floating window (not a route navigation) when a building requests details', async () => {
+    seedColonies()
+    const gameStore = useGameStore()
+    gameStore.colonyScreen = colonyScreenWithHqBuilding()
+
+    // Mount with the real BuildingsWindowPanel (and BuildingsPanel inside it)
     // so its actual "view details" button emits the real event ColonyView's
-    // dock context listens for. BuildingDetailsHud is stubbed since it
+    // window context listens for. BuildingDetailsHud is stubbed since it
     // fetches over tauriBridge, which isn't mocked in this suite — only the
     // floating window shell matters here.
     const wrapper = mount(ColonyView, {
       global: {
-        stubs: {
-          ...STUBS,
-          DockBuildingsPanel: false,
-          BuildingDetailsHud: true,
-        },
+        stubs: { ...STUBS, BuildingsWindowPanel: false, BuildingDetailsHud: true },
       },
     })
-    expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(false)
+    expect(wrapper.find('[data-window-id="building-details"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="view-details-colony_hq"]').trigger('click')
 
-    expect(routerPush).not.toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'facility' }),
-    )
-    const win = wrapper.find('[data-testid="floating-window"]')
+    expect(routerPush).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'facility' }))
+    const win = wrapper.find('[data-window-id="building-details"]')
     expect(win.exists()).toBe(true)
     expect(win.text()).toContain('colony_hq')
   })
 
   it('retargets the floating window instead of opening a second one', async () => {
     seedColonies()
-    routeParams.colonyId = 'colony-1'
     const gameStore = useGameStore()
-    gameStore.colonyScreen = {
-      colony_id: 'colony-1',
-      name: 'Alpha Base',
-      population: 100,
-      stability: 0.9,
-      morale: 0.85,
+    gameStore.colonyScreen = colonyScreenWithHqBuilding({
       slots_used: 2,
-      slot_capacity: 5,
-      labour_available: 5,
-      labour_total: 10,
-      labour_demanded: 4,
-      labour_employed: 4,
-      labour_unemployed: 1,
-      resources: [],
       buildings: [
-        {
-          building_id: 'hq-instance-1',
-          name: 'Colony HQ 1',
-          building_type: 'colony_hq',
-          labour_assigned: 0,
-          labour_demand: 0,
-          priority: 5,
-          labour_lock: null,
-          paused: false,
-          slot_cost: 1,
-          full_capacity: true,
-          scale: 1.0,
-          shortfall_reason: null,
-          shortfall_kind: null,
-          always_on: true,
-          running_recipe_ids: [],
-          inputs: [],
-          outputs: [],
-        },
+        ...colonyScreenWithHqBuilding().buildings,
         {
           building_id: 'lab-instance-1',
           name: 'Research Lab 1',
@@ -296,30 +311,24 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
           outputs: [],
         },
       ],
-      stockpile: [],
-      construction_queue: [],
-      manual_override: false,
-    }
+    })
 
     const wrapper = mount(ColonyView, {
-      global: {
-        stubs: { ...STUBS, DockBuildingsPanel: false, BuildingDetailsHud: true },
-      },
+      global: { stubs: { ...STUBS, BuildingsWindowPanel: false, BuildingDetailsHud: true } },
     })
 
     await wrapper.get('[data-testid="view-details-colony_hq"]').trigger('click')
-    expect(wrapper.findAll('[data-testid="floating-window"]')).toHaveLength(1)
-    expect(wrapper.get('[data-testid="floating-window"]').text()).toContain('colony_hq')
+    expect(wrapper.findAll('[data-window-id="building-details"]')).toHaveLength(1)
+    expect(wrapper.get('[data-window-id="building-details"]').text()).toContain('colony_hq')
 
     await wrapper.get('[data-testid="view-details-research_lab"]').trigger('click')
 
-    expect(wrapper.findAll('[data-testid="floating-window"]')).toHaveLength(1)
-    expect(wrapper.get('[data-testid="floating-window"]').text()).toContain('research_lab')
+    expect(wrapper.findAll('[data-window-id="building-details"]')).toHaveLength(1)
+    expect(wrapper.get('[data-window-id="building-details"]').text()).toContain('research_lab')
   })
 
   it('opens the floating window for a deep-linked /colony/:colonyId/facility/:buildingType route', async () => {
     seedColonies()
-    routeParams.colonyId = 'colony-1'
     routeParams.buildingType = 'colony_hq'
 
     const wrapper = mount(ColonyView, {
@@ -327,68 +336,28 @@ describe('ColonyView colony selection (navigation rework #7 phase 1: route param
     })
     await nextTick()
 
-    const win = wrapper.find('[data-testid="floating-window"]')
+    const win = wrapper.find('[data-window-id="building-details"]')
     expect(win.exists()).toBe(true)
     expect(win.text()).toContain('colony_hq')
   })
 
-  it('closes the floating building-details window via its close button', async () => {
+  it('closes the floating building-details window via its own close button, leaving the panel windows untouched', async () => {
     seedColonies()
-    routeParams.colonyId = 'colony-1'
     const gameStore = useGameStore()
-    gameStore.colonyScreen = {
-      colony_id: 'colony-1',
-      name: 'Alpha Base',
-      population: 100,
-      stability: 0.9,
-      morale: 0.85,
-      slots_used: 1,
-      slot_capacity: 5,
-      labour_available: 5,
-      labour_total: 10,
-      labour_demanded: 4,
-      labour_employed: 4,
-      labour_unemployed: 1,
-      resources: [],
-      buildings: [
-        {
-          building_id: 'hq-instance-1',
-          name: 'Colony HQ 1',
-          building_type: 'colony_hq',
-          labour_assigned: 0,
-          labour_demand: 0,
-          priority: 5,
-          labour_lock: null,
-          paused: false,
-          slot_cost: 1,
-          full_capacity: true,
-          scale: 1.0,
-          shortfall_reason: null,
-          shortfall_kind: null,
-          always_on: true,
-          running_recipe_ids: [],
-          inputs: [],
-          outputs: [],
-        },
-      ],
-      stockpile: [],
-      construction_queue: [],
-      manual_override: false,
-    }
+    gameStore.colonyScreen = colonyScreenWithHqBuilding()
 
     const wrapper = mount(ColonyView, {
       global: {
-        stubs: {
-          ...STUBS,
-          DockBuildingsPanel: false,
-          BuildingDetailsHud: true,
-        },
+        stubs: { ...STUBS, BuildingsWindowPanel: false, BuildingDetailsHud: true },
       },
     })
     await wrapper.get('[data-testid="view-details-colony_hq"]').trigger('click')
-    expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(true)
+    expect(wrapper.find('[data-window-id="building-details"]').exists()).toBe(true)
 
-    await wrapper.get('[data-testid="fw-close"]').trigger('click')
-    expect(wrapper.find('[data-testid="floating-window"]').exists()).toBe(false)
+    await wrapper.get('[data-window-id="building-details"]').get('[data-testid="fw-close"]').trigger('click')
+    expect(wrapper.find('[data-window-id="building-details"]').exists()).toBe(false)
+    // The six panel windows (Vitals included) are unaffected by closing a
+    // different window.
+    expect(wrapper.find('[data-window-id="vital-stats"]').exists()).toBe(true)
   })
 })

@@ -1,17 +1,11 @@
 <script setup lang="ts">
-/**
- * `dockview-vue` panel wrapper for `VitalStatsPanel` (issue #321). Reads
- * colony data from the injected `ColonyDockContext` rather than dockview's
- * own `params` mechanism — see `colonyDock.ts` for why.
- */
+/** Floating-window wrapper for `VitalStatsPanel` (colony details multi-window redesign). */
 import { inject } from 'vue'
 import VitalStatsPanel from '@/components/VitalStatsPanel.vue'
-import { COLONY_DOCK_CONTEXT_KEY } from '@/dock/colonyDock'
+import { COLONY_WINDOW_CONTEXT_KEY } from '@/windows/colonyWindows'
 
-defineProps<{ params?: unknown }>()
-
-const ctx = inject(COLONY_DOCK_CONTEXT_KEY)
-if (!ctx) throw new Error('DockVitalStatsPanel must be mounted inside a colony dockview with ColonyDockContext provided')
+const ctx = inject(COLONY_WINDOW_CONTEXT_KEY)
+if (!ctx) throw new Error('VitalStatsWindowPanel must be mounted with ColonyWindowContext provided')
 </script>
 
 <template>
