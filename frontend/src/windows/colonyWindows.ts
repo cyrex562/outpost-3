@@ -15,8 +15,7 @@
  */
 
 import type { ComputedRef, InjectionKey } from 'vue'
-import type { Notification } from '@/worldModel/model'
-import type { ServerEvent } from '@/types/events'
+import type { LogEntry } from '@/worldModel/model'
 import type { BuildingRow, ConstructionQueueRow, ResourceRow, StockpileRow } from '@/types/screen'
 
 /** Stable identifiers for the six colony panel windows. */
@@ -161,8 +160,9 @@ export interface ColonyWindowContext {
   buildings: BuildingRow[] | null
   constructionQueue: ConstructionQueueRow[] | null
   cancelingIds: Set<string>
-  notifications: Notification[]
-  eventLog: ServerEvent[]
+  /** The unified colony log (colony details multi-window redesign) —
+   * every event, alert-tier ones colored/toasted, the rest ambient. */
+  logEntries: LogEntry[]
   setCommodityReserve(commodityId: string, amount: number): void
   viewBuildingDetails(buildingType: string): void
   setBuildingPriority(buildingId: string, priority: number): void
@@ -171,7 +171,7 @@ export interface ColonyWindowContext {
   setBuildingPaused(buildingId: string, paused: boolean): void
   cancelConstruction(projectId: string): void
   openBuildDialog(): void
-  clearEventLog(): void
+  clearLog(): void
 }
 
 export const COLONY_WINDOW_CONTEXT_KEY: InjectionKey<ComputedRef<ColonyWindowContext>> =

@@ -41,6 +41,15 @@ pub enum ModifiableQuantity {
     PopulationGrowth,
     /// Stability change rate.
     StabilityRate,
+    /// Morale change rate (issue #382 added morale; this scalar was added
+    /// separately when Easy difficulty turned out to have zero effect on
+    /// morale decay speed — see [`crate::morale`]'s module doc for why
+    /// morale is its own quantity rather than folded into `StabilityRate`).
+    ///
+    /// Higher values mean faster morale swings (gain and loss alike),
+    /// mirroring how `StabilityRate` scales [`crate::needs`]'s stability
+    /// delta. Applied in the morale resolution step of the turn pipeline.
+    MoraleRate,
     /// Environmental hazard trigger probability.
     HazardProbability,
     /// Per-capita resource consumption rate (food, water, oxygen, power).
@@ -233,6 +242,7 @@ impl ModifiableQuantity {
         Self::StorageCapacity,
         Self::PopulationGrowth,
         Self::StabilityRate,
+        Self::MoraleRate,
         Self::HazardProbability,
         Self::ResourceConsumption,
         Self::PowerRequirement,
@@ -255,6 +265,7 @@ impl ModifiableQuantity {
             Self::StorageCapacity => "storage_capacity",
             Self::PopulationGrowth => "population_growth",
             Self::StabilityRate => "stability_rate",
+            Self::MoraleRate => "morale_rate",
             Self::HazardProbability => "hazard_probability",
             Self::ResourceConsumption => "resource_consumption",
             Self::PowerRequirement => "power_requirement",

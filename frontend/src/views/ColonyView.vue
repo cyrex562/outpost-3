@@ -387,8 +387,7 @@ const windowContext = computed<ColonyWindowContext>(() => ({
   buildings: screen.value ? screen.value.buildings : null,
   constructionQueue: screen.value ? screen.value.construction_queue : null,
   cancelingIds: cancelingIds.value,
-  notifications: worldStore.notifications,
-  eventLog: worldStore.eventLog,
+  logEntries: worldStore.logEntries,
   setCommodityReserve,
   viewBuildingDetails: openBuildingDetails,
   setBuildingPriority,
@@ -399,7 +398,7 @@ const windowContext = computed<ColonyWindowContext>(() => ({
   openBuildDialog: () => {
     showBuildDialog.value = true
   },
-  clearEventLog: () => worldStore.clearEventLog(),
+  clearLog: () => worldStore.clearLog(),
 }))
 
 provide(COLONY_WINDOW_CONTEXT_KEY, windowContext)

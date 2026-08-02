@@ -6,14 +6,21 @@
 #   power:    24 generated − 20 colonists                 = +4/sol
 #   research:  5 produced −  0 consumed                   = +5/sol
 #
-# Compare with content/checks/colony_hq_efficiency/ (+9 / +2 / +4 / +1). The
-# supply side is deliberately near-identical; the interesting difference is the
-# COLONY FOOTPRINT the harness prints, and the two ways these diverge on output:
+# Compare with content/checks/colony_hq_efficiency/ (+9 / +2 / +4 / +1, plus a
+# +5 networking_compute trickle it now also has — see below). The supply side
+# is deliberately near-identical; the interesting difference is the COLONY
+# FOOTPRINT the harness prints, and the ways these diverge on output:
 #
 #   - water is 1/sol *worse* here, because the standalone lab drinks water and
 #     colony_hq's research trickle deliberately does not;
 #   - research is 4/sol *better* here, because research_lab is a real lab and
-#     colony_hq's trickle is one fifth of it by design (issue #310).
+#     colony_hq's trickle is one fifth of it by design (issue #310);
+#   - networking_compute has no entry here at all: colony_hq_efficiency's
+#     hq_operate_baseline_comms trickle (added so morale doesn't
+#     guarantee-crash to zero before automation — see outpost_core/src/
+#     morale.rs) has no standalone equivalent below comms_hub, same shape as
+#     the research gap above, so it isn't represented in this four-building
+#     set. Not asserted here for that reason, not omitted by drift.
 #
 # So this is a genuine trade at four buildings, not strict dominance. It becomes
 # dominance at three — see colony.yaml's note.

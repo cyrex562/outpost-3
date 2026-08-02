@@ -9,6 +9,11 @@
 #   power:      24 produced − 20 colonists                  = +4/sol
 #   research:    1 produced (colony_hq admin trickle), no
 #                consumer in this bundle                     = +1/sol
+#   networking_compute: 20 produced (colony_hq baseline comms trickle,
+#                issue: morale-crashes-pre-automation fix — 4x colony_hq
+#                instances each running the recipe, same pattern as
+#                water/oxygen/power/research above), no consumer in this
+#                bundle                                      = +20/sol
 #
 # No overall-verdict assertion: every net is comfortably positive by design
 # (a healthy starter margin, not a tight bottleneck), so the calculator
@@ -50,3 +55,12 @@
   expect: closed
   min_net: 1.0
   label: research-trickle-at-least-1-per-sol
+
+# Baseline networking_compute (colony_hq's hq_operate_baseline_comms,
+# added so morale doesn't guarantee-crash to zero before the automation
+# tech and comms_hub exist — see outpost_core/src/morale.rs). Same
+# trivially-closed shape as research above: nothing here consumes it.
+- commodity: networking_compute
+  expect: closed
+  min_net: 3.0
+  label: networking-compute-trickle-at-least-3-per-sol

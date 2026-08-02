@@ -225,6 +225,34 @@
       quantity: 1.0
   concurrent: true
 
+# Baseline networking_compute trickle. Morale's sole input (outpost_core's
+# morale.rs, issue #382) was, before this recipe existed, produced by no
+# starter-kit building at all — only comms_hub does, and it needs the
+# automation tech — so every colony's composite_satisfaction sat at a flat
+# 0.0 from sol one, guaranteeing morale a ~20-sol crash to zero regardless
+# of production, employment, or buildings, on every difficulty (playtest
+# report: "resource production was positive, and I had all the starter
+# buildings" and morale still tanked).
+#
+# 5.0/sol is deliberately a quarter of comms_hub's dedicated 20.0/sol
+# (operate_comms_hub): at morale's demand rate (0.1/colonist), it fully
+# satisfies a 50-pop colony and gets a 100-pop colony to the exact
+# gain/loss breakeven (recovery_rate == decay_rate == 0.05, both quadratic
+# in satisfaction, cross at satisfaction 0.5) — enough that morale holds
+# roughly steady for a modest starter colony instead of guaranteed-crashing,
+# without fully solving satisfaction the way comms_hub does. A colony that
+# grows past that, or wants morale actually *rising*, still needs
+# automation + comms_hub — this narrows the gap, it doesn't close it.
+- id: hq_operate_baseline_comms
+  name: Baseline Comms (Colony HQ)
+  building: colony_hq
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: networking_compute
+      quantity: 5.0
+  concurrent: true
+
 # ── Landing kit (self-powered starter buildings, see buildings.yaml) ───────
 
 - id: mine_ice_water

@@ -18,6 +18,7 @@ import CustomDifficultyPanel from '@/components/CustomDifficultyPanel.vue'
 import BalanceTuningPanel from '@/components/BalanceTuningPanel.vue'
 import SystemStatsBar from '@/components/SystemStatsBar.vue'
 import TurnControlBar from '@/components/TurnControlBar.vue'
+import AlertToast from '@/components/AlertToast.vue'
 
 useGameSocket()
 
@@ -180,6 +181,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </header>
 
     <SystemStatsBar v-if="inGame" />
+    <AlertToast v-if="inGame" />
 
     <main class="app-main">
       <RouterView />

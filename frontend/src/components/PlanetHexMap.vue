@@ -238,6 +238,50 @@ const wrappedInfraEdges = computed<WrappedEdge[]>(() => {
   return out
 })
 
+// ── Wrap-seam indicator ──────────────────────────────────────────────────
+//
+// A visible marker for where the map's east-west wrap actually falls
+// (`PlanetMap.width` "wraps east-west" — see `tauriBridge.ts`) so panning
+// into a wrapped repeat doesn't read as "am I still on the same map?".
+// Traced along the west-facing edge of every q=0 hex — q=0 is adjacent to
+// q=width-1 once wrapped, so this single line is the seam; drawing
+// q=width-1's east edge too would just double it. Because axial (q, r)
+// pixel position depends on both coordinates (`axialToPixel`'s x term has
+// an `r` component), a constant-q column isn't a vertical line — it's
+// diagonal, so this deliberately traces the hexes' own edge-by-edge
+// perimeter rather than drawing one straight line, which would cut across
+// the actual hex boundary instead of following it.
+interface SeamSegment {
+  key: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+// The single straight edge of a pointy-top hexagon that faces due west:
+// the segment between the bottom-left vertex (150°) and top-left vertex
+// (210°) in `hexPoints`' vertex ordering.
+const WEST_EDGE_ANGLE_1 = (Math.PI / 3) * 2 + Math.PI / 6
+const WEST_EDGE_ANGLE_2 = (Math.PI / 3) * 3 + Math.PI / 6
+
+const seamSegments = computed<SeamSegment[]>(() => {
+  const out: SeamSegment[] = []
+  for (const h of positioned.value) {
+    if (h.q !== 0) continue
+    for (const shift of wrapShifts.value) {
+      out.push({
+        key: `${h.site_id || `${h.q}-${h.r}`}:${shift}`,
+        x1: h.cx + shift + HEX_SIZE * Math.cos(WEST_EDGE_ANGLE_1),
+        y1: h.cy + HEX_SIZE * Math.sin(WEST_EDGE_ANGLE_1),
+        x2: h.cx + shift + HEX_SIZE * Math.cos(WEST_EDGE_ANGLE_2),
+        y2: h.cy + HEX_SIZE * Math.sin(WEST_EDGE_ANGLE_2),
+      })
+    }
+  }
+  return out
+})
+
 // ── ViewBox pan/zoom state ─────────────────────────────────────────────────
 
 interface ViewBox {
@@ -766,6 +810,21 @@ defineExpose({ focusSite, resetView })
         </g>
       </g>
 
+      <!-- Wrap-seam indicator: where the map's east-west wrap actually
+           falls, drawn above terrain like the infra/marker layers below. -->
+      <g class="seam-layer" data-testid="seam-layer">
+        <line
+          v-for="seg in seamSegments"
+          :key="seg.key"
+          :x1="seg.x1"
+          :y1="seg.y1"
+          :x2="seg.x2"
+          :y2="seg.y2"
+          class="seam-line"
+          data-testid="seam-line"
+        ><title>Map wraps here — the west edge continues from the east edge</title></line>
+      </g>
+
       <!-- Infrastructure edges (phase A3): drawn above terrain but beneath
            the colony markers below, so nodes stay legible. -->
       <g class="infra-layer" data-testid="infra-layer">
@@ -929,6 +988,12 @@ defineExpose({ focusSite, resetView })
   stroke: #05050b;
   stroke-width: 2px;
 }
+
+/* Wrap-seam indicator — bright and thick so it reads clearly at a glance
+   against any terrain color underneath, but decorative (doesn't intercept
+   clicks meant for the hexes it crosses over). */
+.seam-layer { pointer-events: none; }
+.seam-line { stroke: #fff; stroke-width: 3; stroke-linecap: round; }
 
 /* Infrastructure edges are decorative in phase A3 — don't let them intercept
    clicks meant for the hexes they cross over. */

@@ -31,3 +31,10 @@
   name: Research
   category: virtual
   base_value: 0.0
+
+# Colony-local compute flow — population morale's sole input (morale.rs,
+# issue #382), fed here by colony_hq's baseline trickle (hq_operate_baseline_comms).
+- id: networking_compute
+  name: Networking / Compute
+  category: virtual
+  base_value: 0.0

@@ -199,6 +199,19 @@ pub fn default_grade_table() -> DifficultyGradeTable {
         brutal: 1.60,
     });
 
+    // Morale rate — harder = faster morale swings, both gain and loss.
+    // Mirrors StabilityRate's exact curve: the two systems are deliberately
+    // independent (see crate::morale's module doc), but there's no design
+    // reason for them to feel different difficulty-to-difficulty.
+    table.add_row(DifficultyGradeRow {
+        quantity: ModifiableQuantity::MoraleRate,
+        sandbox: 0.50,
+        easy: 0.75,
+        normal: 1.00,
+        hard: 1.30,
+        brutal: 1.60,
+    });
+
     // Storage capacity
     table.add_row(DifficultyGradeRow {
         quantity: ModifiableQuantity::StorageCapacity,
@@ -424,6 +437,37 @@ mod tests {
             "Easy growth scalar ({}) should exceed Hard ({})",
             easy.scalar_for(&q),
             hard.scalar_for(&q)
+        );
+    }
+
+    /// Morale difficulty scaling bugfix: `MoraleRate` exists in the default
+    /// table at all (previously no `ModifiableQuantity` variant for morale
+    /// existed, so there was nothing for a row to scale even in principle),
+    /// and follows `StabilityRate`'s exact curve — gentler on Easy, harsher
+    /// on Hard, unit at Normal.
+    #[test]
+    fn easy_has_gentler_morale_rate_than_hard() {
+        let table = default_grade_table();
+        let q = ModifiableQuantity::MoraleRate;
+        let easy = table.build_scalar(DifficultyPreset::Easy);
+        let normal = table.build_scalar(DifficultyPreset::Normal);
+        let hard = table.build_scalar(DifficultyPreset::Hard);
+        assert!(
+            easy.scalar_for(&q) < normal.scalar_for(&q),
+            "Easy morale-rate scalar ({}) should be below Normal's ({})",
+            easy.scalar_for(&q),
+            normal.scalar_for(&q)
+        );
+        assert!(
+            hard.scalar_for(&q) > normal.scalar_for(&q),
+            "Hard morale-rate scalar ({}) should exceed Normal's ({})",
+            hard.scalar_for(&q),
+            normal.scalar_for(&q)
+        );
+        assert!(
+            (normal.scalar_for(&q) - 1.0).abs() < 1e-4,
+            "Normal morale-rate scalar should be the 1.0 baseline, got {}",
+            normal.scalar_for(&q)
         );
     }
 

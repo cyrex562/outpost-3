@@ -26,6 +26,31 @@ function mountWindow(extraProps: Record<string, unknown> = {}) {
 }
 
 /**
+ * Mounts a `FloatingWindow` with a shared `registry` injected the same way
+ * a real providing ancestor would — `global.provide` on two separate
+ * `mount()` calls sharing the same registry instance simulates two
+ * sibling windows under one parent, without needing an actual wrapper
+ * component (the registry is a plain framework-agnostic object, so this
+ * is equivalent).
+ */
+function mountWithRegistry(registry: FloatingWindowRegistry, extraProps: Record<string, unknown> = {}) {
+  return mount(FloatingWindow, {
+    props: {
+      title: 'Window',
+      storageKey: `${KEY}.${extraProps.windowId ?? 'default'}`,
+      initialX: 0,
+      initialY: 0,
+      initialWidth: 200,
+      initialHeight: 100,
+      ...extraProps,
+    },
+    global: { provide: { [FLOATING_WINDOW_REGISTRY_KEY as symbol]: registry } },
+    slots: { default: '<div data-testid="content">hi</div>' },
+    attachTo: document.body,
+  })
+}
+
+/**
  * jsdom reports every element's client box as 0, so host-relative sizing can't
  * be exercised without stubbing it. Patched on `Element.prototype` rather than
  * a specific node because Vue Test Utils' mount container is not addressable
@@ -383,34 +408,6 @@ describe('FloatingWindow multi-window snapping + z-order (colony details multi-w
     document.body.innerHTML = ''
   })
 
-  /**
-   * Mounts a `FloatingWindow` with a shared `registry` injected the same way
-   * a real providing ancestor would — `global.provide` on two separate
-   * `mount()` calls sharing the same registry instance simulates two
-   * sibling windows under one parent, without needing an actual wrapper
-   * component (the registry is a plain framework-agnostic object, so this
-   * is equivalent).
-   */
-  function mountWithRegistry(
-    registry: FloatingWindowRegistry,
-    extraProps: Record<string, unknown> = {},
-  ) {
-    return mount(FloatingWindow, {
-      props: {
-        title: 'Window',
-        storageKey: `${KEY}.${extraProps.windowId ?? 'default'}`,
-        initialX: 0,
-        initialY: 0,
-        initialWidth: 200,
-        initialHeight: 100,
-        ...extraProps,
-      },
-      global: { provide: { [FLOATING_WINDOW_REGISTRY_KEY as symbol]: registry } },
-      slots: { default: '<div data-testid="content">hi</div>' },
-      attachTo: document.body,
-    })
-  }
-
   it('snaps a dragged window to a sibling registered under the same registry', async () => {
     const registry = createFloatingWindowRegistry()
     // Sibling sits with its left edge at x=300.
@@ -510,5 +507,122 @@ describe('FloatingWindow multi-window snapping + z-order (colony details multi-w
     // "a" is gone — no snap should occur, so the raw dragged position stands.
     const s = styleOf(b.get('[data-testid="floating-window"]').element)
     expect(s.left).toBe('96px')
+  })
+})
+
+describe('FloatingWindow multi-side resize (colony details multi-window redesign)', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    document.body.innerHTML = ''
+  })
+
+  it('resizes from the east edge, left edge fixed', async () => {
+    const wrapper = mountWindow() // x:10, y:20, w:400, h:300
+    await wrapper.get('[data-testid="fw-resize-e"]').trigger('mousedown', { button: 0, clientX: 410, clientY: 170 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 460, clientY: 170 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.left).toBe('10px')
+    expect(s.top).toBe('20px')
+    expect(s.width).toBe('450px')
+    expect(s.height).toBe('300px')
+  })
+
+  it('resizes from the west edge, moving x and shrinking w while the right edge stays fixed', async () => {
+    const wrapper = mountWindow() // x:10, y:20, w:400, h:300 -> right edge at 410
+    await wrapper.get('[data-testid="fw-resize-w"]').trigger('mousedown', { button: 0, clientX: 10, clientY: 170 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 60, clientY: 170 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.left).toBe('60px')
+    expect(s.width).toBe('350px')
+    expect(Number(s.left.replace('px', '')) + Number(s.width.replace('px', ''))).toBe(410)
+  })
+
+  it('resizes from the north edge, moving y and shrinking h while the bottom edge stays fixed', async () => {
+    const wrapper = mountWindow() // x:10, y:20, w:400, h:300 -> bottom edge at 320
+    await wrapper.get('[data-testid="fw-resize-n"]').trigger('mousedown', { button: 0, clientX: 200, clientY: 20 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 60 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.top).toBe('60px')
+    expect(s.height).toBe('260px')
+    expect(Number(s.top.replace('px', '')) + Number(s.height.replace('px', ''))).toBe(320)
+  })
+
+  it('resizes from the south edge, top fixed', async () => {
+    const wrapper = mountWindow()
+    await wrapper.get('[data-testid="fw-resize-s"]').trigger('mousedown', { button: 0, clientX: 200, clientY: 320 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 360 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.top).toBe('20px')
+    expect(s.height).toBe('340px')
+  })
+
+  it('resizes from the north-west corner, moving x/y and shrinking w/h while the bottom-right corner stays fixed', async () => {
+    const wrapper = mountWindow() // x:10, y:20, w:400, h:300 -> bottom-right at (410, 320)
+    await wrapper.get('[data-testid="fw-resize-nw"]').trigger('mousedown', { button: 0, clientX: 10, clientY: 20 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 60, clientY: 70 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.left).toBe('60px')
+    expect(s.top).toBe('70px')
+    expect(s.width).toBe('350px')
+    expect(s.height).toBe('250px')
+    expect(Number(s.left.replace('px', '')) + Number(s.width.replace('px', ''))).toBe(410)
+    expect(Number(s.top.replace('px', '')) + Number(s.height.replace('px', ''))).toBe(320)
+  })
+
+  it('resizing from a side handle clamps to the minimum size, same as the corner grip', async () => {
+    const wrapper = mountWindow()
+    await wrapper.get('[data-testid="fw-resize-w"]').trigger('mousedown', { button: 0, clientX: 10, clientY: 170 })
+    // Drag far to the right, well past the window's own right edge.
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 900, clientY: 170 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await wrapper.vm.$nextTick()
+
+    const s = styleOf(wrapper.get('[data-testid="floating-window"]').element)
+    expect(s.width).toBe('240px') // MIN_W
+  })
+
+  it('a resize from a non-corner edge still snaps against a sibling window', async () => {
+    const registry = createFloatingWindowRegistry()
+    // Sibling's left edge at x=500.
+    mountWithRegistry(registry, { windowId: 'a', initialX: 500, initialWidth: 200 })
+    const b = mountWithRegistry(registry, { windowId: 'b', initialX: 0, initialWidth: 200 })
+
+    // Resize b's east edge so its right edge (0+200 -> ~496) lands just short of a's left edge (500).
+    await b.get('[data-testid="fw-resize-e"]').trigger('mousedown', { button: 0, clientX: 200, clientY: 50 })
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 496, clientY: 50 }))
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    await b.vm.$nextTick()
+
+    const s = styleOf(b.get('[data-testid="floating-window"]').element)
+    expect(s.width).toBe('500px') // snapped so right edge lands exactly at 500
+  })
+
+  it('no resize handles render while maximised', async () => {
+    const restore = withHostSize(1200, 800)
+    try {
+      const wrapper = mountWindow()
+      await wrapper.get('[data-testid="fw-maximise"]').trigger('click')
+      for (const dir of ['n', 's', 'e', 'w', 'ne', 'nw', 'sw']) {
+        expect(wrapper.find(`[data-testid="fw-resize-${dir}"]`).exists()).toBe(false)
+      }
+      expect(wrapper.find('[data-testid="fw-resize"]').exists()).toBe(false)
+    } finally {
+      restore()
+    }
   })
 })

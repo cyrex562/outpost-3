@@ -386,3 +386,38 @@ describe('PlanetHexMap contamination overlay (#387)', () => {
     expect(wrapper.text()).toContain('Contaminated · 42%')
   })
 })
+
+describe('PlanetHexMap wrap-seam indicator', () => {
+  it('draws one seam line per q=0 hex, and none for other columns', () => {
+    const hexes = [
+      makeHex({ q: 0, r: 0, site_id: 'seam-0' }),
+      makeHex({ q: 0, r: 1, site_id: 'seam-1' }),
+      makeHex({ q: 2, r: 0, site_id: 'not-seam' }),
+    ]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    expect(wrapper.findAll('[data-testid="seam-line"]')).toHaveLength(2)
+  })
+
+  it('draws no seam line at all when no hex has q=0', () => {
+    const hexes = [makeHex({ q: 1, r: 0, site_id: 'not-seam' })]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    expect(wrapper.find('[data-testid="seam-line"]').exists()).toBe(false)
+  })
+
+  it('traces the hex\'s actual west-facing edge, not a straight vertical cut through its center', () => {
+    const hexes = [makeHex({ q: 0, r: 0, site_id: 'seam-0' })]
+    const wrapper = mount(PlanetHexMap, { props: { map: makeMap(hexes), selectedSite: null } })
+    const line = wrapper.get('[data-testid="seam-line"]')
+    const x1 = Number(line.attributes('x1'))
+    const y1 = Number(line.attributes('y1'))
+    const x2 = Number(line.attributes('x2'))
+    const y2 = Number(line.attributes('y2'))
+    // Both endpoints sit left of the hex center (cx=0 for q=0,r=0), and are
+    // vertically offset from it (not a single point, not a horizontal line) —
+    // i.e. an actual slanted hex edge, not a straight vertical/horizontal cut.
+    expect(x1).toBeLessThan(0)
+    expect(x2).toBeLessThan(0)
+    expect(y1).not.toBe(y2)
+    expect(x1).toBeCloseTo(x2) // the west edge of a pointy-top hex is vertical (constant x)
+  })
+})
