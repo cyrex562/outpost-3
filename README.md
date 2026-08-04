@@ -18,19 +18,28 @@ outpost-3/
 ├── frontend/            # Vue 3 + TypeScript + Vite UI, shared by outpost_web and outpost_tauri
 ├── xtask/               # In-repo build orchestration (`cargo xtask`) — playtest/portable builds
 ├── content/             # YAML/JSON content packs (buildings, commodities, recipes, tech, events, …)
+├── data/                # Raw source data (solar-system tables, rail network) used to author content
 ├── docs/                # Design doc, harness guide, issue breakdown
 ├── godot/               # Legacy Godot 4 + C# implementation — read-only behavioral spec, not modified
+├── tests/               # Legacy C# test suite for godot/ — the behavioral spec, not a live gate
 ├── reference/           # harsh_realm — a reference Rust+Vue project, structural patterns only
 └── old/                 # Archived prior attempts (Bevy, Actix/HTMX, Python/FastAPI+Vue)
 ```
 
-`outpost_tauri` is deliberately **outside** the root `[workspace]` in `Cargo.toml` — it needs WebKit2GTK system libraries on Linux that aren't guaranteed to be present everywhere (including CI), so it's built/tested separately, on whichever machine actually has them.
+Two crates sit deliberately **outside** the root `[workspace]` in `Cargo.toml`:
+
+- `outpost_tauri` — it needs WebKit2GTK system libraries on Linux that aren't guaranteed to be present everywhere (including CI), so it's built/tested separately, on whichever machine actually has them.
+- `xtask` — kept standalone so building or testing the build tooling never pulls in `outpost_core`/`outpost_web`, and vice versa.
+
+Both are therefore missed by `cargo test --workspace` / `cargo clippy --workspace`; see [Running Tests](#running-tests) for their separate invocations.
 
 ## Prerequisites
 
 - **Rust** (stable, via [rustup](https://rustup.rs/)) — no pinned toolchain version.
 - **Node.js 18+** and npm, for the frontend.
-- To build/run `outpost_tauri` on Linux: WebKit2GTK and the other [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/).
+- **Tauri CLI v2** (`cargo install tauri-cli --version "^2"`), for `cargo tauri dev` / `cargo tauri build`. Not needed for browser mode or for `cargo xtask`, which drives `cargo build` directly.
+- To build/run `outpost_tauri` on **Linux**: WebKit2GTK and the other [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/).
+- To build `outpost_tauri` on **Windows**: the MSVC toolchain (Visual Studio Build Tools with the C++ workload) and the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) — WebView2 ships preinstalled on Windows 11 and recent Windows 10.
 
 ## Development
 
@@ -77,6 +86,9 @@ cargo fmt --check --all
 
 # outpost_tauri — separate workspace, only where WebKit2GTK is available
 cargo check -p outpost_tauri
+
+# xtask — also outside the root workspace, so --workspace misses it
+cargo test --manifest-path xtask/Cargo.toml
 ```
 
 ```bash
@@ -89,9 +101,9 @@ npm run test:e2e     # Playwright, headless
 
 See **[CLAUDE.md](CLAUDE.md)**'s Definition of Done for exactly which tiers apply to a given change.
 
-## Building a Playtest Version
+## Building a Portable Windows Build (`cargo xtask`)
 
-`cargo xtask` (aliased in `.cargo/config.toml`, so it works from the repo root) is the in-repo build orchestrator for producing a shareable build without going through a full installer — e.g. to hand a build to a playtester quickly.
+`cargo xtask` is the in-repo build orchestrator for producing a shareable build without going through a full installer — e.g. to hand a build to a playtester quickly. It's aliased in `.cargo/config.toml`, so it works from the repo root with no extra install step:
 
 ```bash
 cargo xtask help                    # list commands
@@ -100,9 +112,49 @@ cargo xtask install-windows         # Windows-only: build and install into %LOCA
 cargo xtask setup-windows           # install the Windows cross-compile target + cargo-xwin (Linux/macOS only)
 ```
 
-- **`build-windows-portable`** builds the frontend, then `outpost_tauri`, and zips the result (`dist/outpost3-windows-portable-x86_64.zip`) — just unzip and run `Outpost3.exe`, no installer needed. Builds natively when run on Windows; best-effort cross-compiles via `cargo-xwin` when run from Linux/macOS (this sidesteps `outpost_tauri`'s Linux WebKit2GTK requirement, but is not the recommended release path — verify a cross-compiled build against a native one before shipping it).
-- **`install-windows`** (Windows-only) does the same build, but copies the result into a stable `%LOCALAPPDATA%\Outpost3\` location instead of a throwaway zip — convenient for repeat local playtesting (pin a shortcut to it) — and prints the path to its verbose log file (`%LOCALAPPDATA%\com.cyrex562.outpost3\logs\outpost3.log`) for attaching to bug reports.
-- **`setup-windows`** installs the `x86_64-pc-windows-msvc` Rust target and `cargo-xwin`, without building — only needed to prep the Linux/macOS cross-compile path.
+### The one command you want
+
+```bash
+cargo xtask build-windows-portable
+```
+
+That's the whole thing. It builds the frontend (`npm install` + `npm run build` under `frontend/`), then builds `outpost_tauri` in release with the `custom-protocol` feature, then stages and zips the result. **No Tauri CLI needed** — it shells out to `cargo build` directly.
+
+It picks its build strategy from the host OS automatically:
+
+| Host | Strategy | Notes |
+|---|---|---|
+| **Windows** | Native release build | The recommended path — the host already *is* the target. Needs the MSVC toolchain from [Prerequisites](#prerequisites). |
+| **Linux / macOS** | Cross-compile via `cargo-xwin` | Best-effort. Auto-runs `setup-windows` first to install the `x86_64-pc-windows-msvc` target and `cargo-xwin` if missing. Sidesteps `outpost_tauri`'s Linux WebKit2GTK requirement (Tauri only pulls that in for the `linux` target), but **verify a cross-compiled build against a native one before shipping it.** |
+
+### What you get
+
+```
+dist/
+├── windows-portable/Outpost3/    # the staged bundle
+│   ├── Outpost3.exe              # run this — no installer, no install step
+│   ├── README.txt                # end-user notes (WebView2, log path, native-vs-cross provenance)
+│   ├── SHA256SUMS                # checksum of the exe
+│   └── *.dll                     # only if the build produced sibling DLLs (fixed-version WebView2 runtime)
+└── outpost3-windows-portable-x86_64.zip   # the shareable artifact
+```
+
+Unzip anywhere and run `Outpost3.exe`. The target machine needs the **WebView2 Runtime** (preinstalled on Windows 11 and recent Windows 10; otherwise [install it here](https://developer.microsoft.com/microsoft-edge/webview2/)).
+
+Zipping uses the `zip` CLI, falling back to PowerShell's `Compress-Archive` on Windows. If neither is available, the command still **succeeds** and prints a note — the staged folder is a complete portable bundle, just not zipped. `dist/` is gitignored, so artifacts never land in the repo.
+
+Wherever the exe is run from, the app writes a verbose log of every command it executes (successes and failures alike) to:
+
+```
+%LOCALAPPDATA%\com.cyrex562.outpost3\logs\outpost3.log
+```
+
+Attach that to bug reports. It only appears after the app has been run at least once.
+
+### The other commands
+
+- **`install-windows`** (Windows-only — errors out elsewhere) does the same build, but copies the staged bundle into a stable `%LOCALAPPDATA%\Outpost3\` location instead of a throwaway zip. Convenient for repeat local playtesting: pin a shortcut to it and every rebuild overwrites in place. Prints the installed exe path and the log path when it finishes.
+- **`setup-windows`** installs the `x86_64-pc-windows-msvc` Rust target and `cargo-xwin` without building anything. Only needed to prep the Linux/macOS cross-compile path — `build-windows-portable` already calls it automatically there, so you rarely need it by hand. It's a no-op concept on Windows.
 
 The **authoritative installer build** (NSIS/WiX) remains `cargo tauri build`, run natively on Windows from inside `outpost_tauri/` — `xtask` exists for a quick zip-and-go artifact, not to replace that.
 
