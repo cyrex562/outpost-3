@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   getBodySurface,
@@ -192,63 +192,6 @@ function jumpToBestSite(): void {
   planetMapRef.value?.focusSite(best.site_id)
 }
 
-// ── Step-2 map panel height (drag-to-resize, matches SystemMapView's grip) ─
-
-const MIN_MAP_H = 360
-const MAX_MAP_H = 1400
-const MAP_HEIGHT_STORAGE_KEY = 'outpost3.found-colony.map-height'
-
-function loadMapHeight(): number {
-  try {
-    const raw = window.localStorage.getItem(MAP_HEIGHT_STORAGE_KEY)
-    const n = raw !== null ? Number(raw) : NaN
-    if (Number.isFinite(n)) return Math.min(MAX_MAP_H, Math.max(MIN_MAP_H, n))
-  } catch {
-    // storage blocked — fall through to default
-  }
-  return 480
-}
-
-const mapHeight = ref(loadMapHeight())
-
-let isResizingMap = false
-let resizeStartY = 0
-let resizeStartH = 0
-
-function onMapResizeStart(e: MouseEvent): void {
-  isResizingMap = true
-  resizeStartY = e.clientY
-  resizeStartH = mapHeight.value
-  e.preventDefault()
-}
-
-function onMapResizeMove(e: MouseEvent): void {
-  if (!isResizingMap) return
-  const delta = e.clientY - resizeStartY
-  mapHeight.value = Math.min(MAX_MAP_H, Math.max(MIN_MAP_H, resizeStartH + delta))
-}
-
-function onMapResizeEnd(): void {
-  if (!isResizingMap) return
-  isResizingMap = false
-  try {
-    window.localStorage.setItem(MAP_HEIGHT_STORAGE_KEY, String(mapHeight.value))
-  } catch {
-    // storage blocked — non-fatal, just won't persist across sessions
-  }
-}
-
-// Global listeners so a resize drag keeps tracking even if the cursor leaves
-// the grip mid-gesture (same reasoning as SystemMapView's panel resize).
-onMounted(() => {
-  window.addEventListener('mousemove', onMapResizeMove)
-  window.addEventListener('mouseup', onMapResizeEnd)
-})
-onUnmounted(() => {
-  window.removeEventListener('mousemove', onMapResizeMove)
-  window.removeEventListener('mouseup', onMapResizeEnd)
-})
-
 function formatModifier(mod: number): string {
   const pct = (mod - 1.0) * 100
   const sign = pct >= 0 ? '+' : ''
@@ -394,8 +337,10 @@ async function finish(): Promise<void> {
       <p v-if="bodies.length === 0" class="hint">No colonizable bodies detected.</p>
     </section>
 
-    <!-- Step 2: planet hex map -->
-    <section v-else-if="step === 2" class="panel">
+    <!-- Step 2: planet hex map. `map-panel` opts this step alone into
+         filling the wizard's leftover height — the other steps stay
+         content-sized. -->
+    <section v-else-if="step === 2" class="panel map-panel">
       <p class="hint">
         Choose a landing site on <strong>{{ chosenBody?.body_name }}</strong>.
         Scroll to zoom, drag to pan. Ocean cells are impassable; dashed rings
@@ -444,7 +389,7 @@ async function finish(): Promise<void> {
         </button>
       </div>
       <div class="map-layout">
-        <div class="map-wrap" :style="{ height: `${mapHeight}px` }">
+        <div class="map-wrap">
           <PlanetHexMap
             v-if="planetMap"
             ref="planetMapRef"
@@ -454,13 +399,6 @@ async function finish(): Promise<void> {
             @select="pickHex"
           />
           <p v-else class="hint">Loading map…</p>
-          <!-- Bottom-right corner grip for panel height resize. -->
-          <div
-            class="resize-grip"
-            data-testid="map-resize-grip"
-            :class="{ active: isResizingMap }"
-            @mousedown="onMapResizeStart"
-          />
         </div>
         <aside class="site-details">
           <template v-if="chosenHex">
@@ -626,10 +564,14 @@ async function finish(): Promise<void> {
 </template>
 
 <style scoped>
+/* Fill the shell's main area so step 2's map can claim the leftover height
+   (the head and foot are auto-sized; only `.panel.map-panel` grows). */
 .wizard {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  height: 100%;
+  min-height: 0;
 }
 .head { display: flex; flex-direction: column; gap: 0.5rem; }
 .head h2 { color: #8cf; }
@@ -660,6 +602,9 @@ async function finish(): Promise<void> {
   flex-direction: column;
   gap: 0.75rem;
 }
+/* Step 2 only: take all the height left over after the head/steps/foot so
+   the hex map fills the display instead of sitting at a fixed size. */
+.panel.map-panel { flex: 1; min-height: 0; }
 .hint { color: #667; font-size: 0.85rem; }
 
 .body-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; }
@@ -713,43 +658,33 @@ async function finish(): Promise<void> {
 .modifier.neutral { color: #778; }
 .modifier.penalty { color: #d86; }
 
+/* `flex: 1; min-height: 0` inside the flex-column panel; the grid's own
+   `align-items: stretch` then gives the map and the details column the row's
+   full height. */
 .map-layout {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) 220px;
   gap: 0.75rem;
   align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 .map-wrap {
   position: relative;
   min-width: 0;
   overflow: hidden;
   border-radius: 4px;
+  /* Floor matching the old drag-resize minimum — see SystemMapView. */
+  min-height: 360px;
 }
-.resize-grip {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  background: linear-gradient(
-    135deg,
-    transparent 45%,
-    #446 45% 55%,
-    transparent 55% 65%,
-    #446 65% 75%,
-    transparent 75%
-  );
-  border-radius: 2px;
-  z-index: 2;
-}
-.resize-grip:hover, .resize-grip.active { filter: brightness(1.5); }
 .site-details {
   background: #14141e;
   border: 1px solid #223;
   border-radius: 4px;
   padding: 0.75rem;
   color: #aab;
+  /* Full-height column now, so a long deposit list scrolls in place. */
+  overflow-y: auto;
 }
 .site-details h4 { color: #8cf; margin-bottom: 0.5rem; }
 .stats { display: grid; grid-template-columns: 80px 1fr; gap: 0.3rem 0.5rem; font-size: 0.8rem; }

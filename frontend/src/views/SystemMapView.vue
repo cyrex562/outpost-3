@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getSystemBodies, getSystemName, type SystemBody } from '@/services/tauriBridge'
 import { useWorldStore } from '@/stores/worldStore'
@@ -45,8 +45,8 @@ onMounted(async () => {
 // ── World-space layout math ──────────────────────────────────────────────
 //
 // The SVG uses viewBox coordinates (world units); actual pixel size comes
-// from the container's width + the user-adjustable `mapHeight`. Bodies are
-// placed at their orbital distance from the origin (the star at 0,0) using
+// from the container, which fills whatever space the shell gives it. Bodies
+// are placed at their orbital distance from the origin (the star at 0,0) using
 // a deterministic id-hashed angle so the layout is stable across reloads.
 
 const WORLD_SCALE = 100 // 1 AU = 100 world units
@@ -310,12 +310,20 @@ const orbitRadii = computed(() =>
 
 // ── Persistence ──────────────────────────────────────────────────────────
 
+/**
+ * Persisted map layout. Only the viewBox is stored — the panel's height used
+ * to live here too, back when the map was a fixed-pixel, grip-resizable
+ * panel; it now fills whatever vertical space the shell gives it, so there
+ * is nothing left to remember. Entries written by that older build still
+ * carry a `panelHeight` key; it is simply ignored rather than invalidating
+ * the whole entry, so an existing player keeps their pan/zoom across the
+ * upgrade.
+ */
 interface Persisted {
   x: number
   y: number
   w: number
   h: number
-  panelHeight: number
 }
 
 const STORAGE_KEY = 'outpost3.system-map.layout'
@@ -330,8 +338,7 @@ function loadPersisted(): Persisted | null {
       typeof p.x === 'number' &&
       typeof p.y === 'number' &&
       typeof p.w === 'number' &&
-      typeof p.h === 'number' &&
-      typeof p.panelHeight === 'number'
+      typeof p.h === 'number'
     ) {
       return p
     }
@@ -348,7 +355,6 @@ function savePersisted(): void {
       y: viewBox.value.y,
       w: viewBox.value.w,
       h: viewBox.value.h,
-      panelHeight: mapHeight.value,
     }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
@@ -361,12 +367,9 @@ function savePersisted(): void {
 const DEFAULT_VIEW = { x: -600, y: -600, w: 1200, h: 1200 }
 const viewBox = ref({ ...DEFAULT_VIEW })
 
-const mapHeight = ref(720)
-
 const persisted = loadPersisted()
 if (persisted) {
   viewBox.value = { x: persisted.x, y: persisted.y, w: persisted.w, h: persisted.h }
-  mapHeight.value = persisted.panelHeight
   persistedLoaded.value = true
 }
 
@@ -456,53 +459,16 @@ function onMouseUp(): void {
   }
 }
 
-// ── Panel resize (bottom-right grip drags height only) ───────────────────
-
-const MIN_PANEL_H = 320
-const MAX_PANEL_H = 1400
-let isResizing = false
-let resizeStartY = 0
-let resizeStartH = 0
-
-function onResizeStart(e: MouseEvent): void {
-  isResizing = true
-  resizeStartY = e.clientY
-  resizeStartH = mapHeight.value
-  e.preventDefault()
-}
-
-function onResizeMove(e: MouseEvent): void {
-  if (!isResizing) return
-  const delta = e.clientY - resizeStartY
-  const next = Math.min(MAX_PANEL_H, Math.max(MIN_PANEL_H, resizeStartH + delta))
-  mapHeight.value = next
-}
-
-function onResizeEnd(): void {
-  if (isResizing) {
-    isResizing = false
-    savePersisted()
-  }
-}
-
-// Global mouse listeners keep pan + resize drags working even when the
-// cursor leaves the SVG bounds mid-gesture (matches harsh_realm's UX).
+// Global mouse listeners keep pan drags working even when the cursor leaves
+// the SVG bounds mid-gesture (matches harsh_realm's UX).
 onMounted(() => {
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
-  window.addEventListener('mousemove', onResizeMove)
-  window.addEventListener('mouseup', onResizeEnd)
 })
 onUnmounted(() => {
   window.removeEventListener('mousemove', onMouseMove)
   window.removeEventListener('mouseup', onMouseUp)
-  window.removeEventListener('mousemove', onResizeMove)
-  window.removeEventListener('mouseup', onResizeEnd)
 })
-
-// Also persist whenever the user selects a different body — not strictly
-// required, but keeps the layout write cadence low without silent drops.
-watch(mapHeight, savePersisted)
 
 // ── Zoom-aware sizing ────────────────────────────────────────────────────
 
@@ -563,7 +529,7 @@ function viewSurface(body: SystemBody): void {
     </div>
 
     <div class="content">
-      <div class="map-wrap" :style="{ height: `${mapHeight}px` }">
+      <div class="map-wrap">
         <svg
           ref="svgRef"
           :viewBox="viewBoxStr"
@@ -671,13 +637,6 @@ function viewSurface(body: SystemBody): void {
             </text>
           </g>
         </svg>
-        <!-- Bottom-right corner grip for panel height resize. -->
-        <div
-          class="resize-grip"
-          data-testid="map-resize-grip"
-          :class="{ active: isResizing }"
-          @mousedown="onResizeStart"
-        />
       </div>
 
       <aside class="side-panel" v-if="selected" data-testid="body-details">
@@ -766,7 +725,7 @@ function viewSurface(body: SystemBody): void {
         </div>
       </aside>
       <aside v-else class="side-panel hint">
-        Scroll to zoom, drag to pan, corner grip to resize.<br />
+        Scroll to zoom, drag to pan.<br />
         Click a body to inspect.
       </aside>
     </div>
@@ -776,7 +735,10 @@ function viewSurface(body: SystemBody): void {
 </template>
 
 <style scoped>
-.system-view { display: flex; flex-direction: column; gap: 0.75rem; }
+/* Fill the shell's main area so the map can claim every spare pixel of
+   height. `.app-main` is already the single internal scroll container (see
+   App.vue), so this view sizes to it rather than growing the page. */
+.system-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; min-height: 0; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
 .toolbar h2 { color: #8cf; }
 .clock { color: #8a8; font-size: 0.85rem; }
@@ -796,12 +758,20 @@ function viewSurface(body: SystemBody): void {
 .btn.primary { border-color: #468; color: #8cf; }
 .body-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
-.content { display: flex; gap: 1rem; align-items: flex-start; }
+/* `flex: 1; min-height: 0` hands the map row all the leftover vertical space
+   under the toolbar. No `align-items: flex-start` — children stretch to the
+   row's full height, which is what makes the map fill vertically. */
+.content { display: flex; gap: 1rem; flex: 1; min-height: 0; }
 
 .map-wrap {
   position: relative;
   flex: 1;
   min-width: 0;
+  /* Floor matching the old drag-resize minimum. Filling is the point on a
+     real display, but on a short window the leftover space can shrink past
+     the point where bodies are big enough to hit — below this the shell
+     scrolls instead, which is what the fixed-height panel used to do. */
+  min-height: 320px;
   border: 1px solid #223;
   border-radius: 6px;
   overflow: hidden;
@@ -816,26 +786,6 @@ function viewSurface(body: SystemBody): void {
   touch-action: none;
 }
 .map.dragging { cursor: grabbing; }
-
-.resize-grip {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  background: linear-gradient(
-    135deg,
-    transparent 45%,
-    #446 45% 55%,
-    transparent 55% 65%,
-    #446 65% 75%,
-    transparent 75%
-  );
-  border-radius: 2px;
-  z-index: 2;
-}
-.resize-grip:hover, .resize-grip.active { filter: brightness(1.5); }
 
 .body-label {
   pointer-events: none;
@@ -854,6 +804,9 @@ function viewSurface(body: SystemBody): void {
   border-radius: 6px;
   padding: 1rem;
   color: #aab;
+  /* Now that the row stretches to full height, a long body-details panel
+     scrolls itself rather than forcing the whole view to overflow. */
+  overflow-y: auto;
 }
 .side-panel h3 { color: #8cf; margin-bottom: 0.5rem; }
 .side-panel.hint { color: #557; font-style: italic; font-size: 0.85rem; }
