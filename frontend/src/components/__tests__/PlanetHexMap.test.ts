@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PlanetHexMap from '@/components/PlanetHexMap.vue'
+import {
+  __resetPlanetMapWrapForTests,
+  __setPlanetMapWrapForTests,
+} from '@/composables/usePlanetMapWrap'
 import type { PlanetHex, PlanetMap } from '@/services/tauriBridge'
 
 function makeHex(overrides: Partial<PlanetHex>): PlanetHex {
@@ -419,5 +423,88 @@ describe('PlanetHexMap wrap-seam indicator', () => {
     expect(x2).toBeLessThan(0)
     expect(y1).not.toBe(y2)
     expect(x1).toBeCloseTo(x2) // the west edge of a pointy-top hex is vertical (constant x)
+  })
+})
+
+describe('PlanetHexMap wrap toggle', () => {
+  /**
+   * A tall, narrow map: because axial x depends on `r` as well as `q`, ten
+   * rows shear the rendered extent well past one wrap period (`width: 2`),
+   * so wrapping actually emits repeats here. A map fitted exactly to its own
+   * extent needs none, which would make these tests vacuous.
+   */
+  function tallMap(): PlanetMap {
+    const hexes = Array.from({ length: 10 }, (_, r) =>
+      makeHex({ q: 0, r, site_id: `site-${r}` }),
+    )
+    return { seed: 1, width: 2, height: 12, hexes, edges: [] }
+  }
+
+  const HEX_COUNT = 10
+
+  /**
+   * Mount and let the initial `fitToContent` (which runs in `onMounted`)
+   * reach the DOM. Before that flush the map still renders against its
+   * placeholder viewBox, which produces a different repeat count than the
+   * settled view.
+   */
+  async function mountSettled() {
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: tallMap(), selectedSite: null },
+    })
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+    __resetPlanetMapWrapForTests()
+  })
+
+  it('repeats the map east-west while wrapping is on', async () => {
+    const wrapper = await mountSettled()
+    expect(wrapper.findAll('polygon').length).toBeGreaterThan(HEX_COUNT)
+  })
+
+  it('collapses to a single copy when wrapping is switched off', async () => {
+    const wrapper = await mountSettled()
+    expect(wrapper.findAll('polygon').length).toBeGreaterThan(HEX_COUNT)
+
+    await wrapper.get('[data-testid="planet-map-wrap-toggle"]').trigger('click')
+
+    expect(wrapper.findAll('polygon').length).toBe(HEX_COUNT)
+    // The seam markers repeat off the same shift list, so they collapse too.
+    expect(wrapper.findAll('[data-testid="seam-line"]').length).toBe(HEX_COUNT)
+  })
+
+  it('restores the repeats when switched back on', async () => {
+    const wrapper = await mountSettled()
+    const wrapped = wrapper.findAll('polygon').length
+    const toggle = wrapper.get('[data-testid="planet-map-wrap-toggle"]')
+
+    await toggle.trigger('click')
+    expect(wrapper.findAll('polygon').length).toBe(HEX_COUNT)
+
+    await toggle.trigger('click')
+    expect(wrapper.findAll('polygon').length).toBe(wrapped)
+  })
+
+  it('reflects the current mode in its label and aria-pressed state', async () => {
+    const wrapper = await mountSettled()
+    const toggle = wrapper.get('[data-testid="planet-map-wrap-toggle"]')
+
+    expect(toggle.attributes('aria-pressed')).toBe('true')
+    expect(toggle.text()).toMatch(/on/i)
+
+    await toggle.trigger('click')
+
+    expect(toggle.attributes('aria-pressed')).toBe('false')
+    expect(toggle.text()).toMatch(/off/i)
+  })
+
+  it('starts unwrapped when the preference was previously turned off', async () => {
+    __setPlanetMapWrapForTests(false)
+    const wrapper = await mountSettled()
+    expect(wrapper.findAll('polygon').length).toBe(HEX_COUNT)
   })
 })

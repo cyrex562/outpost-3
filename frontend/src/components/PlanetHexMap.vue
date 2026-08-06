@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { PlanetHex, PlanetMap } from '@/services/tauriBridge'
+import { usePlanetMapWrap } from '@/composables/usePlanetMapWrap'
+
+// Shared across every mounted map, and persisted — see the composable.
+const { wrapEnabled, toggleWrap } = usePlanetMapWrap()
 
 const props = defineProps<{
   map: PlanetMap
@@ -176,6 +180,10 @@ const contentBounds = computed(() => {
  * fill `MAX_VIEW_W`) or waste render cost at high zoom (where 1 is enough).
  */
 const wrapShifts = computed<number[]>(() => {
+  // Wrapping off → a single unshifted copy, i.e. exactly the pre-wrap
+  // rendering. Every wrapped layer (tiles, deposits, markers, infra edges,
+  // seam) derives from this list, so gating it here is the whole toggle.
+  if (!wrapEnabled.value) return [0]
   const period = mapPixelWidth.value
   const e = rawExtent.value
   if (!e || !Number.isFinite(period) || period <= 1) return [0]
@@ -906,6 +914,24 @@ defineExpose({ focusSite, resetView })
       </div>
     </div>
 
+    <!-- Wrap toggle. Sits opposite the legend (which is bottom-right and
+         click-through) so it never covers it, and re-enables pointer events
+         the overlay layer otherwise suppresses. -->
+    <button
+      type="button"
+      class="wrap-toggle"
+      data-testid="planet-map-wrap-toggle"
+      :aria-pressed="wrapEnabled"
+      :title="
+        wrapEnabled
+          ? 'Wrapping on — the map repeats east-west as you pan. Click to show it as a single flat rectangle.'
+          : 'Wrapping off — the map ends at its edges. Click to repeat it east-west as you pan.'
+      "
+      @click="toggleWrap"
+    >
+      Wrap: {{ wrapEnabled ? 'on' : 'off' }}
+    </button>
+
     <div
       v-if="terrainLegend.length || legend.length"
       class="legend"
@@ -1032,6 +1058,23 @@ defineExpose({ focusSite, resetView })
   font-size: 0.6rem;
   font-weight: bold;
 }
+
+.wrap-toggle {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: rgba(16, 16, 26, 0.9);
+  border: 1px solid #334;
+  border-radius: 4px;
+  padding: 0.2rem 0.45rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: #aab;
+  cursor: pointer;
+  z-index: 2;
+}
+.wrap-toggle:hover { border-color: #446; color: #cdd; }
+.wrap-toggle[aria-pressed='true'] { border-color: #468; color: #8cf; }
 
 .legend {
   position: absolute;
