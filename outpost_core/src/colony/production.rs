@@ -1959,6 +1959,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         // Mine: extracts ore; needs 30 kW; 2 workers
@@ -1980,6 +1981,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_ore".into(),
@@ -2015,6 +2017,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "smelt_iron".into(),
@@ -2473,6 +2476,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         for id in ["eater_a", "eater_b"] {
             reg.insert_building(building(id));
@@ -2624,6 +2628,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         reg.insert_building(building("miner"));
         reg.insert_recipe(RecipeDef {
@@ -3175,6 +3180,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg.insert_building(BuildingDef {
@@ -3198,6 +3204,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "advanced_smelt".into(),
@@ -3399,6 +3406,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg.insert_building(BuildingDef {
@@ -3423,6 +3431,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "recycle".into(),
@@ -3827,6 +3836,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "refine_alloy".into(),
@@ -3964,6 +3974,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore".into(),
@@ -3999,6 +4010,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "pump_water".into(),
@@ -4264,6 +4276,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "hq_generate_power".into(),
@@ -4407,6 +4420,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "hybrid_alt_a".into(),
@@ -4510,6 +4524,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         reg.insert_building(building("hq"));
         reg.insert_building(building("refinery"));
@@ -4705,6 +4720,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         let recipe = |id: &str, line: &str, inputs: Vec<(&str, f64)>, outputs: Vec<(&str, f64)>| {
             let ing = |v: Vec<(&str, f64)>| {
@@ -4812,6 +4828,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         reg.insert_building(b("complex"));
         reg.insert_building(b("legacy"));
@@ -5032,6 +5049,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         assert!(lines_for_building("silo", &empty, &reg).is_empty());
@@ -5061,6 +5079,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         let r = |id: &str, line: Option<&str>, con: bool, i: &[(&str, f64)], o: &[(&str, f64)]| {
             RecipeDef {

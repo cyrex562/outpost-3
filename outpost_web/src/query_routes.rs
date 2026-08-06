@@ -101,6 +101,10 @@ pub struct BuildingOptionWire {
     /// Whether this building is part of the default landing kit (issue #317) —
     /// lets the founding wizard pre-select it as the recommended loadout.
     pub starter_kit: bool,
+    /// Most instances one colony may have, or `None` for unlimited. Lets the
+    /// build UI grey out an option the engine would reject rather than
+    /// offering a button that always errors.
+    pub max_instances: Option<u32>,
 }
 
 /// `GET /api/buildings` — every building type in the loaded content pack.
@@ -137,6 +141,7 @@ pub async fn list_buildings(State(state): State<AppState>) -> impl IntoResponse 
                 .collect(),
             tech_prerequisite: b.tech_prerequisite.clone(),
             starter_kit: b.starter_kit,
+            max_instances: b.max_instances,
         })
         .collect();
     out.sort_by(|a, b| {

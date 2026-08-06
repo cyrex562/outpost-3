@@ -154,6 +154,20 @@
     - id: power
       quantity: 24.0
 
+# The no-tech generator (buildings.yaml's power_plant). Half of
+# generate_power_solar_mk1's output, matching its half-sized grid capacity, so
+# researching basic_power is a straight doubling rather than a sidegrade.
+# No inputs, like the other pre-tech structures — a landing party has no fuel
+# chain to feed it yet.
+- id: generate_power_plant
+  name: Generate Power (Power Plant)
+  building: power_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 12.0
+
 - id: scrub_oxygen
   name: Scrub Oxygen
   building: life_support_module

@@ -839,6 +839,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         }];
         let researched = HashSet::new();
         let result = unlocked_buildings(buildings.iter(), &researched);
@@ -866,6 +867,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         }];
 
         let empty: HashSet<TechId> = HashSet::new();

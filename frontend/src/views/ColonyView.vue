@@ -61,7 +61,6 @@ import {
 } from '@/windows/colonyWindows'
 import type { ColonyState } from '@/worldModel/model'
 import {
-  isTauri,
   listBuildings,
   getTechTree,
   type BuildingOption,
@@ -185,7 +184,12 @@ const researchedTechs = computed<Set<string>>(
 const slotsAvailable = computed<number | null>(() => (screen.value ? screen.value.slot_capacity - screen.value.slots_used : null))
 
 async function loadCatalog(): Promise<void> {
-  if (!isTauri) return
+  // No `isTauri` guard: both calls below have browser-mode paths of their own
+  // (`/api/buildings` and `/api/tech-tree`), so bailing here left the build
+  // dialog permanently empty in browser mode — it rendered "No buildings
+  // available in the loaded content pack" while the endpoint was returning the
+  // full 59-building roster. The try/catch already covers the case the guard
+  // was presumably protecting, an engine that isn't ready yet.
   try {
     const [buildings, techs] = await Promise.all([listBuildings(), getTechTree()])
     buildingCatalog.value = buildings
@@ -209,11 +213,47 @@ function disabledReason(b: BuildingOption): string | null {
   if (b.tech_prerequisite && !researchedTechs.value.has(b.tech_prerequisite)) {
     return `Requires: ${b.tech_prerequisite}`
   }
+  if (b.max_instances !== null && existingCount(b) >= b.max_instances) {
+    return b.max_instances === 1
+      ? 'Limit 1 per colony — already built'
+      : `Limit ${b.max_instances} per colony — already built`
+  }
   const free = slotsAvailable.value
   if (free !== null && b.slot_cost > free) {
     return `Needs ${b.slot_cost} slot${b.slot_cost === 1 ? '' : 's'}, ${free} free`
   }
   return null
+}
+
+/**
+ * How many of `b` this colony already has, counting queued projects as well as
+ * standing buildings — the same tally the engine uses for
+ * `BuildingDef::max_instances`. Counting only completed ones would let the
+ * player queue a second copy that then fails on completion.
+ *
+ * Reads the colony *screen* rather than `ColonyState`: the latter's
+ * `buildings` comes from `/api/colonies`, which returns it empty, and its
+ * entries would be instance ids rather than building types even when
+ * populated. The screen's rows carry `building_type`, which is what the cap is
+ * keyed on.
+ */
+function existingCount(b: BuildingOption): number {
+  const scr = screen.value
+  if (!scr) return 0
+  const built = scr.buildings.filter((row) => row.building_type === b.id).length
+  const queued = scr.construction_queue.filter((row) => row.building_type === b.id).length
+  return built + queued
+}
+
+/**
+ * Copies of `b` this colony may still queue, or `null` when unlimited. The
+ * build dialog offers a quantity, and it dispatches one command per copy, so
+ * without this a "build 5" on a capped building would succeed once and then
+ * error four times.
+ */
+function remainingAllowance(b: BuildingOption): number | null {
+  if (b.max_instances === null) return null
+  return Math.max(0, b.max_instances - existingCount(b))
 }
 
 /**
@@ -224,7 +264,12 @@ function disabledReason(b: BuildingOption): string | null {
 async function queueBuilding(b: BuildingOption, quantity = 1): Promise<void> {
   const col = selectedColony.value
   if (!col || queueBusy.value || disabledReason(b) !== null) return
-  const count = Math.max(1, Math.floor(quantity))
+  // Clamp to what the colony's instance cap still allows, so asking for five
+  // of a capped building queues the one it can rather than erroring four times.
+  const allowance = remainingAllowance(b)
+  const requested = Math.max(1, Math.floor(quantity))
+  const count = allowance === null ? requested : Math.min(requested, allowance)
+  if (count < 1) return
   queueBusy.value = true
   try {
     for (let i = 0; i < count; i++) {

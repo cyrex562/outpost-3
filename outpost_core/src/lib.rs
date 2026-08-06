@@ -2347,6 +2347,23 @@ pub enum EngineError {
         /// The unresearched tech id it requires.
         tech_id: String,
     },
+    /// The site already has as many instances of this building as its
+    /// [`BuildingDef::max_instances`] cap allows.
+    ///
+    /// `existing` counts completed instances plus anything already in the
+    /// build queue, so queueing several copies in one turn is rejected the
+    /// same way building them one at a time would be.
+    ///
+    /// [`BuildingDef::max_instances`]: crate::content::types::BuildingDef::max_instances
+    #[error("'{building_id}' is limited to {max} per colony and this one already has {existing}")]
+    BuildingLimitReached {
+        /// The building that was requested.
+        building_id: String,
+        /// The authored cap.
+        max: u32,
+        /// How many already exist, counting queued construction.
+        existing: u32,
+    },
     /// A command was submitted after the game has been won.
     ///
     /// The player must activate sandbox-continue mode via
@@ -4154,6 +4171,22 @@ impl GameEngine {
                 let (cost, turns) =
                     self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_colony_index(*colony_id)?;
+                let colony = &self.state.colonies[idx];
+                self.check_instance_limit(
+                    building_type,
+                    count_matching(
+                        colony.buildings.iter().map(|b| b.building_type.as_str()),
+                        building_type,
+                    ),
+                    count_matching(
+                        colony
+                            .build_queue
+                            .projects
+                            .iter()
+                            .map(|p| p.building_type.as_str()),
+                        building_type,
+                    ),
+                )?;
                 let available = self.state.colonies[idx].slots_available();
                 if slot_cost > available {
                     return Err(EngineError::SlotCapacityExceeded {
@@ -4201,6 +4234,11 @@ impl GameEngine {
                 // rejection (bad building_type, tech-locked, over budget)
                 // never leaves a partially-deployed kit.
                 let mut total_slots: u32 = 0;
+                // Instances this batch has already claimed, so a kit listing
+                // the same capped building twice is rejected as a whole rather
+                // than placing the first and silently dropping the second.
+                let mut batch_counts: std::collections::HashMap<&str, u32> =
+                    std::collections::HashMap::new();
                 for (building_type, slot_cost) in buildings {
                     if building_type.trim().is_empty() {
                         return Err(EngineError::InvalidArgument(
@@ -4219,6 +4257,23 @@ impl GameEngine {
                             }
                         }
                     }
+                    // A superseding loadout wipes the auto kit first, so the
+                    // buildings standing right now are not part of the count
+                    // this batch has to fit under.
+                    let already_placed = if supersedes_auto_kit {
+                        0
+                    } else {
+                        count_matching(
+                            self.state.colonies[idx]
+                                .buildings
+                                .iter()
+                                .map(|b| b.building_type.as_str()),
+                            building_type,
+                        )
+                    };
+                    let claimed = batch_counts.entry(building_type.as_str()).or_insert(0);
+                    self.check_instance_limit(building_type, already_placed, *claimed)?;
+                    *claimed += 1;
                     total_slots = total_slots.saturating_add(*slot_cost);
                 }
                 // The auto kit is about to be removed, so its slots are part of
@@ -5297,6 +5352,22 @@ impl GameEngine {
                 let (cost, turns) =
                     self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_outpost_index(*outpost_id)?;
+                let outpost = &self.state.outposts[idx];
+                self.check_instance_limit(
+                    building_type,
+                    count_matching(
+                        outpost.buildings.iter().map(|b| b.building_type.as_str()),
+                        building_type,
+                    ),
+                    count_matching(
+                        outpost
+                            .build_queue
+                            .projects
+                            .iter()
+                            .map(|p| p.building_type.as_str()),
+                        building_type,
+                    ),
+                )?;
                 let available = self.state.outposts[idx].slots_available();
                 if slot_cost > available {
                     return Err(EngineError::SlotCapacityExceeded {
@@ -7827,6 +7898,45 @@ impl GameEngine {
         }
     }
 
+    /// Enforce [`BuildingDef::max_instances`] for one more instance of
+    /// `building_type` at a site that already has `placed` completed instances
+    /// and `queued` under construction.
+    ///
+    /// Queued projects count toward the cap: without that, a player could
+    /// enqueue five copies in a single turn and watch all five complete, which
+    /// is exactly what the cap exists to prevent.
+    ///
+    /// Unregistered building ids and buildings with no authored cap pass
+    /// through, mirroring the None-prerequisite-is-open convention the tech
+    /// gate above already uses.
+    ///
+    /// [`BuildingDef::max_instances`]: content::types::BuildingDef::max_instances
+    fn check_instance_limit(
+        &self,
+        building_type: &str,
+        placed: u32,
+        queued: u32,
+    ) -> Result<(), EngineError> {
+        let Some(max) = self
+            .state
+            .registry
+            .as_ref()
+            .and_then(|reg| reg.building(building_type))
+            .and_then(|def| def.max_instances)
+        else {
+            return Ok(());
+        };
+        let existing = placed.saturating_add(queued);
+        if existing >= max {
+            return Err(EngineError::BuildingLimitReached {
+                building_id: building_type.to_string(),
+                max,
+                existing,
+            });
+        }
+        Ok(())
+    }
+
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].
     fn find_colony_index(&self, id: ColonyId) -> Result<usize, EngineError> {
         self.state
@@ -8148,6 +8258,16 @@ fn recipe_to_row(r: &content::types::RecipeDef) -> ui::RecipeRow {
 ///
 /// Ensures that `(a, b)` and `(b, a)` map to the same slot so bidirectional
 /// lookup works without storing both orderings.
+/// Count how many entries of `haystack` equal `needle`.
+///
+/// Used to tally a site's existing and queued instances of one building type
+/// when enforcing [`content::types::BuildingDef::max_instances`]. Takes an
+/// iterator of `&str` so the same helper serves colonies and outposts, whose
+/// building and project collections are distinct types.
+fn count_matching<'a>(haystack: impl Iterator<Item = &'a str>, needle: &str) -> u32 {
+    u32::try_from(haystack.filter(|candidate| *candidate == needle).count()).unwrap_or(u32::MAX)
+}
+
 fn canonical_infra_key(a: ColonyId, b: ColonyId) -> (ColonyId, ColonyId) {
     if a <= b {
         (a, b)
@@ -8703,6 +8823,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
 
@@ -8751,6 +8872,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
         engine
@@ -8895,6 +9017,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
 
@@ -8955,6 +9078,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
         engine
@@ -9136,6 +9260,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
 
@@ -9463,6 +9588,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9687,6 +9813,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9938,6 +10065,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -10085,11 +10213,13 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
             category: content::BuildingCategory::Remediation,
             contamination_reduction: 0.3,
+            max_instances: None,
             slot_cost: 0,
             ..base("hex_remediation")
         });
@@ -10486,6 +10616,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -10933,6 +11064,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -10954,6 +11086,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg.insert_building(BuildingDef {
@@ -10974,6 +11107,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -11149,6 +11283,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "generate_power_flow".into(),
@@ -11188,6 +11323,7 @@ mod tests {
                 quantity: 12.0,
             }],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg
@@ -13220,6 +13356,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -13478,6 +13615,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
 
@@ -13535,6 +13673,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         engine.state.registry = Some(reg);
         engine
@@ -13851,6 +13990,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -14533,6 +14673,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -14616,6 +14757,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -14690,6 +14832,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -17687,6 +17830,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -17784,6 +17928,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -17901,6 +18046,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -18135,6 +18281,7 @@ mod tests {
                 starter_kit: in_kit,
                 storage: vec![],
                 contamination_reduction: 0.0,
+                max_instances: None,
             });
         }
         engine.state.registry = Some(registry);
@@ -19728,6 +19875,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg.insert_building(BuildingDef {
@@ -19748,6 +19896,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -22628,6 +22777,184 @@ mod tests {
         assert!(
             (ore_after_failure - (ore_after_cost - 30.0)).abs() < 1e-6,
             "resource loss from the failure outcome must be applied on top of the up-front cost"
+        );
+    }
+
+    // ── BuildingDef::max_instances (unique buildings) ────────────────────────
+
+    /// Register a building with an authored instance cap.
+    fn registry_with_capped_building(max: Option<u32>) -> content::ContentRegistry {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "hq".into(),
+            name: "HQ".into(),
+            description: String::new(),
+            category: BuildingCategory::Other,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+            contamination_reduction: 0.0,
+            max_instances: max,
+        });
+        reg
+    }
+
+    fn found_colony_with_registry(max: Option<u32>) -> (GameEngine, ColonyId) {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Capped".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+        engine.state.registry = Some(registry_with_capped_building(max));
+        (engine, colony_id)
+    }
+
+    fn queue_hq(engine: &mut GameEngine, colony_id: ColonyId) -> Result<Vec<Event>, EngineError> {
+        engine.apply(&Command::QueueConstruction {
+            colony_id,
+            building_type: "hq".into(),
+            slot_cost: 1,
+            labor_per_turn: 1,
+            construction_cost: vec![],
+            construction_turns: 1,
+        })
+    }
+
+    #[test]
+    fn queue_construction_counts_queued_projects_toward_the_cap() {
+        // The exploit the cap exists to close: without counting the queue, a
+        // player could enqueue several in one turn and let them all complete.
+        let (mut engine, colony_id) = found_colony_with_registry(Some(1));
+
+        assert!(queue_hq(&mut engine, colony_id).is_ok());
+        let result = queue_hq(&mut engine, colony_id);
+
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::BuildingLimitReached { ref building_id, max: 1, existing: 1 })
+                    if building_id == "hq"
+            ),
+            "expected BuildingLimitReached, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn queue_construction_counts_completed_instances_toward_the_cap() {
+        let (mut engine, colony_id) = found_colony_with_registry(Some(1));
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("hq", 1));
+
+        let result = queue_hq(&mut engine, colony_id);
+
+        assert!(
+            matches!(result, Err(EngineError::BuildingLimitReached { .. })),
+            "expected BuildingLimitReached, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn queue_construction_leaves_uncapped_buildings_alone() {
+        let (mut engine, colony_id) = found_colony_with_registry(None);
+
+        assert!(queue_hq(&mut engine, colony_id).is_ok());
+        assert!(
+            queue_hq(&mut engine, colony_id).is_ok(),
+            "an unlimited building must stay unlimited"
+        );
+    }
+
+    #[test]
+    fn the_cap_is_per_colony_not_per_game() {
+        // A headquarters per colony is the whole point — the cap must not make
+        // the second colony unable to have one.
+        let (mut engine, first) = found_colony_with_registry(Some(1));
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Second".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded {
+            colony_id: second, ..
+        } = &events[0]
+        else {
+            panic!()
+        };
+        let second = *second;
+
+        assert!(queue_hq(&mut engine, first).is_ok());
+        assert!(
+            queue_hq(&mut engine, second).is_ok(),
+            "a second colony must still get its own"
+        );
+    }
+
+    #[test]
+    fn deploy_starter_kit_rejects_a_batch_listing_a_capped_building_twice() {
+        let (mut engine, colony_id) = found_colony_with_registry(Some(1));
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("hq".into(), 1), ("hq".into(), 1)],
+        });
+
+        assert!(
+            matches!(result, Err(EngineError::BuildingLimitReached { .. })),
+            "expected BuildingLimitReached, got {result:?}"
+        );
+        // Validation runs before any placement, so nothing was deployed.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(engine.state.colonies[idx].buildings.is_empty());
+    }
+
+    #[test]
+    fn deploy_starter_kit_accepts_a_batch_listing_a_capped_building_once() {
+        let (mut engine, colony_id) = found_colony_with_registry(Some(1));
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("hq".into(), 1)],
+        });
+
+        assert!(result.is_ok(), "expected success, got {result:?}");
+    }
+
+    #[test]
+    fn queue_construction_rejects_a_second_instance_after_the_kit_placed_one() {
+        // The real shape of the colony_hq rule: the landing kit auto-places one,
+        // so every later attempt to build another must be refused.
+        let (mut engine, colony_id) = found_colony_with_registry(Some(1));
+        engine
+            .apply(&Command::DeployStarterKit {
+                colony_id,
+                buildings: vec![("hq".into(), 1)],
+            })
+            .unwrap();
+
+        let result = queue_hq(&mut engine, colony_id);
+
+        assert!(
+            matches!(result, Err(EngineError::BuildingLimitReached { .. })),
+            "expected BuildingLimitReached, got {result:?}"
         );
     }
 }
