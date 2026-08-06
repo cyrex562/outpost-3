@@ -415,26 +415,26 @@ function displayName(b: BuildingRow): string {
   font-family: monospace;
   margin-top: 0.15rem;
 }
-.io-in { color: #c98; }
-.io-out { color: #8c9; }
-.io-rated { color: #667; font-style: italic; }
-.badge-multi { border-color: #685; color: #ac9; }
-.badge-warn { border-color: #a75; color: #eab764; }
-.badge-lock { border-color: #578; color: #8bd; }
-.panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.6rem; }
-.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+.io-in { color: var(--warn-dim); }
+.io-out { color: var(--good); }
+.io-rated { color: var(--text-dim); font-style: italic; }
+.badge-multi { border-color: var(--good-dim); color: var(--good); }
+.badge-warn { border-color: var(--warn-dim); color: var(--status-warn); }
+.badge-lock { border-color: var(--border-accent); color: var(--accent); }
+.panel-title { color: var(--accent); font-size: 0.9rem; margin: 0 0 0.6rem; }
+.hint { font-size: 0.75rem; color: var(--border-strong); font-style: italic; }
 
 .building-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; }
 .building-item {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  background: #13131e;
-  border: 1px solid #223;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   border-radius: 3px;
   padding: 0.3rem 0.5rem;
   font-size: 0.8rem;
-  color: #aab;
+  color: var(--text);
 }
 .row-main { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .row-staffing { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
@@ -442,7 +442,7 @@ function displayName(b: BuildingRow): string {
 .building-name-btn {
   background: none;
   border: none;
-  color: #aab;
+  color: var(--text);
   font-size: inherit;
   font-family: inherit;
   text-align: left;
@@ -450,28 +450,28 @@ function displayName(b: BuildingRow): string {
   padding: 0;
   text-decoration: underline dotted;
 }
-.building-name-btn:hover { color: #cdd; }
-.building-meta { color: #668; font-size: 0.72rem; }
+.building-name-btn:hover { color: var(--text-bright); }
+.building-meta { color: var(--text-dim); font-size: 0.72rem; }
 .building-status { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; }
-.status-running { color: #6adba5; }
-.status-partial { color: #eab764; }
-.status-idle    { color: #778; }
-.status-paused  { color: #79a; }
+.status-running { color: var(--status-good); }
+.status-partial { color: var(--status-warn); }
+.status-idle    { color: var(--text-muted); }
+.status-paused  { color: var(--text-muted); }
 
 /* A paused building is deliberately off, not broken — dim the whole row
    rather than flag it the way a shortfall would. */
 .building-item.is-paused { opacity: 0.6; }
-.btn-paused { border-color: #579; color: #9ad; }
+.btn-paused { border-color: var(--border-accent); color: var(--accent); }
 
-.staffing { font-size: 0.72rem; color: #789; font-family: monospace; }
-.staffing.understaffed { color: #eab764; }
+.staffing { font-size: 0.72rem; color: var(--text-muted); font-family: monospace; }
+.staffing.understaffed { color: var(--status-warn); }
 
 .priority-label { display: inline-flex; align-items: center; gap: 0.25rem; }
-.priority-caption { font-size: 0.68rem; color: #668; text-transform: uppercase; letter-spacing: 0.04em; }
+.priority-caption { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
 .priority-select {
-  background: #0e0e16;
-  border: 1px solid #334;
-  color: #aab;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  color: var(--text);
   font-size: 0.72rem;
   font-family: inherit;
   padding: 0.05rem 0.2rem;
@@ -479,43 +479,43 @@ function displayName(b: BuildingRow): string {
 }
 
 .btn-small {
-  background: #1a1a28;
-  border: 1px solid #334;
+  background: var(--surface-btn);
+  border: 1px solid var(--border);
   border-radius: 2px;
-  color: #9ab;
+  color: var(--text);
   font-size: 0.68rem;
   font-family: inherit;
   padding: 0.08rem 0.35rem;
   cursor: pointer;
 }
-.btn-small:hover { background: #23233a; color: #cdd; }
+.btn-small:hover { background: var(--surface-btn-hover); color: var(--text-bright); }
 
 .rename-input {
-  background: #0e0e16;
-  border: 1px solid #445;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 2px;
-  color: #cdd;
+  color: var(--text-bright);
   font-size: 0.72rem;
   font-family: inherit;
   padding: 0.08rem 0.3rem;
   min-width: 9rem;
 }
 
-.building-reason { color: #a86; font-size: 0.7rem; font-style: italic; }
+.building-reason { color: var(--warn-dim); font-size: 0.7rem; font-style: italic; }
 /* A chain that is merely filling is information, not a warning — muted rather
    than amber, so a new colony's first few sols don't read as a wall of faults. */
-.building-reason.is-transient { color: #678; }
+.building-reason.is-transient { color: var(--text-muted); }
 .building-badge {
-  border: 1px solid #475;
+  border: 1px solid var(--good-border);
   border-radius: 2px;
-  color: #8a8;
+  color: var(--good-dim);
   font-size: 0.64rem;
   padding: 0.02rem 0.28rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.empty-row { color: #445; font-style: italic; }
+.empty-row { color: var(--border); font-style: italic; }
 
-.slots-summary { font-size: 0.72rem; color: #558; margin-top: 0.35rem; }
+.slots-summary { font-size: 0.72rem; color: var(--text-faint); margin-top: 0.35rem; }
 </style>

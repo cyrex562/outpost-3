@@ -230,9 +230,9 @@ function ghostPercent(knob: DifficultyKnob): number {
 
 <style scoped>
 .cdp {
-  border: 1px solid #334;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: #0d0d15;
+  background: var(--surface-3);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -247,7 +247,7 @@ function ghostPercent(knob: DifficultyKnob): number {
   gap: 0.5rem;
 }
 .cdp-toggle-row { grid-template-columns: 12rem auto; }
-.cdp-label { color: #aab; font-size: 0.82rem; }
+.cdp-label { color: var(--text); font-size: 0.82rem; }
 .cdp-slider-wrap { position: relative; }
 .cdp-slider-wrap input[type="range"] { width: 100%; }
 .cdp-ghost {
@@ -255,32 +255,32 @@ function ghostPercent(knob: DifficultyKnob): number {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: #557;
+  background: var(--text-faint);
   opacity: 0.55;
   pointer-events: none;
   transform: translateX(-1px);
 }
-.cdp-value { color: #8cf; font-family: monospace; text-align: right; }
-.cdp-default { color: #556; font-size: 0.72rem; font-style: italic; }
+.cdp-value { color: var(--accent); font-family: monospace; text-align: right; }
+.cdp-default { color: var(--text-faint); font-size: 0.72rem; font-style: italic; }
 
 .cdp-actions { display: flex; gap: 0.4rem; margin-top: 0.35rem; }
 .cdp-btn {
-  background: #1a1a28;
-  border: 1px solid #446;
-  color: #aac;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
   padding: 0.3rem 0.65rem;
   border-radius: 3px;
   cursor: pointer;
   font-family: monospace;
   font-size: 0.8rem;
 }
-.cdp-btn:hover:not(:disabled) { background: #22223a; }
+.cdp-btn:hover:not(:disabled) { background: var(--surface-btn-hover); }
 .cdp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .cdp-input {
-  background: #0a0a12;
-  border: 1px solid #334;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.25rem 0.4rem;
   font-family: monospace;
   font-size: 0.8rem;
@@ -289,7 +289,7 @@ function ghostPercent(knob: DifficultyKnob): number {
 .cdp-inline-prompt { display: flex; gap: 0.35rem; align-items: center; }
 
 .cdp-load-modal {
-  border: 1px solid #446;
+  border: 1px solid var(--border-strong);
   padding: 0.4rem;
   border-radius: 3px;
   display: flex;
@@ -301,7 +301,7 @@ function ghostPercent(knob: DifficultyKnob): number {
 .cdp-preset-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 .cdp-preset-list li { display: flex; gap: 0.3rem; align-items: center; }
 .cdp-preset-btn { flex: 1; text-align: left; }
-.cdp-preset-del { padding: 0.2rem 0.5rem; color: #c88; border-color: #a55; }
-.cdp-hint { color: #667; font-size: 0.75rem; font-style: italic; }
-.cdp-err { color: #d66; font-size: 0.8rem; }
+.cdp-preset-del { padding: 0.2rem 0.5rem; color: var(--danger-dim); border-color: var(--danger-dim); }
+.cdp-hint { color: var(--text-dim); font-size: 0.75rem; font-style: italic; }
+.cdp-err { color: var(--danger); font-size: 0.8rem; }
 </style>

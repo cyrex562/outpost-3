@@ -546,15 +546,13 @@ function viewSurface(body: SystemBody): void {
             cx="0"
             cy="0"
             r="14"
-            fill="#fda"
-            stroke="#ffd"
+            class="star-disc"
             stroke-width="1"
           />
           <text
             x="0"
             :y="-(14 + labelOffsetY)"
             text-anchor="middle"
-            fill="#aac"
             :font-size="labelFontSize"
             font-family="monospace"
             class="body-label"
@@ -571,7 +569,7 @@ function viewSurface(body: SystemBody): void {
             cy="0"
             :r="r"
             fill="none"
-            stroke="#334"
+            class="orbit-ring"
             :stroke-width="strokeScale"
             :stroke-dasharray="`${2 * strokeScale} ${3 * strokeScale}`"
           />
@@ -584,7 +582,7 @@ function viewSurface(body: SystemBody): void {
             :cy="mo.cy"
             :r="mo.r"
             fill="none"
-            stroke="#2a2a3a"
+            class="moon-orbit-ring"
             :stroke-width="strokeScale * 0.75"
             :stroke-dasharray="`${1 * strokeScale} ${2 * strokeScale}`"
           />
@@ -618,7 +616,7 @@ function viewSurface(body: SystemBody): void {
               :cy="bodyPos(b).y"
               :r="bodyRadius(b)"
               :fill="bodyColor(b)"
-              stroke="#000"
+              class="body-outline"
               stroke-width="1"
             />
             <!-- Moons only label when selected — a giant's many moons would
@@ -628,7 +626,6 @@ function viewSurface(body: SystemBody): void {
               :x="bodyPos(b).x"
               :y="bodyPos(b).y + bodyRadius(b) + labelOffsetY"
               text-anchor="middle"
-              fill="#aac"
               :font-size="labelFontSize"
               font-family="monospace"
               class="body-label"
@@ -740,22 +737,22 @@ function viewSurface(body: SystemBody): void {
    App.vue), so this view sizes to it rather than growing the page. */
 .system-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; min-height: 0; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; }
-.clock { color: #8a8; font-size: 0.85rem; }
+.toolbar h2 { color: var(--accent); }
+.clock { color: var(--good-dim); font-size: 0.85rem; }
 .actions { margin-left: auto; display: flex; gap: 0.5rem; }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.4rem 0.75rem;
   font-family: monospace;
   font-size: 0.82rem;
   cursor: pointer;
 }
-.btn:hover { background: #22223a; }
-.btn.primary { border-color: #468; color: #8cf; }
+.btn:hover { background: var(--surface-btn-hover); }
+.btn.primary { border-color: var(--border-accent); color: var(--accent); }
 .body-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 /* `flex: 1; min-height: 0` hands the map row all the leftover vertical space
@@ -772,10 +769,10 @@ function viewSurface(body: SystemBody): void {
      the point where bodies are big enough to hit — below this the shell
      scrolls instead, which is what the fixed-height panel used to do. */
   min-height: 320px;
-  border: 1px solid #223;
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   overflow: hidden;
-  background: radial-gradient(ellipse at center, #05050b 0%, #000 80%);
+  background: radial-gradient(ellipse at center, var(--map-bg-inner) 0%, var(--map-bg-outer) 80%);
 }
 .map {
   display: block;
@@ -789,47 +786,56 @@ function viewSurface(body: SystemBody): void {
 
 .body-label {
   pointer-events: none;
+  fill: var(--map-label);
 }
 
+/* Inline SVG paint attributes can't read custom properties, so the star,
+   orbit rings, and body outlines carry classes instead of fill/stroke
+   attributes — that's what lets them follow the theme. */
+.star-disc { fill: var(--map-star); stroke: var(--map-star-edge); }
+.orbit-ring { stroke: var(--map-orbit); }
+.moon-orbit-ring { stroke: var(--map-orbit); }
+.body-outline { stroke: var(--map-hex-stroke); }
+
 .body-group { cursor: pointer; }
-.body-group.selected circle { stroke: #8cf; stroke-width: 2; }
+.body-group.selected circle { stroke: var(--accent); stroke-width: 2; }
 .belt-zone { transition: fill-opacity 0.15s ease; }
 .body-group:hover .belt-zone { fill-opacity: 0.9; }
 
 .side-panel {
   min-width: 220px;
   max-width: 260px;
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1rem;
-  color: #aab;
+  color: var(--text);
   /* Now that the row stretches to full height, a long body-details panel
      scrolls itself rather than forcing the whole view to overflow. */
   overflow-y: auto;
 }
-.side-panel h3 { color: #8cf; margin-bottom: 0.5rem; }
-.side-panel.hint { color: #557; font-style: italic; font-size: 0.85rem; }
+.side-panel h3 { color: var(--accent); margin-bottom: 0.5rem; }
+.side-panel.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
 
 .stats { display: grid; grid-template-columns: 100px 1fr; gap: 0.35rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.75rem; }
-.stats dt { color: #668; }
-.stats dd { color: #aab; }
+.stats dt { color: var(--text-dim); }
+.stats dd { color: var(--text); }
 .modifier { font-size: 0.75rem; margin-left: 0.25rem; }
-.modifier.bonus { color: #6c9; }
-.modifier.neutral { color: #778; }
-.modifier.penalty { color: #d86; }
-.mitigation-hint { display: block; font-size: 0.68rem; color: #6c9; font-style: italic; margin-top: 0.1rem; }
+.modifier.bonus { color: var(--good); }
+.modifier.neutral { color: var(--text-muted); }
+.modifier.penalty { color: var(--warn); }
+.mitigation-hint { display: block; font-size: 0.68rem; color: var(--good); font-style: italic; margin-top: 0.1rem; }
 .modifier-chip {
   display: inline-block;
-  background: #14141e;
-  border: 1px solid #334;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0.1rem 0.4rem;
   font-size: 0.7rem;
   margin: 0.1rem 0.25rem 0.1rem 0;
 }
-.modifier-chip.bonus { border-color: #365; color: #6c9; }
-.modifier-chip.neutral { border-color: #334; color: #778; }
-.modifier-chip.penalty { border-color: #632; color: #d86; }
-.err { color: #d66; font-size: 0.8rem; }
+.modifier-chip.bonus { border-color: var(--good-border); color: var(--good); }
+.modifier-chip.neutral { border-color: var(--border); color: var(--text-muted); }
+.modifier-chip.penalty { border-color: var(--danger-border); color: var(--warn); }
+.err { color: var(--danger); font-size: 0.8rem; }
 </style>

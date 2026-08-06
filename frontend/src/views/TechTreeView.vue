@@ -256,7 +256,7 @@ function effectLabel(effect: TechEffect): string {
             :key="e.key"
             :d="`M ${e.x1} ${e.y1} C ${(e.x1 + e.x2) / 2} ${e.y1}, ${(e.x1 + e.x2) / 2} ${e.y2}, ${e.x2} ${e.y2}`"
             fill="none"
-            stroke="#334"
+            class="tech-edge-line"
             stroke-width="1.5"
           />
         </g>
@@ -298,7 +298,7 @@ function effectLabel(effect: TechEffect): string {
               :y="n.y + NODE_H - 6"
               :width="(NODE_W - 8) * Math.min(1, Math.max(0, n.progress))"
               height="4"
-              fill="#8cf"
+              class="tech-node-fill"
             />
           </g>
         </g>
@@ -361,6 +361,11 @@ function effectLabel(effect: TechEffect): string {
 </template>
 
 <style scoped>
+/* Inline SVG paint attributes can't read custom properties — these classes
+   carry the themed colours for the tech-graph edges and progress bars. */
+.tech-edge-line { stroke: var(--border); }
+.tech-node-fill { fill: var(--accent); }
+
 .tech-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; }
 
 /* Graph + detail sit side by side and fill the remaining height, so
@@ -369,44 +374,44 @@ function effectLabel(effect: TechEffect): string {
    the fold). */
 .tech-body { flex: 1; min-height: 0; display: flex; gap: 0.75rem; }
 .head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.head h2 { color: #8cf; }
+.head h2 { color: var(--accent); }
 .legend { display: flex; gap: 0.5rem; margin-left: auto; }
 .legend-item {
   font-size: 0.72rem;
   padding: 0.2rem 0.5rem;
   border-radius: 3px;
-  border: 1px solid #334;
+  border: 1px solid var(--border);
 }
-.legend-item.state-researched { color: #6a8; border-color: #365; }
-.legend-item.state-in_progress { color: #8cf; border-color: #468; }
-.legend-item.state-queued { color: #c9a; border-color: #648; }
-.legend-item.state-available { color: #ac6; border-color: #574; }
-.legend-item.state-locked { color: #557; border-color: #334; }
+.legend-item.state-researched { color: var(--good-dim); border-color: var(--good-border); }
+.legend-item.state-in_progress { color: var(--accent); border-color: var(--border-accent); }
+.legend-item.state-queued { color: var(--warn-dim); border-color: var(--text-dim); }
+.legend-item.state-available { color: var(--good-dim); border-color: var(--good-border); }
+.legend-item.state-locked { color: var(--text-faint); border-color: var(--border); }
 
-.filters { display: flex; gap: 1rem; align-items: center; font-size: 0.8rem; color: #aac; }
+.filters { display: flex; gap: 1rem; align-items: center; font-size: 0.8rem; color: var(--text); }
 .filters select {
-  background: #14141e;
-  border: 1px solid #334;
-  color: #aac;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: 3px;
   padding: 0.2rem 0.4rem;
   font-family: monospace;
 }
 
 .queue-panel {
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
   font-size: 0.82rem;
-  color: #aab;
+  color: var(--text);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 .queue-active { display: flex; align-items: center; gap: 0.6rem; }
-.queue-active strong { color: #8cf; }
-.queue-list { margin: 0; padding-left: 1.2rem; color: #c9a; }
+.queue-active strong { color: var(--accent); }
+.queue-list { margin: 0; padding-left: 1.2rem; color: var(--warn-dim); }
 
 .actions { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
 
@@ -418,52 +423,52 @@ function effectLabel(effect: TechEffect): string {
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.78rem;
-  color: #ac9;
+  color: var(--good);
 }
-.effects li::before { content: '▸ '; color: #575; }
+.effects li::before { content: '▸ '; color: var(--text-faint); }
 
 .graph-wrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  background: #05050b;
-  border: 1px solid #223;
+  background: var(--map-bg-inner);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
 .graph { display: block; }
 
 .node { cursor: pointer; }
-.node rect { fill: #14141e; stroke: #334; stroke-width: 1; transition: fill 0.1s; }
-.node:hover rect { fill: #1a1a2a; }
-.node-title { fill: #aac; font-family: monospace; font-size: 12px; pointer-events: none; }
-.node-sub   { fill: #557; font-family: monospace; font-size: 10px; pointer-events: none; }
+.node rect { fill: var(--surface-2); stroke: var(--border); stroke-width: 1; transition: fill 0.1s; }
+.node:hover rect { fill: var(--surface-alt); }
+.node-title { fill: var(--text); font-family: monospace; font-size: 12px; pointer-events: none; }
+.node-sub   { fill: var(--text-faint); font-family: monospace; font-size: 10px; pointer-events: none; }
 
-.node.state-researched rect { fill: #0a2015; stroke: #365; }
-.node.state-researched .node-title { fill: #6a8; }
-.node.state-in_progress rect { fill: #0a1524; stroke: #468; }
-.node.state-in_progress .node-title { fill: #8cf; }
-.node.state-queued rect { fill: #180a20; stroke: #648; }
-.node.state-queued .node-title { fill: #c9a; }
-.node.state-available rect { fill: #10140a; stroke: #574; }
-.node.state-available .node-title { fill: #ac6; }
-.node.state-locked rect { fill: #0d0d15; stroke: #223; opacity: 0.65; }
-.node.state-locked .node-title { fill: #557; }
+.node.state-researched rect { fill: var(--good-bg); stroke: var(--good-border); }
+.node.state-researched .node-title { fill: var(--good-dim); }
+.node.state-in_progress rect { fill: var(--accent-bg); stroke: var(--border-accent); }
+.node.state-in_progress .node-title { fill: var(--accent); }
+.node.state-queued rect { fill: var(--accent-bg); stroke: var(--text-dim); }
+.node.state-queued .node-title { fill: var(--warn-dim); }
+.node.state-available rect { fill: var(--warn-bg); stroke: var(--good-border); }
+.node.state-available .node-title { fill: var(--good-dim); }
+.node.state-locked rect { fill: var(--surface-3); stroke: var(--border-subtle); opacity: 0.65; }
+.node.state-locked .node-title { fill: var(--text-faint); }
 
 /* Selected node — a bright outline so a click is obviously registered. */
-.node.selected rect { stroke: #8cf; stroke-width: 2.5; }
+.node.selected rect { stroke: var(--accent); stroke-width: 2.5; }
 
 .detail {
   flex: none;
   width: 340px;
   overflow-y: auto;
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1rem;
-  color: #aab;
+  color: var(--text);
 }
 .select-hint { margin: 0; }
-.detail h3 { color: #8cf; margin-bottom: 0.25rem; }
+.detail h3 { color: var(--accent); margin-bottom: 0.25rem; }
 .status {
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -471,11 +476,11 @@ function effectLabel(effect: TechEffect): string {
   font-size: 0.75rem;
   margin-bottom: 0.5rem;
 }
-.status.state-researched { color: #6a8; border: 1px solid #365; }
-.status.state-in_progress { color: #8cf; border: 1px solid #468; }
-.status.state-queued { color: #c9a; border: 1px solid #648; }
-.status.state-available { color: #ac6; border: 1px solid #574; }
-.status.state-locked { color: #557; border: 1px solid #334; }
+.status.state-researched { color: var(--good-dim); border: 1px solid var(--good-border); }
+.status.state-in_progress { color: var(--accent); border: 1px solid var(--border-accent); }
+.status.state-queued { color: var(--warn-dim); border: 1px solid var(--text-dim); }
+.status.state-available { color: var(--good-dim); border: 1px solid var(--good-border); }
+.status.state-locked { color: var(--text-faint); border: 1px solid var(--border); }
 
 .badges { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
 .badge {
@@ -483,32 +488,32 @@ function effectLabel(effect: TechEffect): string {
   padding: 0.15rem 0.5rem;
   border-radius: 3px;
   font-size: 0.7rem;
-  border: 1px solid #334;
-  color: #778;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.badge.category { color: #a8c; border-color: #547; }
-.badge.tier { color: #ac9; border-color: #575; }
+.badge.category { color: var(--accent-soft); border-color: var(--border-strong); }
+.badge.tier { color: var(--good); border-color: var(--text-faint); }
 
-.desc { color: #aab; margin-bottom: 0.5rem; font-size: 0.85rem; }
+.desc { color: var(--text); margin-bottom: 0.5rem; font-size: 0.85rem; }
 .stats { display: grid; grid-template-columns: 120px 1fr; gap: 0.3rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.75rem; }
-.stats dt { color: #668; }
-.stats dd { color: #aab; }
+.stats dt { color: var(--text-dim); }
+.stats dd { color: var(--text); }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.4rem 0.75rem;
   font-family: monospace;
   font-size: 0.82rem;
   cursor: pointer;
 }
-.btn:hover:not(:disabled) { background: #22223a; }
+.btn:hover:not(:disabled) { background: var(--surface-btn-hover); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { border-color: #468; color: #8cf; }
-.hint { color: #557; font-style: italic; font-size: 0.8rem; }
-.err { color: #d66; font-size: 0.85rem; }
+.btn.primary { border-color: var(--border-accent); color: var(--accent); }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.8rem; }
+.err { color: var(--danger); font-size: 0.85rem; }
 </style>

@@ -93,46 +93,46 @@ const isEmpty = computed(() => props.queue === null || props.queue.length === 0)
 .panel--collapsed .queue-heading { margin-bottom: 0; flex: 1; }
 .panel--collapsed .hint { margin: 0 0 0 0.6rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queue-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
-.panel-title { color: #8cf; font-size: 0.9rem; margin: 0; }
-.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+.panel-title { color: var(--accent); font-size: 0.9rem; margin: 0; }
+.hint { font-size: 0.75rem; color: var(--border-strong); font-style: italic; }
 
 .btn-build {
-  background: #1a2030;
-  border: 1px solid #468;
+  background: var(--accent-bg);
+  border: 1px solid var(--border-accent);
   border-radius: 3px;
-  color: #8cf;
+  color: var(--accent);
   padding: 0.25rem 0.7rem;
   font-family: monospace;
   font-size: 0.78rem;
   cursor: pointer;
 }
-.btn-build:hover { background: #22293a; }
+.btn-build:hover { background: var(--accent-bg); }
 
 .queue-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; }
 .queue-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  background: #111120;
-  border: 1px solid #223;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
   border-radius: 3px;
   padding: 0.25rem 0.5rem;
   font-size: 0.8rem;
-  color: #aab;
+  color: var(--text);
 }
 .building-name { flex: 1 0 100px; }
-.queue-progress { font-size: 0.72rem; color: #668; }
-.queue-meta { color: #668; font-size: 0.72rem; }
+.queue-progress { font-size: 0.72rem; color: var(--text-dim); }
+.queue-meta { color: var(--text-dim); font-size: 0.72rem; }
 .btn-cancel {
-  background: #241417;
-  border: 1px solid #632;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
   border-radius: 3px;
-  color: #d88;
+  color: var(--danger-dim);
   padding: 0.15rem 0.4rem;
   font-size: 0.72rem;
   cursor: pointer;
   margin-left: auto;
 }
 .btn-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-cancel:hover:not(:disabled) { background: #2e1a1e; }
+.btn-cancel:hover:not(:disabled) { background: var(--danger-bg); }
 </style>

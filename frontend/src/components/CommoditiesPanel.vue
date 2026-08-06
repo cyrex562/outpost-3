@@ -148,36 +148,36 @@ function formatNet(net: number): string {
 
 <style scoped>
 .panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
-.panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.6rem; }
-.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+.panel-title { color: var(--accent); font-size: 0.9rem; margin: 0 0 0.6rem; }
+.hint { font-size: 0.75rem; color: var(--border-strong); font-style: italic; }
 
 .stock-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-.stock-table th { color: #668; font-weight: normal; text-align: left; padding: 0.2rem 0.4rem; border-bottom: 1px solid #222; }
+.stock-table th { color: var(--text-dim); font-weight: normal; text-align: left; padding: 0.2rem 0.4rem; border-bottom: 1px solid var(--border-subtle); }
 .stock-table th.num, .stock-table td.num { text-align: right; }
-.stock-table td { padding: 0.25rem 0.4rem; border-bottom: 1px solid #1a1a24; color: #aab; }
-.stock-table tbody tr:hover td { background: #13131e; }
-.net-positive { color: #4c9; }
-.net-negative { color: #c55; }
-.net-zero     { color: #667; }
-.empty-row { color: #445; font-style: italic; }
+.stock-table td { padding: 0.25rem 0.4rem; border-bottom: 1px solid var(--surface-btn); color: var(--text); }
+.stock-table tbody tr:hover td { background: var(--surface-2); }
+.net-positive { color: var(--good); }
+.net-negative { color: var(--danger); }
+.net-zero     { color: var(--text-dim); }
+.empty-row { color: var(--border); font-style: italic; }
 
 .reserve-cell { white-space: nowrap; }
 .reserve-value {
   background: none;
-  border: 1px dashed #2a2a38;
+  border: 1px dashed var(--surface-btn-hover);
   border-radius: 3px;
-  color: #667;
+  color: var(--text-dim);
   cursor: pointer;
   font: inherit;
   padding: 0 0.3rem;
 }
-.reserve-value:hover { border-color: #48c; color: #8cf; }
-.reserve-value.is-set { border-style: solid; border-color: #a84; color: #eb6; }
+.reserve-value:hover { border-color: var(--accent-border); color: var(--accent); }
+.reserve-value.is-set { border-style: solid; border-color: var(--warn-dim); color: var(--warn); }
 .reserve-input {
-  background: #0c0c14;
-  border: 1px solid #48c;
+  background: var(--surface-3);
+  border: 1px solid var(--accent-border);
   border-radius: 3px;
-  color: #cde;
+  color: var(--accent-soft);
   font: inherit;
   padding: 0 0.2rem;
   text-align: right;
@@ -185,13 +185,13 @@ function formatNet(net: number): string {
 }
 .mini {
   background: none;
-  border: 1px solid #2a2a38;
+  border: 1px solid var(--surface-btn-hover);
   border-radius: 3px;
-  color: #8cf;
+  color: var(--accent);
   cursor: pointer;
   font-size: 0.7rem;
   margin-left: 0.15rem;
   padding: 0 0.25rem;
 }
-.mini:hover { border-color: #48c; }
+.mini:hover { border-color: var(--accent-border); }
 </style>

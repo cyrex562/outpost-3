@@ -965,15 +965,15 @@ defineExpose({ focusSite, resetView })
 .planet-map {
   width: 100%;
   height: 100%;
-  background: #05050b;
-  border: 1px solid #223;
+  background: var(--map-bg-inner);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   cursor: grab;
 }
 .planet-map.dragging { cursor: grabbing; }
 
 .hex polygon {
-  stroke: #14141e;
+  stroke: var(--surface-2);
   stroke-width: 1;
   cursor: pointer;
   transition: stroke 0.1s, stroke-width 0.1s;
@@ -982,36 +982,36 @@ defineExpose({ focusSite, resetView })
 .hex.occupied polygon { cursor: not-allowed; }
 .hex.occupied-clickable polygon { cursor: pointer; }
 .hex:not(.not-habitable):not(.occupied):hover polygon {
-  stroke: #aac;
+  stroke: var(--text);
   stroke-width: 2;
 }
 .hex.occupied-clickable:hover polygon {
-  stroke: #8cf;
+  stroke: var(--accent);
   stroke-width: 2;
 }
 .hex.selected polygon {
-  stroke: #8cf;
+  stroke: var(--accent);
   stroke-width: 3;
 }
 .hex.recommended polygon {
-  stroke: #ac6;
+  stroke: var(--good-dim);
   stroke-width: 2;
   stroke-dasharray: 3 2;
 }
 
 .colony-label {
-  fill: #fff;
+  fill: var(--map-marker);
   font-family: monospace;
   font-size: 12px;
   pointer-events: none;
 }
 .colony-name {
-  fill: #cde;
+  fill: var(--accent-soft);
   font-family: monospace;
   font-size: 7px;
   pointer-events: none;
   paint-order: stroke;
-  stroke: #05050b;
+  stroke: var(--map-bg-inner);
   stroke-width: 2px;
 }
 
@@ -1019,7 +1019,7 @@ defineExpose({ focusSite, resetView })
    against any terrain color underneath, but decorative (doesn't intercept
    clicks meant for the hexes it crosses over). */
 .seam-layer { pointer-events: none; }
-.seam-line { stroke: #fff; stroke-width: 3; stroke-linecap: round; }
+.seam-line { stroke: var(--map-seam); stroke-width: 3; stroke-linecap: round; }
 
 /* Infrastructure edges are decorative in phase A3 — don't let them intercept
    clicks meant for the hexes they cross over. */
@@ -1029,23 +1029,23 @@ defineExpose({ focusSite, resetView })
 .hex-tooltip {
   position: absolute;
   pointer-events: none;
-  background: #10101a;
-  border: 1px solid #446;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 0.4rem 0.6rem;
   font-family: monospace;
   font-size: 0.75rem;
-  color: #aac;
+  color: var(--text);
   min-width: 140px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 2px 8px var(--shadow-strong);
   z-index: 5;
 }
-.tt-title { color: #8cf; font-weight: bold; margin-bottom: 0.25rem; }
+.tt-title { color: var(--accent); font-weight: bold; margin-bottom: 0.25rem; }
 .tt-row { display: flex; justify-content: space-between; gap: 0.5rem; }
-.tt-label { color: #668; }
-.tt-warn { color: #d86; }
+.tt-label { color: var(--text-dim); }
+.tt-warn { color: var(--warn); }
 .tt-deposits { margin-top: 0.3rem; }
-.tt-deposit { display: flex; align-items: center; gap: 0.35rem; color: #aab; }
+.tt-deposit { display: flex; align-items: center; gap: 0.35rem; color: var(--text); }
 .tt-box {
   display: inline-flex;
   align-items: center;
@@ -1063,34 +1063,34 @@ defineExpose({ focusSite, resetView })
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background: rgba(16, 16, 26, 0.9);
-  border: 1px solid #334;
+  background: var(--overlay-panel);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.2rem 0.45rem;
   font-family: monospace;
   font-size: 0.7rem;
-  color: #aab;
+  color: var(--text);
   cursor: pointer;
   z-index: 2;
 }
-.wrap-toggle:hover { border-color: #446; color: #cdd; }
-.wrap-toggle[aria-pressed='true'] { border-color: #468; color: #8cf; }
+.wrap-toggle:hover { border-color: var(--border-strong); color: var(--text-bright); }
+.wrap-toggle[aria-pressed='true'] { border-color: var(--border-accent); color: var(--accent); }
 
 .legend {
   position: absolute;
   bottom: 0.5rem;
   right: 0.5rem;
-  background: rgba(16, 16, 26, 0.9);
-  border: 1px solid #223;
+  background: var(--overlay-panel);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0.35rem 0.5rem;
   font-family: monospace;
   font-size: 0.7rem;
-  color: #aab;
+  color: var(--text);
   pointer-events: none;
   max-width: 130px;
 }
-.legend-title { color: #668; margin-bottom: 0.2rem; }
+.legend-title { color: var(--text-dim); margin-bottom: 0.2rem; }
 .legend-title-spaced { margin-top: 0.4rem; }
 .legend-row { display: flex; align-items: center; gap: 0.35rem; }
 .legend-box {

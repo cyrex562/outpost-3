@@ -88,13 +88,13 @@ function sparklinePath(values: number[]): string {
             v-if="props.populationTrend.length >= 2"
             :d="sparklinePath(props.populationTrend)"
             fill="none"
-            stroke="#4c8"
+            class="sparkline-trend"
             stroke-width="1.5"
           />
           <line
             v-else
             x1="0" y1="10" x2="80" y2="10"
-            stroke="#444"
+            class="sparkline-empty"
             stroke-width="1"
             stroke-dasharray="4 3"
           />
@@ -178,14 +178,20 @@ function sparklinePath(values: number[]): string {
 </template>
 
 <style scoped>
+/* Inline SVG paint attributes can't read custom properties — the sparkline's
+   trend line and its no-data placeholder carry classes so both follow the
+   theme. */
+.sparkline-trend { stroke: var(--status-good); }
+.sparkline-empty { stroke: var(--border-strong); }
+
 .panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
-.panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.6rem; }
+.panel-title { color: var(--accent); font-size: 0.9rem; margin: 0 0 0.6rem; }
 
 .stat-row { display: flex; gap: 1.5rem; margin-bottom: 0.5rem; align-items: flex-end; }
 .stat-block { display: flex; flex-direction: column; }
-.stat-label { font-size: 0.7rem; color: #668; margin-bottom: 0.1rem; }
-.stat-value { font-size: 1.1rem; color: #dde; }
-.stat-value.stat-warn { color: #eab764; }
+.stat-label { font-size: 0.7rem; color: var(--text-dim); margin-bottom: 0.1rem; }
+.stat-value { font-size: 1.1rem; color: var(--text-bright); }
+.stat-value.stat-warn { color: var(--status-warn); }
 
 .sparkline-wrap { align-self: flex-end; }
 .sparkline { display: block; }
@@ -193,22 +199,22 @@ function sparklinePath(values: number[]): string {
 .stability-section { margin-bottom: 0.75rem; }
 .stability-bar-track {
   height: 12px;
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
   margin: 0.35rem 0;
   width: 100%;
   max-width: 300px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px var(--shadow-soft);
 }
 .stability-bar-fill { height: 100%; transition: width 0.3s ease, background 0.2s; }
-.stability-bar-fill.stability-high { background: #4ec990; }
-.stability-bar-fill.stability-mid  { background: #d4a24a; }
-.stability-bar-fill.stability-low  { background: #d0574a; }
+.stability-bar-fill.stability-high { background: var(--status-good); }
+.stability-bar-fill.stability-mid  { background: var(--status-warn); }
+.stability-bar-fill.stability-low  { background: var(--status-bad); }
 
 .stability-label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; }
-.stability-label.stability-high { color: #6adba5; }
-.stability-label.stability-mid  { color: #eab764; }
-.stability-label.stability-low  { color: #e77767; }
+.stability-label.stability-high { color: var(--status-good); }
+.stability-label.stability-mid  { color: var(--status-warn); }
+.stability-label.stability-low  { color: var(--status-bad); }
 </style>

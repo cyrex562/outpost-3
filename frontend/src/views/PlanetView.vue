@@ -221,35 +221,35 @@ async function demolish(edge: InfraEdge): Promise<void> {
 <style scoped>
 .planet-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; margin: 0; }
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
-.err { color: #d66; font-size: 0.8rem; }
+.toolbar h2 { color: var(--accent); margin: 0; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
 /* Positioned host the floating planet-map window lives inside (UI-rework
    PR6). `position: relative` anchors the window's absolute coordinates; it
    fills the remaining space so the window has room to move/resize. */
 .map-host { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.35rem 0.7rem;
   font-family: monospace;
   font-size: 0.8rem;
   cursor: pointer;
 }
-.btn:hover { background: #22223a; }
-.btn.active { border-color: #8cf; color: #8cf; }
-.btn.primary { border-color: #468; color: #8cf; }
-.btn.danger { border-color: #632; color: #d86; }
+.btn:hover { background: var(--surface-btn-hover); }
+.btn.active { border-color: var(--accent); color: var(--accent); }
+.btn.primary { border-color: var(--border-accent); color: var(--accent); }
+.btn.danger { border-color: var(--danger-border); color: var(--warn); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 /* Push the mode-toggle button to the right edge of the toolbar. */
 .toolbar > .btn { margin-left: auto; }
 
 .build-panel {
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem;
   display: flex;
@@ -257,18 +257,18 @@ async function demolish(edge: InfraEdge): Promise<void> {
   gap: 0.6rem;
 }
 .endpoints { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-.slot { color: #668; font-size: 0.82rem; }
-.slot.filled { color: #aac; }
+.slot { color: var(--text-dim); font-size: 0.82rem; }
+.slot.filled { color: var(--text); }
 .type-select {
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.3rem 0.4rem;
   font-family: monospace;
   font-size: 0.8rem;
 }
 .edge-list { display: flex; flex-direction: column; gap: 0.35rem; }
-.edge-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; color: #aab; }
+.edge-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; color: var(--text); }
 .edge-desc { font-family: monospace; }
 </style>

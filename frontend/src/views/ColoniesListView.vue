@@ -58,8 +58,8 @@ function openColony(id: string): void {
 
 <style scoped>
 .colonies-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; }
-.title { color: #8cf; margin: 0; }
-.empty { color: #667; font-style: italic; }
+.title { color: var(--accent); margin: 0; }
+.empty { color: var(--text-dim); font-style: italic; }
 
 .colony-grid {
   display: grid;
@@ -71,32 +71,32 @@ function openColony(id: string): void {
 
 .colony-card {
   text-align: left;
-  background: #12121c;
-  border: 1px solid #334;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem 0.85rem;
-  color: #aab;
+  color: var(--text);
   cursor: pointer;
   font-family: monospace;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
-.colony-card:hover { border-color: #558; background: #161622; }
+.colony-card:hover { border-color: var(--text-faint); background: var(--surface-2); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; }
-.colony-name { color: #8cf; font-size: 0.95rem; font-weight: 600; }
+.colony-name { color: var(--accent); font-size: 0.95rem; font-weight: 600; }
 .stability-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
 .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 0.75rem; margin: 0; }
 .stat { display: flex; justify-content: space-between; gap: 0.5rem; }
-.stat dt { color: #667; font-size: 0.72rem; }
-.stat dd { color: #cdd; font-size: 0.8rem; margin: 0; }
+.stat dt { color: var(--text-dim); font-size: 0.72rem; }
+.stat dd { color: var(--text-bright); font-size: 0.8rem; margin: 0; }
 
-.stability-high { color: #6adba5; }
-.stability-mid  { color: #eab764; }
-.stability-low  { color: #e77767; }
-.stability-dot.stability-high { background: #4ec990; }
-.stability-dot.stability-mid  { background: #d4a24a; }
-.stability-dot.stability-low  { background: #d0574a; }
+.stability-high { color: var(--status-good); }
+.stability-mid  { color: var(--status-warn); }
+.stability-low  { color: var(--status-bad); }
+.stability-dot.stability-high { background: var(--status-good); }
+.stability-dot.stability-mid  { background: var(--status-warn); }
+.stability-dot.stability-low  { background: var(--status-bad); }
 </style>

@@ -47,14 +47,14 @@ const alertCount = computed(() => world.notifications.length)
   align-items: center;
   gap: 1.5rem;
   padding: 0.3rem 1rem;
-  background: #0d0d15;
-  border-bottom: 1px solid #223;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 0.8rem;
   overflow-x: auto;
   white-space: nowrap;
 }
 .stat { display: flex; align-items: baseline; gap: 0.4rem; }
-.label { color: #667; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.68rem; }
-.value { color: #9cf; font-weight: bold; }
-.value.hot { color: #e97; }
+.label { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.68rem; }
+.value { color: var(--accent); font-weight: bold; }
+.value.hot { color: var(--warn); }
 </style>

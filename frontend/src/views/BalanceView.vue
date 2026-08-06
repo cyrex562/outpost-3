@@ -30,11 +30,11 @@ import BalanceTuningPanel from '@/components/BalanceTuningPanel.vue'
   max-width: 46rem;
 }
 .intro h2 {
-  color: #8cf;
+  color: var(--accent);
   margin: 0 0 0.25rem;
 }
 .hint {
-  color: #789;
+  color: var(--text-muted);
   font-size: 0.85rem;
   margin: 0;
 }

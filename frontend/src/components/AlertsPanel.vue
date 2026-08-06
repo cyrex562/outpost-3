@@ -99,55 +99,55 @@ function toggle(id: string): void {
 
 <style scoped>
 .panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
-.panel-title { color: #8cf; font-size: 0.9rem; margin: 0; }
+.panel-title { color: var(--accent); font-size: 0.9rem; margin: 0; }
 .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; }
-.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+.hint { font-size: 0.75rem; color: var(--border-strong); font-style: italic; }
 
 .btn-clear-log {
   background: transparent;
-  border: 1px solid #334;
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #556;
+  color: var(--text-faint);
   padding: 0.1rem 0.4rem;
   font-size: 0.7rem;
   cursor: pointer;
 }
-.btn-clear-log:hover { color: #889; border-color: #446; }
+.btn-clear-log:hover { color: var(--text-muted); border-color: var(--border-strong); }
 
 .log-list { list-style: none; display: flex; flex-direction: column; gap: 0.15rem; margin: 0; padding: 0; }
 .log-item {
   font-size: 0.76rem;
   padding: 0.25rem 0.45rem;
-  border-left: 3px solid #334;
-  color: #778;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
   cursor: pointer;
   border-radius: 2px;
 }
-.log-item:hover { background: rgba(255, 255, 255, 0.03); }
-.log-item.expanded { background: rgba(255, 255, 255, 0.04); }
+.log-item:hover { background: var(--hairline); }
+.log-item.expanded { background: var(--hairline); }
 
 .log-row { display: flex; align-items: baseline; gap: 0.5rem; }
-.log-sol { color: #556; font-size: 0.68rem; flex-shrink: 0; }
+.log-sol { color: var(--text-faint); font-size: 0.68rem; flex-shrink: 0; }
 .log-message { min-width: 0; overflow-wrap: anywhere; }
 
 /* Tier coloring is the single source of truth for "is this an alert" now
    that there's one list instead of two — matches the tones the old
    .notification.tier-* classes used, so returning players see the same
    color language. */
-.log-item.tier-blocking { border-color: #f44; color: #f66; }
-.log-item.tier-urgent   { border-color: #c44; color: #c66; }
-.log-item.tier-notable  { border-color: #c84; color: #ca8; }
-.log-item.tier-ambient  { border-color: #334; color: #778; }
+.log-item.tier-blocking { border-color: var(--danger-strong); color: var(--danger-strong); }
+.log-item.tier-urgent   { border-color: var(--danger-dim); color: var(--danger); }
+.log-item.tier-notable  { border-color: var(--warn); color: var(--warn-dim); }
+.log-item.tier-ambient  { border-color: var(--border); color: var(--text-muted); }
 
 .log-detail {
   margin: 0.35rem 0 0.15rem;
   padding: 0.35rem 0.5rem;
-  background: #0d0d15;
-  border: 1px solid #223;
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
   border-radius: 3px;
   font-size: 0.7rem;
 }
 .detail-row { display: flex; gap: 0.5rem; padding: 0.08rem 0; }
-.detail-row dt { color: #556; flex-shrink: 0; min-width: 9rem; }
-.detail-row dd { margin: 0; color: #99a; overflow-wrap: anywhere; }
+.detail-row dt { color: var(--text-faint); flex-shrink: 0; min-width: 9rem; }
+.detail-row dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 </style>

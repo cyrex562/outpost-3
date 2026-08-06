@@ -442,8 +442,8 @@ async function exitApp(): Promise<void> {
   gap: 1rem;
   padding: 2rem;
 }
-.menu-title { color: #8cf; font-size: 2.5rem; letter-spacing: 0.3em; }
-.menu-subtitle { color: #557; margin-bottom: 2rem; font-size: 0.9rem; }
+.menu-title { color: var(--accent); font-size: 2.5rem; letter-spacing: 0.3em; }
+.menu-subtitle { color: var(--text-faint); margin-bottom: 2rem; font-size: 0.9rem; }
 
 .menu-buttons {
   display: flex;
@@ -453,8 +453,8 @@ async function exitApp(): Promise<void> {
 }
 
 .panel {
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1.5rem;
   min-width: 320px;
@@ -462,13 +462,13 @@ async function exitApp(): Promise<void> {
   flex-direction: column;
   gap: 0.6rem;
 }
-.panel h2 { color: #8cf; }
-.panel label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: #778; }
+.panel h2 { color: var(--accent); }
+.panel label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--text-muted); }
 .input {
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.35rem 0.5rem;
   font-family: monospace;
   font-size: 0.85rem;
@@ -481,7 +481,7 @@ async function exitApp(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  border: 1px solid #223;
+  border: 1px solid var(--border-subtle);
   border-radius: 3px;
   padding: 0.5rem;
 }
@@ -493,30 +493,30 @@ async function exitApp(): Promise<void> {
   gap: 0.5rem;
 }
 
-.slider-label { font-size: 0.8rem; color: #aab; }
-.slider { width: 100%; accent-color: #4af; }
-.slider-value { color: #8cf; font-family: monospace; font-size: 0.85rem; text-align: right; }
+.slider-label { font-size: 0.8rem; color: var(--text); }
+.slider { width: 100%; accent-color: var(--accent-strong); }
+.slider-value { color: var(--accent); font-family: monospace; font-size: 0.85rem; text-align: right; }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.55rem 1rem;
   font-family: monospace;
   font-size: 0.9rem;
   cursor: pointer;
 }
-.btn:hover:not(:disabled) { background: #22223a; }
+.btn:hover:not(:disabled) { background: var(--surface-btn-hover); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { border-color: #468; color: #8cf; }
-.btn.danger { border-color: #a55; color: #c88; }
+.btn.primary { border-color: var(--border-accent); color: var(--accent); }
+.btn.danger { border-color: var(--danger-dim); color: var(--danger-dim); }
 .btn.wide { width: 100%; text-align: left; }
 
 .row { display: flex; gap: 0.6rem; margin-top: 0.5rem; align-items: center; }
 .named-preset-row { justify-content: space-between; }
 .btn.small { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
-.err { color: #d66; font-size: 0.8rem; }
-.hint { color: #558; font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
 .save-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
 </style>

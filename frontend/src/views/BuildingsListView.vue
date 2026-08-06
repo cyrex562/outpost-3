@@ -76,20 +76,20 @@ function openFacility(row: BuildingRow): void {
 <style scoped>
 .buildings-view { display: flex; flex-direction: column; gap: 0.75rem; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; margin: 0; }
-.count { color: #779; font-size: 0.8rem; }
+.toolbar h2 { color: var(--accent); margin: 0; }
+.count { color: var(--text-muted); font-size: 0.8rem; }
 
 .buildings-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .buildings-table th {
   text-align: left;
-  color: #668;
+  color: var(--text-dim);
   font-weight: normal;
   padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #334;
+  border-bottom: 1px solid var(--border);
 }
-.buildings-table td { padding: 0.4rem 0.6rem; color: #aab; border-bottom: 1px solid #223; }
+.buildings-table td { padding: 0.4rem 0.6rem; color: var(--text); border-bottom: 1px solid var(--border-subtle); }
 .building-row { cursor: pointer; }
-.building-row:hover { background: #16162a; }
+.building-row:hover { background: var(--surface-2); }
 
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
 </style>
