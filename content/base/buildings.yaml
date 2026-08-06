@@ -84,6 +84,14 @@
     outpost_core/src/colony/production.rs's module doc comment).
   category: services
   starter_kit: true
+  # One headquarters per colony. It is the colony's administrative core, not a
+  # generic utility block, so stacking several was always a way to exploit its
+  # slot efficiency rather than a real building decision — three HQs in three
+  # slots beat any honest combination of standalone structures. Need more
+  # power, water, or oxygen than the one HQ supplies? Build the dedicated
+  # structure for it: power_plant is available from founding with no tech, and
+  # ice_miner / air_miner cover the other two.
+  max_instances: 1
   power_delta: -13.0
   worker_slots: 2
   default_priority: 1
@@ -93,6 +101,29 @@
   construction_cost:
     - id: structural_metal
       quantity: 37.0
+
+- id: power_plant
+  name: Power Plant
+  description: >
+    Compact prefab fission unit — the colony's dedicated power source from
+    founding, needing no tech and no sunlight. Deliberately the weakest
+    generator in the game: it exists so a colony that outgrows colony_hq's
+    supply has somewhere to go before basic_power, not so it can skip that
+    research. solar_array_mk1 supplies twice the grid capacity for the same
+    slot once researched, and every later generator beats both.
+
+    Not part of the landing kit — colony_hq already covers a starting
+    colony's draw, and this is what you build when it no longer does.
+  category: power
+  power_delta: -10.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 12.0
 
 - id: ice_miner
   name: Ice Miner

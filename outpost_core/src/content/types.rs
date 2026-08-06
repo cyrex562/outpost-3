@@ -364,6 +364,27 @@ pub struct BuildingDef {
     /// `0.0` — the default — leaves a building behaving exactly as before.
     #[serde(default)]
     pub contamination_reduction: f32,
+    /// Maximum number of instances a single site (colony or outpost) may have.
+    ///
+    /// `None` — the default — means unlimited, which is how every building
+    /// behaved before this field existed.
+    ///
+    /// The cap counts **completed instances plus anything already queued**, so
+    /// a player cannot sidestep it by enqueueing several copies in one turn and
+    /// letting them all complete. It is enforced per site rather than per
+    /// game: two colonies may each have their own `colony_hq`, which is the
+    /// point of a headquarters.
+    ///
+    /// Which buildings are capped is a design decision about the content, not
+    /// about the engine, so it is authored here rather than special-cased by id
+    /// in the command handlers.
+    ///
+    /// Note this is *not* enforced by the balance harness, which assembles a
+    /// synthetic colony directly from a check bundle rather than going through
+    /// [`crate::Command`] — a bundle may still model several instances to
+    /// approximate some flow, and that stays a modelling choice.
+    #[serde(default)]
+    pub max_instances: Option<u32>,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).

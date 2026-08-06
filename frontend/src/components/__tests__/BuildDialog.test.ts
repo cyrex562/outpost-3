@@ -15,6 +15,7 @@ function makeBuildingOption(overrides: Partial<BuildingOption>): BuildingOption 
     construction_cost: [],
     tech_prerequisite: null,
     starter_kit: false,
+    max_instances: null,
     ...overrides,
   }
 }

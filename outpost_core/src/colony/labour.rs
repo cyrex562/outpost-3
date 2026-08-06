@@ -270,6 +270,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         };
         for (id, slots) in [("farm", 5), ("mine", 5), ("lab", 3), ("scrubber", 2)] {
             reg.insert_building(building(id, slots));

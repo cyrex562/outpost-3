@@ -354,6 +354,16 @@ export interface BuildingOption {
    * matches what the engine would place on its own.
    */
   starter_kit: boolean
+  /**
+   * Most instances one colony may have, or `null` for unlimited.
+   *
+   * `colony_hq` is capped at 1: it is the colony's administrative core, not a
+   * utility block, and stacking several was a way to exploit its slot
+   * efficiency rather than a real decision. The engine rejects the command
+   * either way; this lets the build UI grey the option out instead of
+   * offering a button that always errors.
+   */
+  max_instances: number | null
 }
 
 export async function listBuildings(): Promise<BuildingOption[]> {

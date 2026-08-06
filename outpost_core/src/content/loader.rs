@@ -894,4 +894,127 @@ mod tests {
             .surface_expedition_failure("surface_expedition_mishap")
             .is_some());
     }
+
+    // ── Starter power + unique HQ ────────────────────────────────────────────
+
+    /// A colony must be able to add power without researching anything.
+    ///
+    /// `colony_hq` is capped at one instance, so it can no longer be stacked to
+    /// raise the power ceiling — which leaves a colony with no pre-tech route to
+    /// more power at all unless a dedicated generator is buildable from
+    /// founding. This asserts that route exists rather than trusting the roster
+    /// comment, because the two changes only make sense together.
+    #[test]
+    fn a_dedicated_power_source_is_available_with_no_tech() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+
+        let no_tech_generators: Vec<&crate::content::types::BuildingDef> = buildings
+            .iter()
+            .filter(|b| {
+                b.tech_prerequisite.is_none()
+                    && b.category == crate::content::types::BuildingCategory::Power
+                    // Negative power_delta is the generator convention (see
+                    // `compute_power_grid_scaled`).
+                    && b.power_delta < 0.0
+            })
+            .collect();
+
+        assert!(
+            !no_tech_generators.is_empty(),
+            "no buildable power source exists without tech; colony_hq's cap would \
+             leave a colony unable to grow its grid before basic_power"
+        );
+
+        // And it must not be capped itself, or it could not scale.
+        for gen in &no_tech_generators {
+            assert!(
+                gen.max_instances.is_none(),
+                "{} is the pre-tech power source and must not be limited",
+                gen.id
+            );
+        }
+    }
+
+    /// The pre-tech generator is deliberately weaker than the researched one,
+    /// so `basic_power` stays worth researching rather than becoming a sidegrade.
+    #[test]
+    fn the_pre_tech_generator_is_weaker_than_the_researched_one() {
+        let (Some(byaml), Some(ryaml)) = (read_real_buildings_yaml(), read_real_recipes_yaml())
+        else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let recipes: Vec<crate::content::types::RecipeDef> =
+            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
+
+        let capacity = |id: &str| {
+            -buildings
+                .iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id} must exist in the roster"))
+                .power_delta
+        };
+        let power_output = |building_id: &str| {
+            recipes
+                .iter()
+                .filter(|r| r.building == building_id)
+                .flat_map(|r| r.outputs.iter())
+                .filter(|o| o.id == "power")
+                .map(|o| o.quantity)
+                .sum::<f64>()
+        };
+
+        assert!(
+            capacity("power_plant") < capacity("solar_array_mk1"),
+            "the no-tech generator must supply less grid capacity than the researched one"
+        );
+        assert!(
+            power_output("power_plant") < power_output("solar_array_mk1"),
+            "the no-tech generator must supply less power than the researched one"
+        );
+        assert!(
+            power_output("power_plant") > 0.0,
+            "the no-tech generator must actually produce power"
+        );
+    }
+
+    /// A colony gets exactly one headquarters.
+    #[test]
+    fn colony_hq_is_capped_at_one_instance() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let hq = buildings
+            .iter()
+            .find(|b| b.id == "colony_hq")
+            .expect("colony_hq must exist in the roster");
+        assert_eq!(hq.max_instances, Some(1));
+    }
+
+    /// Nothing else is capped by accident.
+    ///
+    /// `max_instances` silently truncates what a player can build, so a stray
+    /// one on an ordinary utility building would read in play as a bug. Pinning
+    /// the set means adding another cap is a deliberate edit here too.
+    #[test]
+    fn only_the_headquarters_is_capped() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let capped: Vec<&str> = buildings
+            .iter()
+            .filter(|b| b.max_instances.is_some())
+            .map(|b| b.id.as_str())
+            .collect();
+        assert_eq!(capped, vec!["colony_hq"]);
+    }
 }

@@ -29,6 +29,7 @@
 //!     starter_kit: false,
 //!     storage: vec![],
 //!     contamination_reduction: 0.0,
+//!     max_instances: None,
 //! };
 //! let mine_recipe = RecipeDef {
 //!     id: "mine_ore".into(),
@@ -355,6 +356,7 @@ mod tests {
             starter_kit: false,
             storage: vec![],
             contamination_reduction: 0.0,
+            max_instances: None,
         }
     }
 

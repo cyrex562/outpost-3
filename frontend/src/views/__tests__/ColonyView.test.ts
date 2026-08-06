@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, reactive } from 'vue'
 import ColonyView from '@/views/ColonyView.vue'
@@ -359,5 +359,126 @@ describe('ColonyView building-details window (issue #322)', () => {
     // The six panel windows (Vitals included) are unaffected by closing a
     // different window.
     expect(wrapper.find('[data-window-id="vital-stats"]').exists()).toBe(true)
+  })
+})
+
+describe('ColonyView build limits (max_instances)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    routeParams.colonyId = undefined
+    routeParams.buildingType = undefined
+  })
+
+  /** A catalog entry, defaulting to a building capped at one per colony. */
+  function option(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'colony_hq',
+      name: 'Colony HQ',
+      description: '',
+      category: 'Services',
+      slot_cost: 1,
+      labor_per_turn: 2,
+      construction_turns: 3,
+      construction_cost: [],
+      tech_prerequisite: null,
+      starter_kit: true,
+      max_instances: 1,
+      ...overrides,
+    }
+  }
+
+  function buildingRow(buildingType: string, n: number) {
+    return {
+      building_id: `${buildingType}-${n}`,
+      name: `${buildingType} ${n}`,
+      building_type: buildingType,
+      labour_assigned: 0,
+      labour_demand: 0,
+      priority: 5,
+      labour_lock: null,
+      paused: false,
+      slot_cost: 1,
+      full_capacity: true,
+    }
+  }
+
+  function queueRow(buildingType: string, n: number) {
+    return {
+      project_id: `p-${n}`,
+      building_type: buildingType,
+      turns_completed: 0,
+      turns_total: 3,
+      slot_cost: 1,
+    }
+  }
+
+  /**
+   * Mount, seed the colony screen with the given standing buildings and queued
+   * projects, and open the build dialog for real (rather than stubbing it) so
+   * the assertion is on what the player would actually see.
+   *
+   * The screen, not `ColonyState`, is what carries `building_type` — see
+   * `existingCount` in the view.
+   */
+  async function openDialog(
+    catalog: Record<string, unknown>[],
+    buildings: ReturnType<typeof buildingRow>[] = [],
+    queue: ReturnType<typeof queueRow>[] = [],
+  ) {
+    const { listBuildings } = await import('@/services/tauriBridge')
+    ;(listBuildings as ReturnType<typeof vi.fn>).mockResolvedValue(catalog)
+
+    seedColonies()
+    const gameStore = useGameStore()
+    gameStore.selectedColonyId = 'colony-1'
+    gameStore.colonyScreen = colonyScreenWithHqBuilding({
+      slots_used: buildings.length,
+      slot_capacity: 20,
+      buildings,
+      construction_queue: queue,
+    })
+
+    const wrapper = mount(ColonyView, {
+      global: { stubs: { ...STUBS, ConstructionQueueWindowPanel: false, BuildDialog: false } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="btn-open-build"]').trigger('click')
+    await flushPromises()
+    // Guard against a vacuous pass: the assertions below check for the presence
+    // or absence of one card's reason, which would also hold if the dialog
+    // never opened or the catalog never loaded.
+    expect(wrapper.find('[data-testid="build-dialog"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid^="build-card-"]').length).toBeGreaterThan(0)
+    return wrapper
+  }
+
+  it('disables a capped building the colony already has', async () => {
+    const wrapper = await openDialog([option()], [buildingRow('colony_hq', 1)])
+    const reason = wrapper.find('[data-testid="build-card-reason-colony_hq"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toMatch(/limit 1 per colony/i)
+  })
+
+  it('counts a queued copy toward the cap, not just standing buildings', async () => {
+    // Queueing a second copy would look fine here but be rejected by the
+    // engine, so the UI has to count the queue the same way the engine does.
+    const wrapper = await openDialog([option()], [], [queueRow('colony_hq', 1)])
+    const reason = wrapper.find('[data-testid="build-card-reason-colony_hq"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toMatch(/limit 1 per colony/i)
+  })
+
+  it('leaves a capped building available when the colony has none yet', async () => {
+    const wrapper = await openDialog([option()], [], [])
+    expect(wrapper.find('[data-testid="build-card-reason-colony_hq"]').exists()).toBe(false)
+  })
+
+  it('leaves uncapped buildings alone however many are already built', async () => {
+    const wrapper = await openDialog(
+      [option({ id: 'power_plant', name: 'Power Plant', max_instances: null })],
+      [buildingRow('power_plant', 1), buildingRow('power_plant', 2), buildingRow('power_plant', 3)],
+    )
+    expect(wrapper.find('[data-testid="build-card-reason-power_plant"]').exists()).toBe(false)
   })
 })
