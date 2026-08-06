@@ -1,0 +1,310 @@
+/*
+ * Design tokens for Outpost 3.
+ *
+ * Every colour in the UI resolves through one of these custom properties —
+ * components should not carry raw hex literals. That indirection is what
+ * makes a light theme possible at all: before this file the palette lived as
+ * ~780 hardcoded literals spread across 33 single-file components, so there
+ * was no single place a theme could be swapped.
+ *
+ * ── How a theme is chosen ──────────────────────────────────────────────
+ *
+ * `:root` holds the dark palette, which is the game's default look and the
+ * fallback when nothing else matches. `@media (prefers-color-scheme: light)`
+ * adopts the light palette for players whose OS asks for it. Both are then
+ * overridden by an explicit `data-theme` attribute on <html>, which the
+ * in-app toggle sets (see `useTheme`) — an explicit choice always beats the
+ * OS preference, in both directions, which is why the attribute selectors
+ * are written for `light` *and* `dark` rather than only the non-default one.
+ *
+ * Specificity note: `[data-theme]` selectors must come after the media query
+ * so they win on source order; they have the same specificity as `:root`
+ * plus an attribute, so they already outrank the bare `:root` block.
+ *
+ * ── Naming ─────────────────────────────────────────────────────────────
+ *
+ * Tokens are named for their *role*, not their appearance — `--text-dim`,
+ * not `--grey-6` — so a light theme can invert lightness without the names
+ * turning into lies. Surfaces are numbered by stacking depth: `--surface-1`
+ * is a panel sitting on the page background, `--surface-2` a card inside a
+ * panel, `--surface-3` an inset well or form field.
+ */
+
+:root {
+  /* Tells the browser which way native UI (scrollbars, form controls,
+     spellcheck underlines) should render. Without it a dark page keeps
+     light scrollbars. */
+  color-scheme: dark;
+
+  /* ── Surfaces ───────────────────────────────────────────────────── */
+  --bg: #0a0a0f;
+  --surface-1: #101018;
+  --surface-2: #14141e;
+  --surface-3: #0d0d15;
+  --surface-btn: #1a1a28;
+  --surface-btn-hover: #22223a;
+  --surface-alt: #1a1a2a;
+  --surface-header: #111;
+
+  /* ── Borders ────────────────────────────────────────────────────── */
+  --border-subtle: #223;
+  --border: #334;
+  --border-strong: #446;
+  --border-accent: #468;
+
+  /* ── Text ───────────────────────────────────────────────────────── */
+  --text-bright: #cdd;
+  --text: #aab;
+  --text-muted: #889;
+  --text-dim: #667;
+  --text-faint: #557;
+
+  /* ── Accent (headings, links, selection) ────────────────────────── */
+  --accent: #8cf;
+  --accent-strong: #4af;
+  --accent-soft: #cde;
+
+  /* ── Status: plain text tones ───────────────────────────────────── */
+  --danger: #d66;
+  --danger-strong: #f66;
+  --danger-dim: #a55;
+  --warn: #d86;
+  --warn-dim: #a86;
+  --good: #6c9;
+  --good-dim: #6a8;
+
+  /* ── Status: saturated indicators (bars, badges, running/idle) ──── */
+  --status-good: #6adba5;
+  --status-warn: #eab764;
+  --status-bad: #e77767;
+
+  /* ── Status: tinted surfaces + borders ──────────────────────────── */
+  --danger-bg: #241417;
+  --danger-border: #632;
+  --warn-bg: #2e1a1e;
+  --good-bg: #0a2015;
+  --good-border: #365;
+  --accent-bg: #182030;
+  --accent-border: #48c;
+
+  /* ── Overlays + shadows ─────────────────────────────────────────── */
+  --overlay-backdrop: rgba(0, 0, 0, 0.7);
+  --overlay-panel: rgba(16, 16, 26, 0.9);
+  --shadow-strong: rgba(0, 0, 0, 0.6);
+  --shadow-soft: rgba(0, 0, 0, 0.45);
+  --hairline: rgba(255, 255, 255, 0.04);
+
+  /* ── Map chrome ─────────────────────────────────────────────────── */
+  /* Data fills (terrain, deposits) deliberately keep fixed hues across
+     themes — they encode meaning the way a chart's series colours do, and
+     re-mapping them per theme would make two screenshots incomparable.
+     Only the surrounding chrome below is themed. */
+  --map-bg-inner: #05050b;
+  --map-bg-outer: #000;
+  --map-star: #fda;
+  --map-star-edge: #ffd;
+  --map-orbit: #223;
+  --map-label: #aac;
+  --map-seam: #8cf;
+  --map-hex-stroke: #000;
+  --map-marker: #fff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --bg: #f3f5f9;
+    --surface-1: #ffffff;
+    --surface-2: #f6f8fc;
+    --surface-3: #ffffff;
+    --surface-btn: #eaedf4;
+    --surface-btn-hover: #dce1ec;
+    --surface-alt: #eef1f7;
+    --surface-header: #ffffff;
+
+    --border-subtle: #e3e7ef;
+    --border: #ccd2de;
+    --border-strong: #a7aec0;
+    --border-accent: #3d7ab8;
+
+    --text-bright: #0f1218;
+    --text: #333b4a;
+    --text-muted: #59616f;
+    --text-dim: #6d7484;
+    --text-faint: #8a91a0;
+
+    --accent: #16639f;
+    --accent-strong: #0d5490;
+    --accent-soft: #2f6b98;
+
+    --danger: #c0392b;
+    --danger-strong: #a52a1e;
+    --danger-dim: #9a4038;
+    --warn: #a85c14;
+    --warn-dim: #8a5420;
+    --good: #16724a;
+    --good-dim: #2c6b4e;
+
+    --status-good: #12784f;
+    --status-warn: #96610f;
+    --status-bad: #bf3a2b;
+
+    --danger-bg: #fbeceb;
+    --danger-border: #e0a79f;
+    --warn-bg: #fdf2e4;
+    --good-bg: #e8f5ee;
+    --good-border: #9dc9b2;
+    --accent-bg: #e7f0f9;
+    --accent-border: #6ea3d0;
+
+    --overlay-backdrop: rgba(20, 24, 34, 0.45);
+    --overlay-panel: rgba(255, 255, 255, 0.94);
+    --shadow-strong: rgba(20, 24, 34, 0.22);
+    --shadow-soft: rgba(20, 24, 34, 0.12);
+    --hairline: rgba(20, 24, 34, 0.05);
+
+    --map-bg-inner: #f0f4fa;
+    --map-bg-outer: #dde4ef;
+    --map-star: #e0a020;
+    --map-star-edge: #b87d10;
+    --map-orbit: #c8d0de;
+    --map-label: #414a5a;
+    --map-seam: #16639f;
+    --map-hex-stroke: #2a2f3a;
+    --map-marker: #12161f;
+  }
+}
+
+/*
+ * Explicit override from the in-app toggle. Repeating the full palette
+ * (rather than only the deltas) keeps each theme readable as one block and
+ * means neither can inherit a stray token from the other.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0a0a0f;
+  --surface-1: #101018;
+  --surface-2: #14141e;
+  --surface-3: #0d0d15;
+  --surface-btn: #1a1a28;
+  --surface-btn-hover: #22223a;
+  --surface-alt: #1a1a2a;
+  --surface-header: #111;
+
+  --border-subtle: #223;
+  --border: #334;
+  --border-strong: #446;
+  --border-accent: #468;
+
+  --text-bright: #cdd;
+  --text: #aab;
+  --text-muted: #889;
+  --text-dim: #667;
+  --text-faint: #557;
+
+  --accent: #8cf;
+  --accent-strong: #4af;
+  --accent-soft: #cde;
+
+  --danger: #d66;
+  --danger-strong: #f66;
+  --danger-dim: #a55;
+  --warn: #d86;
+  --warn-dim: #a86;
+  --good: #6c9;
+  --good-dim: #6a8;
+
+  --status-good: #6adba5;
+  --status-warn: #eab764;
+  --status-bad: #e77767;
+
+  --danger-bg: #241417;
+  --danger-border: #632;
+  --warn-bg: #2e1a1e;
+  --good-bg: #0a2015;
+  --good-border: #365;
+  --accent-bg: #182030;
+  --accent-border: #48c;
+
+  --overlay-backdrop: rgba(0, 0, 0, 0.7);
+  --overlay-panel: rgba(16, 16, 26, 0.9);
+  --shadow-strong: rgba(0, 0, 0, 0.6);
+  --shadow-soft: rgba(0, 0, 0, 0.45);
+  --hairline: rgba(255, 255, 255, 0.04);
+
+  --map-bg-inner: #05050b;
+  --map-bg-outer: #000;
+  --map-star: #fda;
+  --map-star-edge: #ffd;
+  --map-orbit: #223;
+  --map-label: #aac;
+  --map-seam: #8cf;
+  --map-hex-stroke: #000;
+  --map-marker: #fff;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f3f5f9;
+  --surface-1: #ffffff;
+  --surface-2: #f6f8fc;
+  --surface-3: #ffffff;
+  --surface-btn: #eaedf4;
+  --surface-btn-hover: #dce1ec;
+  --surface-alt: #eef1f7;
+  --surface-header: #ffffff;
+
+  --border-subtle: #e3e7ef;
+  --border: #ccd2de;
+  --border-strong: #a7aec0;
+  --border-accent: #3d7ab8;
+
+  --text-bright: #0f1218;
+  --text: #333b4a;
+  --text-muted: #59616f;
+  --text-dim: #6d7484;
+  --text-faint: #8a91a0;
+
+  --accent: #16639f;
+  --accent-strong: #0d5490;
+  --accent-soft: #2f6b98;
+
+  --danger: #c0392b;
+  --danger-strong: #a52a1e;
+  --danger-dim: #9a4038;
+  --warn: #a85c14;
+  --warn-dim: #8a5420;
+  --good: #16724a;
+  --good-dim: #2c6b4e;
+
+  --status-good: #12784f;
+  --status-warn: #96610f;
+  --status-bad: #bf3a2b;
+
+  --danger-bg: #fbeceb;
+  --danger-border: #e0a79f;
+  --warn-bg: #fdf2e4;
+  --good-bg: #e8f5ee;
+  --good-border: #9dc9b2;
+  --accent-bg: #e7f0f9;
+  --accent-border: #6ea3d0;
+
+  --overlay-backdrop: rgba(20, 24, 34, 0.45);
+  --overlay-panel: rgba(255, 255, 255, 0.94);
+  --shadow-strong: rgba(20, 24, 34, 0.22);
+  --shadow-soft: rgba(20, 24, 34, 0.12);
+  --hairline: rgba(20, 24, 34, 0.05);
+
+  --map-bg-inner: #f0f4fa;
+  --map-bg-outer: #dde4ef;
+  --map-star: #e0a020;
+  --map-star-edge: #b87d10;
+  --map-orbit: #c8d0de;
+  --map-label: #414a5a;
+  --map-seam: #16639f;
+  --map-hex-stroke: #2a2f3a;
+  --map-marker: #12161f;
+}

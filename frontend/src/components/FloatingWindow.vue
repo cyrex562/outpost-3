@@ -542,10 +542,10 @@ if (registry) {
   position: absolute;
   display: flex;
   flex-direction: column;
-  background: #0b0b12;
-  border: 1px solid #345;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 24px var(--shadow-soft);
   overflow: hidden;
   z-index: 5;
 }
@@ -555,40 +555,40 @@ if (registry) {
   align-items: center;
   gap: 0.75rem;
   padding: 0.35rem 0.6rem;
-  background: #14141f;
-  border-bottom: 1px solid #223;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-subtle);
   cursor: move;
   user-select: none;
 }
-.fw-title { color: #8cf; font-size: 0.82rem; font-weight: 600; }
-.fw-hint { color: #556; font-size: 0.68rem; font-style: italic; margin-left: auto; }
+.fw-title { color: var(--accent); font-size: 0.82rem; font-weight: 600; }
+.fw-hint { color: var(--text-faint); font-size: 0.68rem; font-style: italic; margin-left: auto; }
 
 /* A maximised window is flush with the host, so the rounded corners and drop
    shadow would just read as a rendering artefact against the host edge. */
 .floating-window.maximised { border-radius: 0; box-shadow: none; }
 
 .fw-max {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   cursor: pointer;
   font-size: 0.72rem;
   line-height: 1;
   padding: 0.15rem 0.35rem;
 }
-.fw-max:hover { background: #22223a; color: #8cf; }
+.fw-max:hover { background: var(--surface-btn-hover); color: var(--accent); }
 
 .fw-close {
   background: none;
   border: none;
-  color: #889;
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 1.05rem;
   line-height: 1;
   padding: 0 0.2rem;
 }
-.fw-close:hover { color: #f89; }
+.fw-close:hover { color: var(--status-bad); }
 
 .fw-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 
@@ -616,24 +616,24 @@ if (registry) {
   right: 0;
   bottom: 0;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+  background: linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 70%, var(--border-strong) 70%, var(--border-strong) 80%, transparent 80%);
 }
 .fw-resize-nw {
   left: 0;
   top: 0;
   cursor: nwse-resize;
-  background: linear-gradient(-45deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+  background: linear-gradient(-45deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 70%, var(--border-strong) 70%, var(--border-strong) 80%, transparent 80%);
 }
 .fw-resize-ne {
   right: 0;
   top: 0;
   cursor: nesw-resize;
-  background: linear-gradient(45deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+  background: linear-gradient(45deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 70%, var(--border-strong) 70%, var(--border-strong) 80%, transparent 80%);
 }
 .fw-resize-sw {
   left: 0;
   bottom: 0;
   cursor: nesw-resize;
-  background: linear-gradient(-135deg, transparent 50%, #446 50%, #446 60%, transparent 60%, transparent 70%, #446 70%, #446 80%, transparent 80%);
+  background: linear-gradient(-135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 70%, var(--border-strong) 70%, var(--border-strong) 80%, transparent 80%);
 }
 </style>

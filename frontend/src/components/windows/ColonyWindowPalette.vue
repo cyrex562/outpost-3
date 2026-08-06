@@ -42,17 +42,17 @@ const emit = defineEmits<{
 }
 
 .palette-chip {
-  background: #14141e;
-  border: 1px solid #334;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #778;
+  color: var(--text-muted);
   padding: 0.3rem 0.6rem;
   font-family: monospace;
   font-size: 0.72rem;
   cursor: pointer;
   white-space: nowrap;
 }
-.palette-chip:hover { background: #1a1a2a; border-color: #558; color: #aab; }
-.palette-chip.open { border-color: #468; background: #182030; color: #8cf; }
-.palette-chip.open:hover { background: #1c2c40; }
+.palette-chip:hover { background: var(--surface-alt); border-color: var(--text-faint); color: var(--text); }
+.palette-chip.open { border-color: var(--border-accent); background: var(--accent-bg); color: var(--accent); }
+.palette-chip.open:hover { background: var(--accent-bg); }
 </style>

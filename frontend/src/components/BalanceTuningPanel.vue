@@ -141,8 +141,8 @@ onMounted(load)
 
 <style scoped>
 .panel {
-  background: #10151c;
-  border: 1px solid #223;
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0.75rem;
 }
@@ -153,15 +153,15 @@ onMounted(load)
   margin-bottom: 0.5rem;
 }
 .panel-title {
-  color: #8cf;
+  color: var(--accent);
   margin: 0;
 }
 .hint {
-  color: #789;
+  color: var(--text-muted);
   font-size: 0.8rem;
 }
 .err {
-  color: #f88;
+  color: var(--danger-strong);
   font-size: 0.85rem;
 }
 .dials {
@@ -178,17 +178,17 @@ onMounted(load)
   align-items: baseline;
 }
 .dial-label {
-  color: #cde;
+  color: var(--accent-soft);
   font-size: 0.9rem;
 }
 .dial-value {
-  color: #789;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   font-size: 0.85rem;
 }
 /* A dial that is no longer at its default should be obvious at a glance. */
 .dial-value.modified {
-  color: #fc6;
+  color: var(--warn);
   font-weight: 600;
 }
 .dial-controls {
@@ -202,16 +202,16 @@ onMounted(load)
 }
 .number {
   width: 5rem;
-  background: #0a0e14;
-  color: #cde;
-  border: 1px solid #223;
+  background: var(--bg);
+  color: var(--accent-soft);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0.15rem 0.3rem;
 }
 .btn-reset {
-  background: #1a2230;
-  color: #9ab;
-  border: 1px solid #223;
+  background: var(--accent-bg);
+  color: var(--text);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
   cursor: pointer;

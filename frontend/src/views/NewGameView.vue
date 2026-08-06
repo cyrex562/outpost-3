@@ -214,8 +214,8 @@ function randomiseSystemSeed() {
 }
 
 .new-game-panel {
-  background: #141420;
-  border: 1px solid #334;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2rem;
   width: 100%;
@@ -227,7 +227,7 @@ function randomiseSystemSeed() {
 
 .panel-title {
   font-size: 1.4rem;
-  color: #8cf;
+  color: var(--accent);
   margin-bottom: 0.25rem;
 }
 
@@ -241,12 +241,12 @@ function randomiseSystemSeed() {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #889;
+  color: var(--text-muted);
 }
 
 .field-hint {
   font-size: 0.72rem;
-  color: #667;
+  color: var(--text-dim);
   margin: 0;
 }
 
@@ -259,16 +259,16 @@ function randomiseSystemSeed() {
 
 .slider-label {
   font-size: 0.8rem;
-  color: #aab;
+  color: var(--text);
 }
 
 .slider {
   width: 100%;
-  accent-color: #4af;
+  accent-color: var(--accent-strong);
 }
 
 .slider-value {
-  color: #8cf;
+  color: var(--accent);
   font-family: monospace;
   font-size: 0.85rem;
   text-align: right;
@@ -284,23 +284,23 @@ function randomiseSystemSeed() {
   flex-direction: column;
   align-items: flex-start;
   padding: 0.6rem 0.8rem;
-  background: #1a1a28;
-  border: 1px solid #334;
+  background: var(--surface-btn);
+  border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
-  color: #cdd;
+  color: var(--text-bright);
   text-align: left;
   transition: border-color 0.1s, background 0.1s;
 }
 
 .difficulty-btn:hover {
-  background: #1e1e30;
-  border-color: #556;
+  background: var(--surface-btn);
+  border-color: var(--text-faint);
 }
 
 .difficulty-btn.selected {
-  background: #1a2a3a;
-  border-color: #4af;
+  background: var(--accent-bg);
+  border-color: var(--accent-strong);
 }
 
 .difficulty-name {
@@ -310,7 +310,7 @@ function randomiseSystemSeed() {
 
 .difficulty-desc {
   font-size: 0.75rem;
-  color: #889;
+  color: var(--text-muted);
   margin-top: 0.15rem;
 }
 
@@ -321,33 +321,33 @@ function randomiseSystemSeed() {
 
 .seed-input {
   flex: 1;
-  background: #1a1a28;
-  border: 1px solid #334;
+  background: var(--surface-btn);
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0.4rem 0.6rem;
-  color: #cdd;
+  color: var(--text-bright);
   font-family: monospace;
   font-size: 0.9rem;
 }
 
 .seed-input:focus {
   outline: none;
-  border-color: #4af;
+  border-color: var(--accent-strong);
 }
 
 .btn-primary {
   padding: 0.6rem 1.4rem;
-  background: #1a4a7a;
-  border: 1px solid #4af;
+  background: var(--accent-border);
+  border: 1px solid var(--accent-strong);
   border-radius: 3px;
-  color: #cef;
+  color: var(--text-bright);
   cursor: pointer;
   font-size: 0.95rem;
   transition: background 0.1s;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #1e5a8a;
+  background: var(--accent-border);
 }
 
 .btn-primary:disabled {
@@ -357,16 +357,16 @@ function randomiseSystemSeed() {
 
 .btn-secondary {
   padding: 0.4rem 0.8rem;
-  background: #1a1a28;
-  border: 1px solid #334;
+  background: var(--surface-btn);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   cursor: pointer;
   font-size: 0.85rem;
 }
 
 .btn-secondary:hover {
-  background: #1e1e30;
+  background: var(--surface-btn);
 }
 
 .actions {
@@ -375,7 +375,7 @@ function randomiseSystemSeed() {
 }
 
 .error-msg {
-  color: #f66;
+  color: var(--danger-strong);
   font-size: 0.85rem;
 }
 </style>

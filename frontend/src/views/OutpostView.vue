@@ -109,30 +109,30 @@ function openBuildingDetails(buildingType: string): void {
 .outpost-view { display: flex; flex-direction: column; gap: 0.75rem; }
 
 .outpost-header { display: flex; align-items: center; gap: 0.5rem; }
-.outpost-header h2 { color: #8cf; margin: 0; }
-.body-tag { color: #779; font-size: 0.78rem; }
+.outpost-header h2 { color: var(--accent); margin: 0; }
+.body-tag { color: var(--text-muted); font-size: 0.78rem; }
 
 .stats { display: grid; grid-template-columns: 100px 1fr; gap: 0.3rem 0.6rem; font-size: 0.8rem; }
-.stats dt { color: #668; }
-.stats dd { color: #aab; margin: 0; }
+.stats dt { color: var(--text-dim); }
+.stats dd { color: var(--text); margin: 0; }
 
 .section { margin-top: 0.25rem; }
-.section h3 { color: #789; font-size: 0.85rem; margin: 0 0 0.4rem; }
+.section h3 { color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.4rem; }
 
 .building-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .building-row {
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.4rem 0.6rem;
   font-size: 0.85rem;
-  color: #aab;
+  color: var(--text);
   cursor: pointer;
 }
-.building-row:hover { background: #16162a; border-color: #446; }
+.building-row:hover { background: var(--surface-2); border-color: var(--border-strong); }
 
-.pool-chip { display: inline-block; background: #14141e; border: 1px solid #334; border-radius: 3px; padding: 0.1rem 0.4rem; font-size: 0.72rem; margin: 0.1rem 0.25rem 0.1rem 0; color: #aab; }
+.pool-chip { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; padding: 0.1rem 0.4rem; font-size: 0.72rem; margin: 0.1rem 0.25rem 0.1rem 0; color: var(--text); }
 
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
-.err { color: #d66; font-size: 0.8rem; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
 </style>

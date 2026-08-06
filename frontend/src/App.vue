@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameSocket } from '@/composables/useGameSocket'
+import { useTheme } from '@/composables/useTheme'
 import { useWorldStore } from '@/stores/worldStore'
 import {
   exitApp as tauriExit,
@@ -28,6 +29,26 @@ const store = useWorldStore()
 const gameStore = useGameStore()
 
 const inGame = computed(() => route.path !== '/' && route.path !== '/menu')
+
+// ── Theme ────────────────────────────────────────────────────────────────
+// Three-state: follow the OS, or force light/dark. The icon shows the mode
+// itself rather than what clicking does, so "auto" stays distinguishable
+// from a manual pick that happens to match the OS right now.
+const { mode: themeMode, resolved: resolvedTheme, cycleTheme } = useTheme()
+
+// Plain words, not sun/moon glyphs: the UI is monospace throughout, and the
+// astronomical symbols fall back to a substitute glyph in that font stack.
+const themeIcon = computed(() => {
+  if (themeMode.value === 'light') return 'light'
+  if (themeMode.value === 'dark') return 'dark'
+  return 'auto'
+})
+
+const themeTitle = computed(() => {
+  if (themeMode.value === 'light') return 'Theme: light. Click for dark.'
+  if (themeMode.value === 'dark') return 'Theme: dark. Click to follow your system setting.'
+  return `Theme: follows your system (currently ${resolvedTheme.value}). Click for light.`
+})
 const showMenu = ref(false)
 const showDifficulty = ref(false)
 const showBalance = ref(false)
@@ -172,6 +193,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <RouterLink to="/buildings" class="nav-link">Buildings</RouterLink>
         <RouterLink to="/trade" class="nav-link">Trade</RouterLink>
       </nav>
+      <button
+        class="theme-btn"
+        data-testid="theme-toggle"
+        :title="themeTitle"
+        :aria-label="themeTitle"
+        @click="cycleTheme"
+      >
+        {{ themeIcon }}
+      </button>
       <span
         v-if="!isTauri"
         class="connection-status"
@@ -260,7 +290,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: monospace; background: #0a0a0f; color: #cdd; }
+body { font-family: monospace; background: var(--bg); color: var(--text-bright); }
 
 /*
  * App shell (UI-rework PR2/PR3): a fixed-height flex column that fills the
@@ -284,56 +314,73 @@ body { font-family: monospace; background: #0a0a0f; color: #cdd; }
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  background: #111;
-  border-bottom: 1px solid #333;
+  background: var(--surface-header);
+  border-bottom: 1px solid var(--border);
 }
 
-.app-header h1 { font-size: 1.1rem; color: #8cf; }
+.app-header h1 { font-size: 1.1rem; color: var(--accent); }
+
+/* Pushed to the right edge, ahead of the connection pill. */
+.theme-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.3rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: monospace;
+}
+.theme-btn:hover { background: var(--surface-alt); }
 
 .menu-btn {
   background: transparent;
-  border: 1px solid #446;
-  color: #8cf;
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
   font-size: 1rem;
   padding: 0.2rem 0.55rem;
   border-radius: 3px;
   cursor: pointer;
   font-family: monospace;
 }
-.menu-btn:hover { background: #1a1a2a; }
+.menu-btn:hover { background: var(--surface-alt); }
 
 .header-nav { display: flex; gap: 0.5rem; }
 .nav-link {
-  color: #778;
+  color: var(--text-muted);
   text-decoration: none;
   font-size: 0.8rem;
   padding: 0.2rem 0.55rem;
   border-radius: 3px;
   border: 1px solid transparent;
 }
-.nav-link:hover { color: #aac; background: #1a1a2a; }
-.nav-link.router-link-active { color: #8cf; border-color: #446; background: #1a1a2a; }
+.nav-link:hover { color: var(--text); background: var(--surface-alt); }
+.nav-link.router-link-active { color: var(--accent); border-color: var(--border-strong); background: var(--surface-alt); }
 
-.connection-status { margin-left: auto; }
-.connection-status[data-status="connected"] { color: #4c4; }
-.connection-status[data-status="connecting"] { color: #cc4; }
-.connection-status[data-status="disconnected"] { color: #888; }
-.connection-status[data-status="error"] { color: #c44; }
+/* No `margin-left: auto` here — `.theme-btn` sits immediately before it and
+   already pushes the pair to the right edge. Two auto margins would split
+   the free space between them instead of grouping them. */
+.connection-status[data-status="connected"] { color: var(--good); }
+.connection-status[data-status="connecting"] { color: var(--good-dim); }
+.connection-status[data-status="disconnected"] { color: var(--text-muted); }
+.connection-status[data-status="error"] { color: var(--danger-dim); }
 
 .app-main { flex: 1; min-height: 0; overflow: auto; padding: 1rem; }
 
 .menu-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--overlay-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 200;
 }
 .menu-dialog {
-  background: #14141e;
-  border: 1px solid #446;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 1.5rem;
   min-width: 320px;
@@ -345,35 +392,35 @@ body { font-family: monospace; background: #0a0a0f; color: #cdd; }
   gap: 1rem;
 }
 .difficulty-slot { margin-top: 0.4rem; }
-.menu-dialog h3 { color: #8cf; }
-.menu-dialog h4 { color: #668; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.menu-dialog h3 { color: var(--accent); }
+.menu-dialog h4 { color: var(--text-dim); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .menu-section { display: flex; flex-direction: column; gap: 0.4rem; }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .menu-input {
   flex: 1;
   min-width: 160px;
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.35rem 0.5rem;
   font-family: monospace;
   font-size: 0.85rem;
 }
 .menu-action {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.4rem 0.75rem;
   font-family: monospace;
   font-size: 0.82rem;
   cursor: pointer;
 }
-.menu-action:hover { background: #22223a; }
+.menu-action:hover { background: var(--surface-btn-hover); }
 .menu-action.wide { width: 100%; text-align: left; }
-.menu-action.danger { border-color: #a55; color: #c88; }
+.menu-action.danger { border-color: var(--danger-dim); color: var(--danger-dim); }
 .save-list { list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
-.hint { font-size: 0.75rem; color: #667; font-style: italic; }
-.menu-msg { color: #ac6; font-size: 0.8rem; }
+.hint { font-size: 0.75rem; color: var(--text-dim); font-style: italic; }
+.menu-msg { color: var(--good-dim); font-size: 0.8rem; }
 </style>

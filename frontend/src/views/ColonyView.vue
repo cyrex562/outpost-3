@@ -607,7 +607,7 @@ watch(
    dashboard fills the screen without a fixed viewport-height guess. */
 .colony-view { width: 100%; height: 100%; display: flex; flex-direction: column; position: relative; }
 
-.empty-state { color: #666; font-style: italic; margin: 1rem 0; }
+.empty-state { color: var(--text-muted); font-style: italic; margin: 1rem 0; }
 
 .colony-header {
   display: flex;
@@ -619,25 +619,25 @@ watch(
 }
 
 .colony-titlebar { display: flex; align-items: center; gap: 0.75rem; }
-.colony-title { color: #8cf; font-size: 1.05rem; margin: 0; }
+.colony-title { color: var(--accent); font-size: 1.05rem; margin: 0; }
 .btn-map {
-  background: #151520;
-  border: 1px solid #446;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #8cf;
+  color: var(--accent);
   padding: 0.3rem 0.7rem;
   font-family: monospace;
   font-size: 0.8rem;
   cursor: pointer;
   white-space: nowrap;
 }
-.btn-map:hover { background: #1a1a2a; border-color: #558; }
+.btn-map:hover { background: var(--surface-alt); border-color: var(--text-faint); }
 
 .btn-reset-layout {
-  background: #151520;
-  border: 1px solid #446;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #8cf;
+  color: var(--accent);
   padding: 0.3rem 0.7rem;
   font-family: monospace;
   font-size: 0.75rem;
@@ -645,7 +645,7 @@ watch(
   white-space: nowrap;
   align-self: flex-start;
 }
-.btn-reset-layout:hover { background: #1a1a2a; border-color: #558; }
+.btn-reset-layout:hover { background: var(--surface-alt); border-color: var(--text-faint); }
 
 /* `FloatingWindow`'s shared host (see the template comment above it): a
    dedicated `position: relative` container for `.base-view` and every
@@ -658,10 +658,10 @@ watch(
   min-height: 320px;
   position: relative;
   isolation: isolate;
-  border: 1px solid #223;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   overflow: hidden;
-  background: #0d0d15;
+  background: var(--surface-3);
 }
 
 /* The backdrop every floating window sits above — colony details itself,
@@ -677,9 +677,9 @@ watch(
   justify-content: center;
   gap: 0.5rem;
   text-align: center;
-  color: #334;
+  color: var(--border);
   user-select: none;
 }
-.base-view-name { font-size: 2.4rem; font-weight: bold; letter-spacing: 0.04em; color: #2a3040; }
-.base-view-meta { font-size: 0.9rem; color: #2a3040; }
+.base-view-name { font-size: 2.4rem; font-weight: bold; letter-spacing: 0.04em; color: var(--surface-btn-hover); }
+.base-view-meta { font-size: 0.9rem; color: var(--surface-btn-hover); }
 </style>

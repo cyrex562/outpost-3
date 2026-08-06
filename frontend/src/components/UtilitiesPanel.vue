@@ -70,31 +70,31 @@ function formatAmount(amount: number): string {
 
 <style scoped>
 .panel { padding: 0.75rem; height: 100%; overflow-y: auto; box-sizing: border-box; }
-.panel-title { color: #8cf; font-size: 0.9rem; margin: 0 0 0.15rem; }
-.panel-note { color: #557; font-size: 0.68rem; font-style: italic; margin: 0 0 0.6rem; }
-.hint { font-size: 0.75rem; color: #446; font-style: italic; }
+.panel-title { color: var(--accent); font-size: 0.9rem; margin: 0 0 0.15rem; }
+.panel-note { color: var(--text-faint); font-size: 0.68rem; font-style: italic; margin: 0 0 0.6rem; }
+.hint { font-size: 0.75rem; color: var(--border-strong); font-style: italic; }
 
 .util-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; }
 .util-item {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
-  background: #13131e;
-  border: 1px solid #223;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   border-radius: 3px;
   padding: 0.3rem 0.5rem;
   font-size: 0.8rem;
-  color: #aab;
+  color: var(--text);
 }
 .util-name { flex: 1 0 auto; }
-.util-amount { font-family: monospace; color: #cdd; font-size: 0.9rem; }
-.util-unit { color: #668; font-size: 0.68rem; margin-left: 0.15rem; }
+.util-amount { font-family: monospace; color: var(--text-bright); font-size: 0.9rem; }
+.util-unit { color: var(--text-dim); font-size: 0.68rem; margin-left: 0.15rem; }
 .util-kind {
-  color: #668;
+  color: var(--text-dim);
   font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border: 1px solid #334;
+  border: 1px solid var(--border);
   border-radius: 2px;
   padding: 0.02rem 0.28rem;
 }

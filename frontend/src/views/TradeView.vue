@@ -151,13 +151,13 @@ async function removeRoute(route: TradeRoute): Promise<void> {
 <style scoped>
 .trade-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; padding: 1rem; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; margin: 0; }
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
-.err { color: #d66; font-size: 0.8rem; }
+.toolbar h2 { color: var(--accent); margin: 0; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
 
 .panel {
-  background: #101018;
-  border: 1px solid #334;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem;
   display: flex;
@@ -165,13 +165,13 @@ async function removeRoute(route: TradeRoute): Promise<void> {
   gap: 0.6rem;
 }
 .endpoints { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.arrow { color: #668; }
+.arrow { color: var(--text-dim); }
 .colony-select,
 .cap-input {
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.3rem 0.4rem;
   font-family: monospace;
   font-size: 0.8rem;
@@ -179,21 +179,21 @@ async function removeRoute(route: TradeRoute): Promise<void> {
 .cap-input { width: 5rem; }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.35rem 0.7rem;
   font-family: monospace;
   font-size: 0.8rem;
   cursor: pointer;
 }
-.btn:hover { background: #22223a; }
-.btn.primary { border-color: #468; color: #8cf; }
-.btn.danger { border-color: #632; color: #d86; }
+.btn:hover { background: var(--surface-btn-hover); }
+.btn.primary { border-color: var(--border-accent); color: var(--accent); }
+.btn.danger { border-color: var(--danger-border); color: var(--warn); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .route-list { display: flex; flex-direction: column; gap: 0.35rem; }
-.route-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; color: #aab; }
+.route-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.8rem; color: var(--text); }
 .route-desc { font-family: monospace; }
 </style>

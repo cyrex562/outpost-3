@@ -40,9 +40,9 @@ const worldStore = useWorldStore()
   max-width: min(24rem, calc(100vw - 2rem));
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
-  border: 1px solid #556;
-  background: #15151f;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+  border: 1px solid var(--text-faint);
+  background: var(--surface-2);
+  box-shadow: 0 4px 16px var(--shadow-soft);
   cursor: pointer;
   font-size: 0.8rem;
 }
@@ -50,15 +50,15 @@ const worldStore = useWorldStore()
   text-transform: uppercase;
   font-size: 0.65rem;
   letter-spacing: 0.05em;
-  color: #778;
+  color: var(--text-muted);
 }
-.alert-toast-message { color: #cde; overflow-wrap: anywhere; }
+.alert-toast-message { color: var(--accent-soft); overflow-wrap: anywhere; }
 
 /* Matches AlertsPanel's tier color language. */
-.alert-toast.tier-blocking { border-color: #f44; }
-.alert-toast.tier-blocking .alert-toast-tier { color: #f66; }
-.alert-toast.tier-urgent   { border-color: #c44; }
-.alert-toast.tier-urgent   .alert-toast-tier { color: #c66; }
-.alert-toast.tier-notable  { border-color: #c84; }
-.alert-toast.tier-notable  .alert-toast-tier { color: #ca8; }
+.alert-toast.tier-blocking { border-color: var(--danger-strong); }
+.alert-toast.tier-blocking .alert-toast-tier { color: var(--danger-strong); }
+.alert-toast.tier-urgent   { border-color: var(--danger-dim); }
+.alert-toast.tier-urgent   .alert-toast-tier { color: var(--danger); }
+.alert-toast.tier-notable  { border-color: var(--warn); }
+.alert-toast.tier-notable  .alert-toast-tier { color: var(--warn-dim); }
 </style>

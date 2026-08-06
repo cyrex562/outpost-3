@@ -100,9 +100,9 @@ function onSelect(hex: PlanetHex): void {
 <style scoped>
 .surface-view { display: flex; flex-direction: column; gap: 0.75rem; height: 100%; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; margin: 0; }
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
-.err { color: #d66; font-size: 0.8rem; }
+.toolbar h2 { color: var(--accent); margin: 0; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
 /* Fill the shell rather than reserving a fixed 70vh (issue #320): `min-height:
    0` lets the flex item shrink to the space `.app-main` actually gives it, so
    the map grows on a large display and stops pushing the app into a scrollbar
@@ -110,16 +110,16 @@ function onSelect(hex: PlanetHex): void {
 .map-host { flex: 1; min-height: 0; }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.35rem 0.7rem;
   font-family: monospace;
   font-size: 0.8rem;
   cursor: pointer;
 }
-.btn:hover { background: #22223a; }
+.btn:hover { background: var(--surface-btn-hover); }
 /* Push the back button to the right edge of the toolbar. */
 .toolbar > .btn { margin-left: auto; }
 </style>

@@ -225,11 +225,11 @@ onUnmounted(stopTimer)
   align-items: center;
   gap: 1rem;
   padding: 0.4rem 1rem;
-  background: #111118;
-  border-top: 1px solid #334;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
 }
 
-.turn-indicator { color: #8a8; font-size: 0.85rem; white-space: nowrap; }
+.turn-indicator { color: var(--good-dim); font-size: 0.85rem; white-space: nowrap; }
 
 .toast {
   flex: 1;
@@ -237,10 +237,10 @@ onUnmounted(stopTimer)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: #1a2020;
-  border: 1px solid #2a5a3a;
+  background: var(--good-bg);
+  border: 1px solid var(--good-bg);
   border-radius: 3px;
-  color: #6c9;
+  color: var(--good);
   padding: 0.3rem 0.6rem;
   font-size: 0.78rem;
   cursor: pointer;
@@ -255,10 +255,10 @@ onUnmounted(stopTimer)
 
 .btn-time,
 .btn-speed {
-  background: #14202e;
-  border: 1px solid #468;
+  background: var(--accent-bg);
+  border: 1px solid var(--border-accent);
   border-radius: 3px;
-  color: #8cf;
+  color: var(--accent);
   padding: 0.35rem 0.6rem;
   font-family: monospace;
   font-size: 0.8rem;
@@ -266,19 +266,19 @@ onUnmounted(stopTimer)
   white-space: nowrap;
 }
 .btn-time:hover:not(:disabled),
-.btn-speed:hover:not(:disabled) { background: #1b2c40; }
+.btn-speed:hover:not(:disabled) { background: var(--accent-bg); }
 .btn-time:disabled,
 .btn-speed:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-time.active,
-.btn-speed.active { background: #24405c; color: #cef; border-color: #6ac; }
+.btn-speed.active { background: var(--accent-border); color: var(--text-bright); border-color: var(--accent); }
 
 .speed-group { display: flex; gap: 2px; }
 
-.threshold { color: #789; font-size: 0.72rem; display: flex; align-items: center; gap: 0.25rem; }
+.threshold { color: var(--text-muted); font-size: 0.72rem; display: flex; align-items: center; gap: 0.25rem; }
 .threshold select {
-  background: #14202e;
-  border: 1px solid #468;
-  color: #8cf;
+  background: var(--accent-bg);
+  border: 1px solid var(--border-accent);
+  color: var(--accent);
   font-family: monospace;
   font-size: 0.72rem;
   border-radius: 3px;
@@ -292,30 +292,30 @@ onUnmounted(stopTimer)
   width: min(30rem, calc(100vw - 2rem));
   max-height: 50vh;
   overflow-y: auto;
-  background: #15151f;
-  border: 1px solid #556;
+  background: var(--surface-2);
+  border: 1px solid var(--text-faint);
   border-radius: 4px;
   padding: 0.6rem 0.8rem;
   font-size: 0.78rem;
-  color: #bbc;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+  color: var(--text-bright);
+  box-shadow: 0 4px 16px var(--shadow-soft);
 }
-.digest-head { display: flex; align-items: center; justify-content: space-between; color: #dde; }
+.digest-head { display: flex; align-items: center; justify-content: space-between; color: var(--text-bright); }
 .btn-close {
   background: none;
   border: none;
-  color: #889;
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 0.9rem;
 }
-.digest-halt { color: #fc8; margin: 0.4rem 0; }
+.digest-halt { color: var(--warn); margin: 0.4rem 0; }
 .digest-items { margin: 0.3rem 0 0; padding-left: 1rem; }
 .digest-items li { margin: 0.15rem 0; }
-.digest-empty { color: #778; font-style: italic; margin: 0.4rem 0 0; }
+.digest-empty { color: var(--text-muted); font-style: italic; margin: 0.4rem 0 0; }
 .tier {
   display: inline-block;
   min-width: 4.5rem;
-  color: #7a9;
+  color: var(--good);
   text-transform: uppercase;
   font-size: 0.68rem;
 }

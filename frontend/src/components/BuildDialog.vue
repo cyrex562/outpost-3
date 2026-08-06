@@ -109,7 +109,7 @@ function queue(b: BuildingOption): void {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--overlay-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -117,8 +117,8 @@ function queue(b: BuildingOption): void {
   padding: 1rem;
 }
 .dialog {
-  background: #12121c;
-  border: 1px solid #446;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 1rem 1.25rem;
   width: min(920px, 100%);
@@ -129,70 +129,70 @@ function queue(b: BuildingOption): void {
   gap: 0.75rem;
 }
 .dialog-head { display: flex; align-items: baseline; gap: 0.75rem; }
-.dialog-head h3 { color: #8cf; margin: 0; }
-.slots { color: #778; font-size: 0.78rem; }
+.dialog-head h3 { color: var(--accent); margin: 0; }
+.slots { color: var(--text-muted); font-size: 0.78rem; }
 .btn-close {
   margin-left: auto;
   background: transparent;
-  border: 1px solid #446;
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   cursor: pointer;
   padding: 0.15rem 0.45rem;
   font-family: monospace;
 }
-.btn-close:hover { background: #22223a; }
-.hint { font-size: 0.8rem; color: #667; font-style: italic; }
+.btn-close:hover { background: var(--surface-btn-hover); }
+.hint { font-size: 0.8rem; color: var(--text-dim); font-style: italic; }
 
 .build-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.5rem; }
 .build-card {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  background: #14141e;
-  border: 1px solid #334;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.55rem 0.6rem;
-  color: #aab;
+  color: var(--text);
 }
 .build-card.is-disabled { opacity: 0.55; }
 .build-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
-.build-card-name { color: #8cf; font-size: 0.86rem; font-weight: 600; }
-.build-card-cat { color: #557; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.build-card-desc { color: #889; font-size: 0.76rem; }
-.build-card-stats { color: #668; font-size: 0.72rem; }
+.build-card-name { color: var(--accent); font-size: 0.86rem; font-weight: 600; }
+.build-card-cat { color: var(--text-faint); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.build-card-desc { color: var(--text-muted); font-size: 0.76rem; }
+.build-card-stats { color: var(--text-dim); font-size: 0.72rem; }
 .build-card-cost { display: flex; gap: 0.25rem; flex-wrap: wrap; }
 .cost-chip {
-  background: #1a1a2a;
-  border: 1px solid #223;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-subtle);
   border-radius: 2px;
   padding: 0.05rem 0.3rem;
-  color: #8a8;
+  color: var(--good-dim);
   font-size: 0.7rem;
 }
 .build-card-foot { display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
-.build-card-reason { color: #a86; font-size: 0.7rem; font-style: italic; margin-right: auto; }
-.qty-label { color: #668; font-size: 0.78rem; display: flex; align-items: center; gap: 0.2rem; }
+.build-card-reason { color: var(--warn-dim); font-size: 0.7rem; font-style: italic; margin-right: auto; }
+.qty-label { color: var(--text-dim); font-size: 0.78rem; display: flex; align-items: center; gap: 0.2rem; }
 .qty-input {
   width: 3.2rem;
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.2rem 0.35rem;
   font-family: monospace;
   font-size: 0.78rem;
 }
 .btn-queue {
-  background: #1a2030;
-  border: 1px solid #468;
+  background: var(--accent-bg);
+  border: 1px solid var(--border-accent);
   border-radius: 3px;
-  color: #8cf;
+  color: var(--accent);
   padding: 0.3rem 0.7rem;
   font-family: monospace;
   font-size: 0.78rem;
   cursor: pointer;
 }
 .btn-queue:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-queue:hover:not(:disabled) { background: #22293a; }
+.btn-queue:hover:not(:disabled) { background: var(--accent-bg); }
 </style>

@@ -114,37 +114,37 @@ function openOutpost(outpostId: string): void {
 <style scoped>
 .installations-view { display: flex; flex-direction: column; gap: 0.75rem; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; margin: 0; }
-.count { color: #779; font-size: 0.8rem; }
+.toolbar h2 { color: var(--accent); margin: 0; }
+.count { color: var(--text-muted); font-size: 0.8rem; }
 
 .btn {
-  background: #1a1a28;
-  border: 1px solid #446;
+  background: var(--surface-btn);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  color: #aac;
+  color: var(--text);
   padding: 0.4rem 0.75rem;
   font-family: monospace;
   font-size: 0.82rem;
   cursor: pointer;
 }
-.btn:hover { background: #22223a; }
+.btn:hover { background: var(--surface-btn-hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn.danger { border-color: #632; color: #d86; }
+.btn.danger { border-color: var(--danger-border); color: var(--warn); }
 
 .installation-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
-.installation-card { background: #101018; border: 1px solid #334; border-radius: 6px; padding: 0.75rem 1rem; }
+.installation-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; }
 .installation-header { display: flex; align-items: center; gap: 0.5rem; }
 .installation-header--link { cursor: pointer; }
-.installation-header--link:hover h3 { color: #adf; }
-.installation-header h3 { color: #8cf; margin: 0; }
-.body-tag { color: #779; font-size: 0.78rem; }
+.installation-header--link:hover h3 { color: var(--accent); }
+.installation-header h3 { color: var(--accent); margin: 0; }
+.body-tag { color: var(--text-muted); font-size: 0.78rem; }
 
 .stats { display: grid; grid-template-columns: 100px 1fr; gap: 0.3rem 0.6rem; font-size: 0.8rem; margin: 0.5rem 0; }
-.stats dt { color: #668; }
-.stats dd { color: #aab; margin: 0; }
+.stats dt { color: var(--text-dim); }
+.stats dd { color: var(--text); margin: 0; }
 
 .card-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
-.err { color: #d66; font-size: 0.8rem; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
 </style>

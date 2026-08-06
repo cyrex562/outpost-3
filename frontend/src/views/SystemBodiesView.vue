@@ -78,21 +78,21 @@ function viewOnMap(body: SystemBody): void {
 <style scoped>
 .bodies-view { display: flex; flex-direction: column; gap: 0.75rem; }
 .toolbar { display: flex; align-items: center; gap: 1rem; }
-.toolbar h2 { color: #8cf; margin: 0; }
-.count { color: #779; font-size: 0.8rem; }
+.toolbar h2 { color: var(--accent); margin: 0; }
+.count { color: var(--text-muted); font-size: 0.8rem; }
 
 .bodies-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .bodies-table th {
   text-align: left;
-  color: #668;
+  color: var(--text-dim);
   font-weight: normal;
   padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #334;
+  border-bottom: 1px solid var(--border);
 }
-.bodies-table td { padding: 0.4rem 0.6rem; color: #aab; border-bottom: 1px solid #223; }
+.bodies-table td { padding: 0.4rem 0.6rem; color: var(--text); border-bottom: 1px solid var(--border-subtle); }
 .body-row { cursor: pointer; }
-.body-row:hover { background: #16162a; }
+.body-row:hover { background: var(--surface-2); }
 
-.hint { color: #557; font-style: italic; font-size: 0.85rem; }
-.err { color: #d66; font-size: 0.8rem; }
+.hint { color: var(--text-faint); font-style: italic; font-size: 0.85rem; }
+.err { color: var(--danger); font-size: 0.8rem; }
 </style>

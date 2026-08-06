@@ -338,7 +338,7 @@ function onBackdropClick(): void {
 .hud-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--shadow-strong);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -346,15 +346,15 @@ function onBackdropClick(): void {
 }
 
 .hud-panel {
-  background: #0d0d15;
-  border: 1px solid #334;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1rem 1.25rem;
   width: min(480px, 90vw);
   max-height: 80vh;
   overflow-y: auto;
   font-family: monospace;
-  color: #aab;
+  color: var(--text);
 }
 
 .facility-page { padding: 1rem; }
@@ -368,38 +368,38 @@ function onBackdropClick(): void {
    Page mode: (back-button, title) — sit together at the start instead. */
 .hud-header { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
 .facility-page .hud-header { justify-content: flex-start; }
-.hud-title { color: #8cf; font-size: 1rem; margin: 0; }
+.hud-title { color: var(--accent); font-size: 1rem; margin: 0; }
 .btn-back {
   background: none;
-  border: 1px solid #334;
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #aab;
+  color: var(--text);
   font-size: 0.78rem;
   padding: 0.2rem 0.5rem;
   cursor: pointer;
   margin-right: 0.6rem;
 }
-.btn-back:hover { color: #cdd; border-color: #446; }
+.btn-back:hover { color: var(--text-bright); border-color: var(--border-strong); }
 .btn-close {
   background: none;
   border: none;
-  color: #889;
+  color: var(--text-muted);
   font-size: 1.2rem;
   cursor: pointer;
   line-height: 1;
 }
-.btn-close:hover { color: #cdd; }
+.btn-close:hover { color: var(--text-bright); }
 
-.hint { font-size: 0.78rem; color: #446; font-style: italic; }
-.error { font-size: 0.8rem; color: #e77; }
-.description { font-size: 0.8rem; color: #99a; margin: 0.25rem 0 0.75rem; }
+.hint { font-size: 0.78rem; color: var(--border-strong); font-style: italic; }
+.error { font-size: 0.8rem; color: var(--danger); }
+.description { font-size: 0.8rem; color: var(--text); margin: 0.25rem 0 0.75rem; }
 
-.meta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.75rem; color: #668; margin-bottom: 0.6rem; }
+.meta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.6rem; }
 
 .maintenance-short-banner {
-  background: #3a1a1a;
-  border: 1px solid #a55;
-  color: #f89;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-dim);
+  color: var(--status-bad);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -409,14 +409,14 @@ function onBackdropClick(): void {
 }
 
 .section { margin-top: 0.75rem; }
-.section h5 { color: #789; font-size: 0.8rem; margin: 0 0 0.3rem; }
+.section h5 { color: var(--text-muted); font-size: 0.8rem; margin: 0 0 0.3rem; }
 
 .recipe-selector { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0 0.5rem; }
 .recipe-select {
-  background: #13131e;
-  border: 1px solid #334;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 3px;
-  color: #cdd;
+  color: var(--text-bright);
   padding: 0.15rem 0.35rem;
   font-family: monospace;
   font-size: 0.75rem;
@@ -424,15 +424,15 @@ function onBackdropClick(): void {
 .recipe-select:disabled { opacity: 0.5; }
 
 .flow-row { font-size: 0.78rem; margin: 0.2rem 0; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: baseline; }
-.flow-label { color: #668; }
-.flow-item { color: #aab; background: #13131e; border: 1px solid #223; border-radius: 3px; padding: 0.1rem 0.35rem; }
+.flow-label { color: var(--text-dim); }
+.flow-item { color: var(--text); background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: 3px; padding: 0.1rem 0.35rem; }
 
-.concurrent-recipe { margin-bottom: 0.5rem; padding-left: 0.5rem; border-left: 2px solid #223; }
-.concurrent-recipe-name { color: #789; }
+.concurrent-recipe { margin-bottom: 0.5rem; padding-left: 0.5rem; border-left: 2px solid var(--border-subtle); }
+.concurrent-recipe-name { color: var(--text-muted); }
 
-.tag-full { color: #6adba5; font-size: 0.72rem; margin-left: 0.4rem; }
+.tag-full { color: var(--status-good); font-size: 0.72rem; margin-left: 0.4rem; }
 
 .shortfall-list { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
-.shortfall-item { font-size: 0.75rem; color: #eab764; }
-.shortfall-item.shortfall-maintenance { color: #f89; }
+.shortfall-item { font-size: 0.75rem; color: var(--status-warn); }
+.shortfall-item.shortfall-maintenance { color: var(--status-bad); }
 </style>
