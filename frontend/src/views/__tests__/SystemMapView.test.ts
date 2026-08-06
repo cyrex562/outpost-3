@@ -288,3 +288,51 @@ describe('SystemMapView (map/nav plan: view body surface)', () => {
     expect(wrapper.find('[data-testid="btn-view-surface"]').exists()).toBe(false)
   })
 })
+
+describe('SystemMapView (map fills available height)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    getSystemBodies.mockReset()
+    getSystemName.mockReset()
+    getSystemName.mockResolvedValue('Test System')
+    window.localStorage.clear()
+  })
+
+  it('sizes the map panel from the layout, not a fixed pixel height', async () => {
+    getSystemBodies.mockResolvedValueOnce([makeBody({ id: 'p1', name: 'P1' })])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    // The panel used to carry an inline `height: <n>px` driven by a
+    // drag-resize grip. It now stretches to fill `.content`, so any inline
+    // height would defeat the fill.
+    const style = wrapper.get('.map-wrap').attributes('style')
+    expect(style ?? '').not.toMatch(/height/)
+  })
+
+  it('no longer renders a resize grip', async () => {
+    getSystemBodies.mockResolvedValueOnce([makeBody({ id: 'p1', name: 'P1' })])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="map-resize-grip"]').exists()).toBe(false)
+  })
+
+  it('restores pan/zoom from a layout entry written by the old grip build', async () => {
+    // Pre-existing entries carry a `panelHeight` key that no longer maps to
+    // anything. It must be ignored rather than rejecting the whole entry,
+    // or an upgrading player silently loses their saved view.
+    window.localStorage.setItem(
+      'outpost3.system-map.layout',
+      JSON.stringify({ x: -100, y: -200, w: 500, h: 600, panelHeight: 900 }),
+    )
+    getSystemBodies.mockResolvedValueOnce([makeBody({ id: 'p1', name: 'P1' })])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="system-map-svg"]').attributes('viewBox')).toBe(
+      '-100 -200 500 600',
+    )
+  })
+})

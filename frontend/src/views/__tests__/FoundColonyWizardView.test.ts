@@ -254,3 +254,57 @@ describe('FoundColonyWizardView step 3 loadout (#167)', () => {
     expect(getBodySurface).toHaveBeenCalledWith('mars')
   })
 })
+
+describe('FoundColonyWizardView step 2 map fills available height', () => {
+  beforeEach(() => {
+    getColonizeTargets.mockReset()
+    getSystemBodies.mockReset()
+    listBuildings.mockReset()
+    getBodySurface.mockReset()
+    listSupplyPackages.mockReset()
+    window.localStorage.clear()
+  })
+
+  /** Mount and advance to step 2 (the landing-site map), stopping there. */
+  async function mountAtStep2() {
+    getColonizeTargets.mockResolvedValue([BODY])
+    getSystemBodies.mockResolvedValue([])
+    listBuildings.mockResolvedValue([BUILDING_A, BUILDING_B])
+    getBodySurface.mockResolvedValue({ seed: 1, radius: 1, hexes: [HEX] })
+    listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
+
+    const wrapper = mount(FoundColonyWizardView, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.find('[data-testid="body-card-mars"]').trigger('click')
+    await wrapper.find('.btn.primary').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('sizes the map panel from the layout, not a fixed pixel height', async () => {
+    const wrapper = await mountAtStep2()
+    // Previously an inline `height: <n>px` from the drag-resize grip, which
+    // would override the flex fill.
+    expect(wrapper.get('.map-wrap').attributes('style') ?? '').not.toMatch(/height/)
+  })
+
+  it('no longer renders a resize grip', async () => {
+    const wrapper = await mountAtStep2()
+    expect(wrapper.find('[data-testid="map-resize-grip"]').exists()).toBe(false)
+  })
+
+  it('opts only the map step into filling, so other steps stay content-sized', async () => {
+    const wrapper = await mountAtStep2()
+    expect(wrapper.get('section.panel').classes()).toContain('map-panel')
+
+    // Step 1 renders before any body is chosen and must not carry it.
+    getColonizeTargets.mockResolvedValue([BODY])
+    getSystemBodies.mockResolvedValue([])
+    listBuildings.mockResolvedValue([BUILDING_A, BUILDING_B])
+    const fresh = mount(FoundColonyWizardView, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(fresh.get('section.panel').classes()).not.toContain('map-panel')
+  })
+})
