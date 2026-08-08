@@ -1092,9 +1092,7 @@ pub fn bootstrap(
     };
 
     let mut engine = GameEngine::new();
-    engine.state.registry = Some(registry);
-    engine.state.needs_config = Some(NeedsConfig::default_survival());
-    engine.state.morale_config = Some(MoraleConfig::default_config());
+    attach_content(&mut engine, registry);
 
     let _ = engine.apply(&Command::SetDifficulty {
         preset: parse_preset(&difficulty),
@@ -1157,7 +1155,6 @@ pub fn bootstrap(
         height: 12,
     });
 
-    load_embedded_tech(&mut engine);
     log::info!(
         "bootstrap: tech_registry loaded={}",
         engine.state.tech_registry.is_some()
@@ -1171,6 +1168,28 @@ pub fn bootstrap(
     );
     *engine_state.engine.lock().unwrap() = Some(engine);
     Ok(snap)
+}
+
+/// Attach the runtime-only content fields to `engine`.
+///
+/// `GameState` deliberately does not persist these — they are content, not
+/// state, and `SnapshotBlob::into_state` restores them as `None` with the
+/// comment "reloaded from content packs after load". That contract makes every
+/// caller that produces a `GameState` responsible for reattaching them, which
+/// is exactly what `load_game` was failing to do: a loaded game came back with
+/// no registry at all, which left `list_buildings` erroring (an empty build
+/// dialog), `get_tech_tree` erroring, and — worse — the production step a
+/// silent no-op, since it skips entirely when `registry` is `None`.
+///
+/// Bootstrap and load now share this so the two cannot drift again.
+fn attach_content(
+    engine: &mut GameEngine,
+    registry: outpost_core::content::registry::ContentRegistry,
+) {
+    engine.state.registry = Some(registry);
+    engine.state.needs_config = Some(NeedsConfig::default_survival());
+    engine.state.morale_config = Some(MoraleConfig::default_config());
+    load_embedded_tech(engine);
 }
 
 fn load_embedded_tech(engine: &mut GameEngine) {
@@ -1738,6 +1757,24 @@ pub fn load_game(path: String, engine_state: State<'_, EngineState>) -> CmdResul
     let game_state = db.load().map_err(|e| CmdError::Snapshot(e.to_string()))?;
     let mut engine = GameEngine::new();
     engine.state = game_state;
+
+    // The save holds state, not content — see `attach_content`. Without this
+    // a loaded game has no registry, so the build dialog is empty, the tech
+    // tree fails to load, and production silently stops happening.
+    //
+    // Always the embedded pack: `bootstrap` can be pointed at a directory,
+    // but the save records no content source to reproduce that choice, and
+    // embedded is what the shipped app uses.
+    let registry = load_embedded_content().inspect_err(|e| {
+        log::error!("load_game FAILED loading content: {e}");
+    })?;
+    attach_content(&mut engine, registry);
+    log::info!(
+        "load_game: content reattached, registry={} tech_registry={}",
+        engine.state.registry.is_some(),
+        engine.state.tech_registry.is_some()
+    );
+
     let snap = build_snapshot(&engine);
     *engine_state.engine.lock().unwrap() = Some(engine);
     Ok(snap)
@@ -2753,5 +2790,89 @@ mod embedded_content_tests {
             "embedded pack exposes no tech-0 power building; buildings present: {:?}",
             registry.buildings().map(|b| &b.id).collect::<Vec<_>>()
         );
+    }
+
+    /// A save records *state*, not content — `SnapshotBlob::into_state`
+    /// deliberately restores `registry`/`tech_registry`/`needs_config`/
+    /// `morale_config` as `None`, leaving the caller to reattach them.
+    /// `load_game` did not, so a loaded game came back with no content at all:
+    /// the build dialog was empty (`list_buildings` errors without a
+    /// registry), the tech tree failed to load, and the production step
+    /// silently did nothing, since it no-ops when `registry` is `None`.
+    ///
+    /// Exercises the real round trip through SQLite rather than calling
+    /// `attach_content` directly, so a future `load_game` that forgets it
+    /// fails here.
+    #[test]
+    fn a_loaded_game_has_its_content_reattached() {
+        let dir = std::env::temp_dir().join(format!("outpost3-loadtest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("roundtrip.o3save");
+
+        // Build a game the way bootstrap does, save it, and drop it.
+        let mut engine = GameEngine::new();
+        attach_content(
+            &mut engine,
+            load_embedded_content().expect("embedded pack must load"),
+        );
+        engine
+            .apply(&Command::FoundColony {
+                name: "Roundtrip".into(),
+                starting_population: 50,
+            })
+            .expect("found colony");
+        {
+            let mut db = SnapshotDb::open(&path).expect("open save");
+            db.save(&engine.state).expect("save");
+        }
+
+        // Reload exactly as `load_game` does.
+        let db = SnapshotDb::open(&path).expect("reopen save");
+        let game_state = db.load().expect("load");
+        let mut restored = GameEngine::new();
+        restored.state = game_state;
+
+        // Precondition: this is the gap being closed. If the snapshot ever
+        // starts persisting content, this assertion tells us the fix is
+        // redundant rather than silently passing.
+        assert!(
+            restored.state.registry.is_none(),
+            "snapshot unexpectedly restored a registry; attach_content may no longer be needed"
+        );
+
+        attach_content(
+            &mut restored,
+            load_embedded_content().expect("embedded pack must load"),
+        );
+
+        assert!(restored.state.registry.is_some(), "registry not reattached");
+        assert!(
+            restored.state.tech_registry.is_some(),
+            "tech registry not reattached"
+        );
+        assert!(
+            restored.state.needs_config.is_some(),
+            "needs config not reattached"
+        );
+        assert!(
+            restored.state.morale_config.is_some(),
+            "morale config not reattached"
+        );
+
+        // And the thing the player actually noticed: buildings are listable.
+        let count = restored
+            .state
+            .registry
+            .as_ref()
+            .expect("registry")
+            .buildings()
+            .count();
+        assert!(count >= 40, "expected the full roster after load, got {count}");
+
+        // The colony survived the round trip too, so this isn't passing on an
+        // empty game.
+        assert_eq!(restored.state.colonies.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

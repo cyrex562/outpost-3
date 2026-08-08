@@ -175,6 +175,9 @@ const buildingCatalog = ref<BuildingOption[]>([])
 /** Tech node states — used to decide which buildings are tech-unlocked. */
 const techNodes = ref<TechNode[]>([])
 
+/** Why the catalog is empty, when it failed rather than genuinely being so. */
+const catalogError = ref<string | null>(null)
+
 /** Set of tech ids the player has researched. */
 const researchedTechs = computed<Set<string>>(
   () => new Set(techNodes.value.filter((t) => t.state === 'researched').map((t) => t.id)),
@@ -183,19 +186,40 @@ const researchedTechs = computed<Set<string>>(
 /** Slots not currently reserved by an active building or in-flight project. */
 const slotsAvailable = computed<number | null>(() => (screen.value ? screen.value.slot_capacity - screen.value.slots_used : null))
 
+/**
+ * Why this isn't a `Promise.all` in a silent `try/catch` any more.
+ *
+ * It used to be, and that combination hid a real bug for a whole playtest
+ * round: when the backend had no content registry, `listBuildings` rejected,
+ * the catch swallowed it, and the build dialog rendered "No buildings
+ * available in the loaded content pack" — indistinguishable from a genuinely
+ * empty pack, with nothing in the console or the log to say otherwise.
+ *
+ * Two changes: the calls settle independently, so a failing tech tree no
+ * longer costs the player the entire building catalog; and a failure is
+ * recorded and shown rather than discarded.
+ *
+ * There is no `isTauri` guard: both calls have browser-mode paths of their
+ * own (`/api/buildings`, `/api/tech-tree`).
+ */
 async function loadCatalog(): Promise<void> {
-  // No `isTauri` guard: both calls below have browser-mode paths of their own
-  // (`/api/buildings` and `/api/tech-tree`), so bailing here left the build
-  // dialog permanently empty in browser mode — it rendered "No buildings
-  // available in the loaded content pack" while the endpoint was returning the
-  // full 59-building roster. The try/catch already covers the case the guard
-  // was presumably protecting, an engine that isn't ready yet.
-  try {
-    const [buildings, techs] = await Promise.all([listBuildings(), getTechTree()])
-    buildingCatalog.value = buildings
-    techNodes.value = techs
-  } catch {
-    // catalog / tech tree may fail to load if engine isn't ready — ignore
+  catalogError.value = null
+  const [buildings, techs] = await Promise.allSettled([listBuildings(), getTechTree()])
+
+  if (buildings.status === 'fulfilled') {
+    buildingCatalog.value = buildings.value
+  } else {
+    const message = buildings.reason instanceof Error ? buildings.reason.message : String(buildings.reason)
+    catalogError.value = `Could not load the building catalog: ${message}`
+    console.error('[colony] building catalog failed to load:', buildings.reason)
+  }
+
+  if (techs.status === 'fulfilled') {
+    techNodes.value = techs.value
+  } else {
+    // Non-fatal on its own: without the tech list every tech-gated building
+    // reads as locked, but the catalog itself is still usable.
+    console.error('[colony] tech tree failed to load:', techs.reason)
   }
 }
 
@@ -635,6 +659,7 @@ watch(
       <BuildDialog
         v-if="showBuildDialog"
         :catalog="buildingCatalog"
+        :catalog-error="catalogError"
         :disabled-reason="disabledReason"
         :slots-available="slotsAvailable"
         :busy="queueBusy"
