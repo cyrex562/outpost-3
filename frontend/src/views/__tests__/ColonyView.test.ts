@@ -482,3 +482,120 @@ describe('ColonyView build limits (max_instances)', () => {
     expect(wrapper.find('[data-testid="build-card-reason-power_plant"]').exists()).toBe(false)
   })
 })
+
+
+describe('ColonyView build-catalogue filters', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    routeParams.colonyId = undefined
+    routeParams.buildingType = undefined
+    window.localStorage.clear()
+  })
+
+  function option(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'shed',
+      name: 'Shed',
+      description: '',
+      category: 'Storage',
+      slot_cost: 1,
+      labor_per_turn: 1,
+      construction_turns: 1,
+      construction_cost: [] as [string, number][],
+      tech_prerequisite: null,
+      starter_kit: false,
+      max_instances: null,
+      ...overrides,
+    }
+  }
+
+  function stock(commodityId: string, amount: number, reserved = 0) {
+    return { commodity_id: commodityId, amount, capacity: null, net_per_turn: 0, reserved }
+  }
+
+  async function openDialog(
+    catalog: Record<string, unknown>[],
+    stockpile: ReturnType<typeof stock>[] = [],
+  ) {
+    const { listBuildings } = await import('@/services/tauriBridge')
+    ;(listBuildings as ReturnType<typeof vi.fn>).mockResolvedValue(catalog)
+
+    seedColonies()
+    const gameStore = useGameStore()
+    gameStore.selectedColonyId = 'colony-1'
+    gameStore.colonyScreen = colonyScreenWithHqBuilding({
+      slot_capacity: 20,
+      slots_used: 0,
+      stockpile,
+    })
+
+    const wrapper = mount(ColonyView, {
+      global: { stubs: { ...STUBS, ConstructionQueueWindowPanel: false, BuildDialog: false } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="btn-open-build"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="build-dialog"]').exists()).toBe(true)
+    return wrapper
+  }
+
+  it('hides a building the colony cannot fund when the affordability filter is on', async () => {
+    const wrapper = await openDialog(
+      [
+        option({ id: 'cheap', construction_cost: [['structural_metal', 5]] }),
+        option({ id: 'dear', construction_cost: [['structural_metal', 500]] }),
+      ],
+      [stock('structural_metal', 100)],
+    )
+
+    expect(wrapper.find('[data-testid="build-card-dear"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="filter-hide-unaffordable"]').setValue(true)
+
+    expect(wrapper.find('[data-testid="build-card-dear"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="build-card-cheap"]').exists()).toBe(true)
+  })
+
+  it('counts reserved stock as unavailable, matching what construction can spend', async () => {
+    // 100 held but 96 reserved leaves 4 — the engine reports StalledByReserve
+    // in exactly this case, so calling it affordable would promise progress
+    // the colony visibly refuses to make.
+    const wrapper = await openDialog(
+      [option({ id: 'dear', construction_cost: [['structural_metal', 10]] })],
+      [stock('structural_metal', 100, 96)],
+    )
+
+    await wrapper.get('[data-testid="filter-hide-unaffordable"]').setValue(true)
+    expect(wrapper.find('[data-testid="build-card-dear"]').exists()).toBe(false)
+  })
+
+  it('hides tech-locked buildings independently of affordability', async () => {
+    const wrapper = await openDialog(
+      [
+        option({ id: 'locked', tech_prerequisite: 'fusion_basics' }),
+        option({ id: 'open' }),
+      ],
+      [],
+    )
+
+    await wrapper.get('[data-testid="filter-hide-tech-locked"]').setValue(true)
+    expect(wrapper.find('[data-testid="build-card-locked"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="build-card-open"]').exists()).toBe(true)
+  })
+
+  it('treats a commodity the colony holds none of as unaffordable', async () => {
+    const wrapper = await openDialog(
+      [option({ id: 'needs_glass', construction_cost: [['glass', 1]] })],
+      [stock('structural_metal', 999)],
+    )
+
+    await wrapper.get('[data-testid="filter-hide-unaffordable"]').setValue(true)
+    expect(wrapper.find('[data-testid="build-card-needs_glass"]').exists()).toBe(false)
+  })
+
+  it('treats a free building as affordable', async () => {
+    const wrapper = await openDialog([option({ id: 'free', construction_cost: [] })], [])
+    await wrapper.get('[data-testid="filter-hide-unaffordable"]').setValue(true)
+    expect(wrapper.find('[data-testid="build-card-free"]').exists()).toBe(true)
+  })
+})
