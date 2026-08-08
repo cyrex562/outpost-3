@@ -269,6 +269,39 @@ function existingCount(b: BuildingOption): number {
   return built + queued
 }
 
+/** Whether `b`'s tech prerequisite is unmet. */
+function isTechLocked(b: BuildingOption): boolean {
+  return b.tech_prerequisite !== null && !researchedTechs.value.has(b.tech_prerequisite)
+}
+
+/**
+ * Whether the colony could fund `b`'s construction from what it holds now.
+ *
+ * Measured against **unreserved** stock (`amount - reserved`), because that is
+ * what construction can actually spend: the engine reports a distinct
+ * `StalledByReserve` outcome when raw stock would cover an instalment but the
+ * player's own commodity reserve withholds it, so counting reserved stock here
+ * would call a building affordable that will visibly refuse to progress.
+ *
+ * Measured against the **whole** construction cost, not the first instalment.
+ * Construction is paid in per-sol instalments, so a colony *can* queue
+ * something it cannot yet fully afford and let it fill in as materials arrive
+ * — which is why this is a filter the player opts into rather than a reason to
+ * disable the button. What it answers is "could I fund this now", which is the
+ * question someone browsing the catalogue is asking.
+ *
+ * Unknown with no colony screen loaded; treated as affordable so the filter
+ * never hides the entire catalogue while data is still arriving.
+ */
+function isAffordable(b: BuildingOption): boolean {
+  const scr = screen.value
+  if (!scr) return true
+  const available = new Map(
+    scr.stockpile.map((row) => [row.commodity_id, row.amount - row.reserved]),
+  )
+  return b.construction_cost.every(([id, qty]) => (available.get(id) ?? 0) >= qty)
+}
+
 /**
  * Copies of `b` this colony may still queue, or `null` when unlimited. The
  * build dialog offers a quantity, and it dispatches one command per copy, so
@@ -661,6 +694,8 @@ watch(
         :catalog="buildingCatalog"
         :catalog-error="catalogError"
         :disabled-reason="disabledReason"
+        :is-tech-locked="isTechLocked"
+        :is-affordable="isAffordable"
         :slots-available="slotsAvailable"
         :busy="queueBusy"
         @queue="queueBuilding"

@@ -7,7 +7,7 @@
  * panel's "Build…" button; the catalog used to live inline in that panel.
  */
 
-import { reactive } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { BuildingOption } from '@/services/tauriBridge'
 
 const props = defineProps<{
@@ -22,6 +22,10 @@ const props = defineProps<{
    * went unexplained through a playtest round.
    */
   catalogError?: string | null
+  /** Whether this building's tech prerequisite is unmet. */
+  isTechLocked: (b: BuildingOption) => boolean
+  /** Whether the colony could fund this building's construction right now. */
+  isAffordable: (b: BuildingOption) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -41,6 +45,56 @@ function setQuantity(id: string, value: number): void {
   quantities[id] = Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1
 }
 
+
+// ── Catalogue filters ─────────────────────────────────────────────────────
+//
+// Two independent filters rather than one "only what I can build": they hide
+// different things for different reasons, and a player usually wants one at a
+// time. Hiding tech-locked entries is about browsing what is reachable now;
+// hiding unaffordable ones is about deciding what to spend on. Collapsing them
+// would make "what could I build if I had the metal?" unanswerable.
+//
+// Off by default — the full roster is the honest starting view, and a filter
+// silently on from a previous session would look like missing content.
+
+const HIDE_TECH_LOCKED_KEY = 'outpost3.build-dialog.hide-tech-locked'
+const HIDE_UNAFFORDABLE_KEY = 'outpost3.build-dialog.hide-unaffordable'
+
+function loadFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === 'true'
+  } catch {
+    // storage blocked (private mode, embedded webview) — non-fatal
+    return false
+  }
+}
+
+function persistFlag(key: string, on: boolean): void {
+  try {
+    window.localStorage.setItem(key, String(on))
+  } catch {
+    // storage blocked — the filter still works for this session
+  }
+}
+
+const hideTechLocked = ref(loadFlag(HIDE_TECH_LOCKED_KEY))
+const hideUnaffordable = ref(loadFlag(HIDE_UNAFFORDABLE_KEY))
+
+watch(hideTechLocked, (on) => persistFlag(HIDE_TECH_LOCKED_KEY, on), { flush: 'sync' })
+watch(hideUnaffordable, (on) => persistFlag(HIDE_UNAFFORDABLE_KEY, on), { flush: 'sync' })
+
+const visibleCatalog = computed(() =>
+  props.catalog.filter((b) => {
+    if (hideTechLocked.value && props.isTechLocked(b)) return false
+    if (hideUnaffordable.value && !props.isAffordable(b)) return false
+    return true
+  }),
+)
+
+/** How many entries the active filters are hiding — shown so an unexpectedly
+ * short list reads as "filtered", not as "content is missing". */
+const hiddenCount = computed(() => props.catalog.length - visibleCatalog.value.length)
+
 function queue(b: BuildingOption): void {
   if (props.busy || props.disabledReason(b) !== null) return
   emit('queue', b, quantityFor(b.id))
@@ -58,15 +112,40 @@ function queue(b: BuildingOption): void {
         <button class="btn-close" data-testid="btn-close-build" aria-label="Close" @click="emit('close')">✕</button>
       </div>
 
+      <div v-if="props.catalog.length > 0" class="filters" data-testid="build-dialog-filters">
+        <label class="filter">
+          <input
+            type="checkbox"
+            data-testid="filter-hide-tech-locked"
+            v-model="hideTechLocked"
+          />
+          Hide tech-locked
+        </label>
+        <label class="filter">
+          <input
+            type="checkbox"
+            data-testid="filter-hide-unaffordable"
+            v-model="hideUnaffordable"
+          />
+          Hide unaffordable
+        </label>
+        <span v-if="hiddenCount > 0" class="filter-count" data-testid="build-dialog-hidden-count">
+          {{ hiddenCount }} hidden
+        </span>
+      </div>
+
       <div v-if="props.catalogError" class="err" data-testid="build-dialog-error">
         {{ props.catalogError }}
       </div>
       <div v-else-if="props.catalog.length === 0" class="hint">
         No buildings available in the loaded content pack.
       </div>
+      <div v-else-if="visibleCatalog.length === 0" class="hint" data-testid="build-dialog-all-filtered">
+        All {{ props.catalog.length }} buildings are hidden by the filters above.
+      </div>
       <div v-else class="build-catalog">
         <div
-          v-for="b in props.catalog"
+          v-for="b in visibleCatalog"
           :key="b.id"
           class="build-card"
           :class="{ 'is-disabled': props.disabledReason(b) !== null }"
@@ -116,6 +195,20 @@ function queue(b: BuildingOption): void {
 </template>
 
 <style scoped>
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+.filter { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.filter input { cursor: pointer; accent-color: var(--accent); }
+.filter-count { margin-left: auto; color: var(--text-faint); font-style: italic; }
 .err { color: var(--danger); font-size: 0.8rem; padding: 0.5rem 0; }
 .dialog-backdrop {
   position: fixed;
