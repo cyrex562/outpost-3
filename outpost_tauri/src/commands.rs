@@ -2703,3 +2703,55 @@ pub fn delete_custom_preset(app: AppHandle, name: String) -> CmdResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod embedded_content_tests {
+    use super::*;
+
+    /// The desktop shell serves content compiled into the binary by
+    /// `include_dir!("$CARGO_MANIFEST_DIR/../content/base")`, not read from
+    /// disk — so a content change only reaches players if the embed is
+    /// actually picking it up. Nothing else in the test suite exercises that
+    /// path, which is why a roster change can look correct in browser mode
+    /// (which reads `content/base` live over HTTP) and be missing in the app.
+    #[test]
+    fn embedded_pack_contains_the_authored_building_roster() {
+        let registry = load_embedded_content().expect("embedded pack must load");
+        let ids: Vec<&str> = registry.buildings().map(|b| b.id.as_str()).collect();
+
+        assert!(
+            ids.len() >= 40,
+            "expected the full authored roster in the embedded pack, got {}",
+            ids.len()
+        );
+        assert!(
+            ids.contains(&"colony_hq"),
+            "embedded pack is missing colony_hq; got {ids:?}"
+        );
+    }
+
+    /// A colony must be able to build power with nothing researched — the
+    /// pre-tech generator has to survive the embed, not just exist in
+    /// `content/base`.
+    #[test]
+    fn embedded_pack_offers_a_power_source_with_no_tech() {
+        let registry = load_embedded_content().expect("embedded pack must load");
+        let no_tech_power: Vec<&str> = registry
+            .buildings()
+            .filter(|b| b.tech_prerequisite.is_none() && b.power_delta < 0.0)
+            .filter(|b| {
+                matches!(
+                    b.category,
+                    outpost_core::content::types::BuildingCategory::Power
+                )
+            })
+            .map(|b| b.id.as_str())
+            .collect();
+
+        assert!(
+            !no_tech_power.is_empty(),
+            "embedded pack exposes no tech-0 power building; buildings present: {:?}",
+            registry.buildings().map(|b| &b.id).collect::<Vec<_>>()
+        );
+    }
+}
