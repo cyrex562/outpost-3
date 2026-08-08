@@ -15,6 +15,13 @@ const props = defineProps<{
   disabledReason: (b: BuildingOption) => string | null
   slotsAvailable: number | null
   busy: boolean
+  /**
+   * Why the catalog failed to load, if it did. Distinguishes "the pack has no
+   * buildings" from "we could not ask" — those rendered identically before,
+   * which is how an empty build dialog caused by a missing content registry
+   * went unexplained through a playtest round.
+   */
+  catalogError?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -51,7 +58,10 @@ function queue(b: BuildingOption): void {
         <button class="btn-close" data-testid="btn-close-build" aria-label="Close" @click="emit('close')">✕</button>
       </div>
 
-      <div v-if="props.catalog.length === 0" class="hint">
+      <div v-if="props.catalogError" class="err" data-testid="build-dialog-error">
+        {{ props.catalogError }}
+      </div>
+      <div v-else-if="props.catalog.length === 0" class="hint">
         No buildings available in the loaded content pack.
       </div>
       <div v-else class="build-catalog">
@@ -106,6 +116,7 @@ function queue(b: BuildingOption): void {
 </template>
 
 <style scoped>
+.err { color: var(--danger); font-size: 0.8rem; padding: 0.5rem 0; }
 .dialog-backdrop {
   position: fixed;
   inset: 0;

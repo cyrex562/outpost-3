@@ -65,3 +65,31 @@ describe('BuildDialog (UI-rework PR5)', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 })
+
+
+describe('BuildDialog catalog failure vs empty pack', () => {
+  it('shows the failure reason instead of the empty-pack hint when loading failed', () => {
+    const wrapper = mount(BuildDialog, {
+      props: {
+        catalog: [],
+        disabledReason: () => null,
+        slotsAvailable: 3,
+        busy: false,
+        catalogError: 'Could not load the building catalog: no content registry loaded',
+      },
+    })
+    const err = wrapper.find('[data-testid="build-dialog-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('no content registry loaded')
+    // The two used to render identically, which is what hid the bug.
+    expect(wrapper.text()).not.toContain('No buildings available in the loaded content pack')
+  })
+
+  it('still shows the empty-pack hint when the catalog is genuinely empty', () => {
+    const wrapper = mount(BuildDialog, {
+      props: { catalog: [], disabledReason: () => null, slotsAvailable: 3, busy: false },
+    })
+    expect(wrapper.find('[data-testid="build-dialog-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No buildings available in the loaded content pack')
+  })
+})
