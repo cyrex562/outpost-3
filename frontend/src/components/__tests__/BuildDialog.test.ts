@@ -219,3 +219,126 @@ describe('BuildDialog catalogue filters', () => {
     expect(visibleIds(second)).toEqual([TECH_LOCKED, BUILDABLE])
   })
 })
+
+
+describe('BuildDialog category tree', () => {
+  function catalogueOf(...pairs: [string, string][]) {
+    return pairs.map(([id, category]) => makeBuildingOption({ id, name: id, category }))
+  }
+
+  function mountTree(catalog = catalogueOf(
+    ['smelter', 'Processing'],
+    ['refinery', 'Processing'],
+    ['mine', 'Extraction'],
+    ['reactor', 'Power'],
+  )) {
+    return mount(BuildDialog, {
+      props: {
+        catalog,
+        disabledReason: () => null,
+        slotsAvailable: 5,
+        busy: false,
+        isTechLocked: () => false,
+        isAffordable: () => true,
+      },
+    })
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('groups the catalogue into one section per category', () => {
+    const wrapper = mountTree()
+    const groups = wrapper.findAll('[data-testid^="build-cat-"]:not([data-testid^="build-cat-toggle-"])')
+    expect(groups.map((g) => g.attributes('data-testid'))).toEqual([
+      'build-cat-Processing',
+      'build-cat-Extraction',
+      'build-cat-Power',
+    ])
+  })
+
+  it('shows a per-category count so a collapsed group still says what is inside', () => {
+    const wrapper = mountTree()
+    expect(wrapper.get('[data-testid="build-cat-toggle-Processing"]').text()).toContain('2')
+    expect(wrapper.get('[data-testid="build-cat-toggle-Power"]').text()).toContain('1')
+  })
+
+  it('starts every category expanded, so nothing is hidden by default', () => {
+    const wrapper = mountTree()
+    for (const cat of ['Processing', 'Extraction', 'Power']) {
+      expect(wrapper.get(`[data-testid="build-cat-toggle-${cat}"]`).attributes('aria-expanded')).toBe('true')
+    }
+    expect(wrapper.findAll('[data-testid^="build-card-"]').length).toBe(4)
+  })
+
+  it('collapses and re-expands one category without touching the others', async () => {
+    const wrapper = mountTree()
+    const toggle = wrapper.get('[data-testid="build-cat-toggle-Processing"]')
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('[data-testid="build-cat-toggle-Extraction"]').attributes('aria-expanded')).toBe('true')
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+  })
+
+  it('persists collapsed categories across reopening the dialog', async () => {
+    const first = mountTree()
+    await first.get('[data-testid="build-cat-toggle-Processing"]').trigger('click')
+    first.unmount()
+
+    const second = mountTree()
+    expect(second.get('[data-testid="build-cat-toggle-Processing"]').attributes('aria-expanded')).toBe('false')
+    expect(second.get('[data-testid="build-cat-toggle-Extraction"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('expands a category the stored state has never seen', () => {
+    // Storing the *collapsed* set means a category added to the pack later
+    // shows up rather than silently starting hidden.
+    window.localStorage.setItem('outpost3.build-dialog.collapsed-categories', JSON.stringify(['Processing']))
+    const wrapper = mountTree()
+    expect(wrapper.get('[data-testid="build-cat-toggle-Processing"]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('[data-testid="build-cat-toggle-Power"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('falls back to all-expanded when the stored state is corrupt', () => {
+    window.localStorage.setItem('outpost3.build-dialog.collapsed-categories', 'not json')
+    const wrapper = mountTree()
+    expect(wrapper.get('[data-testid="build-cat-toggle-Processing"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('drops a category the filters have emptied, rather than leaving a zero heading', async () => {
+    const wrapper = mount(BuildDialog, {
+      props: {
+        catalog: catalogueOf(['smelter', 'Processing'], ['mine', 'Extraction']),
+        disabledReason: () => null,
+        slotsAvailable: 5,
+        busy: false,
+        isTechLocked: (b: BuildingOption) => b.id === 'smelter',
+        isAffordable: () => true,
+      },
+    })
+    expect(wrapper.find('[data-testid="build-cat-Processing"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="filter-hide-tech-locked"]').setValue(true)
+
+    expect(wrapper.find('[data-testid="build-cat-Processing"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="build-cat-Extraction"]').exists()).toBe(true)
+  })
+
+  it('splits a CamelCase category into readable words', () => {
+    const wrapper = mountTree(catalogueOf(['scrubber', 'LifeSupport']))
+    // Would otherwise render as "LIFESUPPORT" under the heading's uppercasing.
+    expect(wrapper.get('[data-testid="build-cat-toggle-LifeSupport"]').text()).toContain('Life Support')
+  })
+
+  it('exposes the group as a disclosure the heading controls', () => {
+    const wrapper = mountTree()
+    const toggle = wrapper.get('[data-testid="build-cat-toggle-Power"]')
+    expect(toggle.element.tagName).toBe('BUTTON')
+    expect(toggle.attributes('aria-controls')).toBe('build-cat-body-Power')
+    expect(wrapper.find('#build-cat-body-Power').exists()).toBe(true)
+  })
+})
