@@ -95,6 +95,86 @@ const visibleCatalog = computed(() =>
  * short list reads as "filtered", not as "content is missing". */
 const hiddenCount = computed(() => props.catalog.length - visibleCatalog.value.length)
 
+// ── Category grouping ─────────────────────────────────────────────────────
+//
+// The catalogue is one column of collapsible category groups rather than a
+// multi-column card grid. Category was always the organising principle — the
+// wire layer sorts by category then name, so entries arrive grouped — but the
+// grid never showed it, and repeated the category as a tag on every card
+// instead.
+//
+// Empty-by-filter categories are dropped rather than shown with a zero count:
+// the header's "N hidden" already explains why something is missing, and
+// keeping eleven headings alive when the filters have emptied nine of them is
+// noise, not information.
+
+const COLLAPSED_KEY = 'outpost3.build-dialog.collapsed-categories'
+
+/** Categories the player has collapsed. */
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_KEY)
+    if (!raw) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? new Set(parsed.filter((v): v is string => typeof v === 'string')) : new Set()
+  } catch {
+    // storage blocked, or a corrupt entry — start from all-expanded rather
+    // than guessing at half-parsed state
+    return new Set()
+  }
+}
+
+const collapsed = ref<Set<string>>(loadCollapsed())
+
+function isExpanded(category: string): boolean {
+  // Stored as the *collapsed* set, so an unknown category defaults to
+  // expanded. That keeps "show everything" the zero state, matching the
+  // filters above, and means a category added to the pack later shows up
+  // rather than silently starting hidden.
+  return !collapsed.value.has(category)
+}
+
+function toggleCategory(category: string): void {
+  const next = new Set(collapsed.value)
+  if (next.has(category)) next.delete(category)
+  else next.add(category)
+  collapsed.value = next
+  try {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
+  } catch {
+    // storage blocked — the toggle still works for this session
+  }
+}
+
+/**
+ * Human-readable category heading. The wire value is the Rust enum's debug
+ * form, so `LifeSupport` arrives CamelCase and would render as "LIFESUPPORT"
+ * under the heading's uppercase styling.
+ */
+function categoryLabel(category: string): string {
+  return category.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+}
+
+interface CategoryGroup {
+  category: string
+  label: string
+  buildings: BuildingOption[]
+}
+
+const groupedCatalog = computed<CategoryGroup[]>(() => {
+  const groups = new Map<string, BuildingOption[]>()
+  for (const b of visibleCatalog.value) {
+    const existing = groups.get(b.category)
+    if (existing) existing.push(b)
+    else groups.set(b.category, [b])
+  }
+  return [...groups.entries()].map(([category, buildings]) => ({
+    category,
+    label: categoryLabel(category),
+    buildings,
+  }))
+})
+
 function queue(b: BuildingOption): void {
   if (props.busy || props.disabledReason(b) !== null) return
   emit('queue', b, quantityFor(b.id))
@@ -143,52 +223,82 @@ function queue(b: BuildingOption): void {
       <div v-else-if="visibleCatalog.length === 0" class="hint" data-testid="build-dialog-all-filtered">
         All {{ props.catalog.length }} buildings are hidden by the filters above.
       </div>
-      <div v-else class="build-catalog">
-        <div
-          v-for="b in visibleCatalog"
-          :key="b.id"
-          class="build-card"
-          :class="{ 'is-disabled': props.disabledReason(b) !== null }"
-          :title="props.disabledReason(b) ?? ''"
-          :data-testid="`build-card-${b.id}`"
+      <div v-else class="build-catalog" data-testid="build-catalog">
+        <section
+          v-for="g in groupedCatalog"
+          :key="g.category"
+          class="cat-group"
+          :data-testid="`build-cat-${g.category}`"
         >
-          <div class="build-card-head">
-            <span class="build-card-name">{{ b.name }}</span>
-            <span class="build-card-cat">{{ b.category }}</span>
-          </div>
-          <p v-if="b.description" class="build-card-desc">{{ b.description }}</p>
-          <div class="build-card-stats">
-            {{ b.construction_turns }} sols · {{ b.labor_per_turn }} labor/turn ·
-            {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
-          </div>
-          <div v-if="b.construction_cost.length" class="build-card-cost">
-            <span v-for="(c, i) in b.construction_cost" :key="i" class="cost-chip">{{ c[1] }} {{ c[0] }}</span>
-          </div>
-          <div class="build-card-foot">
-            <span v-if="props.disabledReason(b)" class="build-card-reason" :data-testid="`build-card-reason-${b.id}`">
-              {{ props.disabledReason(b) }}
-            </span>
-            <label class="qty-label">
-              ×
-              <input
-                class="qty-input"
-                type="number"
-                min="1"
-                :value="quantityFor(b.id)"
-                :data-testid="`qty-${b.id}`"
-                @input="setQuantity(b.id, Number(($event.target as HTMLInputElement).value))"
-              />
-            </label>
+          <h4 class="cat-heading">
             <button
-              class="btn-queue"
-              :disabled="props.busy || props.disabledReason(b) !== null"
-              :data-testid="`btn-queue-${b.id}`"
-              @click="queue(b)"
+              type="button"
+              class="cat-toggle"
+              :aria-expanded="isExpanded(g.category)"
+              :aria-controls="`build-cat-body-${g.category}`"
+              :data-testid="`build-cat-toggle-${g.category}`"
+              @click="toggleCategory(g.category)"
             >
-              Queue
+              <span class="cat-caret" aria-hidden="true">{{ isExpanded(g.category) ? '▾' : '▸' }}</span>
+              <span class="cat-name">{{ g.label }}</span>
+              <span class="cat-count">{{ g.buildings.length }}</span>
             </button>
-          </div>
-        </div>
+          </h4>
+
+          <ul
+            v-show="isExpanded(g.category)"
+            :id="`build-cat-body-${g.category}`"
+            class="cat-body"
+          >
+            <li
+              v-for="b in g.buildings"
+              :key="b.id"
+              class="build-row"
+              :class="{ 'is-disabled': props.disabledReason(b) !== null }"
+              :data-testid="`build-card-${b.id}`"
+            >
+              <div class="build-row-main">
+                <span class="build-row-name">{{ b.name }}</span>
+                <span class="build-row-stats">
+                  {{ b.construction_turns }} sols · {{ b.labor_per_turn }} labor/turn ·
+                  {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
+                </span>
+                <span v-if="b.construction_cost.length" class="build-row-cost">
+                  <span v-for="(c, i) in b.construction_cost" :key="i" class="cost-chip">{{ c[1] }} {{ c[0] }}</span>
+                </span>
+              </div>
+
+              <p v-if="b.description" class="build-row-desc" :title="b.description">
+                {{ b.description }}
+              </p>
+
+              <div class="build-row-foot">
+                <span v-if="props.disabledReason(b)" class="build-card-reason" :data-testid="`build-card-reason-${b.id}`">
+                  {{ props.disabledReason(b) }}
+                </span>
+                <label class="qty-label">
+                  ×
+                  <input
+                    class="qty-input"
+                    type="number"
+                    min="1"
+                    :value="quantityFor(b.id)"
+                    :data-testid="`qty-${b.id}`"
+                    @input="setQuantity(b.id, Number(($event.target as HTMLInputElement).value))"
+                  />
+                </label>
+                <button
+                  class="btn-queue"
+                  :disabled="props.busy || props.disabledReason(b) !== null"
+                  :data-testid="`btn-queue-${b.id}`"
+                  @click="queue(b)"
+                >
+                  Queue
+                </button>
+              </div>
+            </li>
+          </ul>
+        </section>
       </div>
     </div>
   </div>
@@ -248,24 +358,77 @@ function queue(b: BuildingOption): void {
 .btn-close:hover { background: var(--surface-btn-hover); }
 .hint { font-size: 0.8rem; color: var(--text-dim); font-style: italic; }
 
-.build-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.5rem; }
-.build-card {
+.build-catalog { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.cat-group { border-bottom: 1px solid var(--border-subtle); }
+.cat-group:last-child { border-bottom: none; }
+
+.cat-heading { margin: 0; }
+.cat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.2rem;
+  color: var(--text-bright);
+  font-family: monospace;
+  font-size: 0.78rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  text-align: left;
+}
+.cat-toggle:hover { color: var(--accent); }
+.cat-caret { color: var(--text-faint); font-size: 0.7rem; width: 0.8em; }
+.cat-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-weight: normal;
+  letter-spacing: 0;
+}
+
+.cat-body { list-style: none; margin: 0 0 0.4rem; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+
+.build-row {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.2rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 0.55rem 0.6rem;
+  padding: 0.45rem 0.6rem;
   color: var(--text);
 }
-.build-card.is-disabled { opacity: 0.55; }
-.build-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
-.build-card-name { color: var(--accent); font-size: 0.86rem; font-weight: 600; }
-.build-card-cat { color: var(--text-faint); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.build-card-desc { color: var(--text-muted); font-size: 0.76rem; }
-.build-card-stats { color: var(--text-dim); font-size: 0.72rem; }
-.build-card-cost { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.build-row.is-disabled { opacity: 0.55; }
+
+.build-row-main { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.build-row-name { color: var(--accent); font-weight: bold; font-size: 0.85rem; }
+.build-row-stats { color: var(--text-dim); font-size: 0.72rem; }
+.build-row-cost { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-left: auto; }
+
+/* Clamped to two lines so every row keeps the same height and the column
+   stays scannable; the full text is on the element's `title`. */
+.build-row-desc {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The controls sit right on every row. The reason span carries
+   `margin-right: auto` when present, but a buildable row has no reason — so
+   the anchor lives here instead, or those rows would left-align alone. */
+.build-row-foot { display: flex; align-items: center; gap: 0.5rem; }
+.build-row-foot .qty-label { margin-left: auto; }
+.build-row-foot .build-card-reason + .qty-label { margin-left: 0; }
+
 .cost-chip {
   background: var(--surface-alt);
   border: 1px solid var(--border-subtle);
@@ -274,7 +437,6 @@ function queue(b: BuildingOption): void {
   color: var(--good-dim);
   font-size: 0.7rem;
 }
-.build-card-foot { display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
 .build-card-reason { color: var(--warn-dim); font-size: 0.7rem; font-style: italic; margin-right: auto; }
 .qty-label { color: var(--text-dim); font-size: 0.78rem; display: flex; align-items: center; gap: 0.2rem; }
 .qty-input {

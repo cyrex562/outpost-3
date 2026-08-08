@@ -94,3 +94,29 @@ test('each filter is remembered separately across reopening the dialog', async (
   await expect(page.getByTestId('filter-hide-tech-locked')).toBeChecked()
   await expect(page.getByTestId('filter-hide-unaffordable')).not.toBeChecked()
 })
+
+
+test('the catalogue is a collapsible tree grouped by category', async ({ page }) => {
+  await newGameAndOpenBuild(page)
+
+  const groups = page.locator('[data-testid^="build-cat-"]:not([data-testid^="build-cat-toggle-"])')
+  await expect.poll(async () => groups.count()).toBeGreaterThan(5)
+
+  // Every category starts expanded, so the whole roster is reachable without
+  // a click.
+  const power = page.getByTestId('build-cat-toggle-Power')
+  await expect(power).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('build-card-power_plant')).toBeVisible()
+
+  // Collapsing hides that category's rows and nothing else.
+  await power.click()
+  await expect(power).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('build-card-power_plant')).toBeHidden()
+  await expect(page.getByTestId('build-card-colony_hq')).toBeVisible()
+
+  // ...and the choice survives closing and reopening the dialog.
+  await page.getByTestId('btn-close-build').click()
+  await page.getByTestId('btn-open-build').click()
+  await expect(page.getByTestId('build-cat-toggle-Power')).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('build-cat-toggle-Extraction')).toHaveAttribute('aria-expanded', 'true')
+})
