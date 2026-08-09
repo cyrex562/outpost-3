@@ -91,6 +91,12 @@ pub struct SiteRequirementRow {
     pub met: bool,
 }
 
+/// Serde default for [`BuildingRow::site_multiplier`] — neutral, so a row
+/// deserialised from a payload predating issue #411 reads as unscaled.
+fn one() -> f32 {
+    1.0
+}
+
 /// A single building row for the colony management screen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildingRow {
@@ -139,6 +145,19 @@ pub struct BuildingRow {
     pub slot_cost: u32,
     /// Whether the building ran at full capacity last turn.
     pub full_capacity: bool,
+    /// Output multiplier this building gets from where the colony stands
+    /// (issue #411), or `1.0` when it declares no site scaling.
+    ///
+    /// Surfaced because a silent multiplier reads as a bug: a plant producing
+    /// 40% of nominal because its site is poor has to say so, or the player
+    /// cannot tell it apart from a shortfall.
+    ///
+    /// Distinct from [`Self::scale`], which is how much of its *potential* the
+    /// building achieved this sol. A building can sit at `scale: 1.0` — nothing
+    /// throttling it — while a `site_multiplier` of `0.4` caps what full output
+    /// even means there.
+    #[serde(default = "one")]
+    pub site_multiplier: f32,
     /// Scale the building actually produced at last turn, in `[0.0, 1.0]`.
     ///
     /// `0.0` means it genuinely produced nothing; `1.0` means full output.
@@ -673,6 +692,7 @@ mod tests {
                 paused: false,
                 slot_cost: 1,
                 full_capacity: true,
+                site_multiplier: 1.0,
                 scale: 1.0,
                 shortfall_reason: None,
                 shortfall_kind: None,

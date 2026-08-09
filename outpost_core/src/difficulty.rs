@@ -757,6 +757,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         };
         let recipe = RecipeDef {
@@ -803,6 +804,7 @@ mod tests {
             None,
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
+            None,
         );
         let hard = process_production_scaled(
             &mut crate::colony::ColonyStores::new(&mut pool_hard, &mut res_hard, &reg),
@@ -819,6 +821,7 @@ mod tests {
             None,
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
+            None,
         );
 
         assert!(

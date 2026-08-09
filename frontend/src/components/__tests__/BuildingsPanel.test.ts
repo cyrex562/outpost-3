@@ -503,3 +503,54 @@ describe('BuildingsPanel per-building staffing (#307 stage 4)', () => {
     expect(wrapper.find('[data-testid="building-staffed-s1"]').text()).toBe('no jobs')
   })
 })
+
+describe('BuildingsPanel site multiplier (issue #411)', () => {
+  function mountRow(row: Partial<BuildingRow>) {
+    return mount(BuildingsPanel, {
+      props: {
+        buildings: [makeRow(row)],
+        slotsUsed: 1,
+        slotCapacity: 10,
+        labourAvailable: 10,
+        labourTotal: 10,
+      },
+    })
+  }
+
+  const detail = (w: ReturnType<typeof mount>) =>
+    w.find('[data-testid="building-status-smelter"]').attributes('title') ?? ''
+
+  it('says what a poor site is doing to output, even at full capacity', () => {
+    // The case a plain "Running at full output" hides: nothing is throttling
+    // the building, but full output here is only 40% of nominal.
+    const wrapper = mountRow({ full_capacity: true, scale: 1.0, site_multiplier: 0.4 })
+    expect(detail(wrapper)).toContain('Running at full output')
+    expect(detail(wrapper)).toMatch(/site yields 40% of nominal/i)
+  })
+
+  it('says nothing when the site is neutral', () => {
+    const wrapper = mountRow({ full_capacity: true, scale: 1.0, site_multiplier: 1 })
+    expect(detail(wrapper)).toBe('Running at full output')
+  })
+
+  it('says nothing when the payload predates the field', () => {
+    const wrapper = mountRow({ full_capacity: true, scale: 1.0 })
+    expect(detail(wrapper)).toBe('Running at full output')
+  })
+
+  it('reports a site bonus as well as a penalty', () => {
+    const wrapper = mountRow({ full_capacity: true, scale: 1.0, site_multiplier: 1.5 })
+    expect(detail(wrapper)).toMatch(/site yields 150% of nominal/i)
+  })
+
+  it('appends the site note alongside a shortfall rather than replacing it', () => {
+    const wrapper = mountRow({
+      full_capacity: false,
+      scale: 0.5,
+      site_multiplier: 0.4,
+      shortfall_reason: 'not enough ore',
+    })
+    expect(detail(wrapper)).toContain('not enough ore')
+    expect(detail(wrapper)).toMatch(/site yields 40% of nominal/i)
+  })
+})

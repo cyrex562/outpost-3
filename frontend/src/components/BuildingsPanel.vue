@@ -130,13 +130,29 @@ function isTransientShortfall(b: BuildingRow): boolean {
  * Tooltip/aside text explaining a non-running status — the engine's shortfall
  * reason when it has one, so "Partial" and "Idle" say *why*.
  */
+/**
+ * How this building's site changes its output (issue #411), as a phrase to
+ * append — or empty when the site is neutral or unknown.
+ *
+ * Always shown when it is not 1.0, including on a building running at "full"
+ * capacity: full output at a poor site is still reduced output, and a silent
+ * multiplier is indistinguishable from a bug.
+ */
+function siteDetail(b: BuildingRow): string {
+  const m = b.site_multiplier
+  if (m === undefined || Math.abs(m - 1) < 0.005) return ''
+  return ` · site yields ${(m * 100).toFixed(0)}% of nominal`
+}
+
 function statusDetail(b: BuildingRow): string {
   if (b.paused) return 'Paused — draws no labour, power, or inputs. Still occupies its build slot.'
-  if (b.full_capacity) return 'Running at full output'
+  if (b.full_capacity) return `Running at full output${siteDetail(b)}`
   if (b.shortfall_reason) {
-    return `${(b.scale * 100).toFixed(0)}% output — ${b.shortfall_reason}`
+    return `${(b.scale * 100).toFixed(0)}% output — ${b.shortfall_reason}${siteDetail(b)}`
   }
-  return b.scale > 0 ? `${(b.scale * 100).toFixed(0)}% output` : 'Produced nothing last turn'
+  return b.scale > 0
+    ? `${(b.scale * 100).toFixed(0)}% output${siteDetail(b)}`
+    : 'Produced nothing last turn'
 }
 
 /**

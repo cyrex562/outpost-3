@@ -1288,6 +1288,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         }];
 
         let empty: HashSet<String> = HashSet::new();

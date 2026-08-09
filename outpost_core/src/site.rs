@@ -19,7 +19,7 @@
 //! terrain nobody has checked. If outposts ever gain a hex, they start
 //! evaluating correctly with no change here.
 
-use crate::content::types::SiteRequirement;
+use crate::content::types::{SiteProperty, SiteRequirement, SiteScaling};
 use crate::map::{HexCoord, PlanetMap};
 use crate::system::Body;
 
@@ -85,6 +85,55 @@ impl<'a> SiteContext<'a> {
                 .body
                 .is_some_and(|b| b.atmosphere_density.rank() >= density.rank()),
         }
+    }
+
+    /// A normalised `[0.0, 1.0]` reading of `property` at this site, or `None`
+    /// when the site cannot answer it.
+    #[must_use]
+    pub fn read(&self, property: &SiteProperty) -> Option<f64> {
+        match property {
+            SiteProperty::DepositRichness { commodity } => {
+                let cell = self.own_cell()?;
+                Some(f64::from(
+                    cell.deposits
+                        .iter()
+                        .filter(|d| &d.commodity_id == commodity)
+                        .map(|d| d.richness)
+                        .fold(0.0_f32, f32::max),
+                ))
+            }
+            SiteProperty::AtmosphereDensity => {
+                let body = self.body?;
+                // Rank 0..=3 normalised onto 0..=1.
+                Some(f64::from(body.atmosphere_density.rank()) / 3.0)
+            }
+            SiteProperty::Elevation => Some(f64::from(self.own_cell()?.elevation)),
+        }
+    }
+
+    /// The output multiplier this site implies for `scaling`.
+    ///
+    /// `1.0` when the building declares no scaling, and also when the site
+    /// cannot answer the property. The second case is deliberately neutral
+    /// rather than zero: an unknown site should leave a building performing
+    /// exactly as it did before this mechanism existed, not silently produce
+    /// nothing. That is the opposite of the choice made for site
+    /// *requirements*, where an unanswerable condition refuses — a
+    /// requirement that cannot be shown to hold is a reason not to build,
+    /// while an unreadable property is simply no information.
+    #[must_use]
+    pub fn output_multiplier(&self, scaling: Option<&SiteScaling>) -> f64 {
+        let Some(scaling) = scaling else { return 1.0 };
+        match self.read(&scaling.property) {
+            Some(reading) => scaling.multiplier_at(reading),
+            None => 1.0,
+        }
+    }
+
+    /// The site's own hex, if it has one.
+    fn own_cell(&self) -> Option<&'a crate::map::HexCell> {
+        let (map, coord) = (self.map?, self.coord?);
+        map.cell(map.wrap_coord(coord))
     }
 
     /// Every requirement in `reqs` this site fails, in authored order.
@@ -302,5 +351,132 @@ mod tests {
             .describe(),
             "thin atmosphere or denser"
         );
+    }
+
+    // ── Output scaling (issue #411) ─────────────────────────────────────────
+
+    fn scaling(property: SiteProperty, at_min: f64, at_max: f64) -> SiteScaling {
+        SiteScaling {
+            property,
+            at_min,
+            at_max,
+        }
+    }
+
+    #[test]
+    fn deposit_richness_drives_the_multiplier_between_the_authored_endpoints() {
+        let lean = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let rich = {
+            let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+            let coord = HexCoord::new(0, 0);
+            let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+            cell.deposits = vec![Deposit::new("hydrocarbons", 1.0)];
+            m.cells.insert(coord, cell);
+            m
+        };
+        let s = scaling(
+            SiteProperty::DepositRichness {
+                commodity: "hydrocarbons".into(),
+            },
+            0.25,
+            1.5,
+        );
+
+        assert!((ctx(&lean, 0, 0, None).output_multiplier(Some(&s)) - 0.25).abs() < 1e-9);
+        assert!((ctx(&rich, 0, 0, None).output_multiplier(Some(&s)) - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_mid_range_reading_lands_between_the_endpoints() {
+        let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+        cell.deposits = vec![Deposit::new("ore", 0.5)];
+        m.cells.insert(coord, cell);
+
+        let s = scaling(
+            SiteProperty::DepositRichness {
+                commodity: "ore".into(),
+            },
+            0.0,
+            2.0,
+        );
+        assert!((ctx(&m, 0, 0, None).output_multiplier(Some(&s)) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_descending_curve_is_allowed() {
+        // Nothing assumes the relationship is positive — some outputs should
+        // fall as a property rises.
+        let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+        cell.deposits = vec![Deposit::new("ore", 1.0)];
+        m.cells.insert(coord, cell);
+
+        let s = scaling(
+            SiteProperty::DepositRichness {
+                commodity: "ore".into(),
+            },
+            2.0,
+            0.5,
+        );
+        assert!((ctx(&m, 0, 0, None).output_multiplier(Some(&s)) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn atmosphere_density_reads_across_its_whole_range() {
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let s = scaling(SiteProperty::AtmosphereDensity, 0.0, 3.0);
+        for (density, expected) in [
+            (AtmosphereDensity::Vacuum, 0.0),
+            (AtmosphereDensity::Dense, 3.0),
+        ] {
+            let body = body_with(density);
+            let got = ctx(&m, 0, 0, Some(&body)).output_multiplier(Some(&s));
+            assert!((got - expected).abs() < 1e-9, "{density:?} gave {got}");
+        }
+        // Thin is one third of the way up the rank scale.
+        let thin = body_with(AtmosphereDensity::Thin);
+        let got = ctx(&m, 0, 0, Some(&thin)).output_multiplier(Some(&s));
+        assert!((got - 1.0).abs() < 1e-9, "Thin gave {got}");
+    }
+
+    #[test]
+    fn a_building_with_no_scaling_is_neutral() {
+        assert!((SiteContext::unknown().output_multiplier(None) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_unreadable_site_is_neutral_rather_than_zero() {
+        // The opposite of the choice made for site *requirements*: a condition
+        // that cannot be shown to hold is a reason not to build, but a
+        // property that cannot be read is simply no information, and must
+        // leave the building performing as it did before scaling existed.
+        let s = scaling(
+            SiteProperty::DepositRichness {
+                commodity: "ore".into(),
+            },
+            0.0,
+            2.0,
+        );
+        assert!((SiteContext::unknown().output_multiplier(Some(&s)) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_reading_outside_the_normalised_range_is_clamped_not_extrapolated() {
+        // A property implementation returning out-of-range is a bug; silently
+        // extrapolating would turn it into a wildly wrong yield instead of a
+        // merely capped one.
+        let s = scaling(SiteProperty::Elevation, 1.0, 2.0);
+        assert!((s.multiplier_at(5.0) - 2.0).abs() < 1e-9);
+        assert!((s.multiplier_at(-3.0) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_multiplier_never_goes_negative() {
+        let s = scaling(SiteProperty::Elevation, -4.0, -1.0);
+        assert!(s.multiplier_at(0.0) >= 0.0);
+        assert!(s.multiplier_at(1.0) >= 0.0);
     }
 }

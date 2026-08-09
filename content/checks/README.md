@@ -74,3 +74,25 @@ demonstrates every field in `assertions.yaml`.
 harness check content/checks/bootstrap        # human-readable
 harness check content/checks/bootstrap --json # structured output
 ```
+
+## Site-scaled buildings have no site here
+
+A bundle assembles a synthetic colony straight from YAML — there is no map, no
+hex, and no body behind it. So a building that declares `output_scaling`
+(issue #411) has no site property to read, and the harness runs it at the
+neutral multiplier of `1.0`.
+
+That is the right default (an unreadable site leaves a building performing as
+it did before scaling existed, rather than producing nothing), but it means a
+bundle **cannot currently check a site-scaled building at anything other than
+its nominal output**. Two consequences worth knowing:
+
+- A bundle containing such a building is still valid and still checks its
+  nominal rates; it just is not exercising the scaling.
+- Do not author a bundle whose expected numbers depend on a *scaled* yield —
+  it will pass here and mean nothing.
+
+Teaching bundles to state an assumed site (`assume_site: { deposit_richness: ... }`
+or similar) is the obvious fix and is noted in #411. Until then, buildings
+whose interesting behaviour *is* the scaling belong in engine tests rather
+than in a bundle.

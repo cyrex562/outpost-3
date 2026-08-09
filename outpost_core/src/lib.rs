@@ -3285,6 +3285,21 @@ impl GameEngine {
                         .difficulty_scalar
                         .scalar_for(&modifier::ModifiableQuantity::MaintenanceConsumption);
                     let maintenance_enabled = self.state.maintenance_enabled;
+                    // Per-colony site output multipliers (issue #411).
+                    // Computed before the power-grid pass below, not just
+                    // before the mutable production loop: a site-scaled
+                    // generator contributes scaled *capacity*, so the
+                    // cross-colony transfer resolution has to see the same
+                    // numbers production will.
+                    let colony_site_mults: std::collections::HashMap<
+                        ColonyId,
+                        std::collections::HashMap<String, f64>,
+                    > = self
+                        .state
+                        .colonies
+                        .iter()
+                        .map(|c| (c.id, self.colony_site_multipliers(c)))
+                        .collect();
                     // Cross-colony power transfer (issue #383): before any
                     // colony's production actually runs, look at every
                     // colony's raw (pre-transfer) power balance and walk
@@ -3313,6 +3328,7 @@ impl GameEngine {
                                         registry,
                                         power_scalar,
                                         &c.active_recipes,
+                                        colony_site_mults.get(&c.id),
                                     ),
                                 )
                             })
@@ -3420,6 +3436,7 @@ impl GameEngine {
                             deposits,
                             &self.state.modifier_accumulator,
                             &self.state.difficulty_scalar,
+                            colony_site_mults.get(&colony.id),
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -3589,6 +3606,11 @@ impl GameEngine {
                             Some(deposits),
                             &self.state.modifier_accumulator,
                             &self.state.difficulty_scalar,
+                            // An outpost has no surface hex (see
+                            // `outpost_site`), so no hex-driven property can
+                            // be read for it — site-scaled buildings run
+                            // unscaled there rather than at zero.
+                            None,
                         );
                         for result in &prod_outcome.building_results {
                             for shortfall in &result.shortfalls {
@@ -6779,6 +6801,10 @@ impl GameEngine {
                 // (issue #303: `full_capacity: true` and `labour_assigned: 0`
                 // were placeholders, and the UI inferred "idle" from the
                 // always-zero labour, so every building read as idle).
+                // Site output multipliers (issue #411), so each row can show
+                // what its site is doing to its yield. Computed once for the
+                // whole panel rather than per row.
+                let site_mults = self.colony_site_multipliers(c);
                 let buildings = c
                     .buildings
                     .iter()
@@ -6837,6 +6863,11 @@ impl GameEngine {
                             paused: b.paused,
                             slot_cost: b.slot_cost,
                             full_capacity: scale >= 1.0 - 1e-9,
+                            #[allow(clippy::cast_possible_truncation)]
+                            site_multiplier: site_mults
+                                .get(b.building_type.as_str())
+                                .copied()
+                                .unwrap_or(1.0) as f32,
                             scale,
                             shortfall_reason,
                             shortfall_kind: shortfall_kind.map(str::to_owned),
@@ -8002,6 +8033,33 @@ impl GameEngine {
         site::SiteContext { map, coord, body }
     }
 
+    /// Output multipliers for this colony's site, keyed by building type
+    /// (issue #411).
+    ///
+    /// Only buildings that declare `output_scaling` get an entry, so the map
+    /// stays small and an absent key reads as the neutral `1.0`.
+    fn colony_site_multipliers(
+        &self,
+        colony: &colony::Colony,
+    ) -> std::collections::HashMap<String, f64> {
+        let ctx = self.colony_site(colony);
+        self.state
+            .registry
+            .as_ref()
+            .map(|reg| {
+                reg.buildings()
+                    .filter(|b| b.output_scaling.is_some())
+                    .map(|b| {
+                        (
+                            b.id.clone(),
+                            ctx.output_multiplier(b.output_scaling.as_ref()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The site an outpost occupies.
     ///
     /// An outpost is anchored to a body with no surface hex, so `coord` and
@@ -8937,6 +8995,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
 
@@ -8987,6 +9046,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
         engine
@@ -9133,6 +9193,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
 
@@ -9195,6 +9256,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
         engine
@@ -9378,6 +9440,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
 
@@ -9707,6 +9770,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9933,6 +9997,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -10186,6 +10251,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -10335,6 +10401,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -10342,6 +10409,7 @@ mod tests {
             contamination_reduction: 0.3,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
             slot_cost: 0,
             ..base("hex_remediation")
         });
@@ -10740,6 +10808,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -11189,6 +11258,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -11212,6 +11282,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
 
         reg.insert_building(BuildingDef {
@@ -11234,6 +11305,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -11411,6 +11483,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "generate_power_flow".into(),
@@ -11452,6 +11525,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
 
         reg
@@ -13486,6 +13560,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -13746,6 +13821,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
 
@@ -13805,6 +13881,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
         engine
@@ -14123,6 +14200,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -14807,6 +14885,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -14892,6 +14971,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -14968,6 +15048,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -17967,6 +18048,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -18066,6 +18148,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -18185,6 +18268,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -18421,6 +18505,7 @@ mod tests {
                 contamination_reduction: 0.0,
                 max_instances: None,
                 site_requirements: Vec::new(),
+                output_scaling: None,
             });
         }
         engine.state.registry = Some(registry);
@@ -20016,6 +20101,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
 
         reg.insert_building(BuildingDef {
@@ -20038,6 +20124,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -22947,6 +23034,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: max,
             site_requirements: Vec::new(),
+            output_scaling: None,
         });
         reg
     }
@@ -23169,6 +23257,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: reqs,
+            output_scaling: None,
         });
         engine.state.registry = Some(reg);
         (engine, colony_id)

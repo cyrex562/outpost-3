@@ -31,6 +31,7 @@
 //!     contamination_reduction: 0.0,
 //!     max_instances: None,
 //!     site_requirements: vec![],
+//!     output_scaling: None,
 //! };
 //! let mine_recipe = RecipeDef {
 //!     id: "mine_ore".into(),
@@ -359,6 +360,7 @@ mod tests {
             contamination_reduction: 0.0,
             max_instances: None,
             site_requirements: Vec::new(),
+            output_scaling: None,
         }
     }
 

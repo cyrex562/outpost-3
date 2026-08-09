@@ -435,6 +435,9 @@ pub fn process_production(
         None,
         &crate::modifier::ModifierAccumulator::new(),
         &crate::modifier::DifficultyScalar::new(),
+        // No site on the plain path — callers with one use
+        // `process_production_scaled` directly (issue #411).
+        None,
     )
 }
 
@@ -476,6 +479,13 @@ pub fn process_production(
 /// guarantees placement for) are deposit-gated; every other recipe is
 /// unaffected.
 ///
+/// `site_multipliers` (issue #411) maps building type → output multiplier
+/// derived from where the colony stands, via
+/// [`crate::site::SiteContext::output_multiplier`]. Applied to both recipe
+/// outputs and the building's grid-capacity contribution. `None`, or a type
+/// absent from the map, means `1.0` — a site that cannot be read leaves a
+/// building performing exactly as it did before the mechanism existed.
+///
 /// Pass `None` when the colony has **no spatial placement to check against
 /// at all** (e.g. founded via the bare `Command::FoundColony` test/fixture
 /// path with no hex or body link) — gating is inert, matching
@@ -503,6 +513,7 @@ pub fn process_production_scaled(
     deposit_richness: Option<&std::collections::HashMap<String, f32>>,
     modifier_accumulator: &crate::modifier::ModifierAccumulator,
     difficulty_scalar: &crate::modifier::DifficultyScalar,
+    site_multipliers: Option<&std::collections::HashMap<String, f64>>,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     // `power_import` folds in this sol's net cross-colony powerline transfer
@@ -510,8 +521,13 @@ pub fn process_production_scaled(
     // net of transmission loss, negative for a colony exporting its own
     // surplus out. Callers that haven't resolved transfers (e.g. outposts,
     // which have no edges) pass `0.0`.
-    let mut power_grid =
-        compute_power_grid_scaled(buildings, registry, power_scalar, active_recipes);
+    let mut power_grid = compute_power_grid_scaled(
+        buildings,
+        registry,
+        power_scalar,
+        active_recipes,
+        site_multipliers,
+    );
     power_grid.capacity = (power_grid.capacity + power_import).max(0.0);
     let brownout_ratio = power_grid.supply_ratio();
 
@@ -871,6 +887,7 @@ pub fn process_production_scaled(
     let output_multiplier = f64::from(productivity_multiplier.max(0.0));
     let mut building_results: Vec<BuildingProductionResult> = Vec::new();
     for mut p in pending {
+        let site_mult = site_multiplier_for(site_multipliers, p.building_type);
         // Each line applies at its OWN scale (issue #272) — that independence
         // is the point of lines.
         for line in &mut p.lines {
@@ -901,7 +918,8 @@ pub fn process_production_scaled(
                     * line.scale
                     * output_multiplier
                     * category_mult
-                    * tech_mult;
+                    * tech_mult
+                    * site_mult;
                 stores.deposit(&ingredient.id, deposited);
                 line.outputs_deposited
                     .push((ingredient.id.clone(), deposited));
@@ -1008,11 +1026,24 @@ fn workforce(labor_available: f32) -> u32 {
 /// colony's raw capacity/demand *before* running production, to resolve
 /// cross-colony powerline transfers (issue #383) ahead of the pass that
 /// actually applies them.
+/// The site multiplier for one building type, or `1.0` when the caller
+/// supplied none — no site data, or a building that declares no scaling.
+fn site_multiplier_for(
+    site_multipliers: Option<&std::collections::HashMap<String, f64>>,
+    building_type: &str,
+) -> f64 {
+    site_multipliers
+        .and_then(|m| m.get(building_type))
+        .copied()
+        .unwrap_or(1.0)
+}
+
 pub(crate) fn compute_power_grid_scaled(
     buildings: &[ProductionInput],
     registry: &ContentRegistry,
     power_scalar: f32,
     active_recipes: &std::collections::HashMap<String, String>,
+    site_multipliers: Option<&std::collections::HashMap<String, f64>>,
 ) -> PowerGrid {
     let mut capacity = 0.0f64;
     let mut demand = 0.0f64;
@@ -1025,7 +1056,11 @@ pub(crate) fn compute_power_grid_scaled(
         };
         // Negative power_delta = generator.
         if bdef.power_delta < 0.0 {
-            capacity += -bdef.power_delta;
+            // Site scaling (issue #411) applies to grid capacity as well as
+            // to recipe output. Scaling only the latter would leave a
+            // generator advertising headroom its own output can no longer
+            // fill — a half-lit solar array still claiming full capacity.
+            capacity += -bdef.power_delta * site_multiplier_for(site_multipliers, building_type);
         } else {
             demand += bdef.power_delta * mul;
         }
@@ -1932,6 +1967,10 @@ mod tests {
             deposit_richness,
             modifier_accumulator,
             difficulty_scalar,
+            // Tests that care about site scaling call the real function
+            // directly; this shared helper keeps its existing 23 call sites
+            // unchanged by passing no site data (issue #411).
+            None,
         )
     }
 
@@ -1960,6 +1999,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
 
@@ -1983,6 +2023,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -2020,6 +2061,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -2302,6 +2344,7 @@ mod tests {
             None,
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
+            None,
         )
     }
 
@@ -2480,6 +2523,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         };
         for id in ["eater_a", "eater_b"] {
@@ -2633,6 +2677,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         };
         reg.insert_building(building("miner"));
@@ -2858,6 +2903,7 @@ mod tests {
             None,
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
+            None,
         )
     }
 
@@ -3186,6 +3232,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
 
@@ -3211,6 +3258,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -3414,6 +3462,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
 
@@ -3440,6 +3489,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -3846,6 +3896,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -3985,6 +4036,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -4022,6 +4074,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -4289,6 +4342,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -4434,6 +4488,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
@@ -4539,6 +4594,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         };
         reg.insert_building(building("hq"));
@@ -4736,6 +4792,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         let recipe = |id: &str, line: &str, inputs: Vec<(&str, f64)>, outputs: Vec<(&str, f64)>| {
@@ -4845,6 +4902,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         };
         reg.insert_building(b("complex"));
@@ -5067,6 +5125,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         let empty: std::collections::HashMap<String, String> = std::collections::HashMap::new();
@@ -5098,6 +5157,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            output_scaling: None,
             site_requirements: Vec::new(),
         });
         let r = |id: &str, line: Option<&str>, con: bool, i: &[(&str, f64)], o: &[(&str, f64)]| {
@@ -5285,6 +5345,7 @@ mod tests {
             None,
             &crate::modifier::ModifierAccumulator::default(),
             &crate::modifier::DifficultyScalar::default(),
+            None,
         );
 
         assert!(
@@ -5296,5 +5357,128 @@ mod tests {
             (pool.amount("part") - 5.0).abs() < 1e-9,
             "the other line is untouched by the switch"
         );
+    }
+
+    // ── Site output scaling (issue #411) ────────────────────────────────────
+
+    /// A generator whose output and capacity both ride on a site multiplier.
+    fn site_scaled_generator_registry() -> ContentRegistry {
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "array".into(),
+            name: "Array".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: -20.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+            contamination_reduction: 0.0,
+            max_instances: None,
+            site_requirements: Vec::new(),
+            output_scaling: None,
+        });
+        reg.insert_recipe(RecipeDef {
+            id: "generate".into(),
+            name: "Generate".into(),
+            building: "array".into(),
+            cycle_sols: 1,
+            inputs: vec![],
+            outputs: vec![Ingredient {
+                id: "power".into(),
+                quantity: 24.0,
+            }],
+            power_draw: 0.0,
+            concurrent: false,
+            line: None,
+        });
+        reg
+    }
+
+    /// Run one sol with `array` at the given site multiplier, returning the
+    /// power produced and the grid capacity it contributed.
+    fn run_scaled(multiplier: Option<f64>) -> (f64, f64) {
+        let reg = site_scaled_generator_registry();
+        let mults: std::collections::HashMap<String, f64> = multiplier
+            .map(|m| std::iter::once(("array".to_string(), m)).collect())
+            .unwrap_or_default();
+        let site = multiplier.map(|_| &mults);
+
+        let buildings = ProductionInput::from_types(&[("array".to_string(), 1)]);
+        let grid = compute_power_grid_scaled(
+            &buildings,
+            &reg,
+            1.0,
+            &std::collections::HashMap::new(),
+            site,
+        );
+
+        let mut pool = ColonyPool::new();
+        let mut resources = ColonyResourcePool::new();
+        super::process_production_scaled(
+            &mut ColonyStores::new(&mut pool, &mut resources, &reg),
+            &buildings,
+            0.0,
+            &reg,
+            1.0,
+            0.0,
+            1.0,
+            true,
+            1.0,
+            &std::collections::HashMap::new(),
+            &[],
+            None,
+            &crate::modifier::ModifierAccumulator::new(),
+            &crate::modifier::DifficultyScalar::new(),
+            site,
+        );
+        // `power` is unregistered here, so it lands in the tradeable pool
+        // rather than the colony-local resource store — which is all this
+        // test needs: the question is whether the multiplier was applied.
+        (pool.amount("power"), grid.capacity)
+    }
+
+    #[test]
+    fn a_site_multiplier_scales_recipe_output() {
+        let (full, _) = run_scaled(Some(1.0));
+        let (half, _) = run_scaled(Some(0.5));
+        assert!((full - 24.0).abs() < 1e-6, "got {full}");
+        assert!((half - 12.0).abs() < 1e-6, "got {half}");
+    }
+
+    #[test]
+    fn a_site_multiplier_scales_grid_capacity_by_the_same_factor() {
+        // The two must move together, or a generator advertises headroom its
+        // own output cannot fill (or fills headroom it never supplied).
+        let (full_out, full_cap) = run_scaled(Some(1.0));
+        let (half_out, half_cap) = run_scaled(Some(0.5));
+        assert!((full_cap - 20.0).abs() < 1e-6, "got {full_cap}");
+        assert!((half_cap - 10.0).abs() < 1e-6, "got {half_cap}");
+        assert!(
+            ((half_out / full_out) - (half_cap / full_cap)).abs() < 1e-9,
+            "output and capacity scaled by different factors"
+        );
+    }
+
+    #[test]
+    fn a_multiplier_above_one_raises_both() {
+        let (out, cap) = run_scaled(Some(1.5));
+        assert!((out - 36.0).abs() < 1e-6, "got {out}");
+        assert!((cap - 30.0).abs() < 1e-6, "got {cap}");
+    }
+
+    #[test]
+    fn no_site_data_leaves_a_building_exactly_as_it_was() {
+        let (out, cap) = run_scaled(None);
+        assert!((out - 24.0).abs() < 1e-6, "got {out}");
+        assert!((cap - 20.0).abs() < 1e-6, "got {cap}");
     }
 }
