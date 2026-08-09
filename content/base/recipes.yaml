@@ -578,7 +578,7 @@
       quantity: 2.0
   outputs:
     - id: power
-      quantity: 40.0
+      quantity: 96.0
     - id: radioactive_waste
       quantity: 1.0
 
@@ -623,7 +623,7 @@
   inputs: []
   outputs:
     - id: power
-      quantity: 20.0
+      quantity: 36.0
 
 # ── Tier 3 ───────────────────────────────────────────────────────────────────
 
@@ -829,7 +829,7 @@
       quantity: 3.0
   outputs:
     - id: power
-      quantity: 60.0
+      quantity: 132.0
 
 - id: house_colonists_dome
   name: House Colonists (Dome)

@@ -1,0 +1,16 @@
+id: power-tiers-check
+name: Power Tier Progression Check
+version: '0.1.0'
+description: >
+  Pins the retuned output of every generator above tech 0 (issue #427).
+
+  The *ordering* invariant — each tier beating the one below per build slot —
+  is asserted as a content test in outpost_core/src/content/loader.rs, because
+  it is a property of the definitions rather than of any colony's flow. This
+  bundle covers the other half: it runs all four generators through the real
+  production pipeline at once and pins the absolute rates, so a typo in any one
+  of them shows up here rather than in play.
+
+  Deliberately has no consumption sink. The question is what the generators
+  produce, not whether some colony's demand is met, and a sink would mean a
+  change in colonist consumption could mask a change in generator output.

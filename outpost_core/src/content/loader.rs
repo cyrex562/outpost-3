@@ -1000,6 +1000,138 @@ mod tests {
         );
     }
 
+    /// Each researched generator beats the tier below it, per build slot.
+    ///
+    /// Slots are the scarce resource in a colony, so a generator is worth what
+    /// it produces *per slot* — and on that measure the ladder used to run
+    /// backwards (issue #427). `solar_array_mk2` supplied the same grid
+    /// capacity as `mk1` and less power for 2.5x the cost, and
+    /// `fission_reactor` was worse per slot than two `mk1`s while also costing
+    /// a worker, a fuel chain and a waste byproduct.
+    ///
+    /// Asserts the *ordering* rather than the numbers, so the values stay free
+    /// to be retuned by the harness (`docs/DESIGN.md` §17) as long as the
+    /// progression survives.
+    #[test]
+    fn each_power_tier_beats_the_one_below_it_per_slot() {
+        let (Some(byaml), Some(ryaml)) = (read_real_buildings_yaml(), read_real_recipes_yaml())
+        else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let recipes: Vec<crate::content::types::RecipeDef> =
+            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
+
+        let def = |id: &str| {
+            buildings
+                .iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id} must exist in the roster"))
+        };
+        /// Grid capacity per slot. Negative `power_delta` is the generator
+        /// convention (see `compute_power_grid_scaled`).
+        let capacity_per_slot = |id: &str| {
+            let b = def(id);
+            assert!(
+                b.slot_cost > 0,
+                "{id} occupies no slot; per-slot is meaningless"
+            );
+            -b.power_delta / f64::from(b.slot_cost)
+        };
+        let power_per_slot = |id: &str| {
+            let produced: f64 = recipes
+                .iter()
+                .filter(|r| r.building == id)
+                .flat_map(|r| r.outputs.iter())
+                .filter(|o| o.id == "power")
+                .map(|o| o.quantity)
+                .sum();
+            assert!(produced > 0.0, "{id} produces no power");
+            produced / f64::from(def(id).slot_cost)
+        };
+
+        // Cheapest to flagship. Each step is a tech tier above the last.
+        let ladder = [
+            "solar_array_mk1",          // tech 0
+            "solar_array_mk2",          // improved_solar
+            "fission_reactor",          // nuclear_fuel_cycle
+            "fusion_reactor_prototype", // fusion_basics
+        ];
+        for pair in ladder.windows(2) {
+            let (lower, upper) = (pair[0], pair[1]);
+            assert!(
+                power_per_slot(upper) > power_per_slot(lower),
+                "{upper} produces {:.1} power/slot, not more than {lower}'s {:.1} — \
+                 researching it would be a downgrade",
+                power_per_slot(upper),
+                power_per_slot(lower),
+            );
+            assert!(
+                capacity_per_slot(upper) > capacity_per_slot(lower),
+                "{upper} supplies {:.1} capacity/slot, not more than {lower}'s {:.1}",
+                capacity_per_slot(upper),
+                capacity_per_slot(lower),
+            );
+        }
+    }
+
+    /// No generator is dominated by one that is both earlier and cheaper.
+    ///
+    /// `wind_turbine` is weaker than `solar_array_mk1` per slot and per unit of
+    /// metal, but it is also the cheapest generator to put up at all, which is
+    /// a real choice for a colony that cannot yet afford solar. Its substantive
+    /// differentiation — only working where there is an atmosphere — arrives
+    /// with issue #416.
+    #[test]
+    fn no_generator_is_both_weaker_and_dearer_than_an_untech_gated_one() {
+        let Some(byaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let metal_cost = |b: &crate::content::types::BuildingDef| {
+            b.construction_cost
+                .iter()
+                .filter(|i| i.id == "structural_metal")
+                .map(|i| i.quantity)
+                .sum::<f64>()
+        };
+
+        let generators: Vec<&crate::content::types::BuildingDef> = buildings
+            .iter()
+            .filter(|b| {
+                matches!(b.category, crate::content::types::BuildingCategory::Power)
+                    && b.power_delta < 0.0
+            })
+            .collect();
+        assert!(generators.len() >= 4, "expected the full power roster");
+
+        for a in &generators {
+            for b in &generators {
+                if a.id == b.id {
+                    continue;
+                }
+                let a_free = a.tech_prerequisite.is_none();
+                let b_gated = b.tech_prerequisite.is_some();
+                // Only compare a tech-0 generator against a gated one: two
+                // buildings on the same tier are allowed to trade off.
+                if !(a_free && b_gated) {
+                    continue;
+                }
+                let dominated = -a.power_delta / f64::from(a.slot_cost)
+                    >= -b.power_delta / f64::from(b.slot_cost)
+                    && metal_cost(a) <= metal_cost(b);
+                assert!(
+                    !dominated,
+                    "{} needs tech but is no better per slot than the tech-free {}, \
+                     and costs at least as much metal",
+                    b.id, a.id
+                );
+            }
+        }
+    }
+
     /// A colony gets exactly one headquarters.
     #[test]
     fn colony_hq_is_capped_at_one_instance() {

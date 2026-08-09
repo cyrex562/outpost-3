@@ -1,0 +1,27 @@
+# Expected at one of each generator:
+#   solar_array_mk1            24
+#   solar_array_mk2            36   (1.5x mk1 per slot)
+#   fission_reactor            96   (2x mk1 per slot, over 2 slots)
+#   fusion_reactor_prototype  132   (2.75x mk1 per slot, over 2 slots)
+#                            ----
+#                             288
+#
+# Pinned at the exact total rather than a loose floor: this bundle exists to
+# catch a drifted generator rate, and a rate drifting *up* would go unnoticed
+# under a floor.
+
+- expect: closed
+  label: overall-chain-closes
+
+- commodity: power
+  expect: closed
+  min_net: 288.0
+  label: four-generator-tiers-produce-288-power-per-sol
+
+- commodity: nuclear_fuel
+  expect: closed
+  label: fission-fuel-import-covers-its-draw
+
+- commodity: fusion_fuel
+  expect: closed
+  label: fusion-fuel-import-covers-its-draw

@@ -1,0 +1,47 @@
+# Rates mirror content/base/recipes.yaml exactly.
+#
+# Reactor fuel draw is unchanged by the #427 retune: one nuclear_refinery
+# (3 nuclear_fuel/sol) still feeds exactly one fission_reactor, and one
+# gas_extractor (4 fusion_fuel/sol) one fusion reactor. A better reactor
+# extracting more energy from the same fuel is the intended reading — raising
+# draw alongside output would have needed two refineries per reactor, spending
+# the very slots the tier was meant to save.
+- id: generate_power_solar_mk1
+  name: Generate Power (Solar Mk1)
+  building: solar_array_mk1
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 24.0
+
+- id: generate_power_solar_mk2
+  name: Generate Power (Solar Mk2)
+  building: solar_array_mk2
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 36.0
+
+- id: generate_power_fission
+  name: Generate Power (Fission)
+  building: fission_reactor
+  cycle_sols: 1
+  inputs:
+    - id: nuclear_fuel
+      quantity: 2.0
+  outputs:
+    - id: power
+      quantity: 96.0
+
+- id: generate_power_fusion
+  name: Generate Power (Fusion)
+  building: fusion_reactor_prototype
+  cycle_sols: 1
+  inputs:
+    - id: fusion_fuel
+      quantity: 3.0
+  outputs:
+    - id: power
+      quantity: 132.0

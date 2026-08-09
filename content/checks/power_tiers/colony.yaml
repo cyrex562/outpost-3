@@ -1,0 +1,21 @@
+# One of each generator above tech 0, plus solar_array_mk1 as the tech-0
+# baseline they are all measured against.
+#
+# Fuel arrives as an import at exactly the reactors' draw, so both fuels net
+# zero and any change to reactor fuel draw shows up as a deficit here rather
+# than silently rebalancing.
+buildings:
+  - building_id: solar_array_mk1
+    recipe_id: generate_power_solar_mk1
+  - building_id: solar_array_mk2
+    recipe_id: generate_power_solar_mk2
+  - building_id: fission_reactor
+    recipe_id: generate_power_fission
+  - building_id: fusion_reactor_prototype
+    recipe_id: generate_power_fusion
+
+imports:
+  - commodity_id: nuclear_fuel
+    rate: 2.0
+  - commodity_id: fusion_fuel
+    rate: 3.0
