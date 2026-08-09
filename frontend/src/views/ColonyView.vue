@@ -269,37 +269,120 @@ function existingCount(b: BuildingOption): number {
   return built + queued
 }
 
-/** Whether `b`'s tech prerequisite is unmet. */
-function isTechLocked(b: BuildingOption): boolean {
-  return b.tech_prerequisite !== null && !researchedTechs.value.has(b.tech_prerequisite)
+/**
+ * One line in a building's requirement list (issue #423).
+ *
+ * Every requirement is listed on every card, met or not — reading a card's
+ * requirements should not depend on first working out whether it happens to be
+ * blocked, and a list whose length changes with state is harder to scan.
+ */
+export interface BuildRequirement {
+  /** Stable key, also used as the row's test id suffix. */
+  key: string
+  /** What the requirement is — "40 structural_metal", "Tech: automation". */
+  label: string
+  /** Present only when unmet: what is missing — "have 12". */
+  shortfall: string | null
+  met: boolean
+}
+
+/** Unreserved stock per commodity — what construction can actually spend. */
+const availableStock = computed<Map<string, number>>(() => {
+  const scr = screen.value
+  if (!scr) return new Map()
+  return new Map(scr.stockpile.map((row) => [row.commodity_id, row.amount - row.reserved]))
+})
+
+/** Trim trailing zeros so a cost of 40 reads "40", not "40.0". */
+function fmt(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
 
 /**
- * Whether the colony could fund `b`'s construction from what it holds now.
+ * Every requirement for `b`, each marked met or unmet.
  *
- * Measured against **unreserved** stock (`amount - reserved`), because that is
- * what construction can actually spend: the engine reports a distinct
- * `StalledByReserve` outcome when raw stock would cover an instalment but the
- * player's own commodity reserve withholds it, so counting reserved stock here
- * would call a building affordable that will visibly refuse to progress.
+ * Commodities are checked **individually** rather than as one affordable/not
+ * verdict, so a building short on two of them says so — `disabledReason` names
+ * only the first blocker it finds, which made a building with three problems
+ * read as having one.
  *
- * Measured against the **whole** construction cost, not the first instalment.
- * Construction is paid in per-sol instalments, so a colony *can* queue
- * something it cannot yet fully afford and let it fill in as materials arrive
- * — which is why this is a filter the player opts into rather than a reason to
- * disable the button. What it answers is "could I fund this now", which is the
- * question someone browsing the catalogue is asking.
+ * Commodity stock is measured against **unreserved** amounts (`amount -
+ * reserved`), because that is what construction can actually spend: the engine
+ * reports a distinct `StalledByReserve` outcome when raw stock would cover an
+ * instalment but the player's own reserve withholds it, so counting reserved
+ * stock would mark something satisfied that visibly refuses to progress.
  *
- * Unknown with no colony screen loaded; treated as affordable so the filter
- * never hides the entire catalogue while data is still arriving.
+ * It is measured against the **whole** construction cost rather than the first
+ * instalment. Construction is paid per sol, so a colony can queue what it
+ * cannot yet fully fund — this answers "could I fund this now", which is the
+ * question someone reading the catalogue is asking.
+ *
+ * With no colony screen loaded, stock- and slot-dependent requirements are
+ * reported as met rather than guessed at: showing a wall of red while data is
+ * still arriving would be worse than briefly optimistic.
  */
-function isAffordable(b: BuildingOption): boolean {
+function requirementsFor(b: BuildingOption): BuildRequirement[] {
+  const out: BuildRequirement[] = []
   const scr = screen.value
-  if (!scr) return true
-  const available = new Map(
-    scr.stockpile.map((row) => [row.commodity_id, row.amount - row.reserved]),
-  )
-  return b.construction_cost.every(([id, qty]) => (available.get(id) ?? 0) >= qty)
+
+  if (b.tech_prerequisite !== null) {
+    out.push({
+      key: `tech-${b.tech_prerequisite}`,
+      label: `Tech: ${b.tech_prerequisite}`,
+      shortfall: null,
+      met: researchedTechs.value.has(b.tech_prerequisite),
+    })
+  }
+
+  for (const [id, qty] of b.construction_cost) {
+    const have = scr ? (availableStock.value.get(id) ?? 0) : qty
+    const met = have >= qty
+    out.push({
+      key: `cost-${id}`,
+      label: `${fmt(qty)} ${id}`,
+      shortfall: met ? null : `have ${fmt(have)}`,
+      met,
+    })
+  }
+
+  // Slot-granting projects are priced at zero slots by the engine
+  // (`effective_slot_cost`), so listing "0 slots" would be noise.
+  if (b.slot_cost > 0) {
+    const free = slotsAvailable.value
+    const met = free === null || free >= b.slot_cost
+    out.push({
+      key: 'slots',
+      label: `${b.slot_cost} slot${b.slot_cost === 1 ? '' : 's'}`,
+      shortfall: met || free === null ? null : `${free} free`,
+      met,
+    })
+  }
+
+  if (b.max_instances !== null) {
+    const existing = existingCount(b)
+    out.push({
+      key: 'limit',
+      label: `Limit ${b.max_instances} per colony`,
+      shortfall: existing < b.max_instances ? null : `${existing} already`,
+      met: existing < b.max_instances,
+    })
+  }
+
+  return out
+}
+
+// The two filter predicates are derived from the same requirement list rather
+// than computed separately, so the filters and the badges can never disagree
+// about whether something is buildable.
+
+/** Whether `b`'s tech prerequisite is unmet. */
+function isTechLocked(b: BuildingOption): boolean {
+  return requirementsFor(b).some((r) => r.key.startsWith('tech-') && !r.met)
+}
+
+/** Whether the colony could fund `b`'s construction from what it holds now. */
+function isAffordable(b: BuildingOption): boolean {
+  return requirementsFor(b).every((r) => !r.key.startsWith('cost-') || r.met)
 }
 
 /**
@@ -696,6 +779,7 @@ watch(
         :disabled-reason="disabledReason"
         :is-tech-locked="isTechLocked"
         :is-affordable="isAffordable"
+        :requirements="requirementsFor"
         :slots-available="slotsAvailable"
         :busy="queueBusy"
         @queue="queueBuilding"

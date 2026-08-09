@@ -79,11 +79,13 @@ test('the build dialog offers power_plant with no tech, and greys out a built co
   // power_plant is buildable right now, with nothing researched — that is the
   // whole point of adding it alongside the cap.
   await expect(page.getByTestId('build-card-power_plant')).toBeVisible()
-  await expect(page.getByTestId('build-card-reason-power_plant')).toHaveCount(0)
+  await expect(page.getByTestId('btn-queue-power_plant')).toBeEnabled()
 
-  // colony_hq starts available, since this colony has none.
+  // colony_hq starts available, since this colony has none. Its cap shows as a
+  // *met* requirement rather than being absent — every requirement is listed
+  // whether or not it is satisfied (issue #423).
   await expect(page.getByTestId('build-card-colony_hq')).toBeVisible()
-  await expect(page.getByTestId('build-card-reason-colony_hq')).toHaveCount(0)
+  await expect(page.getByTestId('build-req-colony_hq-limit')).toHaveAttribute('data-met', 'true')
 
   // Queue one through the UI — the real player path, and the one that
   // refreshes the client's colony screen. (Posting to /api/command directly
@@ -94,11 +96,11 @@ test('the build dialog offers power_plant with no tech, and greys out a built co
 
   // The refreshed screen arrives asynchronously, so poll for the card to turn
   // unavailable rather than assuming it has by the next tick.
-  const hqReason = page.getByTestId('build-card-reason-colony_hq')
-  await expect(hqReason).toBeVisible({ timeout: 20_000 })
-  await expect(hqReason).toContainText(/limit 1 per colony/i)
+  const hqLimit = page.getByTestId('build-req-colony_hq-limit')
+  await expect(hqLimit).toHaveAttribute('data-met', 'false', { timeout: 20_000 })
+  await expect(hqLimit).toContainText(/limit 1 per colony/i)
   await expect(page.getByTestId('btn-queue-colony_hq')).toBeDisabled()
 
   // ...while the uncapped generator stays available.
-  await expect(page.getByTestId('build-card-reason-power_plant')).toHaveCount(0)
+  await expect(page.getByTestId('btn-queue-power_plant')).toBeEnabled()
 })

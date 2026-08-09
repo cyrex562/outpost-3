@@ -9,6 +9,7 @@
 
 import { computed, reactive, ref, watch } from 'vue'
 import type { BuildingOption } from '@/services/tauriBridge'
+import type { BuildRequirement } from '@/views/ColonyView.vue'
 
 const props = defineProps<{
   catalog: BuildingOption[]
@@ -26,6 +27,13 @@ const props = defineProps<{
   isTechLocked: (b: BuildingOption) => boolean
   /** Whether the colony could fund this building's construction right now. */
   isAffordable: (b: BuildingOption) => boolean
+  /**
+   * Every requirement for this building, each marked met or unmet (issue
+   * #423). Replaces the bare cost chips: those said what a building costs but
+   * never whether the colony had it, and `disabledReason` names only the first
+   * blocker, so a building with three problems read as having one.
+   */
+  requirements: (b: BuildingOption) => BuildRequirement[]
 }>()
 
 const emit = defineEmits<{
@@ -255,6 +263,7 @@ function queue(b: BuildingOption): void {
               :key="b.id"
               class="build-row"
               :class="{ 'is-disabled': props.disabledReason(b) !== null }"
+              :title="props.disabledReason(b) ?? ''"
               :data-testid="`build-card-${b.id}`"
             >
               <div class="build-row-main">
@@ -263,19 +272,39 @@ function queue(b: BuildingOption): void {
                   {{ b.construction_turns }} sols · {{ b.labor_per_turn }} labor/turn ·
                   {{ b.slot_cost }} slot{{ b.slot_cost === 1 ? '' : 's' }}
                 </span>
-                <span v-if="b.construction_cost.length" class="build-row-cost">
-                  <span v-for="(c, i) in b.construction_cost" :key="i" class="cost-chip">{{ c[1] }} {{ c[0] }}</span>
-                </span>
               </div>
 
               <p v-if="b.description" class="build-row-desc" :title="b.description">
                 {{ b.description }}
               </p>
 
+              <ul
+                v-if="props.requirements(b).length"
+                class="req-list"
+                :data-testid="`build-reqs-${b.id}`"
+              >
+                <li
+                  v-for="r in props.requirements(b)"
+                  :key="r.key"
+                  class="req"
+                  :class="r.met ? 'req-met' : 'req-unmet'"
+                  :data-testid="`build-req-${b.id}-${r.key}`"
+                  :data-met="r.met"
+                >
+                  <span class="req-mark" aria-hidden="true">{{ r.met ? '\u2713' : '\u2717' }}</span>
+                  <span class="req-sr">{{ r.met ? 'met:' : 'missing:' }}</span>
+                  <span class="req-label">{{ r.label }}</span>
+                  <span v-if="r.shortfall" class="req-short">({{ r.shortfall }})</span>
+                </li>
+              </ul>
+
+              <!-- No separate "reason" line: every branch of `disabledReason`
+                   (tech, instance limit, slots) now appears in the requirement
+                   list above as a superset — it names *every* blocker, not just
+                   the first. Repeating the first one here made each blocked row
+                   say the same thing twice and cost a line of height. It stays
+                   as the row's tooltip and still drives the disabled state. -->
               <div class="build-row-foot">
-                <span v-if="props.disabledReason(b)" class="build-card-reason" :data-testid="`build-card-reason-${b.id}`">
-                  {{ props.disabledReason(b) }}
-                </span>
                 <label class="qty-label">
                   ×
                   <input
@@ -407,7 +436,6 @@ function queue(b: BuildingOption): void {
 .build-row-main { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
 .build-row-name { color: var(--accent); font-weight: bold; font-size: 0.85rem; }
 .build-row-stats { color: var(--text-dim); font-size: 0.72rem; }
-.build-row-cost { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-left: auto; }
 
 /* Clamped to two lines so every row keeps the same height and the column
    stays scannable; the full text is on the element's `title`. */
@@ -422,12 +450,45 @@ function queue(b: BuildingOption): void {
   overflow: hidden;
 }
 
-/* The controls sit right on every row. The reason span carries
-   `margin-right: auto` when present, but a buildable row has no reason — so
-   the anchor lives here instead, or those rows would left-align alone. */
+/* Requirement badges (issue #423). Every requirement is listed on every row,
+   met or not, so the set is readable at a glance without first working out
+   whether the building happens to be blocked.
+
+   Colour is never the only signal: the ✓/✗ glyphs differ in shape, the
+   shortfall text appears only when something is missing, and `.req-sr` carries
+   a "met:"/"missing:" word for screen readers. */
+.req-list {
+  list-style: none;
+  margin: 0.1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.65rem;
+  font-size: 0.72rem;
+}
+.req { display: flex; align-items: baseline; gap: 0.25rem; }
+.req-mark { font-weight: bold; }
+.req-met { color: var(--good); }
+.req-unmet { color: var(--danger); }
+.req-short { opacity: 0.85; }
+
+/* Visible to assistive tech, not on screen — the glyph already carries the
+   meaning visually and repeating it as text would be noise. */
+.req-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Controls sit right on every row. */
 .build-row-foot { display: flex; align-items: center; gap: 0.5rem; }
 .build-row-foot .qty-label { margin-left: auto; }
-.build-row-foot .build-card-reason + .qty-label { margin-left: 0; }
 
 .cost-chip {
   background: var(--surface-alt);
@@ -437,7 +498,6 @@ function queue(b: BuildingOption): void {
   color: var(--good-dim);
   font-size: 0.7rem;
 }
-.build-card-reason { color: var(--warn-dim); font-size: 0.7rem; font-style: italic; margin-right: auto; }
 .qty-label { color: var(--text-dim); font-size: 0.78rem; display: flex; align-items: center; gap: 0.2rem; }
 .qty-input {
   width: 3.2rem;

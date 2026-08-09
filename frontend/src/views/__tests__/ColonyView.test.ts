@@ -455,23 +455,35 @@ describe('ColonyView build limits (max_instances)', () => {
 
   it('disables a capped building the colony already has', async () => {
     const wrapper = await openDialog([option()], [buildingRow('colony_hq', 1)])
-    const reason = wrapper.find('[data-testid="build-card-reason-colony_hq"]')
-    expect(reason.exists()).toBe(true)
-    expect(reason.text()).toMatch(/limit 1 per colony/i)
+    // The cap now reads as a requirement badge rather than a reason line
+    // (issue #423) — same information, alongside every other blocker.
+    const limit = wrapper.find('[data-testid="build-req-colony_hq-limit"]')
+    expect(limit.exists()).toBe(true)
+    expect(limit.attributes('data-met')).toBe('false')
+    expect(limit.text()).toMatch(/limit 1 per colony/i)
+    expect(
+      wrapper.get('[data-testid="btn-queue-colony_hq"]').attributes('disabled'),
+    ).toBeDefined()
   })
 
   it('counts a queued copy toward the cap, not just standing buildings', async () => {
     // Queueing a second copy would look fine here but be rejected by the
     // engine, so the UI has to count the queue the same way the engine does.
     const wrapper = await openDialog([option()], [], [queueRow('colony_hq', 1)])
-    const reason = wrapper.find('[data-testid="build-card-reason-colony_hq"]')
-    expect(reason.exists()).toBe(true)
-    expect(reason.text()).toMatch(/limit 1 per colony/i)
+    const limit = wrapper.get('[data-testid="build-req-colony_hq-limit"]')
+    expect(limit.attributes('data-met')).toBe('false')
+    expect(limit.text()).toMatch(/limit 1 per colony/i)
   })
 
   it('leaves a capped building available when the colony has none yet', async () => {
     const wrapper = await openDialog([option()], [], [])
-    expect(wrapper.find('[data-testid="build-card-reason-colony_hq"]').exists()).toBe(false)
+    // The badge is still listed — met requirements always show — but satisfied.
+    expect(wrapper.get('[data-testid="build-req-colony_hq-limit"]').attributes('data-met')).toBe(
+      'true',
+    )
+    expect(
+      wrapper.get('[data-testid="btn-queue-colony_hq"]').attributes('disabled'),
+    ).toBeUndefined()
   })
 
   it('leaves uncapped buildings alone however many are already built', async () => {
@@ -479,7 +491,7 @@ describe('ColonyView build limits (max_instances)', () => {
       [option({ id: 'power_plant', name: 'Power Plant', max_instances: null })],
       [buildingRow('power_plant', 1), buildingRow('power_plant', 2), buildingRow('power_plant', 3)],
     )
-    expect(wrapper.find('[data-testid="build-card-reason-power_plant"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="build-req-power_plant-limit"]').exists()).toBe(false)
   })
 })
 
@@ -597,5 +609,164 @@ describe('ColonyView build-catalogue filters', () => {
     const wrapper = await openDialog([option({ id: 'free', construction_cost: [] })], [])
     await wrapper.get('[data-testid="filter-hide-unaffordable"]').setValue(true)
     expect(wrapper.find('[data-testid="build-card-free"]').exists()).toBe(true)
+  })
+})
+
+
+describe('ColonyView build requirements (issue #423)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    routeParams.colonyId = undefined
+    routeParams.buildingType = undefined
+    window.localStorage.clear()
+  })
+
+  function option(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'depot',
+      name: 'Depot',
+      description: '',
+      category: 'Storage',
+      slot_cost: 1,
+      labor_per_turn: 1,
+      construction_turns: 1,
+      construction_cost: [] as [string, number][],
+      tech_prerequisite: null,
+      starter_kit: false,
+      max_instances: null,
+      ...overrides,
+    }
+  }
+
+  function stock(commodityId: string, amount: number, reserved = 0) {
+    return { commodity_id: commodityId, amount, capacity: null, net_per_turn: 0, reserved }
+  }
+
+  async function openDialog(
+    catalog: Record<string, unknown>[],
+    screenOverrides: Record<string, unknown> = {},
+  ) {
+    const { listBuildings, getTechTree } = await import('@/services/tauriBridge')
+    ;(listBuildings as ReturnType<typeof vi.fn>).mockResolvedValue(catalog)
+    ;(getTechTree as ReturnType<typeof vi.fn>).mockResolvedValue(
+      screenOverrides.researched ?? [],
+    )
+
+    seedColonies()
+    const gameStore = useGameStore()
+    gameStore.selectedColonyId = 'colony-1'
+    gameStore.colonyScreen = colonyScreenWithHqBuilding({
+      slot_capacity: 10,
+      slots_used: 0,
+      stockpile: [],
+      construction_queue: [],
+      ...screenOverrides,
+    })
+
+    const wrapper = mount(ColonyView, {
+      global: { stubs: { ...STUBS, ConstructionQueueWindowPanel: false, BuildDialog: false } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="btn-open-build"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="build-dialog"]').exists()).toBe(true)
+    return wrapper
+  }
+
+  const req = (w: ReturnType<typeof mount>, id: string, key: string) =>
+    w.get(`[data-testid="build-req-${id}-${key}"]`)
+
+  it('lists every missing commodity, not just the first', async () => {
+    // The gap this closes: `disabledReason` names one blocker, so a building
+    // short on two commodities read as having one problem.
+    const wrapper = await openDialog(
+      [option({ construction_cost: [['structural_metal', 40], ['components', 10]] })],
+      { stockpile: [stock('structural_metal', 12)] },
+    )
+
+    const metal = req(wrapper, 'depot', 'cost-structural_metal')
+    const parts = req(wrapper, 'depot', 'cost-components')
+    expect(metal.attributes('data-met')).toBe('false')
+    expect(parts.attributes('data-met')).toBe('false')
+    expect(metal.text()).toContain('have 12')
+    expect(parts.text()).toContain('have 0')
+  })
+
+  it('marks a satisfied commodity met, and shows no shortfall for it', async () => {
+    const wrapper = await openDialog(
+      [option({ construction_cost: [['structural_metal', 40]] })],
+      { stockpile: [stock('structural_metal', 40)] },
+    )
+    const metal = req(wrapper, 'depot', 'cost-structural_metal')
+    expect(metal.attributes('data-met')).toBe('true')
+    expect(metal.text()).not.toMatch(/have/)
+  })
+
+  it('counts reserved stock as unavailable', async () => {
+    // Matches what construction can actually spend — the engine reports a
+    // distinct StalledByReserve outcome for exactly this case.
+    const wrapper = await openDialog(
+      [option({ construction_cost: [['structural_metal', 40]] })],
+      { stockpile: [stock('structural_metal', 100, 80)] },
+    )
+    const metal = req(wrapper, 'depot', 'cost-structural_metal')
+    expect(metal.attributes('data-met')).toBe('false')
+    expect(metal.text()).toContain('have 20')
+  })
+
+  it('shows an unmet tech prerequisite', async () => {
+    const wrapper = await openDialog([option({ tech_prerequisite: 'automation' })])
+    const tech = req(wrapper, 'depot', 'tech-automation')
+    expect(tech.attributes('data-met')).toBe('false')
+    expect(tech.text()).toContain('automation')
+  })
+
+  it('shows a researched tech prerequisite as met', async () => {
+    const wrapper = await openDialog([option({ tech_prerequisite: 'automation' })], {
+      researched: [{ id: 'automation', name: 'Automation', state: 'researched' }],
+    })
+    expect(req(wrapper, 'depot', 'tech-automation').attributes('data-met')).toBe('true')
+  })
+
+  it('shows slots as a requirement, unmet when the colony is full', async () => {
+    const wrapper = await openDialog([option({ slot_cost: 3 })], {
+      slot_capacity: 10,
+      slots_used: 9,
+    })
+    const slots = req(wrapper, 'depot', 'slots')
+    expect(slots.attributes('data-met')).toBe('false')
+    expect(slots.text()).toContain('1 free')
+  })
+
+  it('omits the slots requirement for a slot-granting project', async () => {
+    // Priced at zero slots by the engine, so "0 slots" would be noise.
+    const wrapper = await openDialog([option({ slot_cost: 0 })])
+    expect(wrapper.find('[data-testid="build-req-depot-slots"]').exists()).toBe(false)
+  })
+
+  it('shows every requirement as met on a fully buildable building', async () => {
+    // The decided behaviour: met requirements are always listed, so a card's
+    // requirement set reads the same whether or not it happens to be blocked.
+    const wrapper = await openDialog(
+      [option({ construction_cost: [['structural_metal', 5]], slot_cost: 1 })],
+      { stockpile: [stock('structural_metal', 50)] },
+    )
+    const rows = wrapper.findAll('[data-testid^="build-req-depot-"]')
+    expect(rows.length).toBe(2)
+    for (const r of rows) expect(r.attributes('data-met')).toBe('true')
+  })
+
+  it('conveys status by more than colour — a distinct mark and a spelled-out word', async () => {
+    const wrapper = await openDialog(
+      [option({ construction_cost: [['structural_metal', 5], ['components', 5]] })],
+      { stockpile: [stock('structural_metal', 50)] },
+    )
+    const met = req(wrapper, 'depot', 'cost-structural_metal')
+    const unmet = req(wrapper, 'depot', 'cost-components')
+
+    expect(met.get('.req-mark').text()).not.toBe(unmet.get('.req-mark').text())
+    expect(met.get('.req-sr').text()).toBe('met:')
+    expect(unmet.get('.req-sr').text()).toBe('missing:')
   })
 })
