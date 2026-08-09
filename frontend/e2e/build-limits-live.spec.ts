@@ -6,9 +6,9 @@ import { test, expect } from '@playwright/test'
  *  - `colony_hq` is capped at one per colony — the engine refuses a second,
  *    and the build dialog greys it out once one is queued or standing rather
  *    than offering a button that always errors.
- *  - `power_plant` is buildable from founding with no tech, which is what
- *    keeps that cap playable: a colony that outgrows the HQ's supply needs
- *    *some* pre-tech route to more power.
+ *  - `solar_array_mk1` is buildable from founding with no tech (issue #409),
+ *    which is what keeps that cap playable: a colony that outgrows the HQ's
+ *    supply needs *some* pre-tech route to more power.
  *
  * A New Game colony starts with no buildings at all, so these queue the first
  * `colony_hq` themselves rather than assuming a landing kit is standing.
@@ -62,7 +62,7 @@ test('the engine refuses a second colony_hq', async ({ page }) => {
   expect(second.body).toMatch(/limited to 1 per colony/i)
 })
 
-test('the build dialog offers power_plant with no tech, and greys out a built colony_hq', async ({
+test('the build dialog offers solar with no tech, and greys out a built colony_hq', async ({
   page,
 }) => {
   await newGame(page)
@@ -76,10 +76,10 @@ test('the build dialog offers power_plant with no tech, and greys out a built co
     .poll(async () => page.locator('[data-testid^="build-card-"]').count(), { timeout: 15_000 })
     .toBeGreaterThan(0)
 
-  // power_plant is buildable right now, with nothing researched — that is the
-  // whole point of adding it alongside the cap.
-  await expect(page.getByTestId('build-card-power_plant')).toBeVisible()
-  await expect(page.getByTestId('btn-queue-power_plant')).toBeEnabled()
+  // A dedicated generator is buildable right now, with nothing researched —
+  // that is the whole point of it being reachable alongside the HQ cap.
+  await expect(page.getByTestId('build-card-solar_array_mk1')).toBeVisible()
+  await expect(page.getByTestId('build-req-solar_array_mk1-tech-basic_power')).toHaveCount(0)
 
   // colony_hq starts available, since this colony has none. Its cap shows as a
   // *met* requirement rather than being absent — every requirement is listed
@@ -101,6 +101,6 @@ test('the build dialog offers power_plant with no tech, and greys out a built co
   await expect(hqLimit).toContainText(/limit 1 per colony/i)
   await expect(page.getByTestId('btn-queue-colony_hq')).toBeDisabled()
 
-  // ...while the uncapped generator stays available.
-  await expect(page.getByTestId('btn-queue-power_plant')).toBeEnabled()
+  // ...while the uncapped generator carries no instance-limit requirement.
+  await expect(page.getByTestId('build-req-solar_array_mk1-limit')).toHaveCount(0)
 })

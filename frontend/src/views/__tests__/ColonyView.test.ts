@@ -488,10 +488,10 @@ describe('ColonyView build limits (max_instances)', () => {
 
   it('leaves uncapped buildings alone however many are already built', async () => {
     const wrapper = await openDialog(
-      [option({ id: 'power_plant', name: 'Power Plant', max_instances: null })],
-      [buildingRow('power_plant', 1), buildingRow('power_plant', 2), buildingRow('power_plant', 3)],
+      [option({ id: 'solar_array_mk1', name: 'Solar Array Mk1', max_instances: null })],
+      [buildingRow('solar_array_mk1', 1), buildingRow('solar_array_mk1', 2), buildingRow('solar_array_mk1', 3)],
     )
-    expect(wrapper.find('[data-testid="build-req-power_plant-limit"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="build-req-solar_array_mk1-limit"]').exists()).toBe(false)
   })
 })
 

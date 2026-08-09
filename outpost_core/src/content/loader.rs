@@ -939,47 +939,64 @@ mod tests {
         }
     }
 
-    /// The pre-tech generator is deliberately weaker than the researched one,
-    /// so `basic_power` stays worth researching rather than becoming a sidegrade.
+    /// The power roster's tech gates are the ones issue #409 set.
+    ///
+    /// Pinned individually rather than as a general rule because each was a
+    /// distinct authoring error: solar and wind sat behind `basic_power`,
+    /// which left a colony with no buildable generator at all on sol 1, and
+    /// `fission_reactor` sat behind `improved_solar` — a solar improvement
+    /// unlocking a fission reactor.
     #[test]
-    fn the_pre_tech_generator_is_weaker_than_the_researched_one() {
-        let (Some(byaml), Some(ryaml)) = (read_real_buildings_yaml(), read_real_recipes_yaml())
-        else {
+    fn power_roster_tech_gates_are_as_intended() {
+        let Some(yaml) = read_real_buildings_yaml() else {
             return;
         };
         let buildings: Vec<crate::content::types::BuildingDef> =
-            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
-        let recipes: Vec<crate::content::types::RecipeDef> =
-            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
-
-        let capacity = |id: &str| {
-            -buildings
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let gate = |id: &str| {
+            buildings
                 .iter()
                 .find(|b| b.id == id)
                 .unwrap_or_else(|| panic!("{id} must exist in the roster"))
-                .power_delta
-        };
-        let power_output = |building_id: &str| {
-            recipes
-                .iter()
-                .filter(|r| r.building == building_id)
-                .flat_map(|r| r.outputs.iter())
-                .filter(|o| o.id == "power")
-                .map(|o| o.quantity)
-                .sum::<f64>()
+                .tech_prerequisite
+                .clone()
         };
 
-        assert!(
-            capacity("power_plant") < capacity("solar_array_mk1"),
-            "the no-tech generator must supply less grid capacity than the researched one"
+        // Buildable on sol 1.
+        assert_eq!(gate("solar_array_mk1"), None);
+        assert_eq!(gate("wind_turbine"), None);
+
+        // Still gated, and on nodes that make sense for what they are.
+        assert_eq!(
+            gate("fission_reactor"),
+            Some("nuclear_fuel_cycle".to_string())
         );
-        assert!(
-            power_output("power_plant") < power_output("solar_array_mk1"),
-            "the no-tech generator must supply less power than the researched one"
+        assert_eq!(
+            gate("fusion_reactor_prototype"),
+            Some("fusion_basics".to_string())
         );
+        assert_eq!(gate("solar_array_mk2"), Some("improved_solar".to_string()));
+    }
+
+    /// `basic_power` still unlocks something after solar and wind moved off it.
+    ///
+    /// A tech node that grants nothing is a dead end in the tree — worth
+    /// catching here rather than discovering it in play.
+    #[test]
+    fn basic_power_still_unlocks_a_building() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let unlocked: Vec<&str> = buildings
+            .iter()
+            .filter(|b| b.tech_prerequisite.as_deref() == Some("basic_power"))
+            .map(|b| b.id.as_str())
+            .collect();
         assert!(
-            power_output("power_plant") > 0.0,
-            "the no-tech generator must actually produce power"
+            !unlocked.is_empty(),
+            "basic_power unlocks nothing now that solar and wind are tech-0"
         );
     }
 

@@ -106,12 +106,12 @@ test('the catalogue is a collapsible tree grouped by category', async ({ page })
   // a click.
   const power = page.getByTestId('build-cat-toggle-Power')
   await expect(power).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByTestId('build-card-power_plant')).toBeVisible()
+  await expect(page.getByTestId('build-card-solar_array_mk1')).toBeVisible()
 
   // Collapsing hides that category's rows and nothing else.
   await power.click()
   await expect(power).toHaveAttribute('aria-expanded', 'false')
-  await expect(page.getByTestId('build-card-power_plant')).toBeHidden()
+  await expect(page.getByTestId('build-card-solar_array_mk1')).toBeHidden()
   await expect(page.getByTestId('build-card-colony_hq')).toBeVisible()
 
   // ...and the choice survives closing and reopening the dialog.
