@@ -237,6 +237,10 @@ function disabledReason(b: BuildingOption): string | null {
   if (b.tech_prerequisite && !researchedTechs.value.has(b.tech_prerequisite)) {
     return `Requires: ${b.tech_prerequisite}`
   }
+  const unmetSite = siteRequirementsFor(b.id).filter((r) => !r.met)
+  if (unmetSite.length > 0) {
+    return `Needs ${unmetSite.map((r) => r.label).join(', ')}`
+  }
   if (b.max_instances !== null && existingCount(b) >= b.max_instances) {
     return b.max_instances === 1
       ? 'Limit 1 per colony — already built'
@@ -368,7 +372,25 @@ function requirementsFor(b: BuildingOption): BuildRequirement[] {
     })
   }
 
+  // Site conditions (issue #410) arrive already evaluated against this
+  // colony's own site — the engine answers them, because "is there ocean
+  // within two hexes" needs the map and the colony's place on it, neither of
+  // which the client has when browsing a global catalogue.
+  for (const [i, row] of siteRequirementsFor(b.id).entries()) {
+    out.push({
+      key: `site-${i}`,
+      label: row.label,
+      shortfall: row.met ? null : 'not at this site',
+      met: row.met,
+    })
+  }
+
   return out
+}
+
+/** This colony's evaluated site requirements for one building. */
+function siteRequirementsFor(buildingId: string) {
+  return (screen.value?.site_requirements ?? []).filter((r) => r.building_type === buildingId)
 }
 
 // The two filter predicates are derived from the same requirement list rather

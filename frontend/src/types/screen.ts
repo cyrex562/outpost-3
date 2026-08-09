@@ -124,6 +124,14 @@ export interface ResourceRow {
   unit: string
 }
 
+/** One site requirement of one building, as it stands at a given colony. */
+export interface SiteRequirementRow {
+  building_type: string
+  /** The condition, phrased as a requirement rather than a failure. */
+  label: string
+  met: boolean
+}
+
 /** A single in-progress construction project. */
 export interface ConstructionQueueRow {
   project_id: string
@@ -159,5 +167,15 @@ export interface ColonyScreenData {
   buildings: BuildingRow[]
   stockpile: StockpileRow[]
   construction_queue: ConstructionQueueRow[]
+  /**
+   * Site requirements for the buildings that declare any, already evaluated
+   * against *this* colony's site (issue #410).
+   *
+   * Comes from the colony screen rather than the building catalogue because
+   * the catalogue is a global, colony-agnostic list — "is there ocean nearby"
+   * has no answer without knowing which colony is asking. Only buildings with
+   * at least one authored requirement appear.
+   */
+  site_requirements?: SiteRequirementRow[]
   manual_override: boolean
 }

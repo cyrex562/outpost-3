@@ -187,6 +187,25 @@ pub enum AtmosphereDensity {
 }
 
 impl AtmosphereDensity {
+    /// Rank by density, thinnest first, for "at least this dense" comparisons
+    /// (see [`crate::content::types::SiteRequirement::MinAtmosphere`]).
+    ///
+    /// A method rather than a derived `Ord` because ordering is only
+    /// meaningful along this one axis: the variants are declared in
+    /// increasing density order today, but nothing about the type promises
+    /// that, and a derived `Ord` would silently follow a future reordering.
+    #[must_use]
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Vacuum => 0,
+            Self::Thin => 1,
+            Self::Breathable => 2,
+            Self::Dense => 3,
+        }
+    }
+}
+
+impl AtmosphereDensity {
     /// Whether this density supports unaided human breathing. Does not
     /// account for [`AtmosphereHazard`] — a `Breathable`-density atmosphere
     /// with a `Toxic` hazard is still lethal to breathe.
