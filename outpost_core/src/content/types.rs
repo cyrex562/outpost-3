@@ -240,6 +240,92 @@ pub enum BuildingCategory {
     Other,
 }
 
+/// A condition a site must satisfy before a building can be constructed there.
+///
+/// Authored per building rather than inferred, the same way
+/// [`BuildingDef::max_instances`] is: which structures care about where they
+/// stand is a content decision, not an engine one.
+///
+/// Evaluation lives in [`crate::site`], which is where the map and system
+/// types needed to answer these questions are reachable.
+///
+/// # Radius
+///
+/// Hex-scoped variants carry `within_hexes`, defaulting to `0` — the colony's
+/// own hex. A larger radius means "somewhere near enough to exploit", which is
+/// what makes e.g. a coastal power plant buildable on the land hex beside the
+/// water rather than requiring the colony to sit *on* an unbuildable ocean
+/// tile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SiteRequirement {
+    /// At least one hex within range has one of these terrains.
+    Terrain {
+        /// Any one of these satisfies the requirement.
+        any_of: Vec<crate::map::Terrain>,
+        /// Search radius in hexes; `0` means the colony's own hex.
+        #[serde(default)]
+        within_hexes: u32,
+    },
+    /// At least one hex within range holds a deposit of this commodity.
+    Deposit {
+        /// Content-pack commodity id, matching [`crate::map::Deposit::commodity_id`].
+        commodity: String,
+        /// Search radius in hexes; `0` means the colony's own hex.
+        #[serde(default)]
+        within_hexes: u32,
+    },
+    /// The body's atmosphere is at least this dense.
+    ///
+    /// Body-scoped rather than hex-scoped, so unlike the two above it can be
+    /// evaluated for an outpost, which is anchored to a body without a surface
+    /// hex.
+    MinAtmosphere {
+        /// The thinnest atmosphere that satisfies this.
+        density: crate::system::AtmosphereDensity,
+    },
+}
+
+impl SiteRequirement {
+    /// A short human-readable statement of the condition, for error messages
+    /// and the build UI. Phrased as the requirement, not as a failure, so the
+    /// same string serves a met and an unmet row.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        fn within(radius: u32) -> String {
+            match radius {
+                0 => "on this site".to_string(),
+                1 => "within 1 hex".to_string(),
+                n => format!("within {n} hexes"),
+            }
+        }
+        match self {
+            Self::Terrain {
+                any_of,
+                within_hexes,
+            } => {
+                let names: Vec<String> = any_of
+                    .iter()
+                    .map(|t| format!("{t:?}").to_lowercase())
+                    .collect();
+                format!("{} {}", names.join(" or "), within(*within_hexes))
+            }
+            Self::Deposit {
+                commodity,
+                within_hexes,
+            } => {
+                format!("{commodity} deposit {}", within(*within_hexes))
+            }
+            Self::MinAtmosphere { density } => {
+                format!(
+                    "{} atmosphere or denser",
+                    format!("{density:?}").to_lowercase()
+                )
+            }
+        }
+    }
+}
+
 /// A structure that can be constructed in a colony.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildingDef {
@@ -385,6 +471,14 @@ pub struct BuildingDef {
     /// approximate some flow, and that stays a modelling choice.
     #[serde(default)]
     pub max_instances: Option<u32>,
+    /// Conditions the site must satisfy before this can be built (issue #410).
+    ///
+    /// Empty — the default — means buildable anywhere, which is how every
+    /// building behaved before this field existed. All listed requirements
+    /// must hold; there is no "any of" across entries, only within a single
+    /// [`SiteRequirement::Terrain`]'s `any_of`.
+    #[serde(default)]
+    pub site_requirements: Vec<SiteRequirement>,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).

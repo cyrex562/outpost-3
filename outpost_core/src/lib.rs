@@ -43,6 +43,7 @@ pub mod outpost;
 pub mod population;
 pub mod predicate;
 pub mod research;
+pub mod site;
 pub mod snapshot;
 pub mod system;
 pub mod system_gen;
@@ -2364,6 +2365,20 @@ pub enum EngineError {
         /// How many already exist, counting queued construction.
         existing: u32,
     },
+    /// The site does not satisfy one or more of the building's authored
+    /// [`SiteRequirement`]s (issue #410).
+    ///
+    /// `unmet` lists **every** failed condition, not just the first, so the
+    /// UI can show a site short of two things as short of two things.
+    ///
+    /// [`SiteRequirement`]: crate::content::types::SiteRequirement
+    #[error("'{building_id}' cannot be built here: needs {}", unmet.join(", "))]
+    SiteRequirementUnmet {
+        /// The building that was requested.
+        building_id: String,
+        /// Human-readable description of each unmet condition.
+        unmet: Vec<String>,
+    },
     /// A command was submitted after the game has been won.
     ///
     /// The player must activate sandbox-continue mode via
@@ -4172,6 +4187,7 @@ impl GameEngine {
                     self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_colony_index(*colony_id)?;
                 let colony = &self.state.colonies[idx];
+                self.check_site_requirements(building_type, &self.colony_site(colony))?;
                 self.check_instance_limit(
                     building_type,
                     count_matching(
@@ -4271,6 +4287,10 @@ impl GameEngine {
                             building_type,
                         )
                     };
+                    self.check_site_requirements(
+                        building_type,
+                        &self.colony_site(&self.state.colonies[idx]),
+                    )?;
                     let claimed = batch_counts.entry(building_type.as_str()).or_insert(0);
                     self.check_instance_limit(building_type, already_placed, *claimed)?;
                     *claimed += 1;
@@ -5353,6 +5373,7 @@ impl GameEngine {
                     self.project_terms(building_type, construction_cost, *construction_turns);
                 let idx = self.find_outpost_index(*outpost_id)?;
                 let outpost = &self.state.outposts[idx];
+                self.check_site_requirements(building_type, &self.outpost_site(outpost))?;
                 self.check_instance_limit(
                     building_type,
                     count_matching(
@@ -6940,6 +6961,27 @@ impl GameEngine {
                     .collect();
                 resources.sort_by(|a, b| a.resource_id.cmp(&b.resource_id));
 
+                // Site requirements for whatever declares them, answered
+                // against this colony's own site (issue #410). Only buildings
+                // that authored a requirement contribute rows.
+                let site_ctx = self.colony_site(c);
+                let site_requirements: Vec<ui::SiteRequirementRow> = self
+                    .state
+                    .registry
+                    .as_ref()
+                    .map(|reg| {
+                        reg.buildings()
+                            .flat_map(|b| {
+                                b.site_requirements.iter().map(|r| ui::SiteRequirementRow {
+                                    building_type: b.id.clone(),
+                                    label: r.describe(),
+                                    met: site_ctx.satisfies(r),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
                 Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
                     colony_id: c.id,
                     name: c.name.clone(),
@@ -6963,6 +7005,7 @@ impl GameEngine {
                     stockpile,
                     construction_queue,
                     manual_override,
+                    site_requirements,
                 }))
             }
 
@@ -7937,6 +7980,75 @@ impl GameEngine {
         Ok(())
     }
 
+    /// The site a colony occupies, for evaluating [`SiteRequirement`]s.
+    ///
+    /// A colony resolves to a hex through its body's `PlanetMap`: the map
+    /// records which coordinate each colony sits on. Any part that cannot be
+    /// resolved (no home body, no generated map, colony not placed) is left
+    /// `None`, which makes the requirements depending on it report unmet —
+    /// see [`crate::site`] for why refusing beats waving through.
+    ///
+    /// [`SiteRequirement`]: content::types::SiteRequirement
+    fn colony_site(&self, colony: &colony::Colony) -> site::SiteContext<'_> {
+        let body_id = colony.home_body_id.as_ref();
+        let map = body_id.and_then(|b| self.state.map_for_body(b));
+        let coord = map.and_then(|m| {
+            m.colonies
+                .iter()
+                .find(|n| n.colony_id == colony.id)
+                .map(|n| n.coord)
+        });
+        let body = body_id.and_then(|b| self.state.system_state.node_map.bodies.get(b));
+        site::SiteContext { map, coord, body }
+    }
+
+    /// The site an outpost occupies.
+    ///
+    /// An outpost is anchored to a body with no surface hex, so `coord` and
+    /// `map` are deliberately `None` — hex-scoped requirements cannot be
+    /// answered for one and report unmet, while body-scoped ones still work.
+    fn outpost_site(&self, outpost: &outpost::Outpost) -> site::SiteContext<'_> {
+        site::SiteContext {
+            map: None,
+            coord: None,
+            body: self
+                .state
+                .system_state
+                .node_map
+                .bodies
+                .get(&outpost.body_id),
+        }
+    }
+
+    /// Reject `building_type` if `ctx` fails any of its authored site
+    /// requirements.
+    ///
+    /// Unregistered building ids and buildings with no authored requirement
+    /// pass through, matching the None-prerequisite-is-open convention the
+    /// tech gate and `max_instances` both already use.
+    fn check_site_requirements(
+        &self,
+        building_type: &str,
+        ctx: &site::SiteContext<'_>,
+    ) -> Result<(), EngineError> {
+        let Some(def) = self
+            .state
+            .registry
+            .as_ref()
+            .and_then(|reg| reg.building(building_type))
+        else {
+            return Ok(());
+        };
+        let unmet = ctx.unmet(&def.site_requirements);
+        if unmet.is_empty() {
+            return Ok(());
+        }
+        Err(EngineError::SiteRequirementUnmet {
+            building_id: building_type.to_string(),
+            unmet: unmet.iter().map(|r| r.describe()).collect(),
+        })
+    }
+
     /// Find the index of a colony by ID, or return [`EngineError::ColonyNotFound`].
     fn find_colony_index(&self, id: ColonyId) -> Result<usize, EngineError> {
         self.state
@@ -8824,6 +8936,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
 
@@ -8873,6 +8986,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
         engine
@@ -9018,6 +9132,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
 
@@ -9079,6 +9194,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
         engine
@@ -9261,6 +9377,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
 
@@ -9589,6 +9706,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -9814,6 +9932,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         reg.insert_recipe(content::RecipeDef {
             id: "burn".into(),
@@ -10066,6 +10185,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
@@ -10214,12 +10334,14 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         };
         reg.insert_building(base("smelter"));
         reg.insert_building(content::types::BuildingDef {
             category: content::BuildingCategory::Remediation,
             contamination_reduction: 0.3,
             max_instances: None,
+            site_requirements: Vec::new(),
             slot_cost: 0,
             ..base("hex_remediation")
         });
@@ -10617,6 +10739,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         let r = |id: &str, line: Option<&str>, con: bool, out: &str| RecipeDef {
             id: id.into(),
@@ -11065,6 +11188,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
 
         // Research lab: consumes 1 water, produces 5 research per sol.
@@ -11087,6 +11211,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
 
         reg.insert_building(BuildingDef {
@@ -11108,6 +11233,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -11284,6 +11410,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
             id: "generate_power_flow".into(),
@@ -11324,6 +11451,7 @@ mod tests {
             }],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
 
         reg
@@ -13357,6 +13485,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_structural_ore_outpost".into(),
@@ -13616,6 +13745,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
 
@@ -13674,6 +13804,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         engine.state.registry = Some(reg);
         engine
@@ -13991,6 +14122,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         reg.insert_recipe(RecipeDef {
             id: "mine_needs_power".into(),
@@ -14674,6 +14806,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         registry.insert_recipe(RecipeDef {
             id: "refine_b".into(),
@@ -14758,6 +14891,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
             registry.insert_recipe(RecipeDef {
@@ -14833,6 +14967,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         // Only always-on recipes — so there is no recipe to pick.
         for (id, commodity) in [("hq_power", "power"), ("hq_water", "water")] {
@@ -17831,6 +17966,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -17929,6 +18065,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -18047,6 +18184,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
         registry.insert_recipe(content::types::RecipeDef {
             id: "mine_structural_ore".into(),
@@ -18282,6 +18420,7 @@ mod tests {
                 storage: vec![],
                 contamination_reduction: 0.0,
                 max_instances: None,
+                site_requirements: Vec::new(),
             });
         }
         engine.state.registry = Some(registry);
@@ -19876,6 +20015,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
 
         reg.insert_building(BuildingDef {
@@ -19897,6 +20037,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: None,
+            site_requirements: Vec::new(),
         });
 
         reg.insert_commodity(crate::content::types::CommodityDef {
@@ -22805,6 +22946,7 @@ mod tests {
             storage: vec![],
             contamination_reduction: 0.0,
             max_instances: max,
+            site_requirements: Vec::new(),
         });
         reg
     }
@@ -22956,5 +23098,287 @@ mod tests {
             matches!(result, Err(EngineError::BuildingLimitReached { .. })),
             "expected BuildingLimitReached, got {result:?}"
         );
+    }
+
+    // ── SiteRequirement enforcement (issue #410) ────────────────────────────
+
+    /// A colony standing on a known hex of a known body, so its site
+    /// requirements have real answers.
+    fn engine_with_sited_colony(
+        reqs: Vec<content::types::SiteRequirement>,
+        site_terrain: map::Terrain,
+        atmosphere: system::AtmosphereDensity,
+    ) -> (GameEngine, ColonyId) {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Sited".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!()
+        };
+        let colony_id = *colony_id;
+
+        // A body with the requested atmosphere, and a map whose origin cell
+        // carries the requested terrain.
+        let mut body = system::Body::new("Testworld", system::BodyKind::InnerPlanet, 1.0);
+        body.atmosphere_density = atmosphere;
+        let body_id = body.id.clone();
+        engine
+            .state
+            .system_state
+            .node_map
+            .bodies
+            .insert(body_id.clone(), body);
+
+        let mut planet = map::PlanetMap::generate(7, 8, 8);
+        let origin = map::HexCoord::new(0, 0);
+        planet.cells.insert(
+            origin,
+            map::HexCell::new(origin, site_terrain, map::Biome::Desert),
+        );
+        planet.place_colony(colony_id, origin).unwrap();
+        engine.state.planet_maps.insert(body_id.clone(), planet);
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].home_body_id = Some(body_id);
+        engine.state.colonies[idx].slot_capacity = 20;
+
+        let mut reg = ContentRegistry::default();
+        reg.insert_building(BuildingDef {
+            id: "sited".into(),
+            name: "Sited Building".into(),
+            description: String::new(),
+            category: BuildingCategory::Power,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 1,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+            contamination_reduction: 0.0,
+            max_instances: None,
+            site_requirements: reqs,
+        });
+        engine.state.registry = Some(reg);
+        (engine, colony_id)
+    }
+
+    fn queue_sited(
+        engine: &mut GameEngine,
+        colony_id: ColonyId,
+    ) -> Result<Vec<Event>, EngineError> {
+        engine.apply(&Command::QueueConstruction {
+            colony_id,
+            building_type: "sited".into(),
+            slot_cost: 1,
+            labor_per_turn: 1,
+            construction_cost: vec![],
+            construction_turns: 1,
+        })
+    }
+
+    #[test]
+    fn queue_construction_rejects_a_building_whose_site_requirement_is_unmet() {
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![content::types::SiteRequirement::Terrain {
+                any_of: vec![map::Terrain::Ocean],
+                within_hexes: 0,
+            }],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Breathable,
+        );
+
+        let result = queue_sited(&mut engine, colony_id);
+
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::SiteRequirementUnmet { ref building_id, ref unmet })
+                    if building_id == "sited" && unmet.len() == 1 && unmet[0].contains("ocean")
+            ),
+            "expected SiteRequirementUnmet naming the terrain, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn queue_construction_allows_a_building_whose_site_requirement_holds() {
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![content::types::SiteRequirement::Terrain {
+                any_of: vec![map::Terrain::Volcanic],
+                within_hexes: 0,
+            }],
+            map::Terrain::Volcanic,
+            system::AtmosphereDensity::Breathable,
+        );
+
+        assert!(queue_sited(&mut engine, colony_id).is_ok());
+    }
+
+    #[test]
+    fn a_building_with_no_site_requirements_is_unaffected() {
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Vacuum,
+        );
+        assert!(queue_sited(&mut engine, colony_id).is_ok());
+    }
+
+    #[test]
+    fn the_error_names_every_unmet_condition_not_just_the_first() {
+        // The same reasoning as the per-requirement build badges (#423): a
+        // site short of two things should say it is short of two things.
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![
+                content::types::SiteRequirement::Terrain {
+                    any_of: vec![map::Terrain::Ocean],
+                    within_hexes: 0,
+                },
+                content::types::SiteRequirement::Deposit {
+                    commodity: "hydrocarbons".into(),
+                    within_hexes: 0,
+                },
+                content::types::SiteRequirement::MinAtmosphere {
+                    density: system::AtmosphereDensity::Dense,
+                },
+            ],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Vacuum,
+        );
+
+        let Err(EngineError::SiteRequirementUnmet { unmet, .. }) =
+            queue_sited(&mut engine, colony_id)
+        else {
+            panic!("expected SiteRequirementUnmet")
+        };
+        assert_eq!(unmet.len(), 3, "got {unmet:?}");
+    }
+
+    #[test]
+    fn deploy_starter_kit_rejects_a_site_gated_building_and_places_nothing() {
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![content::types::SiteRequirement::Terrain {
+                any_of: vec![map::Terrain::Ocean],
+                within_hexes: 0,
+            }],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Breathable,
+        );
+
+        let result = engine.apply(&Command::DeployStarterKit {
+            colony_id,
+            buildings: vec![("sited".into(), 1)],
+        });
+
+        assert!(
+            matches!(result, Err(EngineError::SiteRequirementUnmet { .. })),
+            "expected SiteRequirementUnmet, got {result:?}"
+        );
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            engine.state.colonies[idx].buildings.is_empty(),
+            "validation must run before anything is placed"
+        );
+    }
+
+    #[test]
+    fn a_body_scoped_requirement_is_answerable_at_a_colony() {
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![content::types::SiteRequirement::MinAtmosphere {
+                density: system::AtmosphereDensity::Thin,
+            }],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Vacuum,
+        );
+        assert!(matches!(
+            queue_sited(&mut engine, colony_id),
+            Err(EngineError::SiteRequirementUnmet { .. })
+        ));
+
+        // ...and passes once the body actually has an atmosphere.
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![content::types::SiteRequirement::MinAtmosphere {
+                density: system::AtmosphereDensity::Thin,
+            }],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Dense,
+        );
+        assert!(queue_sited(&mut engine, colony_id).is_ok());
+    }
+
+    #[test]
+    fn outpost_construction_refuses_a_hex_scoped_requirement_but_answers_a_body_scoped_one() {
+        // An outpost is anchored to a body with no surface hex, so "ocean
+        // within 2 hexes" has no answer for one — refusing is the
+        // conservative reading (see `crate::site`). Atmosphere is a property
+        // of the body, so that one still resolves.
+        let (mut engine, colony_id) = engine_with_sited_colony(
+            vec![],
+            map::Terrain::Plains,
+            system::AtmosphereDensity::Dense,
+        );
+        let body_id = engine.state.colonies[engine.find_colony_index(colony_id).unwrap()]
+            .home_body_id
+            .clone()
+            .unwrap();
+        let outpost = outpost::Outpost::new("Depot", colony_id, body_id);
+        let outpost_id = outpost.id;
+        engine.state.outposts.push(outpost);
+
+        let queue = |engine: &mut GameEngine| {
+            engine.apply(&Command::QueueOutpostConstruction {
+                outpost_id,
+                building_type: "sited".into(),
+                slot_cost: 1,
+                labor_per_turn: 1,
+                construction_cost: vec![],
+                construction_turns: 1,
+            })
+        };
+
+        // Hex-scoped: unanswerable, so refused.
+        set_sited_requirements(
+            &mut engine,
+            vec![content::types::SiteRequirement::Terrain {
+                any_of: vec![map::Terrain::Ocean],
+                within_hexes: 2,
+            }],
+        );
+        assert!(
+            matches!(
+                queue(&mut engine),
+                Err(EngineError::SiteRequirementUnmet { .. })
+            ),
+            "a hex-scoped requirement has no answer at an outpost and must not pass"
+        );
+
+        // Body-scoped and satisfied: allowed.
+        set_sited_requirements(
+            &mut engine,
+            vec![content::types::SiteRequirement::MinAtmosphere {
+                density: system::AtmosphereDensity::Thin,
+            }],
+        );
+        let result = queue(&mut engine);
+        assert!(result.is_ok(), "expected success, got {result:?}");
+    }
+
+    /// Swap the `sited` building's requirements in an already-built engine.
+    fn set_sited_requirements(engine: &mut GameEngine, reqs: Vec<content::types::SiteRequirement>) {
+        let reg = engine.state.registry.as_mut().expect("registry");
+        let mut def = reg.building("sited").expect("sited building").clone();
+        def.site_requirements = reqs;
+        reg.insert_building(def);
     }
 }

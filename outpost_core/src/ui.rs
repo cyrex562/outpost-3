@@ -67,6 +67,28 @@ pub struct ColonyScreenData {
     pub construction_queue: Vec<ConstructionQueueRow>,
     /// Whether manual override is active (suppresses directive automation).
     pub manual_override: bool,
+    /// Site requirements for the buildings that declare any, evaluated
+    /// against **this colony's** site (issue #410).
+    ///
+    /// Only buildings with at least one authored requirement appear, so this
+    /// stays a handful of rows rather than one per catalogue entry. It lives
+    /// on the colony screen rather than on the building catalogue because the
+    /// catalogue is a global, colony-agnostic list — "is there ocean nearby"
+    /// has no answer without knowing which colony is asking.
+    #[serde(default)]
+    pub site_requirements: Vec<SiteRequirementRow>,
+}
+
+/// One site requirement of one building, as it stands at a given colony.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiteRequirementRow {
+    /// Content-pack key of the building this condition belongs to.
+    pub building_type: String,
+    /// Human-readable statement of the condition, phrased as the requirement
+    /// rather than as a failure so one string serves met and unmet alike.
+    pub label: String,
+    /// Whether this colony's site satisfies it.
+    pub met: bool,
 }
 
 /// A single building row for the colony management screen.
@@ -681,6 +703,7 @@ mod tests {
             }],
             construction_queue: vec![],
             manual_override: false,
+            site_requirements: Vec::new(),
         };
         let json = serde_json::to_string(&data).unwrap();
         let back: ColonyScreenData = serde_json::from_str(&json).unwrap();

@@ -770,3 +770,121 @@ describe('ColonyView build requirements (issue #423)', () => {
     expect(unmet.get('.req-sr').text()).toBe('missing:')
   })
 })
+
+
+describe('ColonyView site requirements (issue #410)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    routeParams.colonyId = undefined
+    routeParams.buildingType = undefined
+    window.localStorage.clear()
+  })
+
+  function option(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'wave_plant',
+      name: 'Wave Plant',
+      description: '',
+      category: 'Power',
+      slot_cost: 1,
+      labor_per_turn: 1,
+      construction_turns: 1,
+      construction_cost: [] as [string, number][],
+      tech_prerequisite: null,
+      starter_kit: false,
+      max_instances: null,
+      ...overrides,
+    }
+  }
+
+  async function openDialog(
+    catalog: Record<string, unknown>[],
+    siteRequirements: { building_type: string; label: string; met: boolean }[],
+  ) {
+    const { listBuildings } = await import('@/services/tauriBridge')
+    ;(listBuildings as ReturnType<typeof vi.fn>).mockResolvedValue(catalog)
+
+    seedColonies()
+    const gameStore = useGameStore()
+    gameStore.selectedColonyId = 'colony-1'
+    gameStore.colonyScreen = colonyScreenWithHqBuilding({
+      slot_capacity: 10,
+      slots_used: 0,
+      stockpile: [],
+      construction_queue: [],
+      site_requirements: siteRequirements,
+    })
+
+    const wrapper = mount(ColonyView, {
+      global: { stubs: { ...STUBS, ConstructionQueueWindowPanel: false, BuildDialog: false } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="btn-open-build"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="build-dialog"]').exists()).toBe(true)
+    return wrapper
+  }
+
+  it('shows an unmet site condition as a failed requirement and disables Queue', async () => {
+    const wrapper = await openDialog(
+      [option()],
+      [{ building_type: 'wave_plant', label: 'ocean within 2 hexes', met: false }],
+    )
+
+    const req = wrapper.get('[data-testid="build-req-wave_plant-site-0"]')
+    expect(req.attributes('data-met')).toBe('false')
+    expect(req.text()).toContain('ocean within 2 hexes')
+    expect(wrapper.get('[data-testid="btn-queue-wave_plant"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('shows a satisfied site condition as met, and leaves the building buildable', async () => {
+    const wrapper = await openDialog(
+      [option()],
+      [{ building_type: 'wave_plant', label: 'ocean within 2 hexes', met: true }],
+    )
+
+    expect(wrapper.get('[data-testid="build-req-wave_plant-site-0"]').attributes('data-met')).toBe(
+      'true',
+    )
+    expect(
+      wrapper.get('[data-testid="btn-queue-wave_plant"]').attributes('disabled'),
+    ).toBeUndefined()
+  })
+
+  it('lists every unmet site condition, not just the first', async () => {
+    const wrapper = await openDialog(
+      [option()],
+      [
+        { building_type: 'wave_plant', label: 'ocean within 2 hexes', met: false },
+        { building_type: 'wave_plant', label: 'thin atmosphere or denser', met: false },
+      ],
+    )
+
+    expect(wrapper.get('[data-testid="build-req-wave_plant-site-0"]').attributes('data-met')).toBe('false')
+    expect(wrapper.get('[data-testid="build-req-wave_plant-site-1"]').attributes('data-met')).toBe('false')
+    // ...and the disabled reason names both rather than stopping at one.
+    const title = wrapper.get('[data-testid="build-card-wave_plant"]').attributes('title') ?? ''
+    expect(title).toContain('ocean within 2 hexes')
+    expect(title).toContain('thin atmosphere or denser')
+  })
+
+  it('does not attach another building\'s site conditions', async () => {
+    const wrapper = await openDialog(
+      [option(), option({ id: 'solar', name: 'Solar' })],
+      [{ building_type: 'wave_plant', label: 'ocean within 2 hexes', met: false }],
+    )
+
+    expect(wrapper.find('[data-testid="build-req-solar-site-0"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="btn-queue-solar"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('leaves buildings alone when the colony screen carries no site data', async () => {
+    // Older payloads (and any colony screen predating #410) omit the field.
+    const wrapper = await openDialog([option()], [])
+    expect(wrapper.find('[data-testid="build-req-wave_plant-site-0"]').exists()).toBe(false)
+    expect(
+      wrapper.get('[data-testid="btn-queue-wave_plant"]').attributes('disabled'),
+    ).toBeUndefined()
+  })
+})
