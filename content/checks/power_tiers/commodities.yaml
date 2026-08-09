@@ -1,0 +1,25 @@
+# Only what the four generators produce, consume, or are built from.
+- id: power
+  name: Power
+  category: energy
+  base_value: 0.0
+
+- id: nuclear_fuel
+  name: Nuclear Fuel
+  category: fuel
+  base_value: 40.0
+
+- id: fusion_fuel
+  name: Fusion Fuel
+  category: fuel
+  base_value: 60.0
+
+- id: structural_metal
+  name: Structural Metal
+  category: metal
+  base_value: 25.0
+
+- id: components
+  name: Components
+  category: component
+  base_value: 45.0

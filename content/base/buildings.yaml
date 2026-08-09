@@ -748,7 +748,13 @@
   name: Solar Array Mk2
   description: High-efficiency panel array with tracking mounts.
   category: power
-  power_delta: -20.0
+  # Issue #427: mk2 used to supply the same 20 grid capacity as mk1 and
+  # *less* power (20 against 24) for 2.5x the cost and an extra sol — so
+  # researching improved_solar handed the player a worse solar array. It is
+  # now 1.5x mk1 per slot, which is what the upgrade is for: slots are the
+  # scarce resource, so a tier buys output per slot at the price of more
+  # materials.
+  power_delta: -30.0
   worker_slots: 0
   default_priority: 9
   labor_required: 1
@@ -808,20 +814,25 @@
     nuclear_fuel and produces a radioactive_waste byproduct as it runs
     (issue #215).
   category: power
-  power_delta: -40.0
+  # Issue #427: at 40 capacity over 2 slots this was 20/slot — worse than
+  # two solar_array_mk1s (40 capacity, 48 power, 24 metal), while also
+  # costing a worker, a nuclear_fuel chain, and a radioactive_waste
+  # byproduct. Now 2x mk1 per slot, and priced to match: a reactor is a
+  # capital project, not a cheaper panel.
+  power_delta: -80.0
   worker_slots: 1
   default_priority: 3
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
   # `nuclear_fuel_cycle`, not `improved_solar` — a solar improvement
-  # unlocking a fission reactor was plainly an authoring slip.
+  # unlocking a fission reactor was plainly an authoring slip (issue #409).
   tech_prerequisite: nuclear_fuel_cycle
   construction_cost:
     - id: structural_metal
-      quantity: 45.0
+      quantity: 70.0
     - id: components
-      quantity: 15.0
+      quantity: 25.0
 
 # ── Tier 3 (automation / fusion_basics / planetary_life_support) ───────────
 
@@ -974,7 +985,11 @@
   name: Fusion Reactor Prototype
   description: Experimental fusion plant — by far the colony's largest power source.
   category: power
-  power_delta: -60.0
+  # Issue #427: the roster's flagship generator was 30/slot, barely above
+  # solar_array_mk1's 24 despite tier-3 tech, two slots, a worker and a
+  # fusion_fuel chain. Now 2.75x mk1 per slot — the top of the ladder should
+  # feel like it.
+  power_delta: -110.0
   worker_slots: 1
   default_priority: 3
   labor_required: 2
@@ -983,9 +998,9 @@
   tech_prerequisite: fusion_basics
   construction_cost:
     - id: structural_metal
-      quantity: 60.0
+      quantity: 110.0
     - id: components
-      quantity: 30.0
+      quantity: 55.0
 
 - id: habitat_dome
   name: Habitat Dome
