@@ -326,6 +326,66 @@ impl SiteRequirement {
     }
 }
 
+/// A site property a building's output can be scaled by (issue #411).
+///
+/// Every variant resolves to a normalised `[0.0, 1.0]` reading, so the
+/// multiplier curve in [`SiteScaling`] is the same shape whatever drives it —
+/// which is what lets a new property (a geothermal gradient, insolation) be
+/// added without touching the scaling mechanism.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "property", rename_all = "snake_case")]
+pub enum SiteProperty {
+    /// Richness of a named commodity's deposit at the site.
+    ///
+    /// Distinct from #232's deposit *gating*, which throttles a recipe that
+    /// consumes a vein commodity. This reads the same richness as a plain
+    /// input to an output curve, for a building whose yield depends on what
+    /// is under it without consuming it.
+    DepositRichness {
+        /// Content-pack commodity id.
+        commodity: String,
+    },
+    /// The body's atmosphere density, `Vacuum` = 0 through `Dense` = 1.
+    AtmosphereDensity,
+    /// The site hex's elevation, already stored normalised.
+    Elevation,
+}
+
+/// How a building's output responds to a site property (issue #411).
+///
+/// Linear between two authored endpoints: `at_min` is the multiplier where the
+/// property reads `0.0`, `at_max` where it reads `1.0`. Two endpoints rather
+/// than a named curve because every case wanted so far is monotonic, and an
+/// author reading `at_min: 0.2, at_max: 1.5` can see the whole behaviour
+/// without knowing what "linear" or "quadratic" would have meant here.
+///
+/// `at_min` above `at_max` is allowed and means the output falls as the
+/// property rises — nothing assumes the relationship is positive.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SiteScaling {
+    /// What drives the multiplier.
+    #[serde(flatten)]
+    pub property: SiteProperty,
+    /// Multiplier where the property reads `0.0`.
+    pub at_min: f64,
+    /// Multiplier where the property reads `1.0`.
+    pub at_max: f64,
+}
+
+impl SiteScaling {
+    /// The multiplier for a normalised property reading.
+    ///
+    /// `reading` is clamped to `[0.0, 1.0]` first: a property implementation
+    /// returning something out of range is a bug, but silently extrapolating
+    /// the curve past its authored endpoints would turn that bug into a
+    /// wildly wrong yield rather than a merely capped one.
+    #[must_use]
+    pub fn multiplier_at(&self, reading: f64) -> f64 {
+        let t = reading.clamp(0.0, 1.0);
+        (self.at_min + (self.at_max - self.at_min) * t).max(0.0)
+    }
+}
+
 /// A structure that can be constructed in a colony.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildingDef {
@@ -479,6 +539,17 @@ pub struct BuildingDef {
     /// [`SiteRequirement::Terrain`]'s `any_of`.
     #[serde(default)]
     pub site_requirements: Vec<SiteRequirement>,
+    /// How this building's output responds to where it stands (issue #411).
+    ///
+    /// `None` — the default — means output is independent of site, which is
+    /// how every building behaved before this field existed.
+    ///
+    /// Applies to **both** the building's grid-capacity contribution
+    /// (`power_delta`) and its recipes' outputs. Scaling only one would make a
+    /// generator that either supplies headroom it cannot fill or fills
+    /// headroom it never supplied.
+    #[serde(default)]
+    pub output_scaling: Option<SiteScaling>,
 }
 
 /// Highest (numerically largest, lowest-urgency) staffing priority (issue #307).

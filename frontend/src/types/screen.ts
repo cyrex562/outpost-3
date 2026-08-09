@@ -42,6 +42,16 @@ export interface BuildingRow {
   paused: boolean
   slot_cost: number
   full_capacity: boolean
+  /**
+   * Output multiplier this building gets from where the colony stands
+   * (issue #411), or `1` when it declares no site scaling.
+   *
+   * Distinct from `scale`, which is how much of its *potential* the building
+   * achieved this sol. A building can sit at `scale: 1` — nothing throttling
+   * it — while a `site_multiplier` of `0.4` caps what full output even means
+   * there. Without surfacing it, a poor site is indistinguishable from a bug.
+   */
+  site_multiplier?: number
   /** Production scale achieved last turn, 0.0–1.0. `0` = produced nothing. */
   scale: number
   /** Why output fell short last turn, if it did (e.g. `"input short: water"`). */
