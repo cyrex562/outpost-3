@@ -120,3 +120,35 @@ test('the catalogue is a collapsible tree grouped by category', async ({ page })
   await expect(page.getByTestId('build-cat-toggle-Power')).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByTestId('build-cat-toggle-Extraction')).toHaveAttribute('aria-expanded', 'true')
 })
+
+
+test('every requirement is listed and marked, met and unmet alike', async ({ page }) => {
+  await newGameAndOpenBuild(page)
+
+  // A fresh colony has an empty stockpile and nothing researched, so
+  // `habitat_dome` is short on its tech *and* both its commodities — the case
+  // `disabledReason` could only ever report one of.
+  const dome = page.locator('[data-testid^="build-req-habitat_dome-"]')
+  await expect.poll(async () => dome.count()).toBeGreaterThan(2)
+
+  const unmet = page.locator('[data-testid^="build-req-habitat_dome-"][data-met="false"]')
+  await expect.poll(async () => unmet.count()).toBeGreaterThanOrEqual(3)
+
+  // Its tech and both commodities each say what is missing.
+  await expect(page.getByTestId('build-req-habitat_dome-tech-planetary_life_support')).toHaveAttribute(
+    'data-met',
+    'false',
+  )
+  await expect(page.getByTestId('build-req-habitat_dome-cost-structural_metal')).toContainText('have 0')
+
+  // Met requirements are listed too: the colony has all 10 slots free, so the
+  // slot requirement is satisfied on the same building that fails three others.
+  await expect(page.getByTestId('build-req-habitat_dome-slots')).toHaveAttribute('data-met', 'true')
+
+  // Status is not carried by colour alone — the marks differ in shape.
+  const metMark = await page.locator('[data-met="true"] .req-mark').first().textContent()
+  const unmetMark = await page.locator('[data-met="false"] .req-mark').first().textContent()
+  expect(metMark?.trim()).not.toBe(unmetMark?.trim())
+  expect(metMark?.trim()).toBeTruthy()
+  expect(unmetMark?.trim()).toBeTruthy()
+})

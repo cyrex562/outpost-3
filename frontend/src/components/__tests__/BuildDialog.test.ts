@@ -29,6 +29,7 @@ function mountDialog(catalog: BuildingOption[], disabledReason: (b: BuildingOpti
       busy: false,
       isTechLocked: () => false,
       isAffordable: () => true,
+      requirements: () => [],
     },
   })
 }
@@ -57,11 +58,14 @@ describe('BuildDialog (UI-rework PR5)', () => {
     expect(wrapper.emitted('queue')).toEqual([[option, 1]])
   })
 
-  it('disables Queue and shows the reason when a building is gated', () => {
+  it('disables Queue and explains why when a building is gated', () => {
     const option = makeBuildingOption({ id: 'research_lab' })
     const wrapper = mountDialog([option], () => 'Requires: basic_metallurgy')
     expect(wrapper.find('[data-testid="btn-queue-research_lab"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('[data-testid="build-card-reason-research_lab"]').text()).toBe(
+    // The reason moved from a line of its own to the row's tooltip — the
+    // requirement badges below now name every blocker, not just the first, so
+    // repeating one of them inline said the same thing twice (issue #423).
+    expect(wrapper.get('[data-testid="build-card-research_lab"]').attributes('title')).toBe(
       'Requires: basic_metallurgy',
     )
   })
@@ -84,6 +88,7 @@ describe('BuildDialog catalog failure vs empty pack', () => {
         busy: false,
         isTechLocked: () => false,
         isAffordable: () => true,
+        requirements: () => [],
         catalogError: 'Could not load the building catalog: no content registry loaded',
       },
     })
@@ -103,6 +108,7 @@ describe('BuildDialog catalog failure vs empty pack', () => {
         busy: false,
         isTechLocked: () => false,
         isAffordable: () => true,
+        requirements: () => [],
       },
     })
     expect(wrapper.find('[data-testid="build-dialog-error"]').exists()).toBe(false)
@@ -129,6 +135,7 @@ describe('BuildDialog catalogue filters', () => {
         busy: false,
         isTechLocked: (b: BuildingOption) => b.id === TECH_LOCKED,
         isAffordable: (b: BuildingOption) => b.id !== UNAFFORDABLE,
+        requirements: () => [],
       },
     })
   }
@@ -183,6 +190,7 @@ describe('BuildDialog catalogue filters', () => {
         busy: false,
         isTechLocked: () => true,
         isAffordable: () => true,
+        requirements: () => [],
       },
     })
     await wrapper.get('[data-testid="filter-hide-tech-locked"]').setValue(true)
@@ -240,6 +248,7 @@ describe('BuildDialog category tree', () => {
         busy: false,
         isTechLocked: () => false,
         isAffordable: () => true,
+        requirements: () => [],
       },
     })
   }
@@ -318,6 +327,7 @@ describe('BuildDialog category tree', () => {
         busy: false,
         isTechLocked: (b: BuildingOption) => b.id === 'smelter',
         isAffordable: () => true,
+        requirements: () => [],
       },
     })
     expect(wrapper.find('[data-testid="build-cat-Processing"]').exists()).toBe(true)
