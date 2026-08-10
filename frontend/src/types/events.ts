@@ -38,6 +38,26 @@ export interface ColonyFoundedAtSiteEvent {
   site_id: string
 }
 
+/**
+ * A colony founding was launched and is in transit (issue #359).
+ *
+ * The founding wizard always names a sponsor colony, so foundings are
+ * *deferred* — the colony arrives after a distance-derived delay rather than
+ * appearing at once. Before this had a wire representation the event was
+ * dropped, so the player clicked Found and got no confirmation of any kind,
+ * then saw the colony appear some sols later with nothing having announced it
+ * (issue #403).
+ */
+export interface ColonyFoundingLaunchedEvent {
+  kind: 'colony_founding_launched'
+  /** Pending-colony id, distinct from the eventual colony id. */
+  pending_id: string
+  name: string
+  body_id: string
+  /** Sols until it arrives. */
+  sols_remaining: number
+}
+
 export interface ConstructionQueuedEvent {
   kind: 'construction_queued'
   colony_id: string
@@ -338,6 +358,7 @@ export type ServerEvent =
   | ManualOverrideChangedEvent
   | DirectiveFiredEvent
   | ProductionShortfallEvent
+  | ColonyFoundingLaunchedEvent
   | HazardOccurredEvent
   | MigrationArrivedEvent
   | VoluntaryEmigrationTriggeredEvent
