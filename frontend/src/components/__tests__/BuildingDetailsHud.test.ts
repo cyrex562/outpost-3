@@ -90,6 +90,55 @@ describe('BuildingDetailsHud (#182)', () => {
     expect(wrapper.find('[data-testid="shortfall-maintenance_short"]').exists()).toBe(true)
   })
 
+  it('names the hazard responsible for an elevated maintenance cost (issue #438)', async () => {
+    getBuildingDetail.mockResolvedValueOnce(
+      makeDetail({
+        maintenance: [{ commodity_id: 'spare_parts', quantity: 0.75 }],
+        maintenance_multiplier: 1.5,
+        maintenance_hazard: 'corrosive',
+      }),
+    )
+    const wrapper = mount(BuildingDetailsHud, {
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
+    })
+    await flushPromises()
+
+    const note = wrapper.find('[data-testid="maintenance-hazard-note"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('corrosive')
+    expect(note.text()).toContain('1.5')
+    // The scaled figure, not the authored one.
+    expect(wrapper.find('[data-testid="maintenance-section"]').text()).toContain('0.75')
+  })
+
+  it('shows no hazard note when the atmosphere costs nothing extra', async () => {
+    getBuildingDetail.mockResolvedValueOnce(
+      makeDetail({ maintenance_multiplier: 1, maintenance_hazard: null }),
+    )
+    const wrapper = mount(BuildingDetailsHud, {
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="maintenance-hazard-note"]').exists()).toBe(false)
+  })
+
+  it('renders a scaled quantity without float noise (issue #438)', async () => {
+    // 0.3 * 1.25 is 0.375 in exact arithmetic but not in IEEE-754 once it has
+    // been through an f32 multiplier; the panel must not show the artefact.
+    getBuildingDetail.mockResolvedValueOnce(
+      makeDetail({ maintenance: [{ commodity_id: 'spare_parts', quantity: 0.30000000000000004 }] }),
+    )
+    const wrapper = mount(BuildingDetailsHud, {
+      props: { ownerId: 'colony-1', buildingType: 'research_lab' },
+    })
+    await flushPromises()
+
+    const text = wrapper.find('[data-testid="maintenance-section"]').text()
+    expect(text).toContain('0.3')
+    expect(text).not.toContain('0.30000000000000004')
+  })
+
   it('shows no recipe selector when there is only one recipe', async () => {
     getBuildingDetail.mockResolvedValueOnce(makeDetail({}))
     const wrapper = mount(BuildingDetailsHud, {

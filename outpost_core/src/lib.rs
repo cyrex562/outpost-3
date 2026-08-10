@@ -3300,6 +3300,35 @@ impl GameEngine {
                         .iter()
                         .map(|c| (c.id, self.colony_site_multipliers(c)))
                         .collect();
+                    // Per-colony atmospheric-hazard maintenance multipliers
+                    // (issue #438). Precomputed here for the same reason as
+                    // the site multipliers above: the production loop below
+                    // borrows each colony mutably and so cannot ask `self`
+                    // about its body.
+                    let colony_hazard_mults: std::collections::HashMap<ColonyId, f32> = self
+                        .state
+                        .colonies
+                        .iter()
+                        .map(|c| {
+                            (
+                                c.id,
+                                self.body_atmosphere_hazard(c.home_body_id.as_ref())
+                                    .maintenance_multiplier(),
+                            )
+                        })
+                        .collect();
+                    let outpost_hazard_mults: std::collections::HashMap<outpost::OutpostId, f32> =
+                        self.state
+                            .outposts
+                            .iter()
+                            .map(|o| {
+                                (
+                                    o.id,
+                                    self.body_atmosphere_hazard(Some(&o.body_id))
+                                        .maintenance_multiplier(),
+                                )
+                            })
+                            .collect();
                     // Cross-colony power transfer (issue #383): before any
                     // colony's production actually runs, look at every
                     // colony's raw (pre-transfer) power balance and walk
@@ -3425,7 +3454,14 @@ impl GameEngine {
                             registry,
                             power_scalar,
                             power_imports.get(&colony.id).copied().unwrap_or(0.0),
-                            maintenance_scalar,
+                            // Difficulty's maintenance scalar times this
+                            // body's atmospheric-hazard multiplier (issue
+                            // #438) — both are multipliers on the same per-sol
+                            // drain, so they compose here rather than being
+                            // threaded separately through a 15-argument
+                            // signature.
+                            maintenance_scalar
+                                * colony_hazard_mults.get(&colony.id).copied().unwrap_or(1.0),
                             maintenance_enabled,
                             colony.habitability_modifier
                                 * colony::contamination_habitability_factor(
@@ -3598,7 +3634,12 @@ impl GameEngine {
                             registry,
                             power_scalar,
                             0.0, // power_import (issue #383)
-                            maintenance_scalar,
+                            // An outpost has no surface hex, but it *is*
+                            // anchored to a body, and a corrosive atmosphere
+                            // eats its equipment exactly as it would a
+                            // colony's (issue #438).
+                            maintenance_scalar
+                                * outpost_hazard_mults.get(&out.id).copied().unwrap_or(1.0),
                             maintenance_enabled,
                             1.0,
                             &out.active_recipes,
@@ -7163,6 +7204,7 @@ impl GameEngine {
                     building_type,
                     &colony.active_recipes,
                     &colony.last_production_by_building,
+                    self.body_atmosphere_hazard(colony.home_body_id.as_ref()),
                 )?;
                 Ok(QueryResult::BuildingDetail(data))
             }
@@ -7177,6 +7219,7 @@ impl GameEngine {
                     building_type,
                     &post.active_recipes,
                     &post.last_production_by_building,
+                    self.body_atmosphere_hazard(Some(&post.body_id)),
                 )?;
                 Ok(QueryResult::BuildingDetail(data))
             }
@@ -8079,6 +8122,18 @@ impl GameEngine {
             .unwrap_or_default()
     }
 
+    /// The atmospheric hazard of a body, or [`system::AtmosphereHazard::None`]
+    /// when there is no such body (issue #438).
+    ///
+    /// Absent means neutral, not unknown: a colony with no `home_body_id` (the
+    /// bare `Command::FoundColony` fixture path) pays nominal maintenance
+    /// rather than inheriting a penalty from nowhere.
+    fn body_atmosphere_hazard(&self, body_id: Option<&system::BodyId>) -> system::AtmosphereHazard {
+        body_id
+            .and_then(|b| self.state.system_state.node_map.bodies.get(b))
+            .map_or(system::AtmosphereHazard::None, |b| b.atmosphere_hazard)
+    }
+
     /// The site an outpost occupies.
     ///
     /// An outpost is anchored to a body with no surface hex, so `coord` and
@@ -8160,6 +8215,7 @@ impl GameEngine {
         building_type: &str,
         active_recipes: &std::collections::HashMap<String, String>,
         last_production: &std::collections::HashMap<uuid::Uuid, colony::BuildingProductionResult>,
+        hazard: system::AtmosphereHazard,
     ) -> Result<ui::BuildingDetailData, EngineError> {
         let registry = self
             .state
@@ -8236,9 +8292,16 @@ impl GameEngine {
                 .iter()
                 .map(|i| ui::IngredientRow {
                     commodity_id: i.id.clone(),
-                    quantity: i.quantity,
+                    quantity: i.quantity * f64::from(hazard.maintenance_multiplier()),
                 })
                 .collect(),
+            maintenance_multiplier: hazard.maintenance_multiplier(),
+            // Gated on the multiplier, not on `hazard != None`: `Toxic` is a
+            // real hazard that deliberately costs no extra maintenance, and
+            // naming it as the reason for an elevated cost that isn't elevated
+            // would be worse than saying nothing.
+            maintenance_hazard: (hazard.maintenance_multiplier() > 1.0)
+                .then(|| hazard.label().to_string()),
             recipe,
             available_recipes,
             concurrent_recipes: colony::production::concurrent_recipes_for_building(
@@ -17872,6 +17935,243 @@ mod tests {
             (got - 0.8 * 0.1).abs() < 1e-4,
             "expected the merged max (0.8, from body abundance) scaled by the \
              0.9-severity contamination factor (0.1), got {got}"
+        );
+    }
+
+    // ── Atmospheric hazards scale maintenance (issue #438) ───────────────────
+
+    /// A colony on a body with `hazard`, holding one maintenance-only
+    /// building that draws 10 `spare_parts` per sol.
+    fn engine_on_hazardous_body(
+        hazard: system::AtmosphereHazard,
+    ) -> (GameEngine, system::BodyId, ColonyId) {
+        use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
+
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SeedPlanet {
+                seed: 42,
+                width: 5,
+                height: 4,
+            })
+            .unwrap();
+        let events = engine
+            .apply(&Command::System(system::SystemCommand::AddBody {
+                name: "Hazard World".into(),
+                kind: system::BodyKind::InnerPlanet,
+                distance_au: 1.2,
+            }))
+            .unwrap();
+        let Event::System(system::SystemEvent::BodyAdded { body_id, .. }) = &events[0] else {
+            panic!("expected BodyAdded, got {:?}", events[0])
+        };
+        let body_id = body_id.clone();
+        engine
+            .apply(&Command::System(system::SystemCommand::SetBodyAttributes {
+                body_id: body_id.clone(),
+                atmosphere_density: system::AtmosphereDensity::Breathable,
+                atmosphere_hazard: hazard,
+                temperature: system::TemperatureBand::Temperate,
+                gravity_g: 1.0,
+                radiation: system::RadiationLevel::Low,
+                subtype: system::PlanetarySubtype::Unclassified,
+                tidally_locked: false,
+                axial_tilt_deg: 23.5,
+                rotation_period_hours: 24.0,
+                moon_count: 0,
+            }))
+            .unwrap();
+
+        let site_id = habitable_site_on(&engine, &body_id);
+        engine
+            .apply(&Command::FoundColonyAtSite {
+                name: "Upkeep".into(),
+                starting_population: 100,
+                site_id,
+                focus: None,
+                supplies_id: None,
+                supply_overrides: None,
+                sponsor_colony_id: None,
+                body_id: Some(body_id.clone()),
+            })
+            .unwrap();
+        let colony_id = engine.state.colonies[0].id;
+
+        let mut reg = ContentRegistry::default();
+        // Maintenance-only: no recipe, so nothing but the upkeep draw can move
+        // the stockpile and the measurement is unambiguous.
+        reg.insert_building(BuildingDef {
+            id: "relay_mast".into(),
+            name: "Relay Mast".into(),
+            description: String::new(),
+            category: BuildingCategory::Other,
+            construction_cost: vec![],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![content::types::Ingredient {
+                id: "spare_parts".into(),
+                quantity: 10.0,
+            }],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+            contamination_reduction: 0.0,
+            max_instances: None,
+            site_requirements: Vec::new(),
+            output_scaling: None,
+        });
+        engine.state.registry = Some(reg);
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("relay_mast", 1));
+        engine.state.colonies[idx]
+            .pool
+            .deposit("spare_parts", 1000.0);
+
+        (engine, body_id, colony_id)
+    }
+
+    /// `spare_parts` drawn over one sol by the fixture's single building.
+    fn maintenance_drawn_under(hazard: system::AtmosphereHazard) -> f64 {
+        let (mut engine, _body_id, colony_id) = engine_on_hazardous_body(hazard);
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        1000.0 - engine.state.colonies[idx].pool.amount("spare_parts")
+    }
+
+    #[test]
+    fn hazard_none_leaves_maintenance_at_the_authored_figure() {
+        // Asserted, not assumed (issue #438): an inert world must charge
+        // exactly what the content pack authored, so the whole mechanism is
+        // provably inert until a hazard is actually present.
+        let drawn = maintenance_drawn_under(system::AtmosphereHazard::None);
+        assert!(
+            (drawn - 10.0).abs() < 1e-6,
+            "an inert atmosphere must draw the authored 10.0/sol, drew {drawn}"
+        );
+    }
+
+    #[test]
+    fn a_corrosive_atmosphere_costs_more_maintenance_than_an_inert_one() {
+        let inert = maintenance_drawn_under(system::AtmosphereHazard::None);
+        let corrosive = maintenance_drawn_under(system::AtmosphereHazard::Corrosive);
+        assert!(
+            corrosive > inert,
+            "a corrosive world must cost more upkeep than an inert one: \
+             corrosive drew {corrosive}, inert drew {inert}"
+        );
+        let expected =
+            inert * f64::from(system::AtmosphereHazard::Corrosive.maintenance_multiplier());
+        assert!(
+            (corrosive - expected).abs() < 1e-6,
+            "expected the authored draw scaled by the corrosive multiplier \
+             ({expected}), drew {corrosive}"
+        );
+    }
+
+    #[test]
+    fn an_oxidizing_atmosphere_costs_more_than_inert_but_less_than_corrosive() {
+        let inert = maintenance_drawn_under(system::AtmosphereHazard::None);
+        let oxidizing = maintenance_drawn_under(system::AtmosphereHazard::OxidizingCombustible);
+        let corrosive = maintenance_drawn_under(system::AtmosphereHazard::Corrosive);
+        assert!(
+            oxidizing > inert && oxidizing < corrosive,
+            "steady oxidation should sit between inert and corrosive: \
+             inert {inert}, oxidizing {oxidizing}, corrosive {corrosive}"
+        );
+    }
+
+    /// Pins the deliberate decision recorded on
+    /// [`system::AtmosphereHazard::maintenance_multiplier`] so a later change
+    /// to it has to be a conscious one rather than a quiet edit.
+    #[test]
+    fn a_toxic_atmosphere_does_not_change_maintenance() {
+        let inert = maintenance_drawn_under(system::AtmosphereHazard::None);
+        let toxic = maintenance_drawn_under(system::AtmosphereHazard::Toxic);
+        assert!(
+            (toxic - inert).abs() < 1e-6,
+            "toxicity is lethal to people, not corrosive to equipment — it must \
+             not move maintenance (see the type's docs; its real cost belongs in \
+             population/needs). inert {inert}, toxic {toxic}"
+        );
+    }
+
+    #[test]
+    fn building_detail_reports_the_scaled_maintenance_and_names_the_hazard() {
+        let (engine, _body_id, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::Corrosive);
+        let QueryResult::BuildingDetail(detail) = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "relay_mast".into(),
+            })
+            .unwrap()
+        else {
+            panic!("expected BuildingDetail")
+        };
+
+        let parts = detail
+            .maintenance
+            .iter()
+            .find(|i| i.commodity_id == "spare_parts")
+            .expect("the relay mast draws spare_parts");
+        assert!(
+            (parts.quantity - 15.0).abs() < 1e-6,
+            "the detail panel must show what is actually charged (10.0 x 1.5), \
+             not the authored 10.0; showed {}",
+            parts.quantity
+        );
+        assert_eq!(
+            detail.maintenance_hazard.as_deref(),
+            Some("corrosive"),
+            "an elevated cost has to name its cause, or a hostile world reads as a bug"
+        );
+    }
+
+    #[test]
+    fn building_detail_names_no_hazard_on_an_inert_world() {
+        let (engine, _body_id, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let QueryResult::BuildingDetail(detail) = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "relay_mast".into(),
+            })
+            .unwrap()
+        else {
+            panic!("expected BuildingDetail")
+        };
+        assert_eq!(detail.maintenance_hazard, None);
+        assert!((detail.maintenance_multiplier - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// `Toxic` is a hazard the body genuinely has, but it costs no extra
+    /// upkeep — so the panel must stay silent rather than name it as the
+    /// reason for an increase that never happened.
+    #[test]
+    fn building_detail_stays_silent_about_a_hazard_that_costs_nothing() {
+        let (engine, _body_id, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::Toxic);
+        let QueryResult::BuildingDetail(detail) = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "relay_mast".into(),
+            })
+            .unwrap()
+        else {
+            panic!("expected BuildingDetail")
+        };
+        assert_eq!(
+            detail.maintenance_hazard, None,
+            "a hazard with a neutral multiplier must not be reported as the \
+             cause of an elevated maintenance cost"
         );
     }
 
