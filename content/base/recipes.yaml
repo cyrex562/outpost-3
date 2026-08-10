@@ -148,6 +148,27 @@
 # Nominal output before the site multiplier (issue #414). What a colony
 # actually gets is this scaled by its hex's geothermal gradient — see
 # buildings.yaml's output_scaling for the resulting curve.
+# The only early generator with a running cost (issue #417): it burns fuel
+# rather than harvesting ambient conditions, and the waste is real — unhandled
+# waste overflows storage and contaminates the colony's hex (issue #387), which
+# a remediation project then has to clean up (issue #388).
+#
+# 1 waste per sol matches the refinery recipes, the existing industrial
+# emitters, so a combustion plant reads as one more dirty industrial process
+# rather than a special case.
+- id: burn_hydrocarbons
+  name: Burn Hydrocarbons
+  building: combustion_plant
+  cycle_sols: 1
+  inputs:
+    - id: hydrocarbons
+      quantity: 3.0
+  outputs:
+    - id: power
+      quantity: 34.0
+    - id: waste
+      quantity: 1.0
+
 - id: generate_power_geothermal
   name: Generate Power (Geothermal)
   building: geothermal_plant

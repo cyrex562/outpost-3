@@ -1,0 +1,16 @@
+# One well (9 hydrocarbons/sol) feeding three plants (3 each). Chosen so fuel
+# nets exactly zero: a well that over- or under-supplied would let a change to
+# either rate pass unnoticed.
+#
+# No imports — the whole point is that the colony fuels itself.
+buildings:
+  - building_id: hydrocarbon_well
+    recipe_id: pump_hydrocarbons
+  - building_id: combustion_plant
+    recipe_id: burn_hydrocarbons
+  - building_id: combustion_plant
+    recipe_id: burn_hydrocarbons
+  - building_id: combustion_plant
+    recipe_id: burn_hydrocarbons
+
+imports: []

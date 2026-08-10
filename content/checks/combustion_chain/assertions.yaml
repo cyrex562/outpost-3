@@ -1,0 +1,25 @@
+# One well at 9/sol exactly feeds three plants at 3/sol each.
+#   power: 3 x 34            = 102/sol
+#   waste: 3 x 1             =   3/sol
+#   hydrocarbons: 9 - 9      =   0/sol  (EXACT — the chain closes)
+#
+# Pinned at exact values rather than loose floors: a rate drifting up would
+# change the answer as much as one drifting down, and the fuel balance is the
+# whole claim.
+
+- expect: closed
+  label: the-chain-closes-without-imports
+
+- commodity: hydrocarbons
+  expect: closed
+  label: one-well-exactly-feeds-three-plants
+
+- commodity: power
+  expect: closed
+  min_net: 102.0
+  label: three-plants-produce-102-power-per-sol
+
+- commodity: waste
+  expect: closed
+  min_net: 3.0
+  label: burning-fuel-emits-waste-rather-than-being-free

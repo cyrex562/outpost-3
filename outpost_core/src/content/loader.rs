@@ -1338,6 +1338,117 @@ mod tests {
         );
     }
 
+    /// The whole extract-to-burn chain is reachable at tech 0 (issue #417).
+    ///
+    /// The failure this guards is subtle: a combustion plant gated at tech 0
+    /// is still unbuildable in practice if nothing that produces its fuel is,
+    /// and nothing about the plant's own definition would show that.
+    #[test]
+    fn the_combustion_fuel_chain_closes_at_tech_zero() {
+        let (Some(byaml), Some(ryaml)) = (read_real_buildings_yaml(), read_real_recipes_yaml())
+        else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let recipes: Vec<crate::content::types::RecipeDef> =
+            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
+        let tech_free: std::collections::HashSet<&str> = buildings
+            .iter()
+            .filter(|b| b.tech_prerequisite.is_none())
+            .map(|b| b.id.as_str())
+            .collect();
+
+        assert!(
+            tech_free.contains("combustion_plant"),
+            "the plant itself must be tech 0"
+        );
+
+        // Every commodity the plant burns...
+        let burned: Vec<&str> = recipes
+            .iter()
+            .filter(|r| r.building == "combustion_plant")
+            .flat_map(|r| r.inputs.iter())
+            .map(|i| i.id.as_str())
+            .collect();
+        assert!(
+            !burned.is_empty(),
+            "a combustion plant that burns nothing is not one"
+        );
+
+        // ...must be produced by something also reachable at tech 0.
+        for fuel in burned {
+            let producible = recipes.iter().any(|r| {
+                tech_free.contains(r.building.as_str()) && r.outputs.iter().any(|o| o.id == fuel)
+            });
+            assert!(
+                producible,
+                "nothing available at tech 0 produces '{fuel}', so the plant cannot \
+                 actually be fuelled however its own gate reads"
+            );
+        }
+    }
+
+    /// Burning fuel is not free (issue #417).
+    ///
+    /// The plant's whole character is a running cost against reliable output;
+    /// a byproduct-free version would be strictly better than every ambient
+    /// generator with no downside to weigh.
+    #[test]
+    fn the_combustion_plant_emits_waste_as_well_as_power() {
+        let Some(ryaml) = read_real_recipes_yaml() else {
+            return;
+        };
+        let recipes: Vec<crate::content::types::RecipeDef> =
+            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
+        let burn = recipes
+            .iter()
+            .find(|r| r.building == "combustion_plant")
+            .expect("the plant must have a recipe");
+
+        assert!(
+            burn.outputs
+                .iter()
+                .any(|o| o.id == "power" && o.quantity > 0.0),
+            "must produce power"
+        );
+        assert!(
+            burn.outputs
+                .iter()
+                .any(|o| o.id == "waste" && o.quantity > 0.0),
+            "must emit waste — unhandled waste contaminates the colony's own hex"
+        );
+    }
+
+    /// Its output does not depend on where it stands — that is the point.
+    ///
+    /// Every other early generator varies with the site; this one trades that
+    /// away for a fuel bill. Adding scaling here would blur the one thing
+    /// distinguishing it, and would penalise a poor site twice, since its fuel
+    /// is already deposit-gated at the well.
+    #[test]
+    fn the_combustion_plant_output_is_site_independent() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let plant = buildings
+            .iter()
+            .find(|b| b.id == "combustion_plant")
+            .expect("combustion_plant must exist");
+
+        assert!(plant.output_scaling.is_none());
+        assert!(
+            plant.site_requirements.iter().any(|r| matches!(
+                &r.condition,
+                crate::content::types::SiteCondition::Deposit { commodity, .. }
+                    if commodity == "hydrocarbons"
+            )),
+            "the site decides whether you can have one, not how well it runs"
+        );
+    }
+
     /// A colony gets exactly one headquarters.
     #[test]
     fn colony_hq_is_capped_at_one_instance() {

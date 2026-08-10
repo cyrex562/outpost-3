@@ -1,0 +1,15 @@
+id: combustion-chain-check
+name: Combustion Fuel Chain Check
+version: '0.1.0'
+description: >
+  Pins that a colony can run a combustion plant off its own hydrocarbon well
+  at tech 0 (issue #417), and what that costs it.
+
+  The content test in outpost_core/src/content/loader.rs proves the chain is
+  *reachable* — that something tech-free produces what the plant burns. This
+  bundle proves it actually *closes* in production: one well feeds the plants
+  drawing on it, with fuel netting zero rather than quietly running a deficit
+  the harness would otherwise let pass as "someone else's problem".
+
+  Also pins the waste. Burning hydrocarbons is deliberately not free, and a
+  bundle that ignored the byproduct would let it silently drift to zero.
