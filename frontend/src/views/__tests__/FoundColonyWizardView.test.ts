@@ -308,3 +308,58 @@ describe('FoundColonyWizardView step 2 map fills available height', () => {
     expect(fresh.get('section.panel').classes()).not.toContain('map-panel')
   })
 })
+
+
+describe('FoundColonyWizardView sunlight (issue #415)', () => {
+  beforeEach(() => {
+    getColonizeTargets.mockReset()
+    getSystemBodies.mockReset()
+    listBuildings.mockReset()
+    getBodySurface.mockReset()
+    listSupplyPackages.mockReset()
+    window.localStorage.clear()
+  })
+
+  async function mountWithInsolation(insolation: number | undefined) {
+    const target = { ...BODY }
+    if (insolation === undefined) {
+      delete (target as Record<string, unknown>).insolation
+    } else {
+      ;(target as Record<string, unknown>).insolation = insolation
+    }
+    getColonizeTargets.mockResolvedValue([target])
+    getSystemBodies.mockResolvedValue([])
+    listBuildings.mockResolvedValue([BUILDING_A, BUILDING_B])
+    listSupplyPackages.mockResolvedValue([SUPPLY_PACKAGE])
+
+    const wrapper = mount(FoundColonyWizardView, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('warns at the moment of choosing when a body gets almost no sunlight', async () => {
+    // The knock-on issue #415 asks about: solar is near-useless out here, so
+    // the player needs to know before founding, not after building panels.
+    const wrapper = await mountWithInsolation(0.01)
+    expect(wrapper.get('[data-testid="body-card-mars"]').text()).toMatch(
+      /solar is near-useless here/i,
+    )
+  })
+
+  it('describes an Earth-like body as having good sunlight', async () => {
+    const wrapper = await mountWithInsolation(1.0)
+    expect(wrapper.get('[data-testid="body-card-mars"]').text()).toMatch(/good sunlight/i)
+  })
+
+  it('distinguishes weak from absent sunlight', async () => {
+    const wrapper = await mountWithInsolation(0.2)
+    const text = wrapper.get('[data-testid="body-card-mars"]').text()
+    expect(text).toMatch(/weak sunlight/i)
+    expect(text).not.toMatch(/near-useless/i)
+  })
+
+  it('says nothing when the backend predates the field', async () => {
+    const wrapper = await mountWithInsolation(undefined)
+    expect(wrapper.get('[data-testid="body-card-mars"]').text()).not.toMatch(/sunlight/i)
+  })
+})

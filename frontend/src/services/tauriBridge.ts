@@ -337,6 +337,14 @@ export interface ColonizeTarget {
   distance_au: number
   /** Body habitability score (0-100), issue #183. */
   habitability: number
+  /**
+   * Starlight reaching this body, where Sol at 1 AU is `1` (issue #413).
+   *
+   * Shown in the wizard because it decides what solar power is worth here
+   * (issue #415) — a landing-site input, so it belongs in the comparison made
+   * before founding rather than being discovered after.
+   */
+  insolation?: number
   /** Whether founding here is currently allowed (score clears the threshold, or the harsh-world capability is unlocked). */
   can_found: boolean
 }

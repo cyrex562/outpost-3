@@ -23,6 +23,21 @@ use crate::content::types::{SiteCondition, SiteProperty, SiteRequirement, SiteSc
 use crate::map::{HexCoord, PlanetMap};
 use crate::system::Body;
 
+/// Insolation treated as the bottom of the usable range, in units where Sol
+/// at 1 AU is `1.0` (issue #415).
+///
+/// Roughly a body at 14 AU. Anything dimmer normalises to `0.0` rather than
+/// running off toward negative infinity on the log scale.
+pub const INSOLATION_FLOOR: f32 = 0.005;
+
+/// Insolation treated as the top of the usable range (issue #415).
+///
+/// `4.0` is about 0.5 AU from a Sol-like star. Brighter sites clamp here:
+/// past this point more light stops meaning more usable power, and letting
+/// the curve keep climbing would make a scorched inner planet the best solar
+/// site in the game despite being nearly uninhabitable.
+pub const INSOLATION_CEILING: f32 = 4.0;
+
 /// Where a building is being placed, as far as its requirements care.
 #[derive(Debug, Clone, Copy)]
 pub struct SiteContext<'a> {
@@ -35,6 +50,12 @@ pub struct SiteContext<'a> {
     /// Technologies already researched, for requirements a tech can waive
     /// (issue #414). `None` means nothing is researched.
     pub researched: Option<&'a std::collections::HashSet<crate::tech::TechId>>,
+    /// Starlight reaching this site, where Sol at 1 AU is `1.0` (issue #413).
+    ///
+    /// Supplied by the caller rather than derived here: insolation is a
+    /// property of the body's orbit and its star, neither of which this
+    /// context holds.
+    pub insolation: Option<f32>,
 }
 
 impl<'a> SiteContext<'a> {
@@ -47,6 +68,7 @@ impl<'a> SiteContext<'a> {
             coord: None,
             body: None,
             researched: None,
+            insolation: None,
         }
     }
 
@@ -132,6 +154,7 @@ impl<'a> SiteContext<'a> {
             SiteProperty::GeothermalGradient => {
                 Some(f64::from(self.own_cell()?.geothermal_gradient))
             }
+            SiteProperty::Insolation => Some(f64::from(normalise_insolation(self.insolation?))),
         }
     }
 
@@ -171,6 +194,28 @@ impl<'a> SiteContext<'a> {
     }
 }
 
+/// Map raw insolation onto the `[0.0, 1.0]` reading [`SiteScaling`] expects
+/// (issue #415).
+///
+/// **Logarithmic, deliberately.** Insolation is inverse-square in the world,
+/// which spans roughly 3500-fold between an inner planet and an outer moon —
+/// applied linearly to output, an 18 AU colony would get 0.3% of an inner
+/// one's solar power, which does not make solar a tradeoff so much as delete
+/// it past about 2 AU.
+///
+/// A log scale keeps the *ordering* honest — nearer is always better, by a
+/// lot — while leaving a distant colony with solar panels that do something.
+/// This is a game-feel decision, not a physical one, and it is written down
+/// here so nobody later "fixes" it back to inverse-square: the physics is
+/// already correct in [`crate::system::Star::insolation_at`]; this is the
+/// separate question of how much that should matter to a building's yield.
+fn normalise_insolation(insolation: f32) -> f32 {
+    let clamped = insolation.clamp(INSOLATION_FLOOR, INSOLATION_CEILING);
+    let lo = INSOLATION_FLOOR.log10();
+    let hi = INSOLATION_CEILING.log10();
+    ((clamped.log10() - lo) / (hi - lo)).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +251,7 @@ mod tests {
             coord: Some(HexCoord::new(q, r)),
             body,
             researched: None,
+            insolation: None,
         }
     }
 
@@ -315,6 +361,7 @@ mod tests {
             coord: None,
             body: Some(&body),
             researched: None,
+            insolation: None,
         };
 
         assert!(
@@ -638,5 +685,120 @@ mod tests {
             hot_m > cold_m * 2.5,
             "{hot_m} vs {cold_m} — too flat to matter"
         );
+    }
+
+    // ── Insolation-scaled output (issue #415) ───────────────────────────────
+
+    fn solar_curve() -> SiteScaling {
+        // The authored curve from content/base/buildings.yaml.
+        SiteScaling {
+            property: SiteProperty::Insolation,
+            at_min: 0.12,
+            at_max: 1.23,
+        }
+    }
+
+    fn solar_multiplier_at(insolation: f32) -> f64 {
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        SiteContext {
+            insolation: Some(insolation),
+            ..ctx(&m, 0, 0, None)
+        }
+        .output_multiplier(Some(&solar_curve()))
+    }
+
+    #[test]
+    fn solar_output_falls_with_distance_from_the_star() {
+        // insolation = 1 / au², so these are 0.5 / 1 / 5 / 18 AU.
+        let near = solar_multiplier_at(4.0);
+        let earth = solar_multiplier_at(1.0);
+        let far = solar_multiplier_at(0.04);
+        let very_far = solar_multiplier_at(0.003);
+
+        assert!(near > earth, "{near} vs {earth}");
+        assert!(earth > far, "{earth} vs {far}");
+        assert!(far > very_far, "{far} vs {very_far}");
+    }
+
+    #[test]
+    fn a_sol_like_body_at_one_au_gets_exactly_nominal_output() {
+        // Preserves the ladder issue #427 tuned: solar's authored numbers
+        // were calibrated at this point, so it has to land on 1.0 or every
+        // one of those comparisons silently shifts.
+        let m = solar_multiplier_at(1.0);
+        assert!((m - 1.0).abs() < 0.02, "1 AU multiplier {m}");
+    }
+
+    #[test]
+    fn the_falloff_is_softened_rather_than_inverse_square() {
+        // The game-feel decision the content comment records. Applied
+        // linearly, 18 AU would be 0.3% of 1 AU; the log mapping keeps a
+        // distant colony's panels doing something.
+        let earth = solar_multiplier_at(1.0);
+        let very_far = solar_multiplier_at(0.003);
+        let raw_ratio = 0.003 / 1.0;
+        let curve_ratio = very_far / earth;
+
+        assert!(
+            curve_ratio > raw_ratio * 20.0,
+            "curve ratio {curve_ratio} is barely softer than the raw {raw_ratio}"
+        );
+        assert!(
+            very_far > 0.1,
+            "a distant colony's panels must still do something, got {very_far}"
+        );
+    }
+
+    #[test]
+    fn a_scorching_inner_body_does_not_run_away_with_the_curve() {
+        // Clamped at the ceiling: past ~0.5 AU more light stops meaning more
+        // usable power, and an unclamped curve would make a nearly
+        // uninhabitable inner planet the best solar site in the game.
+        let at_ceiling = solar_multiplier_at(4.0);
+        let far_past = solar_multiplier_at(50.0);
+        assert!((at_ceiling - far_past).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_outer_system_colony_has_a_viable_non_solar_power_path() {
+        // The knock-on issue #415 asks to check: if solar becomes weak past
+        // some distance, the outer system must not be a dead end at tech 0.
+        // Geothermal (issue #414) is the answer — its output depends on the
+        // ground, not the star.
+        let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+        cell.geothermal_gradient = 0.5; // ordinary crust, not a lucky hotspot
+        m.cells.insert(coord, cell);
+
+        let far = SiteContext {
+            insolation: Some(0.01), // ~10 AU
+            ..ctx(&m, 0, 0, None)
+        };
+
+        // Nominal power per slot from content: solar mk1 24, geothermal 36.
+        let solar = 24.0 * far.output_multiplier(Some(&solar_curve()));
+        let geothermal = 36.0
+            * far.output_multiplier(Some(&SiteScaling {
+                property: SiteProperty::GeothermalGradient,
+                at_min: 0.15,
+                at_max: 1.4,
+            }));
+
+        assert!(
+            geothermal > solar * 3.0,
+            "at 10 AU geothermal gives {geothermal:.1} against solar's {solar:.1} — \
+             the outer system needs a clearly better option than weak sunlight"
+        );
+    }
+
+    #[test]
+    fn a_site_with_no_known_insolation_is_neutral() {
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let c = SiteContext {
+            insolation: None,
+            ..ctx(&m, 0, 0, None)
+        };
+        assert!((c.output_multiplier(Some(&solar_curve())) - 1.0).abs() < 1e-9);
     }
 }

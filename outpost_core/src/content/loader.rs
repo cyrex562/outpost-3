@@ -1115,20 +1115,33 @@ mod tests {
             .collect();
         assert!(generators.len() >= 4, "expected the full power roster");
 
-        // A site-scaled generator (issue #411/#414) has no single output — its
-        // nominal figure is what it would give at a perfect site. Comparing
-        // that against a fixed generator would call geothermal dominant on the
-        // strength of a hotspot it may never be built on. Compare at an
-        // ordinary site instead: the question this guard asks is whether a
-        // tech-free option makes a researched one pointless *in general*, and
-        // "only where the ground happens to be hot" is a real trade, not
-        // dominance.
-        const ORDINARY_SITE: f64 = 0.5;
+        // A site-scaled generator (issue #411/#414/#415) has no single output —
+        // its nominal figure is what it would give at a perfect site.
+        // Comparing that against a fixed generator would call geothermal
+        // dominant on the strength of a hotspot it may never be built on.
+        // Compare at an *ordinary* site instead: the question this guard asks
+        // is whether a tech-free option makes a researched one pointless in
+        // general, and "only where the ground happens to be hot" is a real
+        // trade, not dominance.
+        //
+        // "Ordinary" is per property, not a shared 0.5. The normalised
+        // readings are not on a common scale: the geothermal gradient is
+        // roughly uniform in [0, 1] so its midpoint is a typical hex, but
+        // insolation is normalised *logarithmically* across a 3500-fold range
+        // (issue #415), where 0.5 is a body around 4 AU — distant, not
+        // typical. Using 0.5 for both would compare a solar array at the
+        // outer system against geothermal on average ground.
+        let ordinary_reading = |p: &crate::content::types::SiteProperty| match p {
+            // 1 AU of a Sol-like star — the point the solar curve is
+            // calibrated to produce nominal output at.
+            crate::content::types::SiteProperty::Insolation => 0.7927,
+            _ => 0.5,
+        };
         let effective_capacity_per_slot = |b: &crate::content::types::BuildingDef| {
             let multiplier = b
                 .output_scaling
                 .as_ref()
-                .map_or(1.0, |s| s.multiplier_at(ORDINARY_SITE));
+                .map_or(1.0, |s| s.multiplier_at(ordinary_reading(&s.property)));
             -b.power_delta * multiplier / f64::from(b.slot_cost)
         };
 

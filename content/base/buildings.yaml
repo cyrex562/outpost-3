@@ -393,6 +393,33 @@
   construction_cost:
     - id: structural_metal
       quantity: 12.0
+  # Issue #415: output follows how much starlight actually reaches this body.
+  #
+  # The mapping is LOGARITHMIC, and that is deliberate — do not "correct" it
+  # to inverse-square. The physics is already right in Star::insolation_at;
+  # this is the separate question of how much it should matter to a yield.
+  # Applied linearly, an 18 AU colony would get 0.3% of an inner one's solar
+  # power, which does not make solar a tradeoff so much as delete it past
+  # about 2 AU. The log scale keeps the ordering honest — nearer is always
+  # better, by a lot — while leaving a distant colony with panels that do
+  # something.
+  #
+  # Endpoints chosen so a body at 1 AU of a Sol-like star lands on exactly
+  # nominal, preserving the ladder issue #427 tuned:
+  #    0.5 AU (insolation 4.000) -> x1.23
+  #    1.0 AU (insolation 1.000) -> x1.00   <- nominal, as tuned
+  #    2.5 AU (insolation 0.160) -> x0.70
+  #    5.0 AU (insolation 0.040) -> x0.47
+  #   10.0 AU (insolation 0.010) -> x0.24
+  #   18.0 AU (insolation 0.003) -> x0.12   <- the floor
+  #
+  # An outer-system colony is therefore poorly served by solar and should be
+  # reaching for geothermal (issue #414), whose output does not depend on
+  # distance from the star.
+  output_scaling:
+    property: insolation
+    at_min: 0.12
+    at_max: 1.23
 
 - id: life_support_module
   name: Life Support Module
@@ -811,6 +838,33 @@
       quantity: 30.0
     - id: components
       quantity: 5.0
+  # Issue #415: the same curve as mk1 — output follows how much starlight actually reaches this body.
+  #
+  # The mapping is LOGARITHMIC, and that is deliberate — do not "correct" it
+  # to inverse-square. The physics is already right in Star::insolation_at;
+  # this is the separate question of how much it should matter to a yield.
+  # Applied linearly, an 18 AU colony would get 0.3% of an inner one's solar
+  # power, which does not make solar a tradeoff so much as delete it past
+  # about 2 AU. The log scale keeps the ordering honest — nearer is always
+  # better, by a lot — while leaving a distant colony with panels that do
+  # something.
+  #
+  # Endpoints chosen so a body at 1 AU of a Sol-like star lands on exactly
+  # nominal, preserving the ladder issue #427 tuned:
+  #    0.5 AU (insolation 4.000) -> x1.23
+  #    1.0 AU (insolation 1.000) -> x1.00   <- nominal, as tuned
+  #    2.5 AU (insolation 0.160) -> x0.70
+  #    5.0 AU (insolation 0.040) -> x0.47
+  #   10.0 AU (insolation 0.010) -> x0.24
+  #   18.0 AU (insolation 0.003) -> x0.12   <- the floor
+  #
+  # An outer-system colony is therefore poorly served by solar and should be
+  # reaching for geothermal (issue #414), whose output does not depend on
+  # distance from the star.
+  output_scaling:
+    property: insolation
+    at_min: 0.12
+    at_max: 1.23
 
 - id: petrochemical_plant
   name: Petrochemical Plant

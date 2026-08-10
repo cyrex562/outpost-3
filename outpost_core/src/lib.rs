@@ -8048,6 +8048,7 @@ impl GameEngine {
             coord,
             body,
             researched: Some(&self.state.tech_state.researched),
+            insolation: body_id.and_then(|b| self.state.system_state.node_map.insolation_for(b)),
         }
     }
 
@@ -8094,6 +8095,11 @@ impl GameEngine {
                 .bodies
                 .get(&outpost.body_id),
             researched: Some(&self.state.tech_state.researched),
+            insolation: self
+                .state
+                .system_state
+                .node_map
+                .insolation_for(&outpost.body_id),
         }
     }
 
