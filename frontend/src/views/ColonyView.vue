@@ -607,6 +607,8 @@ const windowContext = computed<ColonyWindowContext>(() => ({
   // query-driven `screen` (ColonyScreenData), refreshed the same way
   // stability's siblings below (labour, resources, ...) already are.
   morale: screen.value?.morale ?? 0,
+  productivityModifier: screen.value?.productivity_modifier ?? 1,
+  productivityNote: screen.value?.productivity_note ?? null,
   availableLabour: selectedColony.value?.available_labour ?? 0,
   populationTrend: populationTrend.value,
   slotsUsed: screen.value?.slots_used ?? 0,

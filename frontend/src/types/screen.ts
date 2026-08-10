@@ -188,6 +188,18 @@ export interface ColonyScreenData {
   stability: number
   /** Morale scalar in [0, 1] (issue #382) — separate from stability. */
   morale: number
+  /**
+   * Colony-wide multiplier on every building's output (issue #444).
+   *
+   * The world's habitability modifier times the local contamination factor —
+   * exactly what the production pass applies each sol. The scale runs
+   * `0.75`–`1.25` with an *average* world at `1`, so a value above `1` is a
+   * good world rather than a bonus, and a hostile one still shows how much
+   * it is costing relative to what it could be.
+   */
+  productivity_modifier?: number
+  /** Why `productivity_modifier` is off neutral, or absent when it is not. */
+  productivity_note?: string | null
   slots_used: number
   slot_capacity: number
   labour_available: number

@@ -253,12 +253,26 @@ impl AtmosphereHazard {
     ///   in `hazard_none_leaves_maintenance_at_the_authored_figure`.
     /// - [`Self::Corrosive`] — the clearest case. Attacks structure, seals, and
     ///   exposed mechanism continuously, so it carries the largest drain.
-    /// - [`Self::Toxic`] — **deliberately neutral.** Toxicity is lethal to
-    ///   *people*, not corrosive to *equipment*; a sealed pump does not care
-    ///   that the air outside it is poisonous. Its real cost belongs in
-    ///   population/needs (habitat sealing, EVA restrictions), which is filed
-    ///   separately rather than smuggled in here as a maintenance number that
-    ///   would model the wrong thing.
+    /// - [`Self::Toxic`] — **deliberately neutral here, and already paid for
+    ///   elsewhere.** Toxicity is lethal to *people*, not corrosive to
+    ///   *equipment*; a sealed pump does not care that the air outside it is
+    ///   poisonous. Its cost lands in
+    ///   [`habitability_with_mitigations`](Body::habitability_with_mitigations),
+    ///   where `Toxic` zeroes the atmosphere contribution outright — the
+    ///   harshest of the four hazards, against `Corrosive`'s x0.5 and
+    ///   `OxidizingCombustible`'s x0.25. On an otherwise-perfect body that is
+    ///   30 habitability points, which
+    ///   [`habitability_modifier`](Body::habitability_modifier) turns into a
+    ///   x1.10 against x1.25 production multiplier: a toxic world produces
+    ///   about 12% less, every sol, and a marginal one can drop under the
+    ///   founding threshold entirely.
+    ///
+    ///   Issue #444 was filed proposing a *second*, needs-side penalty on the
+    ///   premise that `Toxic` "costs the player nothing". That premise was
+    ///   wrong — it was written from this function alone, without checking
+    ///   habitability scoring. Stacking another penalty on top would have
+    ///   double-charged the same fact and made both illegible. Recorded here
+    ///   so the next reader does not repeat the inference.
     /// - [`Self::OxidizingCombustible`] — **the oxidising half only.** Steady
     ///   oxidation is genuine material degradation and belongs here, between
     ///   inert and corrosive. The *combustible* half is a discrete fire and

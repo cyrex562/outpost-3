@@ -147,6 +147,9 @@ export interface ColonyWindowContext {
   stability: number
   /** Morale scalar in [0, 1] (issue #382) — separate from stability. */
   morale: number
+  /** Colony-wide output multiplier and its cause (issue #444). */
+  productivityModifier: number
+  productivityNote: string | null
   availableLabour: number
   populationTrend: number[]
   slotsUsed: number

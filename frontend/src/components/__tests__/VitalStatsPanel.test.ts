@@ -61,3 +61,42 @@ describe('VitalStatsPanel (UI-rework PR4; evolved from PopulationPanel)', () => 
     expect(wrapper.find('[data-testid="labour-unemployed"]').classes()).not.toContain('stat-warn')
   })
 })
+
+describe('VitalStatsPanel productivity (#444)', () => {
+  function mountWith(extra: Record<string, unknown>) {
+    return mount(VitalStatsPanel, {
+      props: {
+        population: 100,
+        stability: 0.8,
+        morale: 0.7,
+        availableLabour: 40,
+        populationTrend: [],
+        slotsUsed: 2,
+        slotCapacity: 5,
+        labourEmployed: 10,
+        labourUnemployed: 30,
+        ...extra,
+      },
+    })
+  }
+
+  it('shows the world output multiplier and names its cause', () => {
+    const wrapper = mountWith({
+      productivityModifier: 1.1,
+      productivityNote: 'world habitability x1.10',
+    })
+    expect(wrapper.find('[data-testid="productivity-value"]').text()).toContain('1.10')
+    expect(wrapper.find('[data-testid="productivity-note"]').text()).toContain('habitability')
+  })
+
+  it('stays silent for a neutral world', () => {
+    // Otherwise every ordinary colony is told "x1.00 — nothing is wrong".
+    const wrapper = mountWith({ productivityModifier: 1, productivityNote: null })
+    expect(wrapper.find('[data-testid="productivity-section"]').exists()).toBe(false)
+  })
+
+  it('stays silent when the backend predates the field', () => {
+    const wrapper = mountWith({})
+    expect(wrapper.find('[data-testid="productivity-section"]').exists()).toBe(false)
+  })
+})
