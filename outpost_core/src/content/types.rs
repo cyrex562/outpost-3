@@ -428,6 +428,12 @@ pub enum SiteProperty {
     /// [`crate::site::INSOLATION_FLOOR`] for the mapping and why it is
     /// deliberately not inverse-square in effect.
     Insolation,
+    /// How vigorously bulk water moves at the body (issue #440) — the body's
+    /// own spin, or tidal forcing from its primary, whichever dominates.
+    ///
+    /// See [`crate::system::SystemNodeMap::ocean_circulation_for`] for the
+    /// derivation and for why the parent term carries most of the mechanic.
+    OceanCirculation,
 }
 
 /// How a building's output responds to a site property (issue #411).

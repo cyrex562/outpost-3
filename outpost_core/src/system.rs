@@ -1092,6 +1092,44 @@ impl Default for Star {
     }
 }
 
+/// Rotation period, in hours, that reads as a full-strength spin-driven
+/// circulation (issue #440).
+///
+/// The generator's fast rotators span 10–60 h, so this puts the fastest of
+/// them at the top of the scale and a 24-hour day at about `0.42` — brisk but
+/// with headroom above it.
+pub const SPIN_REFERENCE_HOURS: f32 = 10.0;
+
+/// Tidal forcing (`parent gravity / separation³`) at or below which a body
+/// reads as tidally dead (issue #440).
+///
+/// Measured across 300 generated systems, moon forcing spans about 5200×
+/// between the weakest and strongest — a range only a logarithmic mapping can
+/// carry, the same problem and the same answer as
+/// [`crate::site::INSOLATION_FLOOR`]. This floor sits just under the 1st
+/// percentile (166) so the faintest cases clamp rather than stretching the
+/// bottom of the scale.
+pub const TIDAL_FORCING_FLOOR: f32 = 100.0;
+
+/// Tidal forcing at or above which a body reads as maximally tide-driven.
+///
+/// Just under the measured 99th percentile (149 000). Past this, more forcing
+/// stops meaning more usable current, and letting the curve keep climbing
+/// would make one extreme moon per system outclass everything else.
+pub const TIDAL_FORCING_CEILING: f32 = 100_000.0;
+
+/// Map raw tidal forcing onto `0.0`–`1.0`, logarithmically.
+///
+/// See [`TIDAL_FORCING_FLOOR`] for why this cannot be linear. Against the
+/// measured distribution this puts the median moon at about `0.44`, with
+/// roughly 1% clamped at each end.
+fn normalise_tidal_forcing(forcing: f32) -> f32 {
+    let clamped = forcing.clamp(TIDAL_FORCING_FLOOR, TIDAL_FORCING_CEILING);
+    let lo = TIDAL_FORCING_FLOOR.log10();
+    let hi = TIDAL_FORCING_CEILING.log10();
+    ((clamped.log10() - lo) / (hi - lo)).clamp(0.0, 1.0)
+}
+
 /// System node map: bodies as nodes, shipping routes as edges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemNodeMap {
@@ -1141,6 +1179,61 @@ impl SystemNodeMap {
             .and_then(|p| self.bodies.get(p))
             .map_or(body.distance_au, |parent| parent.distance_au);
         Some(self.star.insolation_at(distance))
+    }
+
+    /// How vigorously bulk water moves at this body, `0.0`–`1.0` (issue #440).
+    ///
+    /// Two independent drivers, and the reading is whichever **dominates**
+    /// rather than their sum — a body's currents are set by its strongest
+    /// forcing, and adding a negligible second term to a strong first one
+    /// would inflate a reading without describing anything real:
+    ///
+    /// 1. **Its own spin.** A fast rotator drives strong Coriolis
+    ///    circulation. Normalised on angular rate (`1/period`), not on period
+    ///    itself — a body turning twice as fast has twice the rate, so the
+    ///    relationship is not linear in period.
+    /// 2. **Tidal forcing from its primary.** Scales as `M/r³`, the standard
+    ///    tidal form, using the parent's surface gravity as the mass proxy
+    ///    and the orbital separation for `r`.
+    ///
+    /// **Why the parent term is load-bearing rather than a refinement.**
+    /// Measured across 400 generated systems, 87.3% of foundable bodies are
+    /// tidally locked, and 85.5% are moons — every one of them locked, and
+    /// every one carrying a `parent_body`. Reading spin alone would report
+    /// ~0 on seven bodies in eight, which is both wrong (a locked moon of a
+    /// giant is the most tidally energetic place in a system, not the least)
+    /// and useless as a mechanic.
+    ///
+    /// **A locked *planet* really does read ~0**, and that asymmetry is
+    /// deliberate. A synchronously locked body raises a *static* bulge, so
+    /// the tide does no work; what keeps a locked moon's oceans moving is
+    /// orbital eccentricity and libration against a close, massive primary —
+    /// the Io/Europa case. Eccentricity is not modelled here, so the parent
+    /// term stands in for it, and a locked body with no parent to be forced
+    /// by is left with only its negligible spin.
+    #[must_use]
+    pub fn ocean_circulation_for(&self, body_id: &BodyId) -> Option<f32> {
+        let body = self.bodies.get(body_id)?;
+
+        let spin = if body.rotation_period_hours > 0.0 {
+            (SPIN_REFERENCE_HOURS / body.rotation_period_hours).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let tidal = body
+            .parent_body
+            .as_ref()
+            .and_then(|p| self.bodies.get(p))
+            .map_or(0.0, |parent| {
+                let separation = (body.distance_au - parent.distance_au).abs();
+                if separation <= 0.0 {
+                    return 0.0;
+                }
+                normalise_tidal_forcing(parent.gravity_g / separation.powi(3))
+            });
+
+        Some(spin.max(tidal))
     }
 
     /// Create an empty system node map.
@@ -3275,6 +3368,159 @@ mod tests {
 
         let ins = map.insolation_for(&moon_id).unwrap();
         assert!((ins - 0.25).abs() < 1e-6, "got {ins}");
+    }
+
+    // ── Ocean circulation (issue #440) ──────────────────────────────────────
+
+    /// A parentless planet spinning at `hours`.
+    fn spinner(hours: f32) -> Body {
+        let mut b = Body::new("Spinner", BodyKind::InnerPlanet, 1.0);
+        b.rotation_period_hours = hours;
+        b
+    }
+
+    /// A moon `separation` AU out from a parent of `parent_gravity` g, locked
+    /// as the generator locks every moon.
+    fn moon_of(parent_gravity: f32, separation: f32) -> (SystemNodeMap, BodyId) {
+        let mut map = SystemNodeMap::new();
+        let mut parent = Body::new("Primary", BodyKind::GasGiant, 5.0);
+        parent.gravity_g = parent_gravity;
+        let parent_id = parent.id.clone();
+        let parent_distance = parent.distance_au;
+        map.add_body(parent);
+
+        let mut moon = Body::new("Moon", BodyKind::Moon, parent_distance + separation);
+        moon.parent_body = Some(parent_id);
+        moon.tidally_locked = true;
+        moon.rotation_period_hours = 800.0;
+        let moon_id = moon.id.clone();
+        map.add_body(moon);
+        (map, moon_id)
+    }
+
+    #[test]
+    fn a_fast_rotator_circulates_more_than_a_slow_one() {
+        let mut map = SystemNodeMap::new();
+        let fast = spinner(10.0);
+        let slow = spinner(60.0);
+        let (fast_id, slow_id) = (fast.id.clone(), slow.id.clone());
+        map.add_body(fast);
+        map.add_body(slow);
+
+        let f = map.ocean_circulation_for(&fast_id).unwrap();
+        let s = map.ocean_circulation_for(&slow_id).unwrap();
+        assert!(
+            f > s,
+            "a 10-hour day ({f}) must out-circulate a 60-hour one ({s})"
+        );
+        assert!(
+            (f - 1.0).abs() < 1e-6,
+            "the reference period reads full: {f}"
+        );
+    }
+
+    /// The issue's own acceptance bar: a tidally locked body must *measurably*
+    /// differ from a fast rotator, not merely differ in principle.
+    #[test]
+    fn a_tidally_locked_planet_has_an_effectively_dead_sea() {
+        let mut map = SystemNodeMap::new();
+        let mut locked = spinner(800.0);
+        locked.tidally_locked = true;
+        let locked_id = locked.id.clone();
+        let fast = spinner(12.0);
+        let fast_id = fast.id.clone();
+        map.add_body(locked);
+        map.add_body(fast);
+
+        let l = map.ocean_circulation_for(&locked_id).unwrap();
+        let f = map.ocean_circulation_for(&fast_id).unwrap();
+        assert!(
+            l < 0.05,
+            "a locked planet has no independent spin and no primary to be \
+             wrung by, so its sea should be effectively dead; read {l}"
+        );
+        assert!(f > 10.0 * l, "fast {f} should dwarf locked {l}");
+    }
+
+    /// The load-bearing case: a locked moon is *not* dead, because its parent
+    /// forces it. Without this, the property would read ~0 on the 85% of
+    /// foundable bodies that are moons.
+    #[test]
+    fn a_locked_moon_is_kept_alive_by_its_parent() {
+        let (map, moon_id) = moon_of(2.5, 0.03);
+        let v = map.ocean_circulation_for(&moon_id).unwrap();
+        assert!(
+            v > 0.5,
+            "a locked moon close to a massive primary is the most tidally \
+             energetic place in a system, not the least; read {v}"
+        );
+    }
+
+    #[test]
+    fn tidal_forcing_falls_off_with_separation_and_rises_with_parent_mass() {
+        let close = {
+            let (m, id) = moon_of(2.5, 0.03);
+            m.ocean_circulation_for(&id).unwrap()
+        };
+        let far = {
+            let (m, id) = moon_of(2.5, 0.14);
+            m.ocean_circulation_for(&id).unwrap()
+        };
+        let light = {
+            let (m, id) = moon_of(0.3, 0.03);
+            m.ocean_circulation_for(&id).unwrap()
+        };
+        assert!(close > far, "closer must be stronger: {close} vs {far}");
+        assert!(
+            close > light,
+            "a heavier primary must force harder: {close} vs {light}"
+        );
+    }
+
+    /// A moon with a dangling `parent_body` must not panic or read as
+    /// maximally tidal — it falls back to its own (negligible) spin, the same
+    /// defensive posture `insolation_for` takes.
+    #[test]
+    fn a_moon_with_a_broken_parent_link_has_no_tidal_term() {
+        let mut map = SystemNodeMap::new();
+        let mut moon = Body::new("Orphan", BodyKind::Moon, 2.0);
+        moon.parent_body = Some(BodyId::new());
+        moon.tidally_locked = true;
+        moon.rotation_period_hours = 800.0;
+        let moon_id = moon.id.clone();
+        map.add_body(moon);
+
+        let v = map.ocean_circulation_for(&moon_id).unwrap();
+        assert!(
+            v < 0.05,
+            "no reachable parent means no tidal forcing; got {v}"
+        );
+    }
+
+    /// A moon sitting exactly on its parent's orbital distance would divide by
+    /// zero in the `M/r³` term. Generated moons never do, but authored content
+    /// can, and a content pack should not be able to produce a NaN multiplier.
+    #[test]
+    fn a_zero_separation_moon_does_not_produce_a_nan() {
+        let mut map = SystemNodeMap::new();
+        let parent = Body::new("Primary", BodyKind::GasGiant, 5.0);
+        let parent_id = parent.id.clone();
+        map.add_body(parent);
+        let mut moon = Body::new("Coincident", BodyKind::Moon, 5.0);
+        moon.parent_body = Some(parent_id);
+        moon.rotation_period_hours = 800.0;
+        let moon_id = moon.id.clone();
+        map.add_body(moon);
+
+        let v = map.ocean_circulation_for(&moon_id).unwrap();
+        assert!(v.is_finite(), "expected a finite reading, got {v}");
+        assert!((0.0..=1.0).contains(&v), "out of range: {v}");
+    }
+
+    #[test]
+    fn ocean_circulation_for_an_unknown_body_is_none() {
+        let map = SystemNodeMap::new();
+        assert!(map.ocean_circulation_for(&BodyId::new()).is_none());
     }
 
     #[test]

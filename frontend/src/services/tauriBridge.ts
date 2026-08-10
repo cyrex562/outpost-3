@@ -202,6 +202,16 @@ export interface SystemBody {
    * field still parses.
    */
   insolation?: number
+  /**
+   * How vigorously bulk water moves here, `0`–`1` (issue #440) — what an
+   * ocean current plant is worth on this body.
+   *
+   * Derived, not raw: `tidally_locked` and `rotation_period_hours` are on
+   * this payload too, but a moon's dominant term is tidal forcing from its
+   * parent, which cannot be computed frontend-side. Optional so a payload
+   * from a backend predating the field still parses.
+   */
+  ocean_circulation?: number
   colonizable: boolean
   /** Atmospheric thickness/density band (issue #197). */
   atmosphere_density: string
@@ -345,6 +355,14 @@ export interface ColonizeTarget {
    * before founding rather than being discovered after.
    */
   insolation?: number
+  /**
+   * How vigorously bulk water moves here, `0`–`1` (issue #440).
+   *
+   * In the wizard for the same reason as `insolation`: it decides what an
+   * ocean current plant is worth on this body, and that is a landing-site
+   * input rather than something to discover afterwards.
+   */
+  ocean_circulation?: number
   /** Whether founding here is currently allowed (score clears the threshold, or the harsh-world capability is unlocked). */
   can_found: boolean
 }

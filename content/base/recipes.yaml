@@ -667,6 +667,15 @@
     - id: power
       quantity: 38.0
 
+- id: generate_power_ocean_current
+  name: Generate Power (Ocean Current)
+  building: ocean_current_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 42.0
+
 - id: generate_power_solar_mk2
   name: Generate Power (Solar Mk2)
   building: solar_array_mk2

@@ -56,6 +56,14 @@ pub struct SiteContext<'a> {
     /// property of the body's orbit and its star, neither of which this
     /// context holds.
     pub insolation: Option<f32>,
+    /// Bulk-water circulation at this body, already normalised to `0.0`–`1.0`
+    /// (issue #440).
+    ///
+    /// Supplied by the caller for the same reason as `insolation`, and more
+    /// so: deriving it needs the body's **parent**, which this context does
+    /// not hold. See
+    /// [`crate::system::SystemNodeMap::ocean_circulation_for`].
+    pub ocean_circulation: Option<f32>,
 }
 
 impl<'a> SiteContext<'a> {
@@ -69,6 +77,7 @@ impl<'a> SiteContext<'a> {
             body: None,
             researched: None,
             insolation: None,
+            ocean_circulation: None,
         }
     }
 
@@ -155,6 +164,10 @@ impl<'a> SiteContext<'a> {
                 Some(f64::from(self.own_cell()?.geothermal_gradient))
             }
             SiteProperty::Insolation => Some(f64::from(normalise_insolation(self.insolation?))),
+            // Already normalised by its source, unlike insolation — the
+            // mapping needs the parent body, so it happens where the parent
+            // is reachable rather than here.
+            SiteProperty::OceanCirculation => Some(f64::from(self.ocean_circulation?)),
         }
     }
 
@@ -252,6 +265,7 @@ mod tests {
             body,
             researched: None,
             insolation: None,
+            ocean_circulation: None,
         }
     }
 
@@ -362,6 +376,7 @@ mod tests {
             body: Some(&body),
             researched: None,
             insolation: None,
+            ocean_circulation: None,
         };
 
         assert!(
@@ -523,6 +538,39 @@ mod tests {
         let thin = body_with(AtmosphereDensity::Thin);
         let got = ctx(&m, 0, 0, Some(&thin)).output_multiplier(Some(&s));
         assert!((got - 1.0).abs() < 1e-9, "Thin gave {got}");
+    }
+
+    /// The current plant's authored curve, end to end through a site (issue
+    /// #440) — a lively sea must out-produce a dead one by the authored
+    /// margin, not merely by "more".
+    #[test]
+    fn ocean_circulation_drives_the_multiplier_between_the_authored_endpoints() {
+        let s = scaling(SiteProperty::OceanCirculation, 0.75, 1.25);
+        let at = |reading: f32| {
+            let mut ctx = SiteContext::unknown();
+            ctx.ocean_circulation = Some(reading);
+            ctx.output_multiplier(Some(&s))
+        };
+
+        // A tidally locked planet, and a strongly tide-driven moon.
+        assert!((at(0.0) - 0.75).abs() < 1e-9, "dead sea: {}", at(0.0));
+        assert!((at(1.0) - 1.25).abs() < 1e-9, "best case: {}", at(1.0));
+        // The measured median moon sits just below neutral.
+        assert!(
+            at(0.442) > at(0.013),
+            "a tide-driven moon must beat a locked planet: {} vs {}",
+            at(0.442),
+            at(0.013)
+        );
+    }
+
+    /// A body whose circulation cannot be read leaves the plant unscaled
+    /// rather than dead — the same neutral-on-unknown rule every other
+    /// property follows.
+    #[test]
+    fn a_site_that_cannot_report_circulation_is_neutral() {
+        let s = scaling(SiteProperty::OceanCirculation, 0.75, 1.25);
+        assert!((SiteContext::unknown().output_multiplier(Some(&s)) - 1.0).abs() < 1e-9);
     }
 
     #[test]

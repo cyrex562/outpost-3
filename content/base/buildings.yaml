@@ -967,6 +967,58 @@
     at_min: 0.05
     at_max: 1.35
 
+- id: ocean_current_plant
+  name: Ocean Current Plant
+  description: >
+    Submerged turbines in a standing current. Needs a coast, and needs the
+    water to actually be moving — which means either a body that spins
+    briskly, or one wrung by tides from the world it orbits. A tidally locked
+    planet with nothing to pull on it has a dead sea.
+  category: power
+  tech_prerequisite: marine_power
+  power_delta: -36.0
+  worker_slots: 1
+  default_priority: 3
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 4
+  construction_cost:
+    - id: structural_metal
+      quantity: 30.0
+    - id: components
+      quantity: 12.0
+  # Coastal, same radius and same reasoning as the other two marine plants
+  # (issue #418's measurement).
+  site_requirements:
+    - kind: terrain
+      any_of: [ocean]
+      within_hexes: 1
+  # The third marine plant, and deliberately not a reskin of the other two
+  # (issue #440). Wave scales on atmosphere_density, thermal on insolation,
+  # this on ocean_circulation — spin, or tidal forcing from a parent body.
+  #
+  # Its character is *steady*: rotation and tides do not vary the way weather
+  # and sunlight do, so this has the highest floor and the smallest swing of
+  # the three. Compare the spans:
+  #   wave     0.35 -> 1.15  (span 0.80)
+  #   thermal  0.05 -> 1.35  (span 1.30)
+  #   current  0.75 -> 1.25  (span 0.50)  <- flattest, best floor
+  #
+  # Tuned against solar_array_mk2 (30 capacity / 36 power, buildable
+  # anywhere), the same bar the other two had to clear, using the measured
+  # distribution of ocean_circulation across 300 generated systems:
+  #   locked planet  v=0.01 -> x0.76 -> 27.2 capacity / 31.8 power  (below
+  #                                     mk2 — a dead sea is a poor site)
+  #   median planet  v=0.28 -> x0.89 -> 32.1 capacity / 37.5 power  (beats mk2)
+  #   median moon    v=0.44 -> x0.97 -> 35.0 capacity / 40.8 power  (beats mk2)
+  #   strong tides   v=1.00 -> x1.25 -> 45.0 capacity / 52.5 power  (its best)
+  # Moons are 85.5% of foundable bodies, so the median *applicable* site is
+  # the moon row — which is the one that has to clear mk2, and does.
+  output_scaling:
+    property: ocean_circulation
+    at_min: 0.75
+    at_max: 1.25
+
 - id: solar_array_mk2
   name: Solar Array Mk2
   description: High-efficiency panel array with tracking mounts.

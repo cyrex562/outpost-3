@@ -41,6 +41,12 @@ pub struct ColonizeTargetWire {
     /// here (issue #415) — a landing-site input, so it has to be part of the
     /// comparison made *before* founding, not discovered after.
     pub insolation: f32,
+    /// How vigorously bulk water moves here, `0.0`–`1.0` (issue #440).
+    ///
+    /// Alongside `insolation` for the same reason: it decides what an ocean
+    /// current plant is worth on this body, so it belongs in the comparison
+    /// made *before* founding.
+    pub ocean_circulation: f32,
     /// Whether founding on this body is currently allowed.
     pub can_found: bool,
 }
@@ -76,6 +82,7 @@ pub async fn get_colonize_targets(State(state): State<AppState>) -> impl IntoRes
             distance_au: b.distance_au,
             habitability: b.habitability(),
             insolation: node_map.insolation_for(&b.id).unwrap_or(0.0),
+            ocean_circulation: node_map.ocean_circulation_for(&b.id).unwrap_or(0.0),
             can_found: b.meets_founding_threshold() || harsh_world_unlocked,
         })
         .collect();
@@ -544,6 +551,12 @@ pub struct SystemBodyWire {
     /// decides what solar power is worth here (issue #415) — so it has to be
     /// visible *before* founding, not after.
     pub insolation: f32,
+    /// How vigorously bulk water moves here, `0.0`–`1.0` (issue #440).
+    ///
+    /// Derived rather than raw: `tidally_locked` and `rotation_period_hours`
+    /// are on this payload too, but a moon's dominant term is tidal forcing
+    /// from its parent, which needs a lookup the frontend cannot do.
+    pub ocean_circulation: f32,
     /// Surface/composition archetype (issue #196) — flavor/authoring
     /// guidance, not a habitability input.
     pub subtype: String,
@@ -627,6 +640,12 @@ pub async fn get_system_bodies(State(state): State<AppState>) -> impl IntoRespon
                 .system_state
                 .node_map
                 .insolation_for(&b.id)
+                .unwrap_or(0.0),
+            ocean_circulation: engine
+                .state
+                .system_state
+                .node_map
+                .ocean_circulation_for(&b.id)
                 .unwrap_or(0.0),
             colonizable: matches!(
                 b.kind,
