@@ -384,3 +384,83 @@ describe('SystemMapView insolation (issue #413)', () => {
     expect(wrapper.find('[data-testid="insolation-value"]').exists()).toBe(false)
   })
 })
+
+describe('SystemMapView belt paint order (#402)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getSystemBodies.mockReset()
+    getSystemName.mockReset()
+    getSystemName.mockResolvedValue('Vega')
+    window.localStorage.clear()
+  })
+
+  /**
+   * SVG paints later siblings on top, and hit-testing follows the same order.
+   * A belt annulus is a couple of hundred pixels across; a planet node is
+   * about four. So a planet that sorted *after* a belt used to be both hidden
+   * and unclickable — clicking it selected the belt instead.
+   *
+   * Pinned here rather than left to `view-surface-live.spec.ts`, which caught
+   * this only probabilistically: it depends on a randomly generated system,
+   * and failed 0/6 vs 6/6 either side of the fix. A regression should break a
+   * deterministic test, not resurrect a coin-flip one.
+   */
+  it('paints belts beneath every other body so small planets stay clickable', async () => {
+    const belt = makeBody({
+      id: 'belt-1',
+      name: 'Belt-1',
+      kind: 'AsteroidBelt',
+      distance_au: 2.5,
+      belt_profile: {
+        inner_au: 2.0,
+        outer_au: 3.0,
+        zones: [{ start_deg: 0, sweep_deg: 360, density: 0.5 }],
+      },
+    } as Partial<SystemBody>)
+    const planet = makeBody({ id: 'planet-1', name: 'Planet-1', distance_au: 2.5 })
+
+    // The planet is declared FIRST, so an unordered render paints the belt
+    // last — on top of it. That is the bug, and this ordering is what makes
+    // this test able to catch it.
+    getSystemBodies.mockResolvedValueOnce([planet, belt])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    const order = wrapper
+      .findAll('[data-testid^="body-node-"]')
+      .map((n) => n.attributes('data-testid'))
+    const beltIdx = order.indexOf('body-node-belt-1')
+    const planetIdx = order.indexOf('body-node-planet-1')
+
+    expect(beltIdx).toBeGreaterThanOrEqual(0)
+    expect(planetIdx).toBeGreaterThanOrEqual(0)
+    expect(beltIdx).toBeLessThan(planetIdx)
+  })
+
+  it('keeps the belt selectable, which pointer-events:none would have cost', async () => {
+    // The cheaper fix for #402 was `pointer-events: none` on the belt fill.
+    // That would have made belts unselectable entirely, losing the side
+    // panel's belt readout — so ordering was chosen instead, and this pins
+    // that the belt is still a real, clickable body.
+    const belt = makeBody({
+      id: 'belt-1',
+      name: 'Belt-1',
+      kind: 'AsteroidBelt',
+      distance_au: 2.5,
+      belt_profile: {
+        inner_au: 2.0,
+        outer_au: 3.0,
+        zones: [{ start_deg: 0, sweep_deg: 360, density: 0.5 }],
+      },
+    } as Partial<SystemBody>)
+    getSystemBodies.mockResolvedValueOnce([belt])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+
+    const node = wrapper.get('[data-testid="body-node-belt-1"]')
+    expect(node.findAll('path.belt-zone').length).toBeGreaterThan(0)
+
+    await node.trigger('click')
+    expect(wrapper.get('[data-testid="belt-span"]').text()).toContain('2.00')
+  })
+})
