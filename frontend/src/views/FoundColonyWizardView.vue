@@ -192,6 +192,23 @@ function jumpToBestSite(): void {
   planetMapRef.value?.focusSite(best.site_id)
 }
 
+/**
+ * What sunlight is worth at this body, phrased as its effect on solar power
+ * rather than as a bare insolation figure (issue #415).
+ *
+ * The number matters here specifically: solar output scales with it, so an
+ * outer-system landing site needs geothermal or fuel instead. Saying "weak
+ * sunlight" is what makes that legible at the moment of choosing.
+ */
+function solarLabel(b: ColonizeTarget): string {
+  const i = b.insolation
+  if (i === undefined) return ''
+  if (i >= 1.5) return 'strong sunlight'
+  if (i >= 0.5) return 'good sunlight'
+  if (i >= 0.1) return 'weak sunlight'
+  return 'little sunlight — solar is near-useless here'
+}
+
 function formatModifier(mod: number): string {
   const pct = (mod - 1.0) * 100
   const sign = pct >= 0 ? '+' : ''
@@ -328,7 +345,11 @@ async function finish(): Promise<void> {
           @click="chosenBody = b"
         >
           <div class="body-name">{{ b.body_name }}</div>
-          <div class="body-meta">{{ b.kind }} · {{ b.distance_au.toFixed(2) }} AU · habitability {{ b.habitability }}/100</div>
+          <div class="body-meta">
+            {{ b.kind }} · {{ b.distance_au.toFixed(2) }} AU · habitability {{ b.habitability }}/100<template
+              v-if="b.insolation !== undefined"
+            > · {{ solarLabel(b) }}</template>
+          </div>
           <div v-if="!b.can_found" class="body-warning" :data-testid="`body-warning-${b.body_id}`">
             Below habitability threshold — founding here will be rejected unless a harsh-world tech is researched.
           </div>

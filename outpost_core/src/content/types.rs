@@ -420,6 +420,14 @@ pub enum SiteProperty {
     /// The site hex's geothermal gradient (issue #412) — how shallow magma
     /// sits beneath it.
     GeothermalGradient,
+    /// Starlight reaching the body (issue #413), normalised logarithmically.
+    ///
+    /// Insolation spans about three and a half thousand-fold between an inner
+    /// planet and an outer moon, so it is the one property whose raw value
+    /// cannot be normalised linearly — see
+    /// [`crate::site::INSOLATION_FLOOR`] for the mapping and why it is
+    /// deliberately not inverse-square in effect.
+    Insolation,
 }
 
 /// How a building's output responds to a site property (issue #411).

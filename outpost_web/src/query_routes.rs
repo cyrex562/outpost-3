@@ -35,6 +35,12 @@ pub struct ColonizeTargetWire {
     pub distance_au: f32,
     /// Body habitability score, `0..=100`.
     pub habitability: u8,
+    /// Starlight reaching this body, where Sol at 1 AU is `1.0` (issue #413).
+    ///
+    /// In the founding wizard because it decides what solar power is worth
+    /// here (issue #415) — a landing-site input, so it has to be part of the
+    /// comparison made *before* founding, not discovered after.
+    pub insolation: f32,
     /// Whether founding on this body is currently allowed.
     pub can_found: bool,
 }
@@ -53,10 +59,8 @@ pub async fn get_colonize_targets(State(state): State<AppState>) -> impl IntoRes
         .state
         .unlocked_capabilities
         .contains(outpost_core::system::HARSH_WORLD_CAPABILITY_ID);
-    let list: Vec<ColonizeTargetWire> = engine
-        .state
-        .system_state
-        .node_map
+    let node_map = &engine.state.system_state.node_map;
+    let list: Vec<ColonizeTargetWire> = node_map
         .bodies
         .values()
         .filter(|b| {
@@ -71,6 +75,7 @@ pub async fn get_colonize_targets(State(state): State<AppState>) -> impl IntoRes
             kind: format!("{:?}", b.kind),
             distance_au: b.distance_au,
             habitability: b.habitability(),
+            insolation: node_map.insolation_for(&b.id).unwrap_or(0.0),
             can_found: b.meets_founding_threshold() || harsh_world_unlocked,
         })
         .collect();
