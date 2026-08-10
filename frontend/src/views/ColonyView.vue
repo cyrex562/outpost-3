@@ -579,6 +579,21 @@ async function setBuildingPaused(buildingId: string, paused: boolean): Promise<v
   })
 }
 
+/**
+ * Repair a broken building (issue #384). Same intent-up/dispatch-here split as
+ * the controls above; the engine rejects a repair the colony cannot afford, so
+ * there is nothing to validate here.
+ */
+async function repairBuilding(buildingId: string): Promise<void> {
+  const col = selectedColony.value
+  if (!col) return
+  await gameStore.sendCommand({
+    kind: 'repair_building',
+    colony_id: col.id,
+    building_id: buildingId,
+  })
+}
+
 // ─── Window panel context (colony details multi-window redesign) ───────────
 //
 // A single computed bag, provided to the whole view, that every
@@ -612,6 +627,7 @@ const windowContext = computed<ColonyWindowContext>(() => ({
   setBuildingLock,
   renameBuilding,
   setBuildingPaused,
+  repairBuilding,
   cancelConstruction,
   openBuildDialog: () => {
     showBuildDialog.value = true

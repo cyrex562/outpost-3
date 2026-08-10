@@ -24,6 +24,7 @@
 //!     construction_turns: 1,
 //!     tech_prerequisite: None,
 //!     maintenance: vec![],
+//!     repair_cost: vec![],
 //!     default_priority: 5,
 //!     grants_slot_capacity: 0,
 //!     starter_kit: false,
@@ -341,6 +342,7 @@ mod tests {
 
     fn make_building(id: &str) -> BuildingDef {
         BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),

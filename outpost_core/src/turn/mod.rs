@@ -272,6 +272,24 @@ pub struct GameState {
     /// deposit also tracks a real remaining quantity that extraction draws
     /// down (see [`crate::map::PlanetMap::deplete_deposit`]).
     pub deposit_depletion_enabled: bool,
+    /// Master building-breakdown toggle (issue #384).
+    ///
+    /// When `false` — the default, and every prior world's behaviour —
+    /// buildings still track [`crate::colony::PlacedBuilding::condition`] and
+    /// still wear down under unmet maintenance, but they never actually
+    /// break. When `true`, a worn building also carries a per-sol chance of
+    /// failing outright and needing [`crate::Command::RepairBuilding`].
+    ///
+    /// Opt-in rather than always-on, mirroring `deposit_depletion_enabled`:
+    /// losing a building is a much harsher consequence than #180's output
+    /// throttle, and switching it on for every existing save would change
+    /// games nobody signed up to change. `Hard`/`Brutal` enable it
+    /// automatically.
+    ///
+    /// Condition itself is tracked either way, so the stat a player watches
+    /// means the same thing in both modes and turning the toggle on mid-game
+    /// does not start every building from a fictional pristine state.
+    pub building_breakdown_enabled: bool,
     /// Most recently activated menace definition, if any.
     ///
     /// Kept alongside `menace_state` so a menace-disabled → re-enabled
@@ -457,6 +475,7 @@ impl GameState {
             hazards_enabled: true,
             maintenance_enabled: true,
             deposit_depletion_enabled: false,
+            building_breakdown_enabled: false,
             last_menace_definition: None,
             system_state: SystemState::new(),
             infra_routes: HashMap::new(),
@@ -534,6 +553,23 @@ impl TurnProcessor {
             sols_per_month,
             rng: ChaCha8Rng::seed_from_u64(seed),
         }
+    }
+
+    /// Draw one uniform `[0, 1)` float from the processor's seeded stream.
+    ///
+    /// Exists so systems resolved *after* `advance` returns — building
+    /// condition and breakdown (issue #384), which cannot be decided until the
+    /// production pass has reported which buildings went unmaintained — can
+    /// roll from the same reproducible sequence rather than standing up a
+    /// second RNG with its own seed to keep in sync.
+    ///
+    /// Callers must draw a **deterministic number of times** in a
+    /// **deterministic order**, or a fixed seed stops reproducing a fixed
+    /// game. Iterating `Vec`s (colonies, then their buildings) satisfies both;
+    /// iterating a `HashMap` would not.
+    pub(crate) fn next_unit_float(&mut self) -> f32 {
+        use rand::Rng as _;
+        self.rng.gen()
     }
 
     /// Advance `state` by exactly one colony-sol.
@@ -1269,6 +1305,7 @@ mod tests {
         use std::collections::HashSet;
 
         let buildings = vec![BuildingDef {
+            repair_cost: vec![],
             id: "adv_lab".to_string(),
             name: "Advanced Lab".to_string(),
             description: String::new(),

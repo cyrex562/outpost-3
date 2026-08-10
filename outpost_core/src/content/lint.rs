@@ -193,6 +193,7 @@ mod tests {
 
     fn building(id: &str) -> BuildingDef {
         BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),

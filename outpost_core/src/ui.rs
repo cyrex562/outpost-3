@@ -117,6 +117,12 @@ fn one() -> f32 {
     1.0
 }
 
+/// Four booleans is over clippy's default comfort threshold, and correct
+/// here: this is a serde payload the frontend reads field by field, so the
+/// lint's usual remedy — collapsing the flags into a state enum — would
+/// invent a state machine the UI does not want and break the TypeScript
+/// shape. Same reasoning as `GameState` and `SnapshotBlob`.
+#[allow(clippy::struct_excessive_bools)]
 /// A single building row for the colony management screen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildingRow {
@@ -161,6 +167,32 @@ pub struct BuildingRow {
     /// "genuinely produced nothing."
     #[serde(default)]
     pub paused: bool,
+    /// Physical condition, `1.0` pristine to `0.0` derelict (issue #384).
+    ///
+    /// Shown so wear is visible *before* anything fails. A breakdown the
+    /// player could not have seen coming reads as the game cheating, which is
+    /// why the model pairs a legible stat with the roll rather than using the
+    /// roll alone.
+    #[serde(default = "one")]
+    pub condition: f32,
+    /// Per-sol chance this building breaks down, `0.0` when it is in no
+    /// danger (issue #384).
+    ///
+    /// Carried as a resolved number rather than left for the frontend to
+    /// recompute: it depends on the body's atmosphere as well as condition,
+    /// and a risk figure the UI derives independently is one that can drift
+    /// from the one the engine actually rolls against.
+    ///
+    /// Always `0.0` while the breakdown toggle is off, so the UI shows risk
+    /// only where risk exists.
+    #[serde(default)]
+    pub breakdown_risk: f32,
+    /// Whether this building has failed and is awaiting repair (issue #384).
+    #[serde(default)]
+    pub broken: bool,
+    /// What repairing it would cost, empty unless [`Self::broken`].
+    #[serde(default)]
+    pub repair_cost: Vec<IngredientRow>,
     /// Number of build slots consumed by this building.
     pub slot_cost: u32,
     /// Whether the building ran at full capacity last turn.
@@ -720,6 +752,10 @@ mod tests {
             labour_employed: 12.0,
             labour_unemployed: 28.0,
             buildings: vec![BuildingRow {
+                condition: 1.0,
+                breakdown_risk: 0.0,
+                broken: false,
+                repair_cost: vec![],
                 building_id: uuid::Uuid::nil(),
                 name: "Greenhouse 1".to_string(),
                 building_type: "greenhouse".to_string(),

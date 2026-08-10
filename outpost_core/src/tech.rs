@@ -822,6 +822,7 @@ mod tests {
     fn unlocked_buildings_no_prereq_always_available() {
         use crate::content::types::{BuildingCategory, BuildingDef};
         let buildings = vec![BuildingDef {
+            repair_cost: vec![],
             id: "shelter".to_string(),
             name: "Shelter".to_string(),
             description: String::new(),
@@ -852,6 +853,7 @@ mod tests {
     fn unlocked_buildings_gated_by_tech() {
         use crate::content::types::{BuildingCategory, BuildingDef};
         let buildings = vec![BuildingDef {
+            repair_cost: vec![],
             id: "adv_lab".to_string(),
             name: "Advanced Lab".to_string(),
             description: String::new(),

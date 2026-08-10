@@ -515,6 +515,16 @@ pub struct BuildingDef {
     /// the sol after `BuildingConstructed` fires.
     #[serde(default)]
     pub maintenance: Vec<Ingredient>,
+    /// Cost to repair this building after a breakdown (issue #384).
+    ///
+    /// Optional. When empty — the default — the engine charges
+    /// [`crate::condition::DEFAULT_REPAIR_COST_FRACTION`] of
+    /// [`Self::construction_cost`] instead, so every building has a sensible
+    /// repair price without one having to be authored for each. Set this only
+    /// where a building should cost something other than that fraction to put
+    /// right (a structure that is cheap to build but dear to fix, say).
+    #[serde(default)]
+    pub repair_cost: Vec<Ingredient>,
     /// Default staffing priority for instances of this building (issue #307).
     ///
     /// `1` is staffed first, [`MAX_BUILDING_PRIORITY`] last. Labour is allocated

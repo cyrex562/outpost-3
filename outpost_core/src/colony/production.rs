@@ -265,6 +265,12 @@ struct PendingProduction<'a> {
     /// labour input. `None` for a building with lines, whose upkeep scale is the
     /// busiest line's and so isn't known until labour has been folded in.
     maintenance_only_scale: Option<f64>,
+    /// Shortfall for a maintenance-only building that cannot pay its upkeep.
+    ///
+    /// Held separately because every other shortfall is recorded per line, and
+    /// this shape of building has none — see where it is set for why that
+    /// previously meant it reported nothing at all.
+    maintenance_only_shortfall: Option<ProductionShortfall>,
     /// Scale upkeep is charged at, resolved in Pass L.
     maintenance_scale: f64,
     /// Whether this building consumes labour at all (issue #307). A pure
@@ -773,6 +779,7 @@ pub fn process_production_scaled(
         // its own affordability ratio and doesn't depend on labour. For everything
         // else the scale is the busiest line's, which isn't known until Pass L has
         // folded labour in — so it's computed there.
+        let mut maintenance_only_shortfall: Option<ProductionShortfall> = None;
         let maintenance_only_scale = if has_any_recipe {
             None
         } else {
@@ -784,6 +791,21 @@ pub fn process_production_scaled(
                 maintenance_slice,
                 maintenance_multiplier,
             );
+            // Shortfalls are otherwise recorded per *line*, and a
+            // maintenance-only building has no lines — so before this it could
+            // starve completely, sit at scale 0, and report nothing at all.
+            // That made the maintenance-short indicator impossible to trigger
+            // for exactly the buildings whose only job is to be maintained,
+            // and left issue #384's condition tracking with no signal to read.
+            if afford.ratio < 1.0 - 1e-9 && !maintenance_slice.is_empty() {
+                maintenance_only_shortfall = Some(ProductionShortfall {
+                    reason: ShortfallReason::MaintenanceShort {
+                        commodity_id: afford.tight.clone().unwrap_or_default(),
+                    },
+                    effective_scale: afford.ratio,
+                    deficit: afford.tight_deficit,
+                });
+            }
             Some(afford.ratio.max(0.0))
         };
 
@@ -819,6 +841,7 @@ pub fn process_production_scaled(
             maintenance: maintenance_slice,
             maintenance_multiplier,
             maintenance_only_scale,
+            maintenance_only_shortfall,
             maintenance_scale: 0.0,
             applies_labour,
             labour_demand,
@@ -960,8 +983,12 @@ pub fn process_production_scaled(
             .map(|l| l.scale)
             .fold(f64::INFINITY, f64::min);
         let scale = if scale.is_finite() { scale } else { 0.0 };
-        let shortfalls: Vec<ProductionShortfall> =
-            p.lines.iter().flat_map(|l| l.shortfalls.clone()).collect();
+        let shortfalls: Vec<ProductionShortfall> = p
+            .lines
+            .iter()
+            .flat_map(|l| l.shortfalls.clone())
+            .chain(p.maintenance_only_shortfall.clone())
+            .collect();
         let line_results = p
             .lines
             .iter()
@@ -1981,6 +2008,7 @@ mod tests {
 
         // Power plant: produces 100 kW
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
             description: String::new(),
@@ -2005,6 +2033,7 @@ mod tests {
 
         // Mine: extracts ore; needs 30 kW; 2 workers
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "mine".into(),
             name: "Mine".into(),
             description: String::new(),
@@ -2041,8 +2070,18 @@ mod tests {
             line: None,
         });
 
-        // Smelter: converts ore to plates; needs 50 kW; 3 workers
+        insert_smelter(&mut reg);
+
+        reg
+    }
+
+    /// Smelter: converts ore to plates; needs 50 kW; 3 workers.
+    ///
+    /// Split out of `make_registry_with_power` so that fixture stays inside
+    /// clippy's function-length limit.
+    fn insert_smelter(reg: &mut ContentRegistry) {
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "smelter".into(),
             name: "Smelter".into(),
             description: String::new(),
@@ -2081,8 +2120,6 @@ mod tests {
             concurrent: false,
             line: None,
         });
-
-        reg
     }
 
     // ── Helper to list placed buildings as (type, slot_cost) ─────────────────
@@ -2505,6 +2542,7 @@ mod tests {
     fn make_registry_with_two_water_consumers() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str| BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -2659,6 +2697,7 @@ mod tests {
     fn make_registry_with_a_chain() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str| BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -3214,6 +3253,7 @@ mod tests {
         let mut reg = ContentRegistry::default();
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
             description: String::new(),
@@ -3237,6 +3277,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_smelter".into(),
             name: "Advanced Smelter".into(),
             description: String::new(),
@@ -3436,14 +3477,12 @@ mod tests {
         assert!(pool.amount("spare_parts").abs() < 1e-9);
     }
 
-    #[test]
-    fn shared_commodity_reports_as_input_short_not_maintenance() {
-        // Backwards-compat guard: when a commodity appears in BOTH the recipe
-        // inputs and the maintenance list, a tightness on that commodity must
-        // still report as InputShort (existing UI/interrupt contracts).
-        let mut reg = ContentRegistry::default();
-
-        reg.insert_building(BuildingDef {
+    /// A plain 100 kW solar array with no upkeep — the stock power source
+    /// this fixture needs. Extracted so its caller stays inside clippy's
+    /// function-length limit.
+    fn solar_array_def() -> BuildingDef {
+        BuildingDef {
+            repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
             description: String::new(),
@@ -3464,9 +3503,20 @@ mod tests {
             max_instances: None,
             output_scaling: None,
             site_requirements: Vec::new(),
-        });
+        }
+    }
+
+    #[test]
+    fn shared_commodity_reports_as_input_short_not_maintenance() {
+        // Backwards-compat guard: when a commodity appears in BOTH the recipe
+        // inputs and the maintenance list, a tightness on that commodity must
+        // still report as InputShort (existing UI/interrupt contracts).
+        let mut reg = ContentRegistry::default();
+
+        reg.insert_building(solar_array_def());
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "recycler".into(),
             name: "Recycler".into(),
             description: String::new(),
@@ -3878,6 +3928,7 @@ mod tests {
     fn make_registry_with_two_recipes() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "refinery".into(),
             name: "Refinery".into(),
             description: String::new(),
@@ -4018,6 +4069,7 @@ mod tests {
     fn make_registry_with_vein_mine() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
             description: String::new(),
@@ -4056,6 +4108,7 @@ mod tests {
         // Non-deposit-gated recipe (not in VEIN_COMMODITIES) — a control to
         // prove gating is scoped to deposit-tracked commodities only.
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "water_well".into(),
             name: "Water Well".into(),
             description: String::new(),
@@ -4324,6 +4377,7 @@ mod tests {
     fn make_registry_with_concurrent_recipes() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "colony_hq".into(),
             name: "Colony HQ".into(),
             description: String::new(),
@@ -4470,6 +4524,7 @@ mod tests {
         // count toward the same shared scale/shortfalls.
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "hybrid_plant".into(),
             name: "Hybrid Plant".into(),
             description: String::new(),
@@ -4576,6 +4631,7 @@ mod tests {
     fn make_registry_for_io_summary() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str| BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -4774,6 +4830,7 @@ mod tests {
     fn io_summary_covers_every_line_not_just_the_first() {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "complex".into(),
             name: "complex".into(),
             description: String::new(),
@@ -4884,6 +4941,7 @@ mod tests {
     fn lines_registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let b = |id: &str| BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -5107,6 +5165,7 @@ mod tests {
     fn a_building_with_no_recipes_has_no_lines() {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "silo".into(),
             name: "silo".into(),
             description: String::new(),
@@ -5139,6 +5198,7 @@ mod tests {
     fn live_lines_registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "complex".into(),
             name: "Fabrication Complex".into(),
             description: String::new(),
@@ -5365,6 +5425,7 @@ mod tests {
     fn site_scaled_generator_registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "array".into(),
             name: "Array".into(),
             description: String::new(),

@@ -40,6 +40,28 @@ export interface BuildingRow {
    * nothing, but still occupies its build slot.
    */
   paused: boolean
+  /**
+   * Physical condition, `1` pristine down to `0` derelict (issue #384).
+   *
+   * Degrades while this building's maintenance goes unpaid, recovers slowly
+   * while it is paid. Shown so wear is visible before anything fails — a
+   * breakdown the player could not see coming reads as the game cheating.
+   */
+  condition?: number
+  /**
+   * Per-sol chance this building breaks down; `0` when it is in no danger
+   * (issue #384).
+   *
+   * Resolved by the engine rather than derived here: it depends on the body's
+   * atmosphere as well as condition, and a figure the UI computes itself is
+   * one that can drift from what the engine actually rolls against. Always
+   * `0` when the breakdown rule is switched off.
+   */
+  breakdown_risk?: number
+  /** Whether this building has failed and awaits repair (issue #384). */
+  broken?: boolean
+  /** What a repair would cost; empty unless `broken` (issue #384). */
+  repair_cost?: IngredientRow[]
   slot_cost: number
   full_capacity: boolean
   /**

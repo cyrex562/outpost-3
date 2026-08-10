@@ -103,6 +103,18 @@ export type Command =
       building_id: string
       paused: boolean
     }
+  | {
+      /**
+       * Repair a broken building, returning it to service (issue #384).
+       *
+       * Charges the colony's stockpile. Rejected if the building is not
+       * actually broken — repair is not a free top-up for a merely worn one —
+       * or if the materials are not there, in which case nothing is spent.
+       */
+      kind: 'repair_building'
+      colony_id: string
+      building_id: string
+    }
   | { kind: 'cancel_construction'; colony_id: string; project_id: string }
   | {
       kind: 'deploy_starter_kit'

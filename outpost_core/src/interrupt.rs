@@ -57,6 +57,8 @@ pub enum InterruptSource {
     TechUnlocked,
     /// The colony's stability dropped below the critical floor.
     StabilityCritical(ColonyId),
+    /// A building is wearing out and now at risk of failing (issue #384).
+    BuildingCondition(ColonyId),
 }
 
 /// Discriminant tag for [`InterruptSource`] used in [`InterruptSourceMask`].
@@ -76,6 +78,8 @@ pub enum InterruptSourceKind {
     TechUnlocked,
     /// Matches [`InterruptSource::StabilityCritical`].
     StabilityCritical,
+    /// Matches [`InterruptSource::BuildingCondition`].
+    BuildingCondition,
 }
 
 impl InterruptSourceKind {
@@ -102,6 +106,7 @@ impl From<&InterruptSource> for InterruptSourceKind {
             InterruptSource::ConstructionComplete => Self::ConstructionComplete,
             InterruptSource::TechUnlocked => Self::TechUnlocked,
             InterruptSource::StabilityCritical(_) => Self::StabilityCritical,
+            InterruptSource::BuildingCondition(_) => Self::BuildingCondition,
         }
     }
 }

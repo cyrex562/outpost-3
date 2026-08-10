@@ -180,6 +180,9 @@ struct FullStateBlob {
     // ── #317 Deposit depletion ───────────────────────────────────────────────
     #[serde(default)]
     deposit_depletion_enabled: bool,
+    /// Master building-breakdown toggle (issue #384).
+    #[serde(default)]
+    building_breakdown_enabled: bool,
 
     // ── #185 Tech-driven habitability mitigation ────────────────────────────
     #[serde(default)]
@@ -275,6 +278,7 @@ impl FullStateBlob {
             last_menace_definition: state.last_menace_definition.clone(),
             maintenance_enabled: state.maintenance_enabled,
             deposit_depletion_enabled: state.deposit_depletion_enabled,
+            building_breakdown_enabled: state.building_breakdown_enabled,
             habitability_mitigations: state.habitability_mitigations.clone(),
             outposts: state.outposts.clone(),
             expedition_registry: state.expedition_registry.clone(),
@@ -342,6 +346,7 @@ impl FullStateBlob {
             last_menace_definition: self.last_menace_definition,
             maintenance_enabled: self.maintenance_enabled,
             deposit_depletion_enabled: self.deposit_depletion_enabled,
+            building_breakdown_enabled: self.building_breakdown_enabled,
             habitability_mitigations: self.habitability_mitigations,
             outposts: self.outposts,
             expedition_registry: self.expedition_registry,
