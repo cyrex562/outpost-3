@@ -12,6 +12,7 @@ use tokio::sync::broadcast::error::RecvError;
 use outpost_core::content::loader::{PackLoader, RawFile};
 use outpost_core::content::registry::ContentRegistry;
 use outpost_core::difficulty::{default_grade_table, DifficultyGradeTable, DifficultyPreset};
+use outpost_core::hazard::load_hazard_config;
 use outpost_core::modifier::ModifiableQuantity;
 use outpost_core::morale::MoraleConfig;
 use outpost_core::needs::NeedsConfig;
@@ -719,6 +720,21 @@ async fn handle_new_game(
         if let Ok(tech_yaml) = std::fs::read_to_string(content_dir.join("base/tech.yaml")) {
             if let Ok(tech_registry) = load_tech_registry(&tech_yaml) {
                 engine.state.tech_registry = Some(tech_registry);
+            }
+        }
+
+        // Load the authored hazard table (issue #421) — mirrors
+        // `outpost_tauri::commands::load_embedded_hazards`. Without this the
+        // per-sol hazard step skips entirely, which is what it did in every
+        // session before this. Non-fatal when missing, but a *parse* failure
+        // is logged rather than swallowed: a silently inert threat layer is
+        // the bug being fixed here.
+        if let Ok(hazard_yaml) = std::fs::read_to_string(content_dir.join("base/hazards.yaml")) {
+            match load_hazard_config(&hazard_yaml) {
+                Ok(config) => engine.state.hazard_config = Some(config),
+                Err(e) => {
+                    tracing::error!("hazards.yaml failed to load, hazards disabled: {e}");
+                }
             }
         }
 

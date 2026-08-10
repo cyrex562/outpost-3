@@ -221,6 +221,75 @@ pub fn roll_hazard(
     })
 }
 
+// ─── Pack loading ────────────────────────────────────────────────────────────
+
+/// Why a `hazards.yaml` could not be loaded.
+#[derive(Debug, thiserror::Error)]
+pub enum HazardLoadError {
+    /// The YAML did not parse into a [`HazardConfig`].
+    #[error("hazards.yaml parse error: {0}")]
+    Parse(String),
+    /// An entry declared a probability or severity outside `[0, 1]`, or a
+    /// severity range that runs backwards.
+    #[error("hazards.yaml: {0}")]
+    Invalid(String),
+}
+
+/// Load and validate a [`HazardConfig`] from raw YAML (issue #421).
+///
+/// Mirrors [`crate::tech::load_tech_registry`]: hazards are content, and both
+/// hosts read this file themselves rather than going through `PackLoader`,
+/// which only knows the ten tables that make up a `ContentRegistry`.
+///
+/// Validation is not merely defensive. `roll_hazard` compares a `[0, 1)` roll
+/// against the configured probability, so a negative probability silently
+/// disables a hazard kind and a probability above `1.0` silently makes it
+/// fire every single sol — neither of which would surface as an error, only
+/// as a game that feels wrong. Catching it at load turns a mystifying
+/// play-time symptom into a message naming the offending entry.
+///
+/// # Errors
+///
+/// Returns [`HazardLoadError::Parse`] if the YAML is malformed, or
+/// [`HazardLoadError::Invalid`] if an entry is out of range.
+pub fn load_hazard_config(yaml: &str) -> Result<HazardConfig, HazardLoadError> {
+    let config: HazardConfig =
+        serde_yaml::from_str(yaml).map_err(|e| HazardLoadError::Parse(e.to_string()))?;
+
+    for entry in &config.kinds {
+        let c = &entry.config;
+        let kind = entry.kind;
+        if !(0.0..=1.0).contains(&c.base_probability) {
+            return Err(HazardLoadError::Invalid(format!(
+                "{kind:?} has base_probability {}, which must be in [0, 1]",
+                c.base_probability
+            )));
+        }
+        if !(0.0..=1.0).contains(&c.severity_min) || !(0.0..=1.0).contains(&c.severity_max) {
+            return Err(HazardLoadError::Invalid(format!(
+                "{kind:?} has severity range [{}, {}], which must lie in [0, 1]",
+                c.severity_min, c.severity_max
+            )));
+        }
+        if c.severity_min > c.severity_max {
+            return Err(HazardLoadError::Invalid(format!(
+                "{kind:?} has severity_min {} above severity_max {}",
+                c.severity_min, c.severity_max
+            )));
+        }
+        for (terrain, modifier) in &entry.terrain_modifiers {
+            if *modifier < 0.0 || !modifier.is_finite() {
+                return Err(HazardLoadError::Invalid(format!(
+                    "{kind:?} has terrain modifier {modifier} for {terrain:?}, \
+                     which must be finite and non-negative"
+                )));
+            }
+        }
+    }
+
+    Ok(config)
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -246,6 +315,152 @@ mod tests {
 
     fn dummy_id() -> ColonyId {
         uuid::Uuid::new_v4()
+    }
+
+    // ── Loading the authored pack (issue #421) ──────────────────────────────
+
+    fn read_real_hazards_yaml() -> Option<String> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let root = std::path::Path::new(&manifest).parent()?.to_path_buf();
+        let path = root.join("content").join("base").join("hazards.yaml");
+        std::fs::read_to_string(path).ok()
+    }
+
+    /// The authored file must load, and load with every kind present.
+    ///
+    /// `hazards.yaml` sat in the pack unread for the whole life of the
+    /// project — `PackLoader` only knows the ten tables that make up a
+    /// `ContentRegistry`, and nothing else parsed it — so nothing had ever
+    /// checked that it was even valid.
+    #[test]
+    fn the_authored_hazards_yaml_loads_with_every_kind_configured() {
+        let Some(yaml) = read_real_hazards_yaml() else {
+            return; // content/ not present in this checkout layout; skip.
+        };
+        let config = load_hazard_config(&yaml).expect("content/base/hazards.yaml must load");
+        for kind in HazardKind::ALL {
+            assert!(
+                config.entry_for(kind).is_some(),
+                "{kind:?} has no authored entry, so it could never fire"
+            );
+        }
+    }
+
+    /// One well-formed `dust_storm` entry with the three fields these tests
+    /// vary. Built rather than written inline: a hand-indented multi-line
+    /// literal is one `cargo fmt` away from becoming malformed YAML, which
+    /// turns a validation test into a parse test without failing loudly.
+    fn one_entry_yaml(probability: &str, severity_min: &str, severity_max: &str) -> String {
+        format!(
+            "kinds:\n  - kind: dust_storm\n    base_probability: {probability}\n    severity_min: {severity_min}\n    severity_max: {severity_max}\n    stability_damage_per_severity: 0.1\n    commodity_loss_per_severity: 0.1\n    population_damage_per_severity: 0.1\n"
+        )
+    }
+
+    #[test]
+    fn the_entry_builder_produces_yaml_that_actually_loads() {
+        // Guards the three tests below: each asserts a *rejection*, and would
+        // pass just as happily if the builder emitted garbage.
+        assert!(load_hazard_config(&one_entry_yaml("0.1", "0.2", "0.8")).is_ok());
+    }
+
+    #[test]
+    fn a_probability_outside_the_unit_range_is_rejected_at_load() {
+        // Above 1.0 would fire every sol; below 0.0 would never fire. Both
+        // are silent at runtime, which is exactly why they are caught here.
+        for probability in ["1.5", "-0.2"] {
+            assert!(
+                matches!(
+                    load_hazard_config(&one_entry_yaml(probability, "0.1", "0.5")),
+                    Err(HazardLoadError::Invalid(_))
+                ),
+                "base_probability {probability} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_backwards_severity_range_is_rejected_at_load() {
+        assert!(matches!(
+            load_hazard_config(&one_entry_yaml("0.1", "0.9", "0.2")),
+            Err(HazardLoadError::Invalid(_))
+        ));
+    }
+
+    /// The heart of issue #421: with the authored table attached, hazards
+    /// must actually fire over a long game.
+    ///
+    /// Asserted rather than eyeballed, and deliberately end-to-end through
+    /// `TurnProcessor::advance` rather than calling `roll_hazard` directly —
+    /// the bug was never in the rolling, which was correct and unit-tested
+    /// throughout. It was that nothing ever populated `hazard_config`, so the
+    /// whole step was skipped. Only a test that runs the real pipeline with
+    /// the real file could have caught that.
+    #[test]
+    fn the_authored_table_actually_fires_hazards_over_a_long_game() {
+        use crate::colony::Colony;
+        use crate::turn::{GameState, TurnProcessor};
+
+        let Some(yaml) = read_real_hazards_yaml() else {
+            return;
+        };
+        let config = load_hazard_config(&yaml).expect("hazards.yaml must load");
+
+        let mut state = GameState::new();
+        state.add_colony(Colony::new("Exposed"), 1000);
+        state.hazard_config = Some(config);
+
+        let mut processor = TurnProcessor::new(20_240_421);
+        let mut kinds_seen = std::collections::HashSet::new();
+        let mut total = 0usize;
+        for _ in 0..500 {
+            for outcome in processor.advance(&mut state).hazard_outcomes {
+                kinds_seen.insert(outcome.kind);
+                total += 1;
+            }
+        }
+
+        assert!(
+            total > 0,
+            "500 sols with the authored hazard table produced no hazards at all —              the threat layer is inert"
+        );
+        // The rarest authored kind is meteor_impact at 0.001/sol, so ~0.5
+        // expected occurrences over 500 sols; requiring every kind would make
+        // this flaky. Requiring most of them still proves the table is being
+        // read as a whole rather than one entry happening to work.
+        assert!(
+            kinds_seen.len() >= 4,
+            "only {} of 6 hazard kinds ever fired over 500 sols: {kinds_seen:?}",
+            kinds_seen.len()
+        );
+    }
+
+    /// The other half of the same bug: a colony that never recorded its
+    /// terrain cannot have terrain modifiers applied to it (issue #421).
+    #[test]
+    fn terrain_modifiers_only_bite_when_a_colony_records_its_terrain() {
+        let Some(yaml) = read_real_hazards_yaml() else {
+            return;
+        };
+        let config = load_hazard_config(&yaml).expect("hazards.yaml must load");
+
+        // seismic_event authors volcanic 3.0 and plains 0.6.
+        let volcanic = config.effective_probability(HazardKind::SeismicEvent, Some("volcanic"));
+        let plains = config.effective_probability(HazardKind::SeismicEvent, Some("plains"));
+        let unknown = config.effective_probability(HazardKind::SeismicEvent, None);
+
+        assert!(
+            volcanic > unknown && unknown > plains,
+            "volcanic {volcanic} should exceed the unmodified {unknown}, which \
+             should exceed plains {plains}"
+        );
+    }
+
+    #[test]
+    fn malformed_yaml_is_a_parse_error_not_a_panic() {
+        assert!(matches!(
+            load_hazard_config("kinds: [this is not a hazard entry]"),
+            Err(HazardLoadError::Parse(_))
+        ));
     }
 
     fn pool() -> Vec<(String, f64)> {
