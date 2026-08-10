@@ -336,3 +336,51 @@ describe('SystemMapView (map fills available height)', () => {
     )
   })
 })
+
+
+describe('SystemMapView insolation (issue #413)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routerPush.mockReset()
+    getSystemBodies.mockReset()
+    getSystemName.mockReset()
+    getSystemName.mockResolvedValue('Test System')
+    window.localStorage.clear()
+  })
+
+  async function selectBodyWith(insolation: number | undefined) {
+    const body = makeBody({ id: 'b1', name: 'B1', distance_au: 1.0 })
+    if (insolation !== undefined) {
+      ;(body as unknown as Record<string, number>).insolation = insolation
+    }
+    getSystemBodies.mockResolvedValueOnce([body])
+    const wrapper = mount(SystemMapView)
+    await flushPromises()
+    await wrapper.get('[data-testid="body-node-b1"]').trigger('click')
+    return wrapper
+  }
+
+  it('reports starlight as a multiple of Earth, with a word for scale', async () => {
+    const wrapper = await selectBodyWith(1.0)
+    const row = wrapper.get('[data-testid="insolation-value"]')
+    expect(row.text()).toContain('1.00×')
+    expect(row.text()).toMatch(/earth-like/i)
+  })
+
+  it('calls out a very dim outer-system body', async () => {
+    // The case that matters for solar power (#415): an outer body gets a
+    // tiny fraction of the light an inner one does.
+    const wrapper = await selectBodyWith(0.003)
+    expect(wrapper.get('[data-testid="insolation-value"]').text()).toMatch(/very dim/i)
+  })
+
+  it('calls out a scorching inner body', async () => {
+    const wrapper = await selectBodyWith(6.0)
+    expect(wrapper.get('[data-testid="insolation-value"]').text()).toMatch(/harsh glare/i)
+  })
+
+  it('omits the row entirely when the backend predates the field', async () => {
+    const wrapper = await selectBodyWith(undefined)
+    expect(wrapper.find('[data-testid="insolation-value"]').exists()).toBe(false)
+  })
+})

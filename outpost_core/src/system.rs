@@ -906,6 +906,120 @@ pub struct ShippingRoute {
     pub travel_time_months: u32,
 }
 
+/// Rough spectral class of a star, derived from its luminosity (issue #413).
+///
+/// Flavour and naming rather than mechanics — insolation is computed from
+/// [`Star::luminosity`] directly, so nothing depends on which band a star
+/// falls in. Present because "a G-class star" tells a player more at a glance
+/// than "luminosity 1.02", and because #319 (multi-star) asks for stellar
+/// types as the step that also makes single-star systems more varied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpectralClass {
+    /// Cool red dwarf — dim, and its habitable zone hugs the star.
+    M,
+    /// Orange dwarf.
+    K,
+    /// Sol-like yellow dwarf.
+    G,
+    /// Hotter yellow-white.
+    F,
+    /// Hot blue-white — bright, with a distant habitable zone.
+    A,
+}
+
+impl SpectralClass {
+    /// The band a luminosity falls in, in solar units.
+    ///
+    /// Boundaries are chosen for legibility rather than astrophysical
+    /// precision: the point is that a dim system reads as dim.
+    #[must_use]
+    pub fn for_luminosity(luminosity: f32) -> Self {
+        match luminosity {
+            l if l < 0.1 => Self::M,
+            l if l < 0.6 => Self::K,
+            l if l < 2.0 => Self::G,
+            l if l < 6.0 => Self::F,
+            _ => Self::A,
+        }
+    }
+}
+
+/// The star a system orbits (issue #413).
+///
+/// Singular for now. #319 (multi-star systems) will want a `Vec<Star>`, and
+/// this type is shaped so that becomes a field change rather than inventing
+/// the concept then — which is why luminosity lives on a star rather than
+/// as a bare field on [`SystemNodeMap`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Star {
+    /// Bolometric luminosity in solar units — Sol is `1.0`.
+    ///
+    /// The one property anything mechanical reads: insolation at a body is
+    /// `luminosity / distance_au²`, so this is what makes an outer-system
+    /// colony's solar arrays worth less than an inner one's (issue #415).
+    pub luminosity: f32,
+    /// Rough class, derived from [`Self::luminosity`].
+    pub spectral_class: SpectralClass,
+}
+
+impl Star {
+    /// A star of the given luminosity, with its class derived to match.
+    ///
+    /// Derived rather than authored so the two can never contradict each
+    /// other — a "class M" star with solar luminosity would be a bug nobody
+    /// would notice until it reached the UI.
+    #[must_use]
+    pub fn with_luminosity(luminosity: f32) -> Self {
+        let luminosity = luminosity.max(f32::MIN_POSITIVE);
+        Self {
+            luminosity,
+            spectral_class: SpectralClass::for_luminosity(luminosity),
+        }
+    }
+
+    /// A Sol-like star.
+    ///
+    /// The fallback for a save written before systems carried a star: the
+    /// original luminosity is not recoverable, and Sol-like keeps every
+    /// existing body's insolation at exactly the value the pre-#413 game
+    /// behaved as if it had.
+    #[must_use]
+    pub fn sol() -> Self {
+        Self::with_luminosity(1.0)
+    }
+
+    /// Luminosity implied by a habitable-zone centre, in AU.
+    ///
+    /// Inverts the standard `hz ≈ √L`. The habitable-zone centre is a New
+    /// Game slider, so it — not luminosity — is what the player actually
+    /// chooses; deriving luminosity from it keeps the star consistent with
+    /// the system generated around it rather than leaving two independent
+    /// knobs that can contradict each other (issue #413).
+    #[must_use]
+    pub fn from_habitable_zone_center(hz_center_au: f32) -> Self {
+        let hz = hz_center_au.max(0.01);
+        Self::with_luminosity(hz * hz)
+    }
+
+    /// Insolation at `distance_au`, in units where Sol at 1 AU is `1.0`.
+    ///
+    /// Plain inverse-square. Atmospheric attenuation, axial tilt, and
+    /// day/night are all deliberately out of scope (issue #413) — this is
+    /// orbital geometry only.
+    #[must_use]
+    pub fn insolation_at(&self, distance_au: f32) -> f32 {
+        let d = distance_au.max(0.01);
+        self.luminosity / (d * d)
+    }
+}
+
+impl Default for Star {
+    fn default() -> Self {
+        Self::sol()
+    }
+}
+
 /// System node map: bodies as nodes, shipping routes as edges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemNodeMap {
@@ -913,6 +1027,12 @@ pub struct SystemNodeMap {
     /// from it. Set when the system is generated; empty until then.
     #[serde(default)]
     pub system_name: String,
+    /// The star these bodies orbit (issue #413).
+    ///
+    /// Defaults to Sol-like for a save written before systems carried one —
+    /// see [`Star::sol`].
+    #[serde(default)]
+    pub star: Star,
     /// All celestial bodies in the system.
     pub bodies: HashMap<BodyId, Body>,
     /// Directed shipping routes between bodies.
@@ -928,11 +1048,35 @@ impl Default for SystemNodeMap {
 }
 
 impl SystemNodeMap {
+    /// Insolation at `body_id`, in units where Sol at 1 AU is `1.0`
+    /// (issue #413).
+    ///
+    /// A moon reports its **parent's** insolation, not one derived from its
+    /// own orbital radius: `distance_au` on a moon is its distance from the
+    /// planet, so using it directly would put a moon of a gas giant at
+    /// thousands of times the light its primary receives.
+    ///
+    /// Returns `None` for an unknown body. A moon whose parent is missing
+    /// falls back to its own distance rather than failing — a broken parent
+    /// link is a data problem, not a reason for the system map to have a
+    /// hole in it.
+    #[must_use]
+    pub fn insolation_for(&self, body_id: &BodyId) -> Option<f32> {
+        let body = self.bodies.get(body_id)?;
+        let distance = body
+            .parent_body
+            .as_ref()
+            .and_then(|p| self.bodies.get(p))
+            .map_or(body.distance_au, |parent| parent.distance_au);
+        Some(self.star.insolation_at(distance))
+    }
+
     /// Create an empty system node map.
     #[must_use]
     pub fn new() -> Self {
         Self {
             system_name: String::new(),
+            star: Star::sol(),
             bodies: HashMap::new(),
             routes: HashMap::new(),
             propulsion_level: 1,
@@ -1798,6 +1942,12 @@ pub fn apply_system_command(
         } => {
             state.node_map.bodies.clear();
             state.node_map.system_name = crate::system_gen::system_name_for_seed(*seed).to_string();
+            // The star is derived from the habitable-zone centre rather than
+            // rolled beside it (issue #413). That centre is a New Game
+            // slider, so it is what the player actually chose; deriving
+            // luminosity from it means the star and the system generated
+            // around it can never disagree.
+            state.node_map.star = Star::from_habitable_zone_center(*habitable_zone_center_au);
             let gen_params = crate::system_gen::SystemGenParams {
                 habitable_zone_center_au: *habitable_zone_center_au,
                 min_inner_planets: *min_inner_planets,
@@ -2957,5 +3107,124 @@ mod tests {
             .unwrap();
             assert_eq!(state.node_map.bodies[&body_id].role, *role);
         }
+    }
+
+    // ── Star and insolation (issue #413) ────────────────────────────────────
+
+    #[test]
+    fn insolation_follows_an_inverse_square_with_distance() {
+        let star = Star::with_luminosity(1.0);
+        assert!((star.insolation_at(1.0) - 1.0).abs() < 1e-6);
+        // Twice as far, a quarter the light.
+        assert!((star.insolation_at(2.0) - 0.25).abs() < 1e-6);
+        // Half as far, four times.
+        assert!((star.insolation_at(0.5) - 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn insolation_scales_linearly_with_luminosity() {
+        let dim = Star::with_luminosity(0.25);
+        let bright = Star::with_luminosity(4.0);
+        assert!((dim.insolation_at(1.0) - 0.25).abs() < 1e-6);
+        assert!((bright.insolation_at(1.0) - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn luminosity_is_derived_from_the_habitable_zone_centre() {
+        // The habitable-zone centre is the New Game slider, so it is what the
+        // player chose; the star follows from it rather than sitting beside
+        // it as a second knob that could disagree.
+        assert!((Star::from_habitable_zone_center(1.0).luminosity - 1.0).abs() < 1e-6);
+        assert!((Star::from_habitable_zone_center(2.0).luminosity - 4.0).abs() < 1e-6);
+        assert!((Star::from_habitable_zone_center(0.5).luminosity - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_star_derived_from_its_hz_centre_puts_that_centre_at_solar_insolation() {
+        // The consistency the derivation buys: whatever the player picks as
+        // the habitable zone actually receives Earth-like light.
+        for hz in [0.4f32, 1.0, 1.7, 3.0] {
+            let star = Star::from_habitable_zone_center(hz);
+            let at_hz = star.insolation_at(hz);
+            assert!(
+                (at_hz - 1.0).abs() < 1e-4,
+                "hz {hz}: insolation {at_hz} at the zone centre"
+            );
+        }
+    }
+
+    #[test]
+    fn spectral_class_tracks_luminosity_and_cannot_contradict_it() {
+        assert_eq!(Star::with_luminosity(0.05).spectral_class, SpectralClass::M);
+        assert_eq!(Star::with_luminosity(0.3).spectral_class, SpectralClass::K);
+        assert_eq!(Star::with_luminosity(1.0).spectral_class, SpectralClass::G);
+        assert_eq!(Star::with_luminosity(3.0).spectral_class, SpectralClass::F);
+        assert_eq!(Star::with_luminosity(20.0).spectral_class, SpectralClass::A);
+    }
+
+    #[test]
+    fn a_moon_reports_its_parents_insolation_not_its_own_orbital_radius() {
+        // A moon's `distance_au` is measured from its planet. Using it
+        // directly would put a gas giant's moon at thousands of times the
+        // light its primary receives.
+        let mut map = SystemNodeMap::new();
+        map.star = Star::with_luminosity(1.0);
+
+        let planet = Body::new("Giant", BodyKind::GasGiant, 5.0);
+        let planet_id = planet.id.clone();
+        map.add_body(planet);
+
+        let mut moon = Body::new("Moon", BodyKind::Moon, 0.002);
+        moon.parent_body = Some(planet_id.clone());
+        let moon_id = moon.id.clone();
+        map.add_body(moon);
+
+        let planet_ins = map.insolation_for(&planet_id).unwrap();
+        let moon_ins = map.insolation_for(&moon_id).unwrap();
+        assert!(
+            (planet_ins - 1.0 / 25.0).abs() < 1e-6,
+            "planet {planet_ins}"
+        );
+        assert!(
+            (moon_ins - planet_ins).abs() < 1e-9,
+            "moon read {moon_ins} against its parent's {planet_ins}"
+        );
+    }
+
+    #[test]
+    fn a_moon_with_a_broken_parent_link_falls_back_to_its_own_distance() {
+        // A dangling parent is a data problem, not a reason for the system
+        // map to have a hole in it.
+        let mut map = SystemNodeMap::new();
+        let mut moon = Body::new("Orphan", BodyKind::Moon, 2.0);
+        moon.parent_body = Some(BodyId::new());
+        let moon_id = moon.id.clone();
+        map.add_body(moon);
+
+        let ins = map.insolation_for(&moon_id).unwrap();
+        assert!((ins - 0.25).abs() < 1e-6, "got {ins}");
+    }
+
+    #[test]
+    fn insolation_for_an_unknown_body_is_none() {
+        let map = SystemNodeMap::new();
+        assert!(map.insolation_for(&BodyId::new()).is_none());
+    }
+
+    #[test]
+    fn a_system_without_a_stored_star_reads_as_sol_like() {
+        // What a save predating issue #413 deserialises to: the original
+        // luminosity is unrecoverable, and Sol-like keeps every body's
+        // insolation at exactly what the pre-#413 game behaved as if it had.
+        let map = SystemNodeMap::new();
+        assert!((map.star.luminosity - 1.0).abs() < 1e-6);
+        assert_eq!(map.star.spectral_class, SpectralClass::G);
+    }
+
+    #[test]
+    fn insolation_never_divides_by_zero_at_the_star() {
+        let star = Star::with_luminosity(1.0);
+        assert!(star.insolation_at(0.0).is_finite());
+        assert!(star.insolation_at(-1.0).is_finite());
     }
 }

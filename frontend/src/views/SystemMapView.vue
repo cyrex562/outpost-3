@@ -259,6 +259,23 @@ function formatModifier(mod: number): string {
   return `${sign}${pct.toFixed(0)}%`
 }
 
+/**
+ * Starlight as a multiple of Earth's, plus a word — the bare number means
+ * little when choosing where to found, but "0.03x Earth — very dim" does.
+ *
+ * Matters because insolation decides what solar power is worth here (issue
+ * #415), so it belongs in the comparison a player makes *before* founding.
+ */
+function insolationLabel(b: SystemBody): string {
+  const i = b.insolation
+  if (i === undefined) return ''
+  const x = i >= 0.1 ? i.toFixed(2) : i.toFixed(3)
+  if (i >= 1.5) return `${x}× Earth — harsh glare`
+  if (i >= 0.5) return `${x}× Earth — Earth-like`
+  if (i >= 0.15) return `${x}× Earth — dim`
+  return `${x}× Earth — very dim`
+}
+
 function habitabilityTone(mod: number): 'bonus' | 'neutral' | 'penalty' {
   if (mod > 1.001) return 'bonus'
   if (mod < 0.999) return 'penalty'
@@ -645,6 +662,10 @@ function viewSurface(body: SystemBody): void {
           <dd>{{ selected.role }}</dd>
           <dt>Distance</dt>
           <dd>{{ selected.distance_au.toFixed(2) }} AU</dd>
+          <template v-if="selected.insolation !== undefined">
+            <dt>Starlight</dt>
+            <dd data-testid="insolation-value">{{ insolationLabel(selected) }}</dd>
+          </template>
           <dt>Colonizable</dt>
           <dd>{{ selected.colonizable ? 'yes' : 'no' }}</dd>
           <dt>Atmosphere</dt>

@@ -194,6 +194,14 @@ export interface SystemBody {
   kind: string
   role: string
   distance_au: number
+  /**
+   * Starlight reaching this body, where Sol at 1 AU is `1` (issue #413).
+   *
+   * A moon reports its parent's, since its own `distance_au` is measured
+   * from the planet. Optional so a payload from a backend predating the
+   * field still parses.
+   */
+  insolation?: number
   colonizable: boolean
   /** Atmospheric thickness/density band (issue #197). */
   atmosphere_density: string
