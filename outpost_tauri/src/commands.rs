@@ -1806,6 +1806,9 @@ pub struct SystemBodyWire {
     /// Habitability modifier after tech-driven mitigations are applied
     /// (issue #185). Equal to `habitability_modifier` when no mitigation applies.
     pub habitability_modifier_effective: f32,
+    /// Starlight reaching this body, in units where Sol at 1 AU is `1.0`
+    /// (issue #413). A moon reports its parent's.
+    pub insolation: f32,
     /// Surface/composition archetype (issue #196). Flavor/authoring
     /// guidance — not a habitability input.
     pub subtype: String,
@@ -1871,6 +1874,12 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
             kind: format!("{:?}", b.kind),
             role: format!("{:?}", b.role),
             distance_au: b.distance_au,
+            insolation: engine
+                .state
+                .system_state
+                .node_map
+                .insolation_for(&b.id)
+                .unwrap_or(0.0),
             colonizable: matches!(
                 b.kind,
                 BodyKind::InnerPlanet | BodyKind::Moon | BodyKind::AsteroidBelt
