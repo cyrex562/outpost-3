@@ -2328,6 +2328,10 @@ pub struct PlanetHexWire {
     pub terrain: String,
     pub biome: String,
     pub elevation: f32,
+    /// Geothermal gradient in `[0.0, 1.0]` (issue #412) — how shallow magma
+    /// sits beneath this hex. Surfaced so it can inform a landing-site
+    /// choice, which is exactly where it matters.
+    pub geothermal_gradient: f32,
     pub temperature: String,
     /// Fraction of this cell covered by water/ice, in `[0.0, 1.0]` (issue #316).
     pub water_coverage: f32,
@@ -2535,6 +2539,7 @@ fn build_planet_map_wire(
                 terrain: format!("{:?}", cell.terrain),
                 biome: format!("{:?}", cell.biome),
                 elevation: cell.elevation,
+            geothermal_gradient: cell.geothermal_gradient,
                 temperature: format!("{:?}", cell.temperature),
                 water_coverage: cell.water_coverage,
                 vegetation_density: cell.vegetation_density,

@@ -378,6 +378,14 @@ export interface PlanetHex {
   terrain: string
   biome: string
   elevation: number
+  /**
+   * Geothermal gradient in `[0, 1]` (issue #412) — how shallow magma sits
+   * beneath this hex. `1` is a hotspot; `0` is cold cratonic crust where
+   * reaching heat means drilling deeper than anyone has.
+   *
+   * Optional so a payload from a backend predating the layer still parses.
+   */
+  geothermal_gradient?: number
   temperature: string
   /**
    * Fraction of this cell covered by water/ice, in `[0.0, 1.0]` (issue

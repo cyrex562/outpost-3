@@ -508,3 +508,47 @@ describe('PlanetHexMap wrap toggle', () => {
     expect(wrapper.findAll('polygon').length).toBe(HEX_COUNT)
   })
 })
+
+
+describe('PlanetHexMap geothermal gradient (issue #412)', () => {
+  function mapWith(gradient: number | undefined) {
+    const hex = makeHex({ q: 0, r: 0, site_id: 'g1' })
+    if (gradient !== undefined) {
+      ;(hex as unknown as Record<string, number>).geothermal_gradient = gradient
+    }
+    return makeMap([hex])
+  }
+
+  async function tooltipFor(gradient: number | undefined) {
+    const wrapper = mount(PlanetHexMap, {
+      props: { map: mapWith(gradient), selectedSite: null },
+    })
+    await wrapper.vm.$nextTick()
+    await wrapper.get('g').trigger('mouseenter')
+    return wrapper
+  }
+
+  it('reports a shallow-magma hex in terms a player can act on', async () => {
+    const wrapper = await tooltipFor(0.85)
+    expect(wrapper.text()).toContain('Geothermal')
+    expect(wrapper.text()).toContain('85%')
+    expect(wrapper.text()).toMatch(/shallow magma/i)
+  })
+
+  it('warns that a cold hex needs drilling tech', async () => {
+    // Matches the engine's DEEP_DRILLING_GRADIENT threshold, so the tooltip
+    // and the rule agree.
+    const wrapper = await tooltipFor(0.1)
+    expect(wrapper.text()).toMatch(/needs drilling tech/i)
+  })
+
+  it('describes the bands between the two extremes', async () => {
+    expect((await tooltipFor(0.5)).text()).toMatch(/warm crust/i)
+    expect((await tooltipFor(0.3)).text()).toMatch(/cool crust/i)
+  })
+
+  it('omits the row entirely when the backend predates the layer', async () => {
+    const wrapper = await tooltipFor(undefined)
+    expect(wrapper.text()).not.toContain('Geothermal')
+  })
+})
