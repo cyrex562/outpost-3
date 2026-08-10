@@ -17758,18 +17758,24 @@ mod tests {
             .find(|n| n.colony_id == colony_id)
             .unwrap()
             .coord;
-        engine
+        // Replace rather than append (issue #430): the assertion below wants
+        // an exact 0.75, but `colony_deposit_richness` merges the hex's
+        // deposits with `.max()`. Generation may already have placed
+        // `structural_ore` here — richer than 0.75, in which case it wins the
+        // merge and the exact-match assertion fails for a reason that has
+        // nothing to do with what this test is checking.
+        let cell = engine
             .state
             .map_for_body_mut(&body_id)
             .unwrap()
             .cells
             .get_mut(&coord)
-            .unwrap()
-            .deposits
-            .push(map::Deposit {
-                commodity_id: "structural_ore".into(),
-                richness: 0.75,
-            });
+            .unwrap();
+        cell.deposits.clear();
+        cell.deposits.push(map::Deposit {
+            commodity_id: "structural_ore".into(),
+            richness: 0.75,
+        });
 
         let richness = engine
             .colony_deposit_richness(colony_id, Some(&body_id))
@@ -17815,19 +17821,22 @@ mod tests {
             .find(|n| n.colony_id == colony_id)
             .unwrap()
             .coord;
-        // Hex-level deposit at 0.5 richness, heavily contaminated.
-        engine
+        // Hex-level deposit at 0.5 richness, heavily contaminated. Cleared
+        // first (issue #430) so the 0.5 is really the hex's contribution to
+        // the merge — a generated `structural_ore` above 0.8 would otherwise
+        // beat the body abundance this test is specifically arranging to win.
+        let cell = engine
             .state
             .map_for_body_mut(&body_id)
             .unwrap()
             .cells
             .get_mut(&coord)
-            .unwrap()
-            .deposits
-            .push(map::Deposit {
-                commodity_id: "structural_ore".into(),
-                richness: 0.5,
-            });
+            .unwrap();
+        cell.deposits.clear();
+        cell.deposits.push(map::Deposit {
+            commodity_id: "structural_ore".into(),
+            richness: 0.5,
+        });
         engine
             .state
             .map_for_body_mut(&body_id)
@@ -22758,11 +22767,16 @@ mod tests {
             .unwrap()
             .coord;
         force_plains_deposit(&mut engine, origin, "structural_ore", 1.0);
-        // Force the target cell's terrain without a matching deposit.
+        // Force the target cell's terrain without a matching deposit. The
+        // absence has to be asserted, not assumed (issue #430): generation is
+        // free to place `structural_ore` on this neighbour, and if it does the
+        // expedition succeeds and this test fails for the wrong reason.
         let target = {
             let home = engine.state.home_map_mut().unwrap();
             let wrapped = home.wrap_coord(map::HexCoord::new(origin.q + 1, origin.r));
-            home.cells.get_mut(&wrapped).unwrap().terrain = map::Terrain::Plains;
+            let cell = home.cells.get_mut(&wrapped).unwrap();
+            cell.terrain = map::Terrain::Plains;
+            cell.deposits.clear();
             wrapped
         };
 
