@@ -34,6 +34,28 @@ pub struct ColonyScreenData {
     /// Morale scalar in `[0.0, 1.0]` (issue #382) — separate from `stability`,
     /// see `crate::morale`'s module doc comment.
     pub morale: f32,
+    /// Colony-wide multiplier on **every** building's output (issue #444).
+    ///
+    /// The product of the body's habitability modifier and the contamination
+    /// factor — exactly the `productivity_multiplier` the production pass is
+    /// given each sol. `1.0` is neutral; the range runs `0.75`–`1.25` from
+    /// habitability alone, before contamination.
+    ///
+    /// Surfaced because it was previously invisible: a colony on a hostile
+    /// world simply produced less than the same buildings elsewhere, with
+    /// nothing anywhere saying why. The site multipliers from #411 explain
+    /// what a *site* does to one building; this explains what the *world*
+    /// does to all of them.
+    #[serde(default = "one")]
+    pub productivity_modifier: f32,
+    /// Why [`Self::productivity_modifier`] is off neutral, or `None` when it
+    /// is not.
+    ///
+    /// Carried rather than derived frontend-side so the phrasing stays with
+    /// the engine that knows which inputs actually applied — the same choice
+    /// as `maintenance_hazard` in issue #438.
+    #[serde(default)]
+    pub productivity_note: Option<String>,
     /// Build slots currently in use.
     pub slots_used: u32,
     /// Total build slot capacity.
@@ -744,6 +766,8 @@ mod tests {
             population: 100.0,
             stability: 0.8,
             morale: 0.7,
+            productivity_modifier: 1.0,
+            productivity_note: None,
             slots_used: 2,
             slot_capacity: 5,
             labour_available: 40.0,

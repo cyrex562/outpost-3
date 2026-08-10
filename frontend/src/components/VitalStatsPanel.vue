@@ -8,12 +8,17 @@
  * BuildingsPanel.)
  */
 
+import { computed } from 'vue'
+
 const props = defineProps<{
   population: number
   stability: number
   /** Morale scalar in [0, 1] (issue #382) — separate from stability, see
    * `crate::morale`'s module doc comment in the engine. */
   morale: number
+  /** Colony-wide output multiplier and its cause (issue #444). */
+  productivityModifier?: number
+  productivityNote?: string | null
   availableLabour: number
   /** Recent population samples, oldest first (indicative trend only). */
   populationTrend: number[]
@@ -42,6 +47,13 @@ function stabilityLabel(stability: number): string {
 
 // Morale reuses stability's bucketing/color scheme — same three-band read at
 // a glance, applied to a different (quality-of-life, not survival) scalar.
+/** Only worth a row when the world actually changes output (issue #444). */
+const showProductivity = computed(
+  () =>
+    props.productivityModifier !== undefined &&
+    Math.abs(props.productivityModifier - 1) > 0.005,
+)
+
 function moraleClass(morale: number): string {
   if (morale > 0.6) return 'stability-high'
   if (morale >= 0.3) return 'stability-mid'
@@ -120,6 +132,25 @@ function sparklinePath(values: number[]): string {
       </div>
       <span class="stability-label" :class="stabilityClass(props.stability)" data-testid="stability-label">
         {{ stabilityLabel(props.stability) }}
+      </span>
+    </div>
+
+    <!-- Issue #444: every building's output is scaled by this, and nothing
+         used to say so — a colony on a hostile world simply produced less
+         than the same buildings elsewhere. Shown only when it is off neutral,
+         so an ordinary colony isn't told "x1.00, nothing is wrong". -->
+    <div
+      v-if="showProductivity"
+      class="stat-block"
+      data-testid="productivity-section"
+      :title="props.productivityNote ?? ''"
+    >
+      <span class="stat-label">Output</span>
+      <span class="stat-value" data-testid="productivity-value">
+        ×{{ (props.productivityModifier ?? 1).toFixed(2) }}
+      </span>
+      <span v-if="props.productivityNote" class="hint" data-testid="productivity-note">
+        {{ props.productivityNote }}
       </span>
     </div>
 

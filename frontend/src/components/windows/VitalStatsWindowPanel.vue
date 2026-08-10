@@ -13,6 +13,8 @@ if (!ctx) throw new Error('VitalStatsWindowPanel must be mounted with ColonyWind
     :population="ctx.population"
     :stability="ctx.stability"
     :morale="ctx.morale"
+    :productivity-modifier="ctx.productivityModifier"
+    :productivity-note="ctx.productivityNote"
     :available-labour="ctx.availableLabour"
     :population-trend="ctx.populationTrend"
     :slots-used="ctx.slotsUsed"

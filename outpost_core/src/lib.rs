@@ -2478,6 +2478,26 @@ pub struct GameEngine {
     pub max_advance_turns: u32,
 }
 
+/// Phrase explaining a colony-wide productivity multiplier (issue #444).
+///
+/// `None` when both inputs are neutral, so the UI shows nothing rather than
+/// "x1.00 — nothing is wrong".
+///
+/// Names the *causes*, not just the number. A colony quietly producing 12%
+/// less than the same buildings elsewhere is indistinguishable from a bug
+/// unless something says why — the same reasoning that made #438 name the
+/// hazard behind an elevated maintenance cost.
+fn productivity_note_for(habitability: f32, contamination_factor: f32) -> Option<String> {
+    let mut causes: Vec<String> = Vec::new();
+    if (habitability - 1.0).abs() > 1e-3 {
+        causes.push(format!("world habitability x{habitability:.2}"));
+    }
+    if (contamination_factor - 1.0).abs() > 1e-3 {
+        causes.push(format!("local contamination x{contamination_factor:.2}"));
+    }
+    (!causes.is_empty()).then(|| causes.join(", "))
+}
+
 /// Charge a colonization cost against a settlement's stockpile (issue #359).
 ///
 /// Affordability is checked for *every* commodity before any is withdrawn, so
@@ -7333,12 +7353,24 @@ impl GameEngine {
                     })
                     .collect();
 
+                // The exact multiplier the production pass will be handed this
+                // sol (issue #444), so the panel cannot drift from the engine.
+                let contamination = self.colony_contamination(c.id);
+                let productivity = c.habitability_modifier
+                    * colony::contamination_habitability_factor(contamination);
+                let productivity_note = productivity_note_for(
+                    c.habitability_modifier,
+                    colony::contamination_habitability_factor(contamination),
+                );
+
                 Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
                     colony_id: c.id,
                     name: c.name.clone(),
                     population: p.count,
                     stability: p.stability,
                     morale: p.morale,
+                    productivity_modifier: productivity,
+                    productivity_note,
                     slots_used: c.slots_used(),
                     slot_capacity: c.slot_capacity,
                     labour_available: labour_available_now,
@@ -8481,6 +8513,19 @@ impl GameEngine {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Contamination on the hex a colony occupies, or `0.0` when it has no
+    /// surface placement (issue #444).
+    fn colony_contamination(&self, colony_id: ColonyId) -> f32 {
+        self.state
+            .planet_maps
+            .values()
+            .find_map(|pm| {
+                let node = pm.colonies.iter().find(|n| n.colony_id == colony_id)?;
+                pm.cell(node.coord).map(|cell| cell.contamination)
+            })
+            .unwrap_or(0.0)
     }
 
     /// The atmospheric hazard of a body, or [`system::AtmosphereHazard::None`]
@@ -18361,6 +18406,117 @@ mod tests {
     }
 
     // ── Atmospheric hazards scale maintenance (issue #438) ───────────────────
+
+    // ── Toxic atmospheres already cost, in habitability (issue #444) ────────
+
+    /// The cost `Toxic` carries is real, ongoing, and the harshest of the
+    /// four hazards — it just lives in habitability rather than maintenance.
+    ///
+    /// Issue #444 proposed adding a second, needs-side penalty on the premise
+    /// that a toxic world "costs the player nothing". This pins the premise
+    /// as false, so the mistake is not repeated: the same colony on the same
+    /// body pays measurably more for its toxic air than for inert air, every
+    /// sol, through the production multiplier.
+    #[test]
+    fn a_toxic_world_produces_less_than_an_inert_one() {
+        let modifier = |hazard: system::AtmosphereHazard| {
+            let (engine, _body, colony_id) = engine_on_hazardous_body(hazard);
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            engine.state.colonies[idx].habitability_modifier
+        };
+        let inert = modifier(system::AtmosphereHazard::None);
+        let toxic = modifier(system::AtmosphereHazard::Toxic);
+        assert!(
+            toxic < inert,
+            "a toxic world must be less productive than an inert one: \
+             toxic {toxic}, inert {inert}"
+        );
+    }
+
+    /// And it is the harshest — so adding a further penalty for the same fact
+    /// would double-charge it.
+    #[test]
+    fn toxic_is_the_harshest_hazard_for_habitability() {
+        let score = |hazard: system::AtmosphereHazard| {
+            let mut body = system::Body::new("Probe", system::BodyKind::InnerPlanet, 1.0);
+            body.atmosphere_density = system::AtmosphereDensity::Breathable;
+            body.atmosphere_hazard = hazard;
+            body.temperature = system::TemperatureBand::Temperate;
+            body.gravity_g = 1.0;
+            body.radiation = system::RadiationLevel::Low;
+            body.habitability()
+        };
+        let none = score(system::AtmosphereHazard::None);
+        let corrosive = score(system::AtmosphereHazard::Corrosive);
+        let oxidizing = score(system::AtmosphereHazard::OxidizingCombustible);
+        let toxic = score(system::AtmosphereHazard::Toxic);
+        assert!(
+            toxic < oxidizing && oxidizing < corrosive && corrosive < none,
+            "expected toxic to be harshest: none {none}, corrosive {corrosive}, \
+             oxidizing {oxidizing}, toxic {toxic}"
+        );
+    }
+
+    /// The penalty has to be *visible*, or a colony quietly producing less is
+    /// indistinguishable from a bug — the same requirement #438 imposed on
+    /// elevated maintenance.
+    #[test]
+    fn the_colony_screen_reports_the_productivity_penalty_and_its_cause() {
+        let (engine, _body, colony_id) = engine_on_hazardous_body(system::AtmosphereHazard::Toxic);
+        let QueryResult::ColonyScreen(screen) =
+            engine.query(&Query::ColonyScreen { colony_id }).unwrap()
+        else {
+            panic!("expected ColonyScreen")
+        };
+        // Note the multiplier is *not* necessarily below 1.0. The scale runs
+        // 0.75-1.25 with an *average* world at 1.0, so a toxic-but-otherwise
+        // excellent body still sits above baseline — toxicity is a penalty
+        // relative to the same body with clean air, which is what
+        // `a_toxic_world_produces_less_than_an_inert_one` pins. What this test
+        // requires is that whatever the engine will actually apply is the
+        // number reported, and that it explains itself.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            (screen.productivity_modifier - engine.state.colonies[idx].habitability_modifier).abs()
+                < 1e-6,
+            "the panel must report the multiplier production will really use: \
+             panel {}, engine {}",
+            screen.productivity_modifier,
+            engine.state.colonies[idx].habitability_modifier
+        );
+        let note = screen
+            .productivity_note
+            .expect("an off-neutral multiplier must explain itself");
+        assert!(
+            note.contains("habitability"),
+            "the note must name the cause, got {note:?}"
+        );
+    }
+
+    /// A neutral colony says nothing, rather than "x1.00 — nothing is wrong".
+    #[test]
+    fn a_neutral_colony_reports_no_productivity_note() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Neutral".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let QueryResult::ColonyScreen(screen) = engine
+            .query(&Query::ColonyScreen {
+                colony_id: *colony_id,
+            })
+            .unwrap()
+        else {
+            panic!("expected ColonyScreen")
+        };
+        assert!((screen.productivity_modifier - 1.0).abs() < 1e-6);
+        assert_eq!(screen.productivity_note, None);
+    }
 
     // ── Building condition & breakdown (issue #384) ─────────────────────────
 
