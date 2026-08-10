@@ -328,6 +328,13 @@ pub(crate) fn client_command_to_core(
             building_id: parse_building_id(&building_id)?,
             paused,
         }),
+        ClientCommand::RepairBuilding {
+            colony_id,
+            building_id,
+        } => Ok(Command::RepairBuilding {
+            colony_id: parse_colony_id(&colony_id)?,
+            building_id: parse_building_id(&building_id)?,
+        }),
         ClientCommand::FoundColonyAtSite {
             name,
             starting_population,

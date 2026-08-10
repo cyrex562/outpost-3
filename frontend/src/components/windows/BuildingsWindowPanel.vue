@@ -20,5 +20,6 @@ if (!ctx) throw new Error('BuildingsWindowPanel must be mounted with ColonyWindo
     @set-lock="ctx.setBuildingLock"
     @rename="ctx.renameBuilding"
     @set-paused="ctx.setBuildingPaused"
+    @repair="ctx.repairBuilding"
   />
 </template>

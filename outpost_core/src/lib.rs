@@ -26,6 +26,7 @@
 
 pub mod balance;
 pub mod colony;
+pub mod condition;
 pub mod content;
 pub mod difficulty;
 pub mod directive;
@@ -329,6 +330,29 @@ pub enum Command {
         building_id: uuid::Uuid,
         /// New priority: `1` is staffed first.
         priority: u8,
+    },
+    /// Repair a broken building, returning it to service (issue #384).
+    ///
+    /// Charged against the colony's stockpile: the building's authored
+    /// `repair_cost` if it has one, else
+    /// [`condition::DEFAULT_REPAIR_COST_FRACTION`] of its construction cost.
+    /// Affordability is checked across every commodity before any is
+    /// withdrawn, so a repair the colony cannot afford leaves the stockpile
+    /// exactly as it was rather than half-spending it.
+    ///
+    /// Repair is **immediate**. Building condition already models gradual
+    /// wear, and the real cost of a breakdown is the downtime plus the
+    /// materials — putting a repair on a multi-sol queue as well would need a
+    /// second construction-queue mechanism, which is a separate feature
+    /// rather than part of this one.
+    ///
+    /// Rejects a building that is not actually broken, rather than treating
+    /// the command as a free top-up of a merely worn one.
+    RepairBuilding {
+        /// Colony owning the building.
+        colony_id: ColonyId,
+        /// The placed instance to repair.
+        building_id: uuid::Uuid,
     },
     /// Pin or release a placed building's labour allocation (issue #307).
     ///
@@ -735,6 +759,20 @@ pub enum Command {
         /// Whether surface deposits deplete with extraction (issue #317).
         #[serde(default)]
         deposit_depletion_enabled: bool,
+        /// Whether worn buildings can break down (issue #384).
+        #[serde(default)]
+        building_breakdown_enabled: bool,
+    },
+    /// Toggle the master building-breakdown switch (issue #384).
+    ///
+    /// Independent of `SetMaintenanceEnabled`: condition still tracks wear
+    /// whenever maintenance is on, and this governs only whether a worn
+    /// building can actually fail. Mirrors `SetDepositDepletionEnabled`, so a
+    /// player can opt into the harsher rule without moving to a whole
+    /// difficulty preset.
+    SetBuildingBreakdownEnabled {
+        /// New master breakdown-enabled state.
+        enabled: bool,
     },
     /// Toggle the master hazard switch (issue #161).
     ///
@@ -1368,6 +1406,26 @@ pub enum Event {
         colony_id: ColonyId,
         /// Content-pack key of the completed building.
         building_type: String,
+    },
+    /// A building broke down and stopped operating until repaired (issue #384).
+    BuildingBrokeDown {
+        /// Colony the building belongs to.
+        colony_id: ColonyId,
+        /// Stable instance id of the failed building.
+        building_id: uuid::Uuid,
+        /// Content-pack key of the failed building.
+        building_type: String,
+    },
+    /// A broken building was repaired and returned to service (issue #384).
+    BuildingRepaired {
+        /// Colony the building belongs to.
+        colony_id: ColonyId,
+        /// Stable instance id of the repaired building.
+        building_id: uuid::Uuid,
+        /// Content-pack key of the repaired building.
+        building_type: String,
+        /// What the repair cost, per commodity.
+        cost: Vec<content::types::Ingredient>,
     },
     /// A site-preparation project completed and widened the colony's build-slot
     /// capacity (issue #306).
@@ -3347,7 +3405,7 @@ impl GameEngine {
                                 let placed: Vec<colony::ProductionInput> = c
                                     .buildings
                                     .iter()
-                                    .filter(|b| !b.paused)
+                                    .filter(|b| !b.paused && !b.broken)
                                     .map(colony::ProductionInput::from_placed)
                                     .collect();
                                 (
@@ -3429,10 +3487,16 @@ impl GameEngine {
                         // production pass. Slot accounting is untouched: it sums
                         // `slot_cost` straight off `colony.buildings` (see
                         // `Colony::slots_used`), never this filtered list.
+                        // A broken building (#384) is excluded on exactly the
+                        // same footing as a paused one, and for the same
+                        // reason: one exclusion releases its labour, power,
+                        // inputs, and upkeep together. A wreck draws nothing
+                        // and produces nothing until repaired — but it keeps
+                        // its build slot, since it is still physically there.
                         let placed: Vec<colony::ProductionInput> = colony
                             .buildings
                             .iter()
-                            .filter(|b| !b.paused)
+                            .filter(|b| !b.paused && !b.broken)
                             .map(colony::ProductionInput::from_placed)
                             .collect();
                         colony.pool.reset_deltas();
@@ -3494,6 +3558,105 @@ impl GameEngine {
                             .into_iter()
                             .map(|r| (r.building_id, r))
                             .collect();
+                    }
+
+                    // ── Step 3a0: Building condition & breakdown (#384) ──
+                    // Runs directly after production, because whether a
+                    // building's upkeep was actually met is only known once
+                    // the production pass has resolved it — a building can
+                    // have an authored maintenance list and still go unpaid
+                    // when the stockpile runs dry, which is exactly the case
+                    // this models.
+                    //
+                    // Colony buildings only. An outpost's upkeep shortfall
+                    // reduces its output and deliberately does not destroy it
+                    // (DESIGN.md §11), and `RepairBuilding` is colony-scoped,
+                    // so extending failure to outposts is a separate decision
+                    // rather than something to fall into by iterating one more
+                    // list here.
+                    if self.state.maintenance_enabled {
+                        let breakdown_enabled = self.state.building_breakdown_enabled;
+                        let mut breakdowns: Vec<(ColonyId, uuid::Uuid, String)> = Vec::new();
+                        // Colony hazards are read before the mutable loop for
+                        // the usual borrow reason (see the site multipliers
+                        // above).
+                        let hazards: std::collections::HashMap<ColonyId, system::AtmosphereHazard> =
+                            self.state
+                                .colonies
+                                .iter()
+                                .map(|c| {
+                                    (c.id, self.body_atmosphere_hazard(c.home_body_id.as_ref()))
+                                })
+                                .collect();
+                        // Deterministic iteration: `colonies` and `buildings`
+                        // are both `Vec`s, so a fixed seed reproduces a fixed
+                        // game (issue #430's lesson).
+                        for ci in 0..self.state.colonies.len() {
+                            let colony_id = self.state.colonies[ci].id;
+                            let hazard = hazards
+                                .get(&colony_id)
+                                .copied()
+                                .unwrap_or(system::AtmosphereHazard::None);
+                            for bi in 0..self.state.colonies[ci].buildings.len() {
+                                let (building_id, building_type, paused, broken) = {
+                                    let b = &self.state.colonies[ci].buildings[bi];
+                                    (b.id, b.building_type.clone(), b.paused, b.broken)
+                                };
+                                // A mothballed building is not running, so it
+                                // is not wearing; a broken one has already
+                                // failed and waits on repair, not on further
+                                // decay.
+                                if paused || broken {
+                                    continue;
+                                }
+                                // Nothing to neglect: a building with no
+                                // authored upkeep never degrades, so a solar
+                                // panel does not quietly rot for want of
+                                // maintenance it was never given.
+                                let has_upkeep = registry
+                                    .buildings()
+                                    .find(|d| d.id == building_type)
+                                    .is_some_and(|d| !d.maintenance.is_empty());
+                                if !has_upkeep {
+                                    continue;
+                                }
+                                let met = !self.state.colonies[ci]
+                                    .last_production_by_building
+                                    .get(&building_id)
+                                    .is_some_and(|r| {
+                                        r.shortfalls.iter().any(|s| {
+                                            matches!(
+                                                s.reason,
+                                                colony::ShortfallReason::MaintenanceShort { .. }
+                                            )
+                                        })
+                                    });
+                                let next = condition::step_condition(
+                                    self.state.colonies[ci].buildings[bi].condition,
+                                    met,
+                                );
+                                self.state.colonies[ci].buildings[bi].condition = next;
+
+                                if breakdown_enabled {
+                                    let roll = self.processor.next_unit_float();
+                                    if condition::breaks_down(next, hazard, roll) {
+                                        self.state.colonies[ci].buildings[bi].broken = true;
+                                        breakdowns.push((
+                                            colony_id,
+                                            building_id,
+                                            building_type.clone(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        for (colony_id, building_id, building_type) in breakdowns {
+                            events.push(Event::BuildingBrokeDown {
+                                colony_id,
+                                building_id,
+                                building_type,
+                            });
+                        }
                     }
 
                     // ── Step 3a1: Waste overflow contamination (issue #387) ──
@@ -4533,6 +4696,70 @@ impl GameEngine {
                     colony_id: *colony_id,
                     building_id: *building_id,
                     lock: *lock,
+                }])
+            }
+
+            Command::RepairBuilding {
+                colony_id,
+                building_id,
+            } => {
+                let idx = self.find_colony_index(*colony_id)?;
+                let building = self.state.colonies[idx]
+                    .buildings
+                    .iter()
+                    .find(|b| b.id == *building_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidArgument(format!(
+                            "no building {building_id} in colony {colony_id}"
+                        ))
+                    })?;
+                if !building.broken {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "building {building_id} is not broken"
+                    )));
+                }
+                let building_type = building.building_type.clone();
+                let cost = self.repair_cost_for(&building_type);
+
+                // Check every commodity before withdrawing any, so an
+                // unaffordable repair changes nothing.
+                {
+                    let colony = &self.state.colonies[idx];
+                    for ing in &cost {
+                        let available = colony.pool.amount(&ing.id)
+                            - colony
+                                .commodity_reserves
+                                .get(&ing.id)
+                                .copied()
+                                .unwrap_or(0.0);
+                        if available < ing.quantity {
+                            #[allow(clippy::cast_possible_truncation)]
+                            return Err(EngineError::InsufficientResources {
+                                commodity: ing.id.clone(),
+                                needed: ing.quantity as f32,
+                                available: available.max(0.0) as f32,
+                            });
+                        }
+                    }
+                }
+                for ing in &cost {
+                    self.state.colonies[idx]
+                        .pool
+                        .withdraw(&ing.id, ing.quantity);
+                }
+                if let Some(b) = self.state.colonies[idx]
+                    .buildings
+                    .iter_mut()
+                    .find(|b| b.id == *building_id)
+                {
+                    b.broken = false;
+                    b.condition = condition::CONDITION_AFTER_REPAIR;
+                }
+                Ok(vec![Event::BuildingRepaired {
+                    colony_id: *colony_id,
+                    building_id: *building_id,
+                    building_type,
+                    cost,
                 }])
             }
 
@@ -5872,6 +6099,13 @@ impl GameEngine {
                     preset,
                     difficulty::DifficultyPreset::Hard | difficulty::DifficultyPreset::Brutal
                 );
+                // Same presets as deposit depletion (issue #384): losing a
+                // building outright is a harsh-mode consequence, not the
+                // baseline experience.
+                self.state.building_breakdown_enabled = matches!(
+                    preset,
+                    difficulty::DifficultyPreset::Hard | difficulty::DifficultyPreset::Brutal
+                );
                 Ok(vec![Event::DifficultyChanged { preset: *preset }])
             }
 
@@ -5881,12 +6115,14 @@ impl GameEngine {
                 hazards_enabled,
                 maintenance_enabled,
                 deposit_depletion_enabled,
+                building_breakdown_enabled,
             } => {
                 self.state.difficulty_preset = difficulty::DifficultyPreset::Custom;
                 self.state.difficulty_scalar = scalars.clone();
                 self.state.hazards_enabled = *hazards_enabled;
                 self.state.maintenance_enabled = *maintenance_enabled;
                 self.state.deposit_depletion_enabled = *deposit_depletion_enabled;
+                self.state.building_breakdown_enabled = *building_breakdown_enabled;
                 if *menace_enabled {
                     // Re-attach the last-known definition if the player
                     // toggles menace back on with nothing currently active.
@@ -5915,6 +6151,11 @@ impl GameEngine {
 
             Command::SetDepositDepletionEnabled { enabled } => {
                 self.state.deposit_depletion_enabled = *enabled;
+                Ok(vec![])
+            }
+
+            Command::SetBuildingBreakdownEnabled { enabled } => {
+                self.state.building_breakdown_enabled = *enabled;
                 Ok(vec![])
             }
 
@@ -6846,6 +7087,10 @@ impl GameEngine {
                 // what its site is doing to its yield. Computed once for the
                 // whole panel rather than per row.
                 let site_mults = self.colony_site_multipliers(c);
+                // Resolved once for the panel, like the site multipliers: the
+                // atmosphere is a property of the colony's body, not of each
+                // building (issue #384).
+                let colony_hazard = self.body_atmosphere_hazard(c.home_body_id.as_ref());
                 let buildings = c
                     .buildings
                     .iter()
@@ -6902,6 +7147,28 @@ impl GameEngine {
                             priority: b.priority,
                             labour_lock: b.labour_lock,
                             paused: b.paused,
+                            condition: b.condition,
+                            // Zero while the toggle is off: the stat still
+                            // tracks wear then, but nothing can actually fail,
+                            // so showing a risk percentage would be a lie
+                            // (issue #384).
+                            breakdown_risk: if self.state.building_breakdown_enabled && !b.broken {
+                                condition::breakdown_chance(b.condition, colony_hazard)
+                            } else {
+                                0.0
+                            },
+                            broken: b.broken,
+                            repair_cost: if b.broken {
+                                self.repair_cost_for(&b.building_type)
+                                    .into_iter()
+                                    .map(|i| ui::IngredientRow {
+                                        commodity_id: i.id,
+                                        quantity: i.quantity,
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            },
                             slot_cost: b.slot_cost,
                             full_capacity: scale >= 1.0 - 1e-9,
                             #[allow(clippy::cast_possible_truncation)]
@@ -7456,6 +7723,66 @@ impl GameEngine {
                     format!("Tech researched: {tech_id}"),
                 ));
             }
+        }
+
+        // Building breakdowns that happened this sol → Urgent. A colony just
+        // lost a working building; that is not something to find out about
+        // three sols later while fast-forwarding.
+        for ev in events {
+            if let Event::BuildingBrokeDown {
+                colony_id,
+                building_type,
+                ..
+            } = ev
+            {
+                interrupts.push(Interrupt::new(
+                    Tier::Urgent,
+                    InterruptSource::BuildingCondition(*colony_id),
+                    Some(*colony_id),
+                    format!("{building_type} has broken down and needs repair"),
+                ));
+            }
+        }
+
+        // Buildings worn into the risk band but not yet failed → Notable.
+        //
+        // This is the telegraph half of issue #384's model, and the reason
+        // condition exists as a visible stat at all: a breakdown a player
+        // could not see coming reads as the game cheating. Warn once per
+        // colony rather than once per building — a colony that has let five
+        // things rot has one problem, not five, and five interrupts in a sol
+        // would train the player to dismiss them unread.
+        //
+        // Deliberately raised even when `building_breakdown_enabled` is off:
+        // buildings still wear, and a player who later turns breakdowns on
+        // should not discover a colony of derelicts they were never told
+        // about.
+        for colony in &self.state.colonies {
+            let at_risk = colony
+                .buildings
+                .iter()
+                .filter(|b| !b.broken && b.condition <= condition::BREAKDOWN_THRESHOLD)
+                .count();
+            if at_risk == 0 {
+                continue;
+            }
+            let worst = colony
+                .buildings
+                .iter()
+                .filter(|b| !b.broken)
+                .map(|b| b.condition)
+                .fold(f32::INFINITY, f32::min);
+            interrupts.push(Interrupt::new(
+                Tier::Notable,
+                InterruptSource::BuildingCondition(colony.id),
+                Some(colony.id),
+                format!(
+                    "Colony '{}': {at_risk} building(s) worn and at risk of failure \
+                     (worst {:.0}% condition)",
+                    colony.name,
+                    worst * 100.0
+                ),
+            ));
         }
 
         // StabilityCritical — stability already at or below the crisis floor → Urgent.
@@ -8162,6 +8489,40 @@ impl GameEngine {
     /// Absent means neutral, not unknown: a colony with no `home_body_id` (the
     /// bare `Command::FoundColony` fixture path) pays nominal maintenance
     /// rather than inheriting a penalty from nowhere.
+    /// What repairing `building_type` costs (issue #384).
+    ///
+    /// The authored `repair_cost` when the pack supplies one, else
+    /// [`condition::DEFAULT_REPAIR_COST_FRACTION`] of the construction cost.
+    /// A derived default rather than a required field: every building can
+    /// break, so demanding an authored figure on all of them would mean a
+    /// content edit per building today and a trap for every building added
+    /// later.
+    ///
+    /// Empty for an unknown building type, which makes the repair free rather
+    /// than impossible — consistent with how the tech gate and `max_instances`
+    /// both treat an unregistered id as unconstrained.
+    fn repair_cost_for(&self, building_type: &str) -> Vec<content::types::Ingredient> {
+        let Some(def) = self
+            .state
+            .registry
+            .as_ref()
+            .and_then(|r| r.buildings().find(|b| b.id == building_type))
+        else {
+            return Vec::new();
+        };
+        if !def.repair_cost.is_empty() {
+            return def.repair_cost.clone();
+        }
+        def.construction_cost
+            .iter()
+            .map(|ing| content::types::Ingredient {
+                id: ing.id.clone(),
+                quantity: ing.quantity * condition::DEFAULT_REPAIR_COST_FRACTION,
+            })
+            .filter(|ing| ing.quantity > 0.0)
+            .collect()
+    }
+
     fn body_atmosphere_hazard(&self, body_id: Option<&system::BodyId>) -> system::AtmosphereHazard {
         body_id
             .and_then(|b| self.state.system_state.node_map.bodies.get(b))
@@ -9103,6 +9464,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
             description: String::new(),
@@ -9154,6 +9516,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
             description: String::new(),
@@ -9301,6 +9664,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
             description: String::new(),
@@ -9364,6 +9728,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
             description: String::new(),
@@ -9548,6 +9913,7 @@ mod tests {
 
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(content::types::BuildingDef {
+            repair_cost: vec![],
             id: "greenhouse".into(),
             name: "Greenhouse".into(),
             description: String::new(),
@@ -9878,6 +10244,7 @@ mod tests {
         // A plant that burns food into fuel — the competing consumer.
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(content::types::BuildingDef {
+            repair_cost: vec![],
             id: "burner".into(),
             name: "burner".into(),
             description: String::new(),
@@ -10105,6 +10472,7 @@ mod tests {
         let mut engine = GameEngine::new();
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(content::types::BuildingDef {
+            repair_cost: vec![],
             id: "burner".into(),
             name: "burner".into(),
             description: String::new(),
@@ -10359,6 +10727,7 @@ mod tests {
     fn registry_with_site_prep() -> content::ContentRegistry {
         let mut reg = content::ContentRegistry::default();
         let base = |id: &str| content::types::BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -10509,6 +10878,7 @@ mod tests {
     fn registry_with_remediation() -> content::ContentRegistry {
         let mut reg = content::ContentRegistry::default();
         let base = |id: &str| content::types::BuildingDef {
+            repair_cost: vec![],
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -10916,6 +11286,7 @@ mod tests {
         use content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "complex".into(),
             name: "Complex".into(),
             description: String::new(),
@@ -11366,6 +11737,7 @@ mod tests {
 
         // A trivial power source so the research lab doesn't brown out.
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
             description: String::new(),
@@ -11390,6 +11762,7 @@ mod tests {
 
         // Research lab: consumes 1 water, produces 5 research per sol.
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "research_lab".into(),
             name: "Research Lab".into(),
             description: String::new(),
@@ -11413,6 +11786,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "water_source".into(),
             name: "Water Source".into(),
             description: String::new(),
@@ -11591,6 +11965,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "solar_panel".into(),
             name: "Solar Panel".into(),
             description: String::new(),
@@ -11630,6 +12005,7 @@ mod tests {
         // Mirrors `battery_bank` in content/base/buildings.yaml, at a smaller
         // capacity so a single generator overflows it within one sol.
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "battery_bank".into(),
             name: "Battery Bank".into(),
             description: String::new(),
@@ -13668,6 +14044,7 @@ mod tests {
         };
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "mining_outpost".into(),
             name: "Mining Outpost".into(),
             description: String::new(),
@@ -13929,6 +14306,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_outpost_module".into(),
             name: "Advanced Outpost Module".into(),
             description: String::new(),
@@ -13989,6 +14367,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "advanced_outpost_module".into(),
             name: "Advanced Outpost Module".into(),
             description: String::new(),
@@ -14308,6 +14687,7 @@ mod tests {
         };
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "power_hungry_outpost".into(),
             name: "Power-hungry Outpost".into(),
             description: String::new(),
@@ -14993,6 +15373,7 @@ mod tests {
         // Add a second building with two recipes to the same registry.
         let mut registry = engine.state.registry.clone().unwrap();
         registry.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "refinery".into(),
             name: "Refinery".into(),
             description: String::new(),
@@ -15079,6 +15460,7 @@ mod tests {
 
         let mut registry = engine.state.registry.clone().unwrap();
         registry.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "hq".into(),
             name: "HQ".into(),
             description: String::new(),
@@ -15156,6 +15538,7 @@ mod tests {
 
         let mut registry = engine.state.registry.clone().unwrap();
         registry.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "hq".into(),
             name: "HQ".into(),
             description: String::new(),
@@ -17979,6 +18362,336 @@ mod tests {
 
     // ── Atmospheric hazards scale maintenance (issue #438) ───────────────────
 
+    // ── Building condition & breakdown (issue #384) ─────────────────────────
+
+    /// The fixture colony's single maintenance-bearing building.
+    fn only_building(engine: &GameEngine, colony_id: ColonyId) -> colony::PlacedBuilding {
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].clone()
+    }
+
+    /// Run `sols` sols with the fixture's stockpile emptied, so its upkeep
+    /// cannot be paid and the building wears.
+    fn engine_starved_for(sols: u32, hazard: system::AtmosphereHazard) -> (GameEngine, ColonyId) {
+        let (mut engine, _body, colony_id) = engine_on_hazardous_body(hazard);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .withdraw("spare_parts", 1000.0);
+        for _ in 0..sols {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        (engine, colony_id)
+    }
+
+    #[test]
+    fn an_unmaintained_building_degrades() {
+        let (engine, colony_id) = engine_starved_for(10, system::AtmosphereHazard::None);
+        let b = only_building(&engine, colony_id);
+        assert!(
+            b.condition < condition::CONDITION_NEW,
+            "10 sols without upkeep should have worn the building, still at {}",
+            b.condition
+        );
+    }
+
+    #[test]
+    fn a_maintained_building_does_not_degrade() {
+        // The stockpile is left funded, so upkeep is paid every sol.
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        for _ in 0..10 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        let b = only_building(&engine, colony_id);
+        assert!(
+            (b.condition - condition::CONDITION_NEW).abs() < 1e-6,
+            "a fully maintained building must stay pristine, got {}",
+            b.condition
+        );
+        assert!(!b.broken);
+    }
+
+    /// Condition must climb back once upkeep resumes — but slower than it
+    /// fell, so neglect is not free.
+    #[test]
+    fn a_building_recovers_when_maintenance_resumes() {
+        let (mut engine, colony_id) = engine_starved_for(10, system::AtmosphereHazard::None);
+        let worn = only_building(&engine, colony_id).condition;
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .deposit("spare_parts", 1000.0);
+        for _ in 0..5 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        let recovered = only_building(&engine, colony_id).condition;
+        assert!(
+            recovered > worn,
+            "condition should recover once upkeep resumes: {worn} -> {recovered}"
+        );
+    }
+
+    #[test]
+    fn breakdowns_do_not_happen_while_the_toggle_is_off() {
+        // Default (Normal) leaves breakdowns off — long neglect wears the
+        // building to nothing but must never break it.
+        let (engine, colony_id) = engine_starved_for(80, system::AtmosphereHazard::None);
+        let b = only_building(&engine, colony_id);
+        assert!(
+            b.condition <= 0.01,
+            "expected a derelict, got {}",
+            b.condition
+        );
+        assert!(
+            !b.broken,
+            "a building must not break down with the toggle off"
+        );
+    }
+
+    #[test]
+    fn a_derelict_building_eventually_breaks_when_enabled() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        engine
+            .apply(&Command::SetBuildingBreakdownEnabled { enabled: true })
+            .unwrap();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .pool
+            .withdraw("spare_parts", 1000.0);
+
+        let mut broke_on = None;
+        for sol in 0..300 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            if only_building(&engine, colony_id).broken {
+                broke_on = Some(sol);
+                break;
+            }
+        }
+        assert!(
+            broke_on.is_some(),
+            "300 sols of total neglect should have broken the building"
+        );
+    }
+
+    /// The whole failure model has to be reproducible from a seed, or a bug
+    /// report cannot be replayed.
+    #[test]
+    fn breakdown_is_deterministic_for_a_fixed_seed() {
+        let run = || {
+            let (mut engine, _body, colony_id) =
+                engine_on_hazardous_body(system::AtmosphereHazard::None);
+            engine
+                .apply(&Command::SetBuildingBreakdownEnabled { enabled: true })
+                .unwrap();
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            engine.state.colonies[idx]
+                .pool
+                .withdraw("spare_parts", 1000.0);
+            let mut broke_on = None;
+            for sol in 0..300 {
+                engine.apply(&Command::AdvanceColonySol).unwrap();
+                if only_building(&engine, colony_id).broken {
+                    broke_on = Some(sol);
+                    break;
+                }
+            }
+            broke_on
+        };
+        assert_eq!(run(), run(), "same seed must break on the same sol");
+    }
+
+    #[test]
+    fn a_broken_building_stops_producing() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        let before = engine.state.colonies[idx].pool.amount("spare_parts");
+
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let after = engine.state.colonies[idx].pool.amount("spare_parts");
+        assert!(
+            (before - after).abs() < 1e-6,
+            "a broken building must draw no upkeep: {before} -> {after}"
+        );
+    }
+
+    #[test]
+    fn a_broken_building_still_occupies_its_build_slot() {
+        // The wreck is physically standing — pausing never freed a slot
+        // (#309) and breaking must not either, or a failure would hand the
+        // player free build capacity.
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let before = engine.state.colonies[idx].slots_used();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        let after = engine.state.colonies[idx].slots_used();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn repairing_restores_the_building_and_charges_the_colony() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        engine.state.colonies[idx].buildings[0].condition = 0.1;
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_metal", 500.0);
+        let before = engine.state.colonies[idx].pool.amount("structural_metal");
+
+        let events = engine
+            .apply(&Command::RepairBuilding {
+                colony_id,
+                building_id,
+            })
+            .expect("repair should succeed");
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let b = &engine.state.colonies[idx].buildings[0];
+        assert!(!b.broken, "repair must clear the broken flag");
+        assert!(
+            (b.condition - condition::CONDITION_AFTER_REPAIR).abs() < 1e-6,
+            "repair should leave it serviceable but not new, got {}",
+            b.condition
+        );
+        let after = engine.state.colonies[idx].pool.amount("structural_metal");
+        assert!(
+            after < before,
+            "repair must charge materials: {before} -> {after}"
+        );
+        assert!(matches!(
+            events.first(),
+            Some(Event::BuildingRepaired { .. })
+        ));
+    }
+
+    #[test]
+    fn repairing_an_unbroken_building_is_rejected() {
+        // Otherwise repair doubles as a free condition top-up, and the
+        // degradation half of the model stops meaning anything.
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+        let result = engine.apply(&Command::RepairBuilding {
+            colony_id,
+            building_id,
+        });
+        assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn an_unaffordable_repair_changes_nothing() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+        // Give it *some* of what a repair needs, but not enough.
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_metal", 1.0);
+        let before = engine.state.colonies[idx].pool.amount("structural_metal");
+
+        let result = engine.apply(&Command::RepairBuilding {
+            colony_id,
+            building_id,
+        });
+
+        assert!(matches!(
+            result,
+            Err(EngineError::InsufficientResources { .. })
+        ));
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            (engine.state.colonies[idx].pool.amount("structural_metal") - before).abs() < 1e-6,
+            "a rejected repair must not part-spend the stockpile"
+        );
+        assert!(
+            engine.state.colonies[idx].buildings[0].broken,
+            "a rejected repair must leave the building broken"
+        );
+    }
+
+    #[test]
+    fn a_building_with_no_authored_upkeep_never_wears() {
+        // A solar panel with no maintenance list has nothing to neglect.
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx]
+            .buildings
+            .push(colony::PlacedBuilding::new("no_upkeep_mast", 1));
+        for _ in 0..20 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let b = engine.state.colonies[idx]
+            .buildings
+            .iter()
+            .find(|b| b.building_type == "no_upkeep_mast")
+            .unwrap();
+        assert!((b.condition - condition::CONDITION_NEW).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hard_difficulty_enables_breakdowns_and_normal_does_not() {
+        let mut engine = GameEngine::new();
+        engine
+            .apply(&Command::SetDifficulty {
+                preset: difficulty::DifficultyPreset::Hard,
+            })
+            .unwrap();
+        assert!(engine.state.building_breakdown_enabled);
+        engine
+            .apply(&Command::SetDifficulty {
+                preset: difficulty::DifficultyPreset::Normal,
+            })
+            .unwrap();
+        assert!(!engine.state.building_breakdown_enabled);
+    }
+
+    /// A building with no authored maintenance, used as the control for
+    /// "a building with nothing to neglect never wears" (issue #384).
+    fn upkeep_free_building_def() -> crate::content::BuildingDef {
+        use crate::content::{BuildingCategory, BuildingDef};
+        BuildingDef {
+            id: "no_upkeep_mast".into(),
+            name: "No-Upkeep Mast".into(),
+            description: String::new(),
+            category: BuildingCategory::Other,
+            construction_cost: vec![content::types::Ingredient {
+                id: "structural_metal".into(),
+                quantity: 10.0,
+            }],
+            power_delta: 0.0,
+            worker_slots: 0,
+            labor_required: 0,
+            slot_cost: 1,
+            construction_turns: 1,
+            tech_prerequisite: None,
+            maintenance: vec![],
+            repair_cost: vec![],
+            default_priority: crate::content::types::DEFAULT_BUILDING_PRIORITY,
+            grants_slot_capacity: 0,
+            starter_kit: false,
+            storage: vec![],
+            contamination_reduction: 0.0,
+            max_instances: None,
+            site_requirements: Vec::new(),
+            output_scaling: None,
+        }
+    }
+
     /// A colony on a body with `hazard`, holding one maintenance-only
     /// building that draws 10 `spare_parts` per sol.
     fn engine_on_hazardous_body(
@@ -18040,11 +18753,17 @@ mod tests {
         // Maintenance-only: no recipe, so nothing but the upkeep draw can move
         // the stockpile and the measurement is unambiguous.
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "relay_mast".into(),
             name: "Relay Mast".into(),
             description: String::new(),
             category: BuildingCategory::Other,
-            construction_cost: vec![],
+            // A real construction cost, so `repair_cost_for`'s derived
+            // fraction has something to derive from (issue #384).
+            construction_cost: vec![content::types::Ingredient {
+                id: "structural_metal".into(),
+                quantity: 40.0,
+            }],
             power_delta: 0.0,
             worker_slots: 0,
             labor_required: 0,
@@ -18064,6 +18783,9 @@ mod tests {
             site_requirements: Vec::new(),
             output_scaling: None,
         });
+        // A second building with no authored upkeep at all — the control for
+        // "nothing to neglect never wears".
+        reg.insert_building(upkeep_free_building_def());
         engine.state.registry = Some(reg);
 
         let idx = engine.find_colony_index(colony_id).unwrap();
@@ -18452,6 +19174,7 @@ mod tests {
 
         let mut registry = content::ContentRegistry::default();
         registry.insert_building(content::types::BuildingDef {
+            repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
             description: String::new(),
@@ -18552,6 +19275,7 @@ mod tests {
 
         let mut registry = content::ContentRegistry::default();
         registry.insert_building(content::types::BuildingDef {
+            repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
             description: String::new(),
@@ -18672,6 +19396,7 @@ mod tests {
 
         let mut registry = content::ContentRegistry::default();
         registry.insert_building(content::types::BuildingDef {
+            repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
             description: String::new(),
@@ -18909,6 +19634,7 @@ mod tests {
         let mut registry = content::ContentRegistry::default();
         for (id, in_kit) in [("kit_a", true), ("kit_b", true), ("not_in_kit", false)] {
             registry.insert_building(content::types::BuildingDef {
+                repair_cost: vec![],
                 id: id.into(),
                 name: id.into(),
                 description: String::new(),
@@ -20505,6 +21231,7 @@ mod tests {
         let mut reg = crate::content::ContentRegistry::default();
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
             description: String::new(),
@@ -20528,6 +21255,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "water_well".into(),
             name: "Water Well".into(),
             description: String::new(),
@@ -23443,6 +24171,7 @@ mod tests {
         use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "hq".into(),
             name: "HQ".into(),
             description: String::new(),
@@ -23666,6 +24395,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            repair_cost: vec![],
             id: "sited".into(),
             name: "Sited Building".into(),
             description: String::new(),

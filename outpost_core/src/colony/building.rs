@@ -87,6 +87,38 @@ pub struct PlacedBuilding {
     /// the whole point.
     #[serde(default)]
     pub paused: bool,
+    /// Physical condition, `1.0` pristine down to `0.0` derelict (issue #384).
+    ///
+    /// Degrades while this building's maintenance goes unpaid and recovers
+    /// slowly while it is paid — see [`crate::condition`] for the model and
+    /// the rates. Below [`crate::condition::BREAKDOWN_THRESHOLD`] it also
+    /// starts carrying a per-sol chance of [`Self::broken`].
+    ///
+    /// `#[serde(default = ...)]` to [`crate::condition::CONDITION_NEW`]: a
+    /// save predating this loads every building pristine, which is the honest
+    /// reading — those buildings were never subject to wear, so inventing a
+    /// history of neglect for them would break games on load.
+    #[serde(default = "default_condition")]
+    pub condition: f32,
+    /// Whether this building has broken down and is awaiting repair (#384).
+    ///
+    /// A broken building is excluded from the production pass exactly as a
+    /// [`Self::paused`] one is, and for the same reason: one exclusion frees
+    /// its labour, power, inputs, and upkeep together, rather than zeroing
+    /// each by hand. It keeps occupying its build slot — the wreck is still
+    /// standing — and only [`crate::Command::RepairBuilding`] clears it.
+    ///
+    /// Deliberately a flag rather than "condition == 0": breakdown is a
+    /// discrete event that can strike at any condition below the threshold,
+    /// so a building can be broken at `0.3` and a different one limping along
+    /// unbroken at `0.05`. Collapsing the two would erase that distinction and
+    /// make the roll meaningless.
+    #[serde(default)]
+    pub broken: bool,
+}
+
+fn default_condition() -> f32 {
+    crate::condition::CONDITION_NEW
 }
 
 fn default_placed_priority() -> u8 {
@@ -116,6 +148,8 @@ impl PlacedBuilding {
             ordinal: 0,
             name: None,
             paused: false,
+            condition: crate::condition::CONDITION_NEW,
+            broken: false,
         }
     }
 

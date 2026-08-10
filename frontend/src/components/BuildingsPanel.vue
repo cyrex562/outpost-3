@@ -51,6 +51,8 @@ const emit = defineEmits<{
   /** `null` reverts to the auto-numbered default name. */
   (e: 'rename', buildingId: string, name: string | null): void
   (e: 'set-paused', buildingId: string, paused: boolean): void
+  /** Repair a broken building (issue #384). */
+  (e: 'repair', buildingId: string): void
 }>()
 
 /** Priority bands offered, matching the engine's `1..=MAX_BUILDING_PRIORITY`. */
@@ -102,7 +104,13 @@ function togglePaused(b: BuildingRow): void {
   emit('set-paused', b.building_id, !b.paused)
 }
 
-function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' | 'paused' {
+type BuildingStatus = 'idle' | 'running' | 'partial' | 'paused' | 'broken'
+
+function buildingStatus(b: BuildingRow): BuildingStatus {
+  // Broken outranks paused and every production state (issue #384): a wreck
+  // produces nothing for a reason the player has to act on, and reporting it
+  // as merely "Idle" would bury the one row that needs attention.
+  if (b.broken) return 'broken'
   if (b.paused) return 'paused'
   if (b.full_capacity) return 'running'
   // Anything above zero produced *something* last turn — only a genuine zero
@@ -110,8 +118,52 @@ function buildingStatus(b: BuildingRow): 'idle' | 'running' | 'partial' | 'pause
   return b.scale > 0 ? 'partial' : 'idle'
 }
 
-function statusLabel(status: 'idle' | 'running' | 'partial' | 'paused'): string {
-  return { idle: 'Idle', running: 'Running', partial: 'Partial', paused: 'Paused' }[status]
+function statusLabel(status: BuildingStatus): string {
+  return {
+    idle: 'Idle',
+    running: 'Running',
+    partial: 'Partial',
+    paused: 'Paused',
+    broken: 'Broken',
+  }[status]
+}
+
+/**
+ * Wear and failure-risk phrase for a building (issue #384), or empty when it
+ * is sound.
+ *
+ * Shown from the moment condition slips below pristine rather than only once
+ * risk begins, so the player sees the slope before the cliff — which is the
+ * entire reason the model pairs a visible stat with a hidden roll.
+ */
+function conditionDetail(b: BuildingRow): string {
+  const c = b.condition
+  if (c === undefined || c >= 0.999) return ''
+  const wear = ` · condition ${(c * 100).toFixed(0)}%`
+  const risk = b.breakdown_risk ?? 0
+  if (risk <= 0) return wear
+  return `${wear}, ${(risk * 100).toFixed(1)}% chance of failure per sol`
+}
+
+/**
+ * Short badge text for a worn building, or empty when it is sound or broken.
+ *
+ * Broken buildings say so in their status already, so a condition badge beside
+ * it would be noise.
+ */
+function conditionBadge(b: BuildingRow): string {
+  const c = b.condition
+  if (b.broken || c === undefined || c >= 0.999) return ''
+  const risk = b.breakdown_risk ?? 0
+  const wear = `condition ${(c * 100).toFixed(0)}%`
+  return risk > 0 ? `${wear} · ${(risk * 100).toFixed(1)}%/sol risk` : wear
+}
+
+/** Repair cost as a readable phrase, for the button's title. */
+function repairCostLabel(b: BuildingRow): string {
+  const cost = b.repair_cost ?? []
+  if (cost.length === 0) return 'no materials'
+  return cost.map((i) => `${i.commodity_id} x${Math.round(i.quantity * 100) / 100}`).join(', ')
 }
 
 /**
@@ -145,14 +197,18 @@ function siteDetail(b: BuildingRow): string {
 }
 
 function statusDetail(b: BuildingRow): string {
-  if (b.paused) return 'Paused — draws no labour, power, or inputs. Still occupies its build slot.'
-  if (b.full_capacity) return `Running at full output${siteDetail(b)}`
+  if (b.broken) {
+    return `Broken down — produces nothing until repaired (${repairCostLabel(b)}). Still occupies its build slot.`
+  }
+  if (b.paused)
+    return 'Paused — draws no labour, power, or inputs. Still occupies its build slot.'
+  if (b.full_capacity) return `Running at full output${siteDetail(b)}${conditionDetail(b)}`
   if (b.shortfall_reason) {
-    return `${(b.scale * 100).toFixed(0)}% output — ${b.shortfall_reason}${siteDetail(b)}`
+    return `${(b.scale * 100).toFixed(0)}% output — ${b.shortfall_reason}${siteDetail(b)}${conditionDetail(b)}`
   }
   return b.scale > 0
-    ? `${(b.scale * 100).toFixed(0)}% output${siteDetail(b)}`
-    : 'Produced nothing last turn'
+    ? `${(b.scale * 100).toFixed(0)}% output${siteDetail(b)}${conditionDetail(b)}`
+    : `Produced nothing last turn${conditionDetail(b)}`
 }
 
 /**
@@ -254,7 +310,7 @@ function displayName(b: BuildingRow): string {
         v-for="b in props.buildings"
         :key="b.building_id"
         class="building-item"
-        :class="{ 'is-paused': b.paused }"
+        :class="{ 'is-paused': b.paused, 'is-broken': b.broken }"
         :data-testid="`building-row-${b.building_type}`"
         :data-building-id="b.building_id"
       >
@@ -274,6 +330,16 @@ function displayName(b: BuildingRow): string {
           >
             {{ statusLabel(buildingStatus(b)) }}
           </span>
+          <!-- Condition is a *visible* badge, not only a tooltip (issue
+               #384). Telegraphing a failure the player has to hover to
+               discover is barely telegraphing it at all. -->
+          <span
+            v-if="conditionBadge(b)"
+            class="building-badge"
+            :class="{ 'badge-at-risk': (b.breakdown_risk ?? 0) > 0 }"
+            :data-testid="`building-condition-${b.building_id}`"
+            :title="conditionDetail(b).replace(/^ · /, '')"
+          >{{ conditionBadge(b) }}</span>
           <span
             v-if="b.shortfall_reason && !b.full_capacity"
             class="building-reason"
@@ -347,6 +413,14 @@ function displayName(b: BuildingRow): string {
               @click="unpin(b)"
             >Unpin</button>
           </template>
+
+          <button
+            v-if="b.broken"
+            class="btn-small btn-repair"
+            :data-testid="`building-repair-${b.building_id}`"
+            :title="`Repair this building and return it to service. Costs ${repairCostLabel(b)}.`"
+            @click="emit('repair', b.building_id)"
+          >Repair</button>
 
           <button
             class="btn-small"
@@ -473,10 +547,16 @@ function displayName(b: BuildingRow): string {
 .status-partial { color: var(--status-warn); }
 .status-idle    { color: var(--text-muted); }
 .status-paused  { color: var(--text-muted); }
+.status-broken  { color: var(--danger); font-weight: 600; }
 
 /* A paused building is deliberately off, not broken — dim the whole row
    rather than flag it the way a shortfall would. */
 .building-item.is-paused { opacity: 0.6; }
+/* A broken building is a problem to act on, not something switched off — so
+   it is highlighted rather than dimmed like a paused one (issue #384). */
+.building-item.is-broken { border-color: var(--danger); }
+.btn-repair { border-color: var(--danger); color: var(--danger); }
+.badge-at-risk { border-color: var(--danger); color: var(--danger); }
 .btn-paused { border-color: var(--border-accent); color: var(--accent); }
 
 .staffing { font-size: 0.72rem; color: var(--text-muted); font-family: monospace; }

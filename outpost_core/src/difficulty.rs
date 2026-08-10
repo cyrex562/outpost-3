@@ -739,6 +739,7 @@ mod tests {
         use crate::content::ContentRegistry;
 
         let bdef = BuildingDef {
+            repair_cost: vec![],
             id: "smelter".into(),
             name: "Smelter".into(),
             description: String::new(),
@@ -846,6 +847,7 @@ mod tests {
         let mut engine = GameEngine::new();
         let events = engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars,
                 menace_enabled: false,
                 hazards_enabled: false,
@@ -895,6 +897,7 @@ mod tests {
         // Turn menace off via custom-difficulty.
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
@@ -907,6 +910,7 @@ mod tests {
         // Turn it back on — should re-attach from last_menace_definition.
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: true,
                 hazards_enabled: true,
@@ -934,6 +938,7 @@ mod tests {
         // Custom difficulty should also drive the toggle atomically.
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
@@ -956,6 +961,7 @@ mod tests {
 
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
@@ -967,6 +973,7 @@ mod tests {
 
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
@@ -1039,6 +1046,7 @@ mod tests {
 
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,
@@ -1050,6 +1058,7 @@ mod tests {
 
         engine
             .apply(&Command::SetCustomDifficulty {
+                building_breakdown_enabled: false,
                 scalars: DifficultyScalar::new(),
                 menace_enabled: false,
                 hazards_enabled: true,

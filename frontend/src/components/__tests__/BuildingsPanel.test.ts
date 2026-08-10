@@ -554,3 +554,84 @@ describe('BuildingsPanel site multiplier (issue #411)', () => {
     expect(detail(wrapper)).toMatch(/site yields 40% of nominal/i)
   })
 })
+
+describe('BuildingsPanel condition and breakdown (#384)', () => {
+  function mountWith(row: Partial<BuildingRow>) {
+    return mount(BuildingsPanel, {
+      props: {
+        buildings: [makeRow(row)],
+        slotsUsed: 2,
+        slotCapacity: 10,
+        labourAvailable: 8,
+        labourTotal: 10,
+      },
+    })
+  }
+
+  it('reports Broken ahead of every other status', () => {
+    // A wreck reported as "Idle" buries the one row needing attention.
+    const wrapper = mountWith({ broken: true, paused: true, full_capacity: false, scale: 0 })
+    expect(wrapper.find('[data-testid="building-status-smelter"]').text()).toBe('Broken')
+  })
+
+  it('offers a repair action only for a broken building', () => {
+    const sound = mountWith({ broken: false })
+    expect(sound.find('[data-testid="building-repair-b-1"]').exists()).toBe(false)
+
+    const wrecked = mountWith({
+      broken: true,
+      repair_cost: [{ commodity_id: 'structural_metal', quantity: 14 }],
+    })
+    expect(wrecked.find('[data-testid="building-repair-b-1"]').exists()).toBe(true)
+  })
+
+  it('emits repair with the building id', async () => {
+    const wrapper = mountWith({ broken: true })
+    await wrapper.find('[data-testid="building-repair-b-1"]').trigger('click')
+    expect(wrapper.emitted('repair')?.[0]).toEqual(['b-1'])
+  })
+
+  it('names the repair cost so the player knows the price before clicking', () => {
+    const wrapper = mountWith({
+      broken: true,
+      repair_cost: [{ commodity_id: 'structural_metal', quantity: 14 }],
+    })
+    const title = wrapper.find('[data-testid="building-repair-b-1"]').attributes('title') ?? ''
+    expect(title).toContain('structural_metal')
+    expect(title).toContain('14')
+  })
+
+  it('shows wear as a visible badge, not only a tooltip', () => {
+    // Condition below pristine but above the risk threshold: the player should
+    // see the slope well before the cliff, without having to hover.
+    const wrapper = mountWith({ condition: 0.8, breakdown_risk: 0 })
+    const badge = wrapper.find('[data-testid="building-condition-b-1"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('condition 80%')
+    expect(badge.text()).not.toContain('risk')
+  })
+
+  it('shows the failure risk once the building is in danger', () => {
+    const wrapper = mountWith({ condition: 0.25, breakdown_risk: 0.02 })
+    const badge = wrapper.find('[data-testid="building-condition-b-1"]')
+    expect(badge.text()).toContain('2.0%/sol risk')
+  })
+
+  it('drops the condition badge for a broken building, whose status says it', () => {
+    const wrapper = mountWith({ condition: 0.2, broken: true })
+    expect(wrapper.find('[data-testid="building-condition-b-1"]').exists()).toBe(false)
+  })
+
+  it('says nothing about condition for a pristine building', () => {
+    const wrapper = mountWith({ condition: 1 })
+    expect(wrapper.find('[data-testid="building-condition-b-1"]').exists()).toBe(false)
+  })
+
+  it('stays quiet when the backend predates the field', () => {
+    // `condition` is optional on the wire; an older payload must not render
+    // "condition NaN%".
+    const wrapper = mountWith({})
+    expect(wrapper.find('[data-testid="building-condition-b-1"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('NaN')
+  })
+})

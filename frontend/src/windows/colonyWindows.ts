@@ -169,6 +169,8 @@ export interface ColonyWindowContext {
   setBuildingLock(buildingId: string, lock: number | null): void
   renameBuilding(buildingId: string, name: string | null): void
   setBuildingPaused(buildingId: string, paused: boolean): void
+  /** Repair a broken building (issue #384). */
+  repairBuilding(buildingId: string): void
   cancelConstruction(projectId: string): void
   openBuildDialog(): void
   clearLog(): void

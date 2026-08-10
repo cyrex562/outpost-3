@@ -137,6 +137,14 @@ pub enum ClientCommand {
         building_id: String,
         paused: bool,
     },
+    /// Repair a broken building, returning it to service (issue #384).
+    ///
+    /// Charges the colony's stockpile; rejected if the building is not broken
+    /// or the materials are not there.
+    RepairBuilding {
+        colony_id: String,
+        building_id: String,
+    },
     /// Cancel a queued construction project and receive a 50% partial refund.
     CancelConstruction {
         colony_id: String,
@@ -202,6 +210,9 @@ pub enum ClientCommand {
         /// this default to `false` (deposits stay infinite).
         #[serde(default)]
         deposit_depletion_enabled: Option<bool>,
+        /// Whether worn buildings can break down (issue #384). Optional so a
+        /// panel predating the toggle still applies.
+        building_breakdown_enabled: Option<bool>,
     },
     /// Master hazards toggle (issue #161).
     SetHazardsEnabled {
@@ -1105,12 +1116,14 @@ pub fn bootstrap(
         // `SetDifficulty` above just derived from the preset (issue #317)
         // rather than silently resetting it to infinite.
         let deposit_depletion_enabled = engine.state.deposit_depletion_enabled;
+        let building_breakdown_enabled = engine.state.building_breakdown_enabled;
         let _ = engine.apply(&Command::SetCustomDifficulty {
             scalars: scalars_from_map(&map),
             menace_enabled: custom_menace_enabled.unwrap_or(true),
             hazards_enabled: custom_hazards_enabled.unwrap_or(true),
             maintenance_enabled: custom_maintenance_enabled.unwrap_or(true),
             deposit_depletion_enabled,
+            building_breakdown_enabled,
         });
     }
 
@@ -1491,6 +1504,13 @@ pub fn apply_command(
             building_id: parse_building(&building_id)?,
             paused,
         },
+        ClientCommand::RepairBuilding {
+            colony_id,
+            building_id,
+        } => Command::RepairBuilding {
+            colony_id: parse_colony(&colony_id)?,
+            building_id: parse_building(&building_id)?,
+        },
         ClientCommand::CancelConstruction {
             colony_id,
             project_id,
@@ -1557,12 +1577,14 @@ pub fn apply_command(
             hazards_enabled,
             maintenance_enabled,
             deposit_depletion_enabled,
+            building_breakdown_enabled,
         } => Command::SetCustomDifficulty {
             scalars: scalars_from_map(&scalars),
             menace_enabled,
             hazards_enabled,
             maintenance_enabled: maintenance_enabled.unwrap_or(true),
             deposit_depletion_enabled: deposit_depletion_enabled.unwrap_or(false),
+            building_breakdown_enabled: building_breakdown_enabled.unwrap_or(false),
         },
         ClientCommand::SetHazardsEnabled { enabled } => Command::SetHazardsEnabled { enabled },
         ClientCommand::SetMaintenanceEnabled { enabled } => {

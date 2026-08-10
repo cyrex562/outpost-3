@@ -174,6 +174,16 @@ pub enum ClientCommand {
         /// `true` to pause, `false` to resume.
         paused: bool,
     },
+    /// Repair a broken building, returning it to service (issue #384).
+    ///
+    /// Charges the colony's stockpile; rejected if the building is not broken
+    /// or the materials are not there.
+    RepairBuilding {
+        /// Target colony UUID.
+        colony_id: String,
+        /// Placed-building instance UUID.
+        building_id: String,
+    },
     /// Retune one balance scalar live (playtesting).
     SetBalanceScalar {
         /// Stable slug of the quantity.
