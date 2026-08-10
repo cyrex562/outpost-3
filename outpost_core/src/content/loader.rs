@@ -1093,11 +1093,14 @@ mod tests {
     /// with issue #416.
     #[test]
     fn no_generator_is_both_weaker_and_dearer_than_an_untech_gated_one() {
-        let Some(byaml) = read_real_buildings_yaml() else {
+        let (Some(byaml), Some(ryaml)) = (read_real_buildings_yaml(), read_real_recipes_yaml())
+        else {
             return;
         };
         let buildings: Vec<crate::content::types::BuildingDef> =
             serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let recipes: Vec<crate::content::types::RecipeDef> =
+            serde_yaml::from_str(&ryaml).expect("content/base/recipes.yaml must parse");
         let metal_cost = |b: &crate::content::types::BuildingDef| {
             b.construction_cost
                 .iter()
@@ -1106,11 +1109,26 @@ mod tests {
                 .sum::<f64>()
         };
 
+        // Fuel burners are excluded from the comparison, not because they are
+        // exempt from balance but because this guard cannot price them. A
+        // generator with a perpetual commodity input (and, for
+        // combustion_plant, a waste byproduct that contaminates the colony's
+        // own hex) is not comparable to an ambient one on construction cost
+        // and capacity alone — the whole point of it is that it trades a
+        // running cost for reliable output. Comparing them here would either
+        // flag every ambient generator as dominated, or force a fuel burner to
+        // be artificially weak to keep the test quiet.
+        let burns_fuel = |b: &crate::content::types::BuildingDef| {
+            recipes
+                .iter()
+                .any(|r| r.building == b.id && !r.inputs.is_empty())
+        };
         let generators: Vec<&crate::content::types::BuildingDef> = buildings
             .iter()
             .filter(|b| {
                 matches!(b.category, crate::content::types::BuildingCategory::Power)
                     && b.power_delta < 0.0
+                    && !burns_fuel(b)
             })
             .collect();
         assert!(generators.len() >= 4, "expected the full power roster");
@@ -1446,6 +1464,103 @@ mod tests {
                     if commodity == "hydrocarbons"
             )),
             "the site decides whether you can have one, not how well it runs"
+        );
+    }
+
+    /// The marine plants are coastal-only, tech-gated, and genuinely
+    /// different from each other (issue #418).
+    #[test]
+    fn marine_plants_are_coastal_tech_gated_and_not_reskins() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let plant = |id: &str| {
+            buildings
+                .iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id} must exist"))
+        };
+        let wave = plant("wave_power_plant");
+        let thermal = plant("ocean_thermal_plant");
+
+        for p in [wave, thermal] {
+            assert_eq!(
+                p.tech_prerequisite.as_deref(),
+                Some("marine_power"),
+                "{} must sit behind the marine tech",
+                p.id
+            );
+            let coastal = p.site_requirements.iter().any(|r| {
+                matches!(
+                    &r.condition,
+                    crate::content::types::SiteCondition::Terrain { any_of, within_hexes }
+                        if any_of.contains(&crate::map::Terrain::Ocean) && *within_hexes == 1
+                )
+            });
+            assert!(
+                coastal,
+                "{} must require ocean within 1 hex — radius 2 would make \
+                 'coastal' mean almost everywhere (measured: ocean is within 1 hex \
+                 of a landing site ~51% of the time, within 2 ~83%)",
+                p.id
+            );
+        }
+
+        // The issue's own warning: three ocean plants that differ only in name
+        // and cost would be reskins. These two depend on different things, so
+        // a coastal colony picks whichever its body favours.
+        let wave_prop = &wave.output_scaling.as_ref().expect("wave scales").property;
+        let thermal_prop = &thermal
+            .output_scaling
+            .as_ref()
+            .expect("thermal scales")
+            .property;
+        assert_ne!(
+            wave_prop, thermal_prop,
+            "the two marine plants must depend on different site properties"
+        );
+    }
+
+    /// A marine plant must beat the unconstrained option of its own tier
+    /// where it applies (issue #418).
+    ///
+    /// `solar_array_mk2` is also tier 2 and buildable anywhere. A plant gated
+    /// three ways — tech, a coast, and a body property — that came out weaker
+    /// than that would simply never be built, and the test suite would have
+    /// been perfectly happy about it.
+    #[test]
+    fn a_marine_plant_beats_the_unconstrained_option_of_its_tier() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let cap = |id: &str, reading: f64| {
+            let b = buildings
+                .iter()
+                .find(|x| x.id == id)
+                .unwrap_or_else(|| panic!("{id} must exist"));
+            let m = b
+                .output_scaling
+                .as_ref()
+                .map_or(1.0, |s| s.multiplier_at(reading));
+            -b.power_delta * m / f64::from(b.slot_cost)
+        };
+
+        // mk2 at its own calibration point (1 AU).
+        let mk2 = cap("solar_array_mk2", 0.7927);
+        // Wave on a breathable atmosphere; thermal at 1 AU.
+        assert!(
+            cap("wave_power_plant", 0.667) > mk2,
+            "wave on a breathable world gives {:.1} against mk2's {mk2:.1}",
+            cap("wave_power_plant", 0.667)
+        );
+        assert!(
+            cap("ocean_thermal_plant", 0.7927) > mk2,
+            "thermal at 1 AU gives {:.1} against mk2's {mk2:.1}",
+            cap("ocean_thermal_plant", 0.7927)
         );
     }
 

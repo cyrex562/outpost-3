@@ -91,10 +91,30 @@
     - basic_power
   unlocks:
     buildings:
+      # fission_reactor moved to nuclear_fuel_cycle in issue #409; this list
+      # is descriptive (nothing reads it for gating — `tech_prerequisite` on
+      # the building is the real gate) but a stale entry here misleads anyone
+      # reading the tree.
       - solar_array_mk2
-      - fission_reactor
     bonuses:
       - power_generation_20_percent
+
+- id: marine_power
+  name: Marine Power
+  description: >
+    Anchoring turbines and heat exchangers in open water. Only useful to a
+    colony that actually sits on a coast — roughly half of landing sites do
+    (issue #418) — which is why it is a side branch rather than a step on the
+    main power ladder.
+  category: engineering
+  tier: 2
+  research_cost: 500.0
+  prerequisites:
+    - basic_construction
+  unlocks:
+    buildings:
+      - wave_power_plant
+      - ocean_thermal_plant
 
 - id: hydroponics
   name: Hydroponic Agriculture
