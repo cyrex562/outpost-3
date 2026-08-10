@@ -319,8 +319,26 @@ pub struct BuildingDetailData {
     pub slot_cost: u32,
     /// Power delta per sol (negative = produced).
     pub power_delta: f64,
-    /// Per-sol maintenance upkeep, if any.
+    /// Per-sol maintenance upkeep, if any — **as actually charged here**,
+    /// with [`Self::maintenance_multiplier`] already applied.
+    ///
+    /// Scaled rather than authored (issue #438) so the number a player reads
+    /// is the number their stockpile loses. Showing the authored figure next
+    /// to a larger real drain is precisely how a hostile world starts reading
+    /// as a bug.
     pub maintenance: Vec<IngredientRow>,
+    /// Multiplier the owner's atmosphere applies to maintenance — `1.0` is
+    /// nominal (issue #438).
+    #[serde(default = "one")]
+    pub maintenance_multiplier: f32,
+    /// Why maintenance is elevated: the hazard's label, or `None` when the
+    /// atmosphere costs nothing extra.
+    ///
+    /// Carried rather than derived frontend-side from the multiplier, so the
+    /// UI can name the cause ("corrosive atmosphere") instead of showing a
+    /// bare number the player has to go and explain to themselves.
+    #[serde(default)]
+    pub maintenance_hazard: Option<String>,
     /// The recipe this building actually runs right now — `active_recipes`'
     /// selection if set, else the deterministic default (issue #166).
     pub recipe: Option<RecipeRow>,

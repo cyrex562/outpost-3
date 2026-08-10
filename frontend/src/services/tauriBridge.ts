@@ -520,7 +520,16 @@ export interface BuildingDetail {
   category: string
   slot_cost: number
   power_delta: number
+  /**
+   * Per-sol upkeep **as actually charged at this owner's site** — the body's
+   * atmospheric-hazard multiplier is already applied (issue #438), so this is
+   * what the stockpile really loses, not the authored figure.
+   */
   maintenance: IngredientRow[]
+  /** Atmosphere's multiplier on maintenance; `1` is nominal (issue #438). */
+  maintenance_multiplier?: number
+  /** Hazard responsible for an elevated upkeep, or `null` when it costs nothing extra. */
+  maintenance_hazard?: string | null
   /** The recipe this building actually runs right now (active selection, or the deterministic default). */
   recipe: RecipeRow | null
   /** Every recipe authored for this building type (issue #166). Empty unless there's a real choice (more than one). */

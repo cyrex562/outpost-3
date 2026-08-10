@@ -231,6 +231,78 @@ pub enum AtmosphereHazard {
     OxidizingCombustible,
 }
 
+impl AtmosphereHazard {
+    /// Per-sol maintenance multiplier for buildings on a body with this
+    /// atmosphere (issue #438). `1.0` is nominal.
+    ///
+    /// A hostile atmosphere does not make a turbine spin slower — it eats the
+    /// turbine. Modelling the hazard as reduced *output* would be the wrong
+    /// shape twice over: indistinguishable from a weak site, and it would miss
+    /// the thing that actually makes a hostile world hard to live on, which is
+    /// that everything wears out faster. So the hazard scales
+    /// [`crate::content::types::BuildingDef::maintenance`], the existing
+    /// per-sol commodity drain from issue #180. A Venus-like world stays
+    /// perfectly buildable; it just costs more to keep standing.
+    ///
+    /// **These are deliberately not all non-neutral.** Folding every hazard
+    /// into one maintenance number would be tidy and slightly dishonest, so
+    /// each variant's reasoning is recorded here rather than left to be
+    /// re-derived:
+    ///
+    /// - [`Self::None`] — inert, nominal by definition. Asserted, not assumed,
+    ///   in `hazard_none_leaves_maintenance_at_the_authored_figure`.
+    /// - [`Self::Corrosive`] — the clearest case. Attacks structure, seals, and
+    ///   exposed mechanism continuously, so it carries the largest drain.
+    /// - [`Self::Toxic`] — **deliberately neutral.** Toxicity is lethal to
+    ///   *people*, not corrosive to *equipment*; a sealed pump does not care
+    ///   that the air outside it is poisonous. Its real cost belongs in
+    ///   population/needs (habitat sealing, EVA restrictions), which is filed
+    ///   separately rather than smuggled in here as a maintenance number that
+    ///   would model the wrong thing.
+    /// - [`Self::OxidizingCombustible`] — **the oxidising half only.** Steady
+    ///   oxidation is genuine material degradation and belongs here, between
+    ///   inert and corrosive. The *combustible* half is a discrete fire and
+    ///   explosion risk, which is an event, not a steady drain; that belongs
+    ///   with the condition/breakdown-roll work in issue #384 and is
+    ///   intentionally absent from this figure.
+    ///
+    /// Uniform across building types by design, for now: per-building
+    /// susceptibility (a sealed habitat shrugging off what wrecks an exposed
+    /// mining rig) is more faithful, but authoring a susceptibility figure on
+    /// every building without balance data to tune it against is guesswork.
+    /// The scalars here are harness-tunable, and a later optional per-building
+    /// field can refine this without reworking the mechanism.
+    ///
+    /// Returns `f32` to match the other maintenance scalars it composes with
+    /// (`MaintenanceConsumption`'s difficulty scalar, `power_scalar`), so the
+    /// two multiply without a lossy cast at the call site.
+    #[must_use]
+    pub fn maintenance_multiplier(self) -> f32 {
+        match self {
+            // Neutral for two different reasons, merged only because clippy
+            // objects to identical arms: `None` is inert by definition, while
+            // `Toxic` is a real hazard that deliberately does not touch
+            // maintenance (see this method's docs). The distinction is pinned
+            // by `a_toxic_atmosphere_does_not_change_maintenance`, so
+            // separating them again later costs nothing.
+            Self::None | Self::Toxic => 1.0,
+            Self::OxidizingCombustible => 1.25,
+            Self::Corrosive => 1.5,
+        }
+    }
+
+    /// Human-readable name, for UI that has to explain an elevated cost.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "inert",
+            Self::Corrosive => "corrosive",
+            Self::Toxic => "toxic",
+            Self::OxidizingCombustible => "oxidizing",
+        }
+    }
+}
+
 /// Surface temperature band for a body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

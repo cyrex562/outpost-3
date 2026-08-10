@@ -121,6 +121,19 @@ function shortfallLabel(kind: string): string {
   return SHORTFALL_LABELS[kind] ?? kind
 }
 
+/**
+ * Render a quantity without float noise (issue #438).
+ *
+ * Maintenance figures arrive already scaled by the site's hazard multiplier,
+ * and a product like `0.3 * 1.25` is not exact in IEEE-754. Rounding to two
+ * decimals and letting `String` drop trailing zeros keeps a plain `10`
+ * looking like `10` — which is how this panel rendered before scaling
+ * existed — while never showing `15.000000000000002`.
+ */
+function formatQuantity(n: number): string {
+  return String(Math.round(n * 100) / 100)
+}
+
 /** Backdrop click-outside-to-close only makes sense in modal mode — a page
  * has no overlay to click "outside" of. */
 function onBackdropClick(): void {
@@ -325,8 +338,16 @@ function onBackdropClick(): void {
           <h5>Maintenance (per sol)</h5>
           <p class="flow-row">
             <span v-for="i in detail.maintenance" :key="i.commodity_id" class="flow-item">
-              {{ i.commodity_id }} ×{{ i.quantity }}
+              {{ i.commodity_id }} ×{{ formatQuantity(i.quantity) }}
             </span>
+          </p>
+          <!-- Without this line an elevated upkeep just looks like a wrong
+               number (issue #438). The figures above are already scaled, so
+               the cause has to be named or the player has nothing to connect
+               it to. -->
+          <p v-if="detail.maintenance_hazard" class="hint" data-testid="maintenance-hazard-note">
+            ×{{ formatQuantity(detail.maintenance_multiplier ?? 1) }} — {{ detail.maintenance_hazard }}
+            atmosphere attacks equipment here.
           </p>
         </section>
       </template>
