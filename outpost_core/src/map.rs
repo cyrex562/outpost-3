@@ -20,7 +20,7 @@
 //! [`PlanetMap::generate`] is purely deterministic from `seed + width + height`.
 //! No I/O.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rand::Rng;
 use rand::SeedableRng;
@@ -903,7 +903,16 @@ impl PlanetMap {
         // (used for the falloff weight) is measured on that raw offset
         // before wrapping; only the *lookup* into `self.cells` needs the
         // wrapped, canonical coordinate (issue #315).
-        let mut best_per_commodity: HashMap<&str, f32> = HashMap::new();
+        // `BTreeMap`, not `HashMap`, and the ordering is load-bearing (issue
+        // #430). The per-commodity bests below are summed, and f32 addition is
+        // not associative, so folding them in `HashMap` iteration order made
+        // the low bits of `variety_bonus` differ between runs of the *same*
+        // build on the *same* seed. `top_landing_sites` sorts candidates by
+        // this score, so two near-tied hexes swapped places at random and
+        // `best_landing_site` recommended a different hex each run — seed
+        // reproducibility silently broken, and the deposit-gating tests
+        // (which found their colony on that recommendation) flaked.
+        let mut best_per_commodity: BTreeMap<&str, f32> = BTreeMap::new();
         for near_coord in coord.within_radius(SITE_PROXIMITY_RADIUS) {
             let Some(near) = self.cell(self.wrap_coord(near_coord)) else {
                 continue;
@@ -2410,6 +2419,43 @@ mod tests {
         // Note: if the entire map is ocean this returns None, which is also valid.
     }
 
+    /// Issue #430: the same seed must recommend the same landing site every
+    /// run of the same build.
+    ///
+    /// This is the invariant the module header claims ("purely deterministic
+    /// from `seed + width + height`") but which only held for generation, not
+    /// for the recommendations read off it: `site_score` summed its
+    /// per-commodity bests out of a `HashMap`, and non-associative f32
+    /// addition then made near-tied candidates sort differently run to run.
+    ///
+    /// Regenerating the map inside the loop is deliberate — each `PlanetMap`
+    /// gets fresh `HashMap`s with fresh iteration orders, which is exactly the
+    /// condition that exposed the bug. Scoring one map repeatedly would not.
+    #[test]
+    fn landing_site_recommendations_are_stable_across_runs() {
+        for (seed, w, h) in [(42_u64, 5_u32, 4_u32), (7, 12, 10), (1, 22, 22)] {
+            let baseline = PlanetMap::generate(seed, w, h);
+            let expected = baseline.top_landing_sites(5, 2);
+            let expected_scores: Vec<f32> =
+                expected.iter().map(|c| baseline.site_score(*c)).collect();
+
+            for attempt in 0..12 {
+                let map = PlanetMap::generate(seed, w, h);
+                assert_eq!(
+                    map.top_landing_sites(5, 2),
+                    expected,
+                    "seed {seed} ({w}x{h}) recommended different sites on attempt {attempt}"
+                );
+                let scores: Vec<f32> = expected.iter().map(|c| map.site_score(*c)).collect();
+                assert_eq!(
+                    scores, expected_scores,
+                    "seed {seed} ({w}x{h}) scored the same hexes differently on attempt \
+                     {attempt} — site_score must be bit-for-bit reproducible, not merely close"
+                );
+            }
+        }
+    }
+
     // ── Colony placement ─────────────────────────────────────────────────────
 
     /// Deterministically pick a habitable coordinate from a generated map —
@@ -3278,17 +3324,57 @@ mod tests {
         assert!(map.site_score(plain_temperate) > map.site_score(harsh_rich));
     }
 
+    /// Fastest of `runs` timings, in microseconds.
+    ///
+    /// The minimum, not the mean: every source of noise on a machine running a
+    /// parallel test suite adds time, so the fastest run is the least
+    /// contaminated estimate of what the code itself costs.
+    fn fastest_micros(mut generate: impl FnMut(), runs: u32) -> u128 {
+        (0..runs)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                generate();
+                start.elapsed().as_micros().max(1)
+            })
+            .min()
+            .expect("callers always pass runs >= 1")
+    }
+
+    /// Quadruple the cell count; if cost grows near-linearly this ratio stays
+    /// well under [`MAX_GROWTH_PER_4X_CELLS`], and an accidental O(n^2) would
+    /// push it to ~16x.
+    const MAX_GROWTH_PER_4X_CELLS: u128 = 10;
+
+    /// Issue #430: guard the *shape* of generation's cost curve, not the
+    /// wall-clock of one run.
+    ///
+    /// This replaces a `< 100ms` assertion on a single generation. That test
+    /// was the single largest source of flakiness in the suite (it failed 5 of
+    /// 10 full-suite runs) because generation at radius 12 measures ~27ms
+    /// unloaded — only ~3.7x under the budget, which ordinary parallel-test
+    /// load erases. Timing one run inside a parallel suite measures the
+    /// machine as much as the code.
+    ///
+    /// Its stated purpose, though, was a real one: catch an accidental
+    /// O(n^2)+ blowup in vein placement or deposit rolls. A ratio between two
+    /// sizes tests exactly that and is load-robust, since both measurements
+    /// absorb whatever load is present. Verified against 40 commits of history
+    /// that generation's cost has been flat (~25-28ms), so this is not
+    /// papering over a regression.
     #[test]
-    fn generate_for_body_radius_12_completes_within_budget() {
-        // Sanity guard against an accidental O(n^2)+ blowup in vein placement
-        // or deposit rolls; 100ms is the `getPlanetMap` playtest gate from
-        // #188, generation itself should be a small fraction of that.
-        let start = std::time::Instant::now();
-        let _map = PlanetMap::generate(1, 22, 22);
+    fn generation_cost_grows_no_worse_than_near_linearly() {
+        let small = fastest_micros(|| drop(PlanetMap::generate(1, 22, 22)), 3);
+        let large = fastest_micros(|| drop(PlanetMap::generate(1, 44, 44)), 3);
+        let growth_tenths = large * 10 / small;
+
         assert!(
-            start.elapsed().as_millis() < 100,
-            "planet map generation at radius 12 took {:?}, expected well under 100ms",
-            start.elapsed()
+            large <= small * MAX_GROWTH_PER_4X_CELLS,
+            "quadrupling the cell count (484 -> 1936) took {large}us vs {small}us, a \
+             {}.{}x growth — near-linear generation should stay well under \
+             {MAX_GROWTH_PER_4X_CELLS}x, and ~16x would indicate an O(n^2) regression \
+             in vein placement or deposit rolls",
+            growth_tenths / 10,
+            growth_tenths % 10
         );
     }
 
@@ -3667,19 +3753,27 @@ mod tests {
     }
 
     #[test]
-    fn subtype_aware_generation_stays_within_performance_budget() {
-        let start = std::time::Instant::now();
-        let _map = PlanetMap::generate_for_body_and_subtype(
-            1,
-            22,
-            22,
-            TemperatureBand::Cold,
-            PlanetarySubtype::IceGiant,
-        );
+    fn subtype_aware_generation_cost_grows_no_worse_than_near_linearly() {
+        let ice_giant = |w, h| {
+            drop(PlanetMap::generate_for_body_and_subtype(
+                1,
+                w,
+                h,
+                TemperatureBand::Cold,
+                PlanetarySubtype::IceGiant,
+            ));
+        };
+        let small = fastest_micros(|| ice_giant(22, 22), 3);
+        let large = fastest_micros(|| ice_giant(44, 44), 3);
+        let growth_tenths = large * 10 / small;
+
         assert!(
-            start.elapsed().as_millis() < 100,
-            "subtype-aware generation at radius 12 took {:?}, expected well under 100ms",
-            start.elapsed()
+            large <= small * MAX_GROWTH_PER_4X_CELLS,
+            "subtype-aware generation grew {}.{}x ({small}us -> {large}us) for 4x the \
+             cells; see `generation_cost_grows_no_worse_than_near_linearly` for why this \
+             is a ratio and not a wall-clock budget (issue #430)",
+            growth_tenths / 10,
+            growth_tenths % 10
         );
     }
 
