@@ -1809,6 +1809,12 @@ pub struct SystemBodyWire {
     /// Starlight reaching this body, in units where Sol at 1 AU is `1.0`
     /// (issue #413). A moon reports its parent's.
     pub insolation: f32,
+    /// How vigorously bulk water moves here, `0.0`–`1.0` (issue #440).
+    ///
+    /// Derived rather than raw: `tidally_locked` and `rotation_period_hours`
+    /// are already on this payload, but the dominant term for a moon is tidal
+    /// forcing from its parent, which needs a lookup the frontend cannot do.
+    pub ocean_circulation: f32,
     /// Surface/composition archetype (issue #196). Flavor/authoring
     /// guidance — not a habitability input.
     pub subtype: String,
@@ -1879,6 +1885,12 @@ pub fn get_system_bodies(engine_state: State<'_, EngineState>) -> CmdResult<Vec<
                 .system_state
                 .node_map
                 .insolation_for(&b.id)
+                .unwrap_or(0.0),
+            ocean_circulation: engine
+                .state
+                .system_state
+                .node_map
+                .ocean_circulation_for(&b.id)
                 .unwrap_or(0.0),
             colonizable: matches!(
                 b.kind,
@@ -2101,6 +2113,12 @@ pub struct ColonizeTargetWire {
     /// here (issue #415) — a landing-site input, so it belongs in the
     /// comparison made *before* founding, not discovered after.
     pub insolation: f32,
+    /// How vigorously bulk water moves here, `0.0`–`1.0` (issue #440).
+    ///
+    /// Alongside `insolation` for the same reason: it decides what an ocean
+    /// current plant is worth here, so it belongs in the comparison made
+    /// *before* founding rather than discovered after.
+    pub ocean_circulation: f32,
     /// Whether founding on this body is currently allowed — either the
     /// habitability score clears `HABITABILITY_FOUNDING_THRESHOLD`, or the
     /// player has unlocked `HARSH_WORLD_CAPABILITY_ID`. The wizard still
@@ -2136,6 +2154,7 @@ pub fn get_colonize_targets(
             distance_au: b.distance_au,
             habitability: b.habitability(),
             insolation: node_map.insolation_for(&b.id).unwrap_or(0.0),
+            ocean_circulation: node_map.ocean_circulation_for(&b.id).unwrap_or(0.0),
             can_found: b.meets_founding_threshold() || harsh_world_unlocked,
         })
         .collect();

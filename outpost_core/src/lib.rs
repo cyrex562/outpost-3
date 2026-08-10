@@ -8092,6 +8092,8 @@ impl GameEngine {
             body,
             researched: Some(&self.state.tech_state.researched),
             insolation: body_id.and_then(|b| self.state.system_state.node_map.insolation_for(b)),
+            ocean_circulation: body_id
+                .and_then(|b| self.state.system_state.node_map.ocean_circulation_for(b)),
         }
     }
 
@@ -8155,6 +8157,11 @@ impl GameEngine {
                 .system_state
                 .node_map
                 .insolation_for(&outpost.body_id),
+            ocean_circulation: self
+                .state
+                .system_state
+                .node_map
+                .ocean_circulation_for(&outpost.body_id),
         }
     }
 

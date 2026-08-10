@@ -1484,8 +1484,9 @@ mod tests {
         };
         let wave = plant("wave_power_plant");
         let thermal = plant("ocean_thermal_plant");
+        let current = plant("ocean_current_plant");
 
-        for p in [wave, thermal] {
+        for p in [wave, thermal, current] {
             assert_eq!(
                 p.tech_prerequisite.as_deref(),
                 Some("marine_power"),
@@ -1509,17 +1510,51 @@ mod tests {
         }
 
         // The issue's own warning: three ocean plants that differ only in name
-        // and cost would be reskins. These two depend on different things, so
-        // a coastal colony picks whichever its body favours.
-        let wave_prop = &wave.output_scaling.as_ref().expect("wave scales").property;
-        let thermal_prop = &thermal
-            .output_scaling
-            .as_ref()
-            .expect("thermal scales")
-            .property;
-        assert_ne!(
-            wave_prop, thermal_prop,
-            "the two marine plants must depend on different site properties"
+        // and cost would be reskins. Each depends on a different thing, so a
+        // coastal colony picks whichever its body favours.
+        let scaling = |p: &crate::content::types::BuildingDef| {
+            p.output_scaling
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} must scale on something", p.id))
+                .clone()
+        };
+        let props: Vec<_> = [wave, thermal, current].map(|p| scaling(p).property).into();
+        for (i, a) in props.iter().enumerate() {
+            for b in props.iter().skip(i + 1) {
+                assert_ne!(
+                    a, b,
+                    "each marine plant must depend on a different site property, \
+                     or they are reskins with different names and costs"
+                );
+            }
+        }
+
+        // Distinct properties alone would not be enough: three plants with the
+        // same curve on three different properties would still feel identical
+        // in play. Their *profiles* have to differ too, and current's whole
+        // character (issue #440) is that it is the steady one — rotation and
+        // tides do not vary the way weather and sunlight do, so it must have
+        // the smallest swing and the highest floor of the three.
+        let span = |p: &crate::content::types::BuildingDef| {
+            let s = scaling(p);
+            s.at_max - s.at_min
+        };
+        let floor = |p: &crate::content::types::BuildingDef| scaling(p).at_min;
+        assert!(
+            span(current) < span(wave) && span(current) < span(thermal),
+            "the current plant must swing least of the three (current {:.2}, \
+             wave {:.2}, thermal {:.2}) — steadiness is what distinguishes it",
+            span(current),
+            span(wave),
+            span(thermal)
+        );
+        assert!(
+            floor(current) > floor(wave) && floor(current) > floor(thermal),
+            "the current plant must have the best worst-case of the three \
+             (current {:.2}, wave {:.2}, thermal {:.2}) — reliable but modest",
+            floor(current),
+            floor(wave),
+            floor(thermal)
         );
     }
 
@@ -1561,6 +1596,23 @@ mod tests {
             cap("ocean_thermal_plant", 0.7927) > mk2,
             "thermal at 1 AU gives {:.1} against mk2's {mk2:.1}",
             cap("ocean_thermal_plant", 0.7927)
+        );
+        // Current at the median *applicable* site (issue #440). Moons are
+        // 85.5% of foundable bodies and their median ocean_circulation is
+        // 0.44, so that — not the whole-population median — is the reading
+        // this plant has to clear mk2 at.
+        assert!(
+            cap("ocean_current_plant", 0.442) > mk2,
+            "current on a median moon gives {:.1} against mk2's {mk2:.1}",
+            cap("ocean_current_plant", 0.442)
+        );
+        // And it must genuinely be a poor choice on a dead sea, or the site
+        // property is decoration. A tidally locked planet reads ~0.013.
+        assert!(
+            cap("ocean_current_plant", 0.013) < mk2,
+            "current on a tidally locked planet gives {:.1}, which should be \
+             below mk2's {mk2:.1} — a dead sea has to be a bad site",
+            cap("ocean_current_plant", 0.013)
         );
     }
 
