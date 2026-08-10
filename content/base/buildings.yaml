@@ -460,11 +460,15 @@
   name: Wind Turbine
   description: Mechanical turbine harvesting atmospheric wind energy.
   category: power
-  # No tech_prerequisite — see solar_array_mk1. Wind is the cheaper and
-  # weaker of the two tech-0 generators; issue #416 makes it depend on the
-  # body actually having an atmosphere, which is what will give the two
-  # genuinely different niches rather than leaving solar dominant.
-  power_delta: -6.0
+  # No tech_prerequisite — see solar_array_mk1.
+  #
+  # Issue #416 gives wind the niche #409 promised it: it needs an atmosphere
+  # to turn in, and it gets stronger as that atmosphere thickens. Solar and
+  # wind are no longer two identically-shaped buildings where one simply wins
+  # — solar fades with distance from the star (issue #415), wind does not
+  # care about distance at all but is unavailable on the two thirds of
+  # foundable bodies that are airless.
+  power_delta: -18.0
   worker_slots: 0
   default_priority: 9
   labor_required: 1
@@ -473,6 +477,25 @@
   construction_cost:
     - id: structural_metal
       quantity: 10.0
+  # Unbuildable without an atmosphere: a turbine on an airless moon is
+  # nonsense, and roughly two thirds of foundable bodies are vacuum, so this
+  # is a real constraint rather than a formality.
+  site_requirements:
+    - kind: min_atmosphere
+      density: thin
+  # Output rides on how thick that atmosphere is (issue #411). Thin is the
+  # most common atmosphere among foundable bodies (~22%), so it is the case
+  # worth tuning around — poor but genuinely usable, not a token:
+  #   thin       -> x0.60 -> 10.8 capacity / 12.6 power
+  #   breathable -> x1.05 -> 18.9 capacity / 22.1 power
+  #   dense      -> x1.50 -> 27.0 capacity / 31.5 power
+  # Against solar's 20/24 at 1 AU: wind loses on a thin atmosphere near the
+  # star, matches on a breathable one, and wins outright on a dense one or
+  # anywhere far enough out that sunlight has faded.
+  output_scaling:
+    property: atmosphere_density
+    at_min: 0.15
+    at_max: 1.5
 
 - id: conductive_mine
   name: Conductive Mine

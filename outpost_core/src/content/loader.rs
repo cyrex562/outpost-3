@@ -1266,6 +1266,78 @@ mod tests {
         }
     }
 
+    /// Wind needs air, and gets better as there is more of it (issue #416).
+    #[test]
+    fn wind_turbine_requires_an_atmosphere_and_scales_with_it() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let wind = buildings
+            .iter()
+            .find(|b| b.id == "wind_turbine")
+            .expect("wind_turbine must exist");
+
+        assert_eq!(
+            wind.tech_prerequisite, None,
+            "still tech 0 after issue #409"
+        );
+
+        assert!(
+            wind.site_requirements.iter().any(|r| matches!(
+                r.condition,
+                crate::content::types::SiteCondition::MinAtmosphere { .. }
+            )),
+            "a turbine on an airless body is nonsense and must be refused"
+        );
+
+        let scaling = wind
+            .output_scaling
+            .as_ref()
+            .expect("output must depend on how thick the atmosphere is");
+        assert!(
+            matches!(
+                scaling.property,
+                crate::content::types::SiteProperty::AtmosphereDensity
+            ),
+            "must scale on atmospheric density"
+        );
+        assert!(
+            scaling.at_max > scaling.at_min * 2.0,
+            "density barely matters at {} to {}",
+            scaling.at_min,
+            scaling.at_max
+        );
+    }
+
+    /// Solar and wind are no longer two identically-shaped buildings where one
+    /// simply wins (issues #415/#416).
+    ///
+    /// Pins that they depend on *different* things, which is what makes the
+    /// choice between them a real one rather than a number comparison.
+    #[test]
+    fn the_two_tech_zero_generators_depend_on_different_site_properties() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let property_of = |id: &str| {
+            buildings
+                .iter()
+                .find(|b| b.id == id)
+                .and_then(|b| b.output_scaling.as_ref())
+                .map(|s| s.property.clone())
+                .unwrap_or_else(|| panic!("{id} must declare output scaling"))
+        };
+        assert_ne!(
+            property_of("solar_array_mk1"),
+            property_of("wind_turbine"),
+            "if both scaled on the same property, one would simply dominate"
+        );
+    }
+
     /// A colony gets exactly one headquarters.
     #[test]
     fn colony_hq_is_capped_at_one_instance() {

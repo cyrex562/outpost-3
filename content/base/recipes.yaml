@@ -387,7 +387,7 @@
   inputs: []
   outputs:
     - id: power
-      quantity: 6.0
+      quantity: 21.0
 
 - id: pump_hydrocarbons
   name: Pump Hydrocarbons
