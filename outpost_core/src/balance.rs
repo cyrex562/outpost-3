@@ -25,6 +25,7 @@
 //!     tech_prerequisite: None,
 //!     maintenance: vec![],
 //!     repair_cost: vec![],
+//!     hazard_susceptibility: None,
 //!     default_priority: 5,
 //!     grants_slot_capacity: 0,
 //!     starter_kit: false,

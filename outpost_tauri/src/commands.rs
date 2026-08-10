@@ -9,12 +9,12 @@ use include_dir::{include_dir, Dir};
 use outpost_core::colony::ColonyId;
 use outpost_core::content::loader::PackLoader;
 use outpost_core::difficulty::DifficultyPreset;
+use outpost_core::hazard::load_hazard_config;
 use outpost_core::modifier::{DifficultyScalar, ModifiableQuantity};
 use outpost_core::morale::MoraleConfig;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::snapshot::Snapshot as SnapshotDb;
 use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
-use outpost_core::hazard::load_hazard_config;
 use outpost_core::tech::load_tech_registry;
 use outpost_core::trade::SiteId;
 use outpost_core::{Command, Event, GameEngine, Query, QueryResult};
@@ -238,7 +238,9 @@ pub enum ClientCommand {
         body_id: String,
     },
     /// Decommission an outpost, removing it from play (issue #233/#243).
-    DecommissionOutpost { outpost_id: String },
+    DecommissionOutpost {
+        outpost_id: String,
+    },
     /// Queue a construction project at an outpost (issue #233/#243).
     QueueOutpostConstruction {
         outpost_id: String,
@@ -286,7 +288,9 @@ pub enum ClientCommand {
         throughput_cap: f64,
     },
     /// Remove a trade route by its id (issue #363).
-    RemoveTradeRoute { route_id: String },
+    RemoveTradeRoute {
+        route_id: String,
+    },
 }
 
 /// Read-only query. Matches the frontend's query message.
@@ -435,7 +439,9 @@ pub enum ServerEvent {
         body_id: String,
     },
     /// An outpost was decommissioned (issue #233/#243).
-    OutpostDecommissioned { outpost_id: String },
+    OutpostDecommissioned {
+        outpost_id: String,
+    },
     /// An outpost queued a construction project (issue #233/#243).
     OutpostConstructionQueued {
         outpost_id: String,
@@ -482,7 +488,9 @@ pub enum ServerEvent {
         throughput_cap: f64,
     },
     /// A trade route was removed from the planetary trade network (issue #363).
-    TradeRouteRemoved { route_id: String },
+    TradeRouteRemoved {
+        route_id: String,
+    },
     /// Fallback for events we don't have a typed variant for yet.
     Unknown {
         core_kind: String,
@@ -1114,11 +1122,14 @@ pub fn bootstrap(
     log::info!(
         "bootstrap: content_dir={content_dir:?} planet_seed={planet_seed} difficulty={difficulty:?} system_seed={system_seed:?}"
     );
-    let registry = match (if content_dir.is_empty() || content_dir == "embedded" {
+    // Bound rather than matched inline: `match (if ... {} else {}) { ... }`
+    // needed parentheses clippy rejects, and reads badly without them.
+    let loaded = if content_dir.is_empty() || content_dir == "embedded" {
         load_embedded_content()
     } else {
         load_content(Path::new(&content_dir))
-    }) {
+    };
+    let registry = match loaded {
         Ok(r) => r,
         Err(e) => {
             log::error!("bootstrap FAILED loading content: {e}");
@@ -2124,10 +2135,7 @@ pub fn get_tech_tree(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Tech
     for tech in tech_registry.all() {
         let is_done = tech_state.is_researched(&tech.id);
         let is_active = current == Some(tech.id.as_str());
-        let queue_position = tech_state
-            .research_queue
-            .iter()
-            .position(|t| t == &tech.id);
+        let queue_position = tech_state.research_queue.iter().position(|t| t == &tech.id);
         let is_queued = queue_position.is_some();
         let prereqs_met = tech_state.prerequisites_met(tech);
 
@@ -2279,7 +2287,11 @@ pub fn list_outposts(engine_state: State<'_, EngineState>) -> CmdResult<Vec<Outp
                 body_name,
                 slot_capacity: o.slot_capacity,
                 slots_used: o.slots_used(),
-                buildings: o.buildings.iter().map(|b| b.building_type.clone()).collect(),
+                buildings: o
+                    .buildings
+                    .iter()
+                    .map(|b| b.building_type.clone())
+                    .collect(),
                 pool: o
                     .pool
                     .commodity_ids()
@@ -2644,7 +2656,7 @@ fn build_planet_map_wire(
                 terrain: format!("{:?}", cell.terrain),
                 biome: format!("{:?}", cell.biome),
                 elevation: cell.elevation,
-            geothermal_gradient: cell.geothermal_gradient,
+                geothermal_gradient: cell.geothermal_gradient,
                 temperature: format!("{:?}", cell.temperature),
                 water_coverage: cell.water_coverage,
                 vegetation_density: cell.vegetation_density,
@@ -3014,7 +3026,10 @@ mod embedded_content_tests {
             .expect("registry")
             .buildings()
             .count();
-        assert!(count >= 40, "expected the full roster after load, got {count}");
+        assert!(
+            count >= 40,
+            "expected the full roster after load, got {count}"
+        );
 
         // The colony survived the round trip too, so this isn't passing on an
         // empty game.
