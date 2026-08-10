@@ -128,11 +128,31 @@ pub fn step_condition(condition: f32, maintenance_met: bool) -> f32 {
 /// it into certainty.
 #[must_use]
 pub fn breakdown_chance(condition: f32, hazard: AtmosphereHazard) -> f32 {
+    breakdown_chance_for(condition, hazard, None)
+}
+
+/// [`breakdown_chance`], scaled by how exposed the building is (issue #443).
+///
+/// A sealed habitat that shrugs off a corrosive world's *upkeep* penalty
+/// should also be less likely to fail because of it — applying susceptibility
+/// to one and not the other would say the atmosphere wears the building
+/// slowly but still wrecks it suddenly at the same rate, which is incoherent.
+///
+/// `None` leaves the hazard at full strength, so unauthored content behaves
+/// exactly as it did before the field existed.
+#[must_use]
+pub fn breakdown_chance_for(
+    condition: f32,
+    hazard: AtmosphereHazard,
+    susceptibility: Option<f32>,
+) -> f32 {
     if condition > BREAKDOWN_THRESHOLD {
         return 0.0;
     }
     let severity = ((BREAKDOWN_THRESHOLD - condition) / BREAKDOWN_THRESHOLD).clamp(0.0, 1.0);
-    (severity * MAX_BREAKDOWN_CHANCE * breakdown_multiplier(hazard)).clamp(0.0, 1.0)
+    let hazard_factor =
+        crate::system::apply_hazard_susceptibility(breakdown_multiplier(hazard), susceptibility);
+    (severity * MAX_BREAKDOWN_CHANCE * hazard_factor).clamp(0.0, 1.0)
 }
 
 /// Whether a building breaks down this sol.
@@ -141,7 +161,18 @@ pub fn breakdown_chance(condition: f32, hazard: AtmosphereHazard) -> f32 {
 /// this module stays pure so the whole model is reproducible for a fixed seed.
 #[must_use]
 pub fn breaks_down(condition: f32, hazard: AtmosphereHazard, roll: f32) -> bool {
-    roll < breakdown_chance(condition, hazard)
+    breaks_down_for(condition, hazard, None, roll)
+}
+
+/// [`breaks_down`], scaled by how exposed the building is (issue #443).
+#[must_use]
+pub fn breaks_down_for(
+    condition: f32,
+    hazard: AtmosphereHazard,
+    susceptibility: Option<f32>,
+    roll: f32,
+) -> bool {
+    roll < breakdown_chance_for(condition, hazard, susceptibility)
 }
 
 #[cfg(test)]

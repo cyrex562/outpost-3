@@ -525,6 +525,27 @@ pub struct BuildingDef {
     /// right (a structure that is cheap to build but dear to fix, say).
     #[serde(default)]
     pub repair_cost: Vec<Ingredient>,
+    /// How exposed this building is to the body's atmosphere, `0.0`–`1.0`
+    /// (issue #443).
+    ///
+    /// Scales how much of a hazard's penalty this building actually takes —
+    /// both the maintenance multiplier from #438 and the breakdown odds from
+    /// #384. `1.0` (the default when unauthored) means fully exposed and
+    /// carries the hazard at full strength, exactly as before this field
+    /// existed; `0.0` means completely sealed and immune.
+    ///
+    /// **Optional on purpose.** Requiring a figure on every building would
+    /// mean a content edit for all of them today and a trap for every
+    /// building added later — an author who forgets one would silently get
+    /// whatever the default happened to be. Absent meaning "fully exposed"
+    /// makes the unauthored case the conservative one, so a new building is
+    /// never accidentally immune.
+    ///
+    /// See [`crate::system::AtmosphereHazard::maintenance_multiplier`] for
+    /// the underlying figures and
+    /// [`crate::system::apply_hazard_susceptibility`] for how the two combine.
+    #[serde(default)]
+    pub hazard_susceptibility: Option<f32>,
     /// Default staffing priority for instances of this building (issue #307).
     ///
     /// `1` is staffed first, [`MAX_BUILDING_PRIORITY`] last. Labour is allocated

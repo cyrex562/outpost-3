@@ -3378,35 +3378,30 @@ impl GameEngine {
                         .iter()
                         .map(|c| (c.id, self.colony_site_multipliers(c)))
                         .collect();
-                    // Per-colony atmospheric-hazard maintenance multipliers
-                    // (issue #438). Precomputed here for the same reason as
-                    // the site multipliers above: the production loop below
-                    // borrows each colony mutably and so cannot ask `self`
-                    // about its body.
-                    let colony_hazard_mults: std::collections::HashMap<ColonyId, f32> = self
+                    // Per-colony atmospheric hazards (issues #438/#443).
+                    // Precomputed here for the same reason as the site
+                    // multipliers above: the production loop below borrows
+                    // each colony mutably and so cannot ask `self` about its
+                    // body. The hazard rather than a resolved multiplier,
+                    // since #443 resolves it per building inside production.
+                    let colony_hazards: std::collections::HashMap<
+                        ColonyId,
+                        system::AtmosphereHazard,
+                    > = self
                         .state
                         .colonies
                         .iter()
-                        .map(|c| {
-                            (
-                                c.id,
-                                self.body_atmosphere_hazard(c.home_body_id.as_ref())
-                                    .maintenance_multiplier(),
-                            )
-                        })
+                        .map(|c| (c.id, self.body_atmosphere_hazard(c.home_body_id.as_ref())))
                         .collect();
-                    let outpost_hazard_mults: std::collections::HashMap<outpost::OutpostId, f32> =
-                        self.state
-                            .outposts
-                            .iter()
-                            .map(|o| {
-                                (
-                                    o.id,
-                                    self.body_atmosphere_hazard(Some(&o.body_id))
-                                        .maintenance_multiplier(),
-                                )
-                            })
-                            .collect();
+                    let outpost_hazards: std::collections::HashMap<
+                        outpost::OutpostId,
+                        system::AtmosphereHazard,
+                    > = self
+                        .state
+                        .outposts
+                        .iter()
+                        .map(|o| (o.id, self.body_atmosphere_hazard(Some(&o.body_id))))
+                        .collect();
                     // Cross-colony power transfer (issue #383): before any
                     // colony's production actually runs, look at every
                     // colony's raw (pre-transfer) power balance and walk
@@ -3538,14 +3533,13 @@ impl GameEngine {
                             registry,
                             power_scalar,
                             power_imports.get(&colony.id).copied().unwrap_or(0.0),
-                            // Difficulty's maintenance scalar times this
-                            // body's atmospheric-hazard multiplier (issue
-                            // #438) — both are multipliers on the same per-sol
-                            // drain, so they compose here rather than being
-                            // threaded separately through a 15-argument
-                            // signature.
-                            maintenance_scalar
-                                * colony_hazard_mults.get(&colony.id).copied().unwrap_or(1.0),
+                            // Difficulty's scalar only. The atmospheric-hazard
+                            // penalty used to be folded in here (#438), but
+                            // #443 makes it depend on each building's authored
+                            // `hazard_susceptibility`, which a colony-wide
+                            // number cannot express — so the hazard itself is
+                            // passed below and applied per building.
+                            maintenance_scalar,
                             maintenance_enabled,
                             colony.habitability_modifier
                                 * colony::contamination_habitability_factor(
@@ -3557,6 +3551,10 @@ impl GameEngine {
                             &self.state.modifier_accumulator,
                             &self.state.difficulty_scalar,
                             colony_site_mults.get(&colony.id),
+                            colony_hazards
+                                .get(&colony.id)
+                                .copied()
+                                .unwrap_or(system::AtmosphereHazard::None),
                         );
                         // Emit events for every shortfall so callers can log or react.
                         for result in &prod_outcome.building_results {
@@ -3633,13 +3631,12 @@ impl GameEngine {
                                 // authored upkeep never degrades, so a solar
                                 // panel does not quietly rot for want of
                                 // maintenance it was never given.
-                                let has_upkeep = registry
-                                    .buildings()
-                                    .find(|d| d.id == building_type)
-                                    .is_some_and(|d| !d.maintenance.is_empty());
+                                let def = registry.buildings().find(|d| d.id == building_type);
+                                let has_upkeep = def.is_some_and(|d| !d.maintenance.is_empty());
                                 if !has_upkeep {
                                     continue;
                                 }
+                                let susceptibility = def.and_then(|d| d.hazard_susceptibility);
                                 let met = !self.state.colonies[ci]
                                     .last_production_by_building
                                     .get(&building_id)
@@ -3659,7 +3656,12 @@ impl GameEngine {
 
                                 if breakdown_enabled {
                                     let roll = self.processor.next_unit_float();
-                                    if condition::breaks_down(next, hazard, roll) {
+                                    if condition::breaks_down_for(
+                                        next,
+                                        hazard,
+                                        susceptibility,
+                                        roll,
+                                    ) {
                                         self.state.colonies[ci].buildings[bi].broken = true;
                                         breakdowns.push((
                                             colony_id,
@@ -3817,12 +3819,7 @@ impl GameEngine {
                             registry,
                             power_scalar,
                             0.0, // power_import (issue #383)
-                            // An outpost has no surface hex, but it *is*
-                            // anchored to a body, and a corrosive atmosphere
-                            // eats its equipment exactly as it would a
-                            // colony's (issue #438).
-                            maintenance_scalar
-                                * outpost_hazard_mults.get(&out.id).copied().unwrap_or(1.0),
+                            maintenance_scalar,
                             maintenance_enabled,
                             1.0,
                             &out.active_recipes,
@@ -3835,6 +3832,13 @@ impl GameEngine {
                             // be read for it — site-scaled buildings run
                             // unscaled there rather than at zero.
                             None,
+                            // It *is* anchored to a body, though, and a
+                            // corrosive atmosphere eats its equipment exactly
+                            // as it would a colony's (issues #438/#443).
+                            outpost_hazards
+                                .get(&out.id)
+                                .copied()
+                                .unwrap_or(system::AtmosphereHazard::None),
                         );
                         for result in &prod_outcome.building_results {
                             for shortfall in &result.shortfalls {
@@ -7173,7 +7177,15 @@ impl GameEngine {
                             // so showing a risk percentage would be a lie
                             // (issue #384).
                             breakdown_risk: if self.state.building_breakdown_enabled && !b.broken {
-                                condition::breakdown_chance(b.condition, colony_hazard)
+                                condition::breakdown_chance_for(
+                                    b.condition,
+                                    colony_hazard,
+                                    self.state
+                                        .registry
+                                        .as_ref()
+                                        .and_then(|r| r.building(&b.building_type))
+                                        .and_then(|d| d.hazard_susceptibility),
+                                )
                             } else {
                                 0.0
                             },
@@ -8725,6 +8737,14 @@ impl GameEngine {
                     .collect(),
             });
 
+        // This building's own share of the hazard (issue #443) — a sealed
+        // structure reports a smaller penalty than an exposed one on the same
+        // world, which is the whole point of the field.
+        let hazard_multiplier = system::apply_hazard_susceptibility(
+            hazard.maintenance_multiplier(),
+            def.hazard_susceptibility,
+        );
+
         Ok(ui::BuildingDetailData {
             building_type: def.id.clone(),
             name: def.name.clone(),
@@ -8737,16 +8757,17 @@ impl GameEngine {
                 .iter()
                 .map(|i| ui::IngredientRow {
                     commodity_id: i.id.clone(),
-                    quantity: i.quantity * f64::from(hazard.maintenance_multiplier()),
+                    quantity: i.quantity * f64::from(hazard_multiplier),
                 })
                 .collect(),
-            maintenance_multiplier: hazard.maintenance_multiplier(),
+            maintenance_multiplier: hazard_multiplier,
             // Gated on the multiplier, not on `hazard != None`: `Toxic` is a
             // real hazard that deliberately costs no extra maintenance, and
             // naming it as the reason for an elevated cost that isn't elevated
-            // would be worse than saying nothing.
-            maintenance_hazard: (hazard.maintenance_multiplier() > 1.0)
-                .then(|| hazard.label().to_string()),
+            // would be worse than saying nothing. Since #443 the same gate
+            // also covers a fully sealed building, which pays nothing extra
+            // on any world and so has nothing to explain.
+            maintenance_hazard: (hazard_multiplier > 1.0).then(|| hazard.label().to_string()),
             recipe,
             available_recipes,
             concurrent_recipes: colony::production::concurrent_recipes_for_building(
@@ -9509,6 +9530,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
@@ -9561,6 +9583,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
@@ -9709,6 +9732,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
@@ -9773,6 +9797,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_reactor".into(),
             name: "Advanced Reactor".into(),
@@ -9958,6 +9983,7 @@ mod tests {
 
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "greenhouse".into(),
             name: "Greenhouse".into(),
@@ -10289,6 +10315,7 @@ mod tests {
         // A plant that burns food into fuel — the competing consumer.
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "burner".into(),
             name: "burner".into(),
@@ -10517,6 +10544,7 @@ mod tests {
         let mut engine = GameEngine::new();
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "burner".into(),
             name: "burner".into(),
@@ -10772,6 +10800,7 @@ mod tests {
     fn registry_with_site_prep() -> content::ContentRegistry {
         let mut reg = content::ContentRegistry::default();
         let base = |id: &str| content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
@@ -10923,6 +10952,7 @@ mod tests {
     fn registry_with_remediation() -> content::ContentRegistry {
         let mut reg = content::ContentRegistry::default();
         let base = |id: &str| content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
@@ -11331,6 +11361,7 @@ mod tests {
         use content::types::{BuildingCategory, BuildingDef, Ingredient, RecipeDef};
         let mut reg = content::ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "complex".into(),
             name: "Complex".into(),
@@ -11782,6 +11813,7 @@ mod tests {
 
         // A trivial power source so the research lab doesn't brown out.
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
@@ -11807,6 +11839,7 @@ mod tests {
 
         // Research lab: consumes 1 water, produces 5 research per sol.
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "research_lab".into(),
             name: "Research Lab".into(),
@@ -11831,6 +11864,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "water_source".into(),
             name: "Water Source".into(),
@@ -12010,6 +12044,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "solar_panel".into(),
             name: "Solar Panel".into(),
@@ -12050,6 +12085,7 @@ mod tests {
         // Mirrors `battery_bank` in content/base/buildings.yaml, at a smaller
         // capacity so a single generator overflows it within one sol.
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "battery_bank".into(),
             name: "Battery Bank".into(),
@@ -14089,6 +14125,7 @@ mod tests {
         };
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "mining_outpost".into(),
             name: "Mining Outpost".into(),
@@ -14351,6 +14388,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_outpost_module".into(),
             name: "Advanced Outpost Module".into(),
@@ -14412,6 +14450,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_outpost_module".into(),
             name: "Advanced Outpost Module".into(),
@@ -14732,6 +14771,7 @@ mod tests {
         };
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "power_hungry_outpost".into(),
             name: "Power-hungry Outpost".into(),
@@ -15418,6 +15458,7 @@ mod tests {
         // Add a second building with two recipes to the same registry.
         let mut registry = engine.state.registry.clone().unwrap();
         registry.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "refinery".into(),
             name: "Refinery".into(),
@@ -15505,6 +15546,7 @@ mod tests {
 
         let mut registry = engine.state.registry.clone().unwrap();
         registry.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "hq".into(),
             name: "HQ".into(),
@@ -15583,6 +15625,7 @@ mod tests {
 
         let mut registry = engine.state.registry.clone().unwrap();
         registry.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "hq".into(),
             name: "HQ".into(),
@@ -18407,6 +18450,134 @@ mod tests {
 
     // ── Atmospheric hazards scale maintenance (issue #438) ───────────────────
 
+    // ── Per-building hazard susceptibility (issue #443) ─────────────────────
+
+    /// A sealed building really does pay less upkeep than an exposed one on
+    /// the *same* corrosive world — end to end through the production pass,
+    /// not just in the arithmetic helper.
+    #[test]
+    fn a_sealed_building_pays_less_upkeep_than_an_exposed_one() {
+        let drawn = |susceptibility: Option<f32>| {
+            let (mut engine, _body, colony_id) =
+                engine_on_hazardous_body(system::AtmosphereHazard::Corrosive);
+            // Re-author the fixture building's exposure.
+            if let Some(reg) = engine.state.registry.as_mut() {
+                let mut def = reg
+                    .buildings()
+                    .find(|b| b.id == "relay_mast")
+                    .expect("fixture building")
+                    .clone();
+                def.hazard_susceptibility = susceptibility;
+                reg.insert_building(def);
+            }
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            1000.0 - engine.state.colonies[idx].pool.amount("spare_parts")
+        };
+
+        let exposed = drawn(Some(1.0));
+        let sealed = drawn(Some(0.2));
+        assert!(
+            sealed < exposed,
+            "a sealed building must pay less on a corrosive world: \
+             sealed {sealed}, exposed {exposed}"
+        );
+        // And still more than it would on an inert world — sealed is not immune.
+        assert!(sealed > 10.0, "expected some penalty, drew {sealed}");
+    }
+
+    /// The guarantee that makes this a refinement rather than a rebalance:
+    /// unauthored content is charged exactly what it was before #443.
+    #[test]
+    fn an_unauthored_building_pays_exactly_the_full_hazard_penalty() {
+        let drawn = |susceptibility: Option<f32>| {
+            let (mut engine, _body, colony_id) =
+                engine_on_hazardous_body(system::AtmosphereHazard::Corrosive);
+            if let Some(reg) = engine.state.registry.as_mut() {
+                let mut def = reg
+                    .buildings()
+                    .find(|b| b.id == "relay_mast")
+                    .expect("fixture building")
+                    .clone();
+                def.hazard_susceptibility = susceptibility;
+                reg.insert_building(def);
+            }
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+            let idx = engine.find_colony_index(colony_id).unwrap();
+            1000.0 - engine.state.colonies[idx].pool.amount("spare_parts")
+        };
+        let unauthored = drawn(None);
+        let full = drawn(Some(1.0));
+        assert!(
+            (unauthored - full).abs() < 1e-6,
+            "absent must mean fully exposed: unauthored {unauthored}, explicit {full}"
+        );
+        // 10.0 authored upkeep x 1.5 corrosive = 15.0.
+        assert!(
+            (unauthored - 15.0).abs() < 1e-6,
+            "expected the full corrosive penalty, drew {unauthored}"
+        );
+    }
+
+    /// The building detail panel must report the building's *own* figure, not
+    /// the body-wide one — the third of the issue's done-when bullets.
+    #[test]
+    fn the_detail_panel_reports_the_buildings_own_hazard_figure() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::Corrosive);
+        if let Some(reg) = engine.state.registry.as_mut() {
+            let mut def = reg
+                .buildings()
+                .find(|b| b.id == "relay_mast")
+                .expect("fixture building")
+                .clone();
+            def.hazard_susceptibility = Some(0.2);
+            reg.insert_building(def);
+        }
+        let QueryResult::BuildingDetail(detail) = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "relay_mast".into(),
+            })
+            .unwrap()
+        else {
+            panic!("expected BuildingDetail")
+        };
+        // Body-wide corrosive is x1.5; at 0.2 exposure this building sees x1.1.
+        assert!(
+            (detail.maintenance_multiplier - 1.1).abs() < 1e-6,
+            "expected the per-building figure, got {}",
+            detail.maintenance_multiplier
+        );
+    }
+
+    /// A fully sealed building has nothing to explain, so the panel stays
+    /// silent rather than naming a hazard that costs it nothing.
+    #[test]
+    fn a_fully_sealed_building_reports_no_hazard_note() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::Corrosive);
+        if let Some(reg) = engine.state.registry.as_mut() {
+            let mut def = reg
+                .buildings()
+                .find(|b| b.id == "relay_mast")
+                .expect("fixture building")
+                .clone();
+            def.hazard_susceptibility = Some(0.0);
+            reg.insert_building(def);
+        }
+        let QueryResult::BuildingDetail(detail) = engine
+            .query(&Query::BuildingDetail {
+                colony_id,
+                building_type: "relay_mast".into(),
+            })
+            .unwrap()
+        else {
+            panic!("expected BuildingDetail")
+        };
+        assert_eq!(detail.maintenance_hazard, None);
+    }
+
     // ── Toxic atmospheres already cost, in habitability (issue #444) ────────
 
     /// The cost `Toxic` carries is real, ongoing, and the harshest of the
@@ -18821,6 +18992,7 @@ mod tests {
     fn upkeep_free_building_def() -> crate::content::BuildingDef {
         use crate::content::{BuildingCategory, BuildingDef};
         BuildingDef {
+            hazard_susceptibility: None,
             id: "no_upkeep_mast".into(),
             name: "No-Upkeep Mast".into(),
             description: String::new(),
@@ -18909,6 +19081,7 @@ mod tests {
         // Maintenance-only: no recipe, so nothing but the upkeep draw can move
         // the stockpile and the measurement is unambiguous.
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "relay_mast".into(),
             name: "Relay Mast".into(),
@@ -19330,6 +19503,7 @@ mod tests {
 
         let mut registry = content::ContentRegistry::default();
         registry.insert_building(content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
@@ -19431,6 +19605,7 @@ mod tests {
 
         let mut registry = content::ContentRegistry::default();
         registry.insert_building(content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
@@ -19552,6 +19727,7 @@ mod tests {
 
         let mut registry = content::ContentRegistry::default();
         registry.insert_building(content::types::BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
@@ -19790,6 +19966,7 @@ mod tests {
         let mut registry = content::ContentRegistry::default();
         for (id, in_kit) in [("kit_a", true), ("kit_b", true), ("not_in_kit", false)] {
             registry.insert_building(content::types::BuildingDef {
+                hazard_susceptibility: None,
                 repair_cost: vec![],
                 id: id.into(),
                 name: id.into(),
@@ -21387,6 +21564,7 @@ mod tests {
         let mut reg = crate::content::ContentRegistry::default();
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
@@ -21411,6 +21589,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "water_well".into(),
             name: "Water Well".into(),
@@ -24327,6 +24506,7 @@ mod tests {
         use crate::content::{BuildingCategory, BuildingDef, ContentRegistry};
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "hq".into(),
             name: "HQ".into(),
@@ -24551,6 +24731,7 @@ mod tests {
 
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "sited".into(),
             name: "Sited Building".into(),

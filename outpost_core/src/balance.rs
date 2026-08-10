@@ -342,6 +342,7 @@ mod tests {
 
     fn make_building(id: &str) -> BuildingDef {
         BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),

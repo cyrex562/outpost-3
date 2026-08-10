@@ -1616,6 +1616,63 @@ mod tests {
         );
     }
 
+    /// Authored `hazard_susceptibility` figures must be in range, and the
+    /// buildings that exist to *process* the atmosphere must never claim to
+    /// be sealed from it (issue #443).
+    #[test]
+    fn authored_hazard_susceptibility_is_sane() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+
+        for b in &buildings {
+            if let Some(s) = b.hazard_susceptibility {
+                assert!(
+                    (0.0..=1.0).contains(&s),
+                    "{} authored hazard_susceptibility {s}, which must be in [0, 1]",
+                    b.id
+                );
+            }
+        }
+
+        // Ingesting the atmosphere is the entire job of these; a pack claiming
+        // any of them is sealed from it would be describing a different
+        // building.
+        for id in ["air_miner", "atmospheric_harvester", "gas_extractor"] {
+            let Some(b) = buildings.iter().find(|b| b.id == id) else {
+                continue;
+            };
+            assert!(
+                b.hazard_susceptibility.unwrap_or(1.0) >= 1.0,
+                "{id} processes the atmosphere, so it cannot be sheltered from it \
+                 (authored {:?})",
+                b.hazard_susceptibility
+            );
+        }
+
+        // Sealed housing is the clearest case in the roster, and the reason
+        // the mechanism exists — if these ever read as fully exposed the
+        // authored set has been lost.
+        for id in [
+            "habitat_pod",
+            "basic_habitat",
+            "apartment_block",
+            "habitat_dome",
+        ] {
+            let Some(b) = buildings.iter().find(|b| b.id == id) else {
+                continue;
+            };
+            let s = b.hazard_susceptibility.unwrap_or(1.0);
+            assert!(
+                s < 1.0,
+                "{id} is a sealed pressure vessel and should take less than the \
+                 full atmospheric penalty, got {s}"
+            );
+        }
+    }
+
     /// A colony gets exactly one headquarters.
     #[test]
     fn colony_hq_is_capped_at_one_instance() {

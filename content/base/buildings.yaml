@@ -69,6 +69,27 @@
 
 # ── Starter set (no tech_prerequisite) ──────────────────────────────────────
 
+
+# ── Atmospheric hazard susceptibility (issue #443) ───────────────────────────
+#
+# `hazard_susceptibility` scales how much of a body's atmospheric-hazard
+# penalty a building actually takes — both the maintenance multiplier (#438)
+# and the breakdown odds (#384). 1.0 is fully exposed, 0.0 is completely
+# sealed.
+#
+# **Absent means 1.0.** That is deliberate: the unauthored case is the
+# conservative one, so a building added later is never accidentally immune to
+# a corrosive world. Only buildings whose exposure is *obvious* carry a figure
+# here — sealed pressure vessels and indoor spaces. Everything outdoors and
+# mechanical (turbines, solar arrays, mines, the marine plants) is left at the
+# default, and the atmosphere processors below are exposed by definition since
+# ingesting the air is their job.
+#
+# These are first-pass figures, not measured ones. Per DESIGN.md §17 the
+# scalars get tuned via the balance harness rather than designed on paper; the
+# point of this pass is that the *shape* is right — a sealed habitat should not
+# corrode at the same rate as the rig standing beside it.
+
 - id: colony_hq
   name: Colony HQ
   description: >
@@ -303,6 +324,8 @@
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  # A pressure vessel with people inside; the whole design problem is keeping the outside out.
+  hazard_susceptibility: 0.25
   construction_cost:
     - id: structural_metal
       quantity: 10.0
@@ -326,6 +349,8 @@
   labor_required: 0
   slot_cost: 0
   construction_turns: 1
+  # A closed vessel with no exposed mechanism — only its shell meets the atmosphere.
+  hazard_susceptibility: 0.4
   storage:
     - id: water
       quantity: 150.0
@@ -389,6 +414,8 @@
   default_priority: 8
   slot_cost: 1
   construction_turns: 4
+  # Indoor work; the delicate equipment never meets outside air.
+  hazard_susceptibility: 0.3
   tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
@@ -406,6 +433,8 @@
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  # Same sealed-envelope reasoning as habitat_pod.
+  hazard_susceptibility: 0.25
   tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
@@ -562,6 +591,8 @@
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  # Enclosed storage — a shell, with nothing mechanical exposed.
+  hazard_susceptibility: 0.4
   tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
@@ -583,6 +614,8 @@
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  # Sealed cells; no moving parts outside to be attacked.
+  hazard_susceptibility: 0.4
   tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
@@ -668,6 +701,8 @@
   labor_required: 1
   slot_cost: 1
   construction_turns: 2
+  # A closed containment structure, and already built to hold worse than the air outside.
+  hazard_susceptibility: 0.4
   tech_prerequisite: basic_construction
   construction_cost:
     - id: structural_metal
@@ -787,6 +822,8 @@
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
+  # A larger, better-built sealed envelope than the early habitats.
+  hazard_susceptibility: 0.2
   tech_prerequisite: advanced_materials
   construction_cost:
     - id: structural_metal
@@ -1314,6 +1351,8 @@
   labor_required: 2
   slot_cost: 2
   construction_turns: 6
+  # Late-tier sealed housing — the most thoroughly isolated structure the colony builds.
+  hazard_susceptibility: 0.2
   tech_prerequisite: planetary_life_support
   construction_cost:
     - id: structural_metal
@@ -1415,6 +1454,8 @@
   labor_required: 2
   slot_cost: 2
   construction_turns: 5
+  # As research_lab, and if anything better sealed.
+  hazard_susceptibility: 0.3
   tech_prerequisite: automation
   construction_cost:
     - id: structural_metal

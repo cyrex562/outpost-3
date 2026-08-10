@@ -739,6 +739,7 @@ mod tests {
         use crate::content::ContentRegistry;
 
         let bdef = BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "smelter".into(),
             name: "Smelter".into(),
@@ -806,6 +807,7 @@ mod tests {
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
             None,
+            crate::system::AtmosphereHazard::None,
         );
         let hard = process_production_scaled(
             &mut crate::colony::ColonyStores::new(&mut pool_hard, &mut res_hard, &reg),
@@ -823,6 +825,7 @@ mod tests {
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
             None,
+            crate::system::AtmosphereHazard::None,
         );
 
         assert!(

@@ -317,6 +317,32 @@ impl AtmosphereHazard {
     }
 }
 
+/// Scale a hazard multiplier by how exposed a building is (issue #443).
+///
+/// Interpolates between neutral (`1.0`) and the hazard's full multiplier:
+///
+/// ```text
+/// effective = 1.0 + (multiplier - 1.0) * susceptibility
+/// ```
+///
+/// So a sealed habitat at `0.2` takes a fifth of the penalty an exposed rig
+/// at `1.0` does, and a `None` susceptibility — the unauthored default —
+/// passes the multiplier through untouched. That last case is what keeps this
+/// a refinement rather than a rebalance: content that says nothing behaves
+/// exactly as it did before the field existed.
+///
+/// Susceptibility is clamped to `[0.0, 1.0]`. Values outside that would let a
+/// content pack invert a hazard into a bonus, or amplify it past the figure
+/// the hazard itself declares — both of which would make the hazard's own
+/// documented multiplier a lie.
+#[must_use]
+pub fn apply_hazard_susceptibility(multiplier: f32, susceptibility: Option<f32>) -> f32 {
+    let Some(s) = susceptibility else {
+        return multiplier;
+    };
+    1.0 + (multiplier - 1.0) * s.clamp(0.0, 1.0)
+}
+
 /// Surface temperature band for a body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -3382,6 +3408,68 @@ mod tests {
 
         let ins = map.insolation_for(&moon_id).unwrap();
         assert!((ins - 0.25).abs() < 1e-6, "got {ins}");
+    }
+
+    // ── Hazard susceptibility (issue #443) ──────────────────────────────────
+
+    /// The load-bearing guarantee: content that says nothing must behave
+    /// exactly as it did before the field existed.
+    #[test]
+    fn an_unauthored_susceptibility_passes_the_multiplier_through_untouched() {
+        for hazard in [
+            AtmosphereHazard::None,
+            AtmosphereHazard::Corrosive,
+            AtmosphereHazard::Toxic,
+            AtmosphereHazard::OxidizingCombustible,
+        ] {
+            let full = hazard.maintenance_multiplier();
+            assert!(
+                (apply_hazard_susceptibility(full, None) - full).abs() < f32::EPSILON,
+                "{hazard:?} must be unchanged when susceptibility is unauthored"
+            );
+            assert!(
+                (apply_hazard_susceptibility(full, Some(1.0)) - full).abs() < f32::EPSILON,
+                "{hazard:?} at full susceptibility must equal the raw multiplier"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sealed_building_takes_less_of_the_penalty_than_an_exposed_one() {
+        let full = AtmosphereHazard::Corrosive.maintenance_multiplier();
+        let sealed = apply_hazard_susceptibility(full, Some(0.2));
+        let exposed = apply_hazard_susceptibility(full, Some(1.0));
+        assert!(
+            sealed < exposed,
+            "sealed {sealed} should pay less than exposed {exposed}"
+        );
+        assert!(sealed > 1.0, "but still more than nothing: {sealed}");
+    }
+
+    #[test]
+    fn a_fully_sealed_building_is_immune() {
+        let full = AtmosphereHazard::Corrosive.maintenance_multiplier();
+        assert!((apply_hazard_susceptibility(full, Some(0.0)) - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// A content pack must not be able to invert a hazard into a bonus, or
+    /// amplify it past the figure the hazard itself declares — either would
+    /// make the hazard's own documented multiplier a lie.
+    #[test]
+    fn an_out_of_range_susceptibility_is_clamped_rather_than_believed() {
+        let full = AtmosphereHazard::Corrosive.maintenance_multiplier();
+        assert!((apply_hazard_susceptibility(full, Some(-2.0)) - 1.0).abs() < f32::EPSILON);
+        assert!((apply_hazard_susceptibility(full, Some(5.0)) - full).abs() < f32::EPSILON);
+    }
+
+    /// A neutral hazard stays neutral whatever the building is made of —
+    /// susceptibility scales a penalty, it does not create one.
+    #[test]
+    fn susceptibility_cannot_conjure_a_penalty_from_a_neutral_hazard() {
+        for s in [0.0, 0.5, 1.0] {
+            let neutral = AtmosphereHazard::None.maintenance_multiplier();
+            assert!((apply_hazard_susceptibility(neutral, Some(s)) - 1.0).abs() < f32::EPSILON);
+        }
     }
 
     // ── Ocean circulation (issue #440) ──────────────────────────────────────
