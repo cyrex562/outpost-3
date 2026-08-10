@@ -7013,6 +7013,18 @@ impl GameEngine {
                     })
                     .unwrap_or_default();
 
+                // Expected yield here for anything site-scaled (issue #414),
+                // so the build dialog can show it before the player commits
+                // materials rather than after.
+                #[allow(clippy::cast_possible_truncation)]
+                let site_output_multipliers: Vec<ui::SiteOutputRow> = site_mults
+                    .iter()
+                    .map(|(building_type, m)| ui::SiteOutputRow {
+                        building_type: building_type.clone(),
+                        multiplier: *m as f32,
+                    })
+                    .collect();
+
                 Ok(QueryResult::ColonyScreen(ui::ColonyScreenData {
                     colony_id: c.id,
                     name: c.name.clone(),
@@ -7037,6 +7049,7 @@ impl GameEngine {
                     construction_queue,
                     manual_override,
                     site_requirements,
+                    site_output_multipliers,
                 }))
             }
 
@@ -8030,7 +8043,12 @@ impl GameEngine {
                 .map(|n| n.coord)
         });
         let body = body_id.and_then(|b| self.state.system_state.node_map.bodies.get(b));
-        site::SiteContext { map, coord, body }
+        site::SiteContext {
+            map,
+            coord,
+            body,
+            researched: Some(&self.state.tech_state.researched),
+        }
     }
 
     /// Output multipliers for this colony's site, keyed by building type
@@ -8075,6 +8093,7 @@ impl GameEngine {
                 .node_map
                 .bodies
                 .get(&outpost.body_id),
+            researched: Some(&self.state.tech_state.researched),
         }
     }
 
@@ -23280,10 +23299,12 @@ mod tests {
     #[test]
     fn queue_construction_rejects_a_building_whose_site_requirement_is_unmet() {
         let (mut engine, colony_id) = engine_with_sited_colony(
-            vec![content::types::SiteRequirement::Terrain {
-                any_of: vec![map::Terrain::Ocean],
-                within_hexes: 0,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::Terrain {
+                    any_of: vec![map::Terrain::Ocean],
+                    within_hexes: 0,
+                },
+            )],
             map::Terrain::Plains,
             system::AtmosphereDensity::Breathable,
         );
@@ -23303,10 +23324,12 @@ mod tests {
     #[test]
     fn queue_construction_allows_a_building_whose_site_requirement_holds() {
         let (mut engine, colony_id) = engine_with_sited_colony(
-            vec![content::types::SiteRequirement::Terrain {
-                any_of: vec![map::Terrain::Volcanic],
-                within_hexes: 0,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::Terrain {
+                    any_of: vec![map::Terrain::Volcanic],
+                    within_hexes: 0,
+                },
+            )],
             map::Terrain::Volcanic,
             system::AtmosphereDensity::Breathable,
         );
@@ -23330,17 +23353,19 @@ mod tests {
         // site short of two things should say it is short of two things.
         let (mut engine, colony_id) = engine_with_sited_colony(
             vec![
-                content::types::SiteRequirement::Terrain {
+                content::types::SiteRequirement::new(content::types::SiteCondition::Terrain {
                     any_of: vec![map::Terrain::Ocean],
                     within_hexes: 0,
-                },
-                content::types::SiteRequirement::Deposit {
+                }),
+                content::types::SiteRequirement::new(content::types::SiteCondition::Deposit {
                     commodity: "hydrocarbons".into(),
                     within_hexes: 0,
-                },
-                content::types::SiteRequirement::MinAtmosphere {
-                    density: system::AtmosphereDensity::Dense,
-                },
+                }),
+                content::types::SiteRequirement::new(
+                    content::types::SiteCondition::MinAtmosphere {
+                        density: system::AtmosphereDensity::Dense,
+                    },
+                ),
             ],
             map::Terrain::Plains,
             system::AtmosphereDensity::Vacuum,
@@ -23357,10 +23382,12 @@ mod tests {
     #[test]
     fn deploy_starter_kit_rejects_a_site_gated_building_and_places_nothing() {
         let (mut engine, colony_id) = engine_with_sited_colony(
-            vec![content::types::SiteRequirement::Terrain {
-                any_of: vec![map::Terrain::Ocean],
-                within_hexes: 0,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::Terrain {
+                    any_of: vec![map::Terrain::Ocean],
+                    within_hexes: 0,
+                },
+            )],
             map::Terrain::Plains,
             system::AtmosphereDensity::Breathable,
         );
@@ -23384,9 +23411,11 @@ mod tests {
     #[test]
     fn a_body_scoped_requirement_is_answerable_at_a_colony() {
         let (mut engine, colony_id) = engine_with_sited_colony(
-            vec![content::types::SiteRequirement::MinAtmosphere {
-                density: system::AtmosphereDensity::Thin,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::MinAtmosphere {
+                    density: system::AtmosphereDensity::Thin,
+                },
+            )],
             map::Terrain::Plains,
             system::AtmosphereDensity::Vacuum,
         );
@@ -23397,9 +23426,11 @@ mod tests {
 
         // ...and passes once the body actually has an atmosphere.
         let (mut engine, colony_id) = engine_with_sited_colony(
-            vec![content::types::SiteRequirement::MinAtmosphere {
-                density: system::AtmosphereDensity::Thin,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::MinAtmosphere {
+                    density: system::AtmosphereDensity::Thin,
+                },
+            )],
             map::Terrain::Plains,
             system::AtmosphereDensity::Dense,
         );
@@ -23439,10 +23470,12 @@ mod tests {
         // Hex-scoped: unanswerable, so refused.
         set_sited_requirements(
             &mut engine,
-            vec![content::types::SiteRequirement::Terrain {
-                any_of: vec![map::Terrain::Ocean],
-                within_hexes: 2,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::Terrain {
+                    any_of: vec![map::Terrain::Ocean],
+                    within_hexes: 2,
+                },
+            )],
         );
         assert!(
             matches!(
@@ -23455,9 +23488,11 @@ mod tests {
         // Body-scoped and satisfied: allowed.
         set_sited_requirements(
             &mut engine,
-            vec![content::types::SiteRequirement::MinAtmosphere {
-                density: system::AtmosphereDensity::Thin,
-            }],
+            vec![content::types::SiteRequirement::new(
+                content::types::SiteCondition::MinAtmosphere {
+                    density: system::AtmosphereDensity::Thin,
+                },
+            )],
         );
         let result = queue(&mut engine);
         assert!(result.is_ok(), "expected success, got {result:?}");

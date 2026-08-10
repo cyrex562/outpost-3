@@ -34,7 +34,26 @@ const props = defineProps<{
    * blocker, so a building with three problems read as having one.
    */
   requirements: (b: BuildingOption) => BuildRequirement[]
+  /**
+   * Expected output multiplier at this colony's site, or `null` when the
+   * building's output does not depend on where it stands (issue #414).
+   *
+   * Shown before anything is committed: a geothermal plant on cold crust is
+   * a trap purchase if the player only learns its yield after building it.
+   */
+  siteYield: (buildingId: string) => number | null
 }>()
+
+/** Site yield as a percentage plus a verdict, or empty when not site-scaled. */
+function siteYieldLabel(b: BuildingOption): string {
+  const m = props.siteYield(b.id)
+  if (m === null) return ''
+  const pct = (m * 100).toFixed(0)
+  if (m >= 1.15) return `${pct}% of nominal output here — a strong site`
+  if (m >= 0.85) return `${pct}% of nominal output here`
+  if (m >= 0.5) return `${pct}% of nominal output here — a weak site`
+  return `${pct}% of nominal output here — barely worth the slot`
+}
 
 const emit = defineEmits<{
   (e: 'queue', building: BuildingOption, quantity: number): void
@@ -278,6 +297,15 @@ function queue(b: BuildingOption): void {
                 {{ b.description }}
               </p>
 
+              <p
+                v-if="siteYieldLabel(b)"
+                class="site-yield"
+                :class="{ 'site-yield-poor': (props.siteYield(b.id) ?? 1) < 0.85 }"
+                :data-testid="`build-site-yield-${b.id}`"
+              >
+                {{ siteYieldLabel(b) }}
+              </p>
+
               <ul
                 v-if="props.requirements(b).length"
                 class="req-list"
@@ -334,6 +362,10 @@ function queue(b: BuildingOption): void {
 </template>
 
 <style scoped>
+/* Expected site yield (issue #414) — information, not a gate, so it is
+   deliberately not one of the met/unmet requirement badges. */
+.site-yield { margin: 0.1rem 0 0; font-size: 0.72rem; color: var(--text-muted); }
+.site-yield-poor { color: var(--warn); }
 .filters {
   display: flex;
   align-items: center;

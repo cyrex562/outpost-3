@@ -142,6 +142,13 @@ export interface SiteRequirementRow {
   met: boolean
 }
 
+/** Expected output multiplier for one building at one colony's site. */
+export interface SiteOutputRow {
+  building_type: string
+  /** `1` is nominal. */
+  multiplier: number
+}
+
 /** A single in-progress construction project. */
 export interface ConstructionQueueRow {
   project_id: string
@@ -187,5 +194,14 @@ export interface ColonyScreenData {
    * at least one authored requirement appear.
    */
   site_requirements?: SiteRequirementRow[]
+  /**
+   * Expected output multiplier at this colony's site for buildings that
+   * declare site scaling (issue #414).
+   *
+   * The buildings panel reports what a site is doing to a *standing*
+   * building; this is the same number before anything is committed, because
+   * a geothermal plant's whole value depends on where it goes.
+   */
+  site_output_multipliers?: SiteOutputRow[]
   manual_override: boolean
 }

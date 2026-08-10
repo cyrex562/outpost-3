@@ -19,7 +19,7 @@
 //! terrain nobody has checked. If outposts ever gain a hex, they start
 //! evaluating correctly with no change here.
 
-use crate::content::types::{SiteProperty, SiteRequirement, SiteScaling};
+use crate::content::types::{SiteCondition, SiteProperty, SiteRequirement, SiteScaling};
 use crate::map::{HexCoord, PlanetMap};
 use crate::system::Body;
 
@@ -32,6 +32,9 @@ pub struct SiteContext<'a> {
     pub coord: Option<HexCoord>,
     /// The body the site is on, if known.
     pub body: Option<&'a Body>,
+    /// Technologies already researched, for requirements a tech can waive
+    /// (issue #414). `None` means nothing is researched.
+    pub researched: Option<&'a std::collections::HashSet<crate::tech::TechId>>,
 }
 
 impl<'a> SiteContext<'a> {
@@ -43,6 +46,7 @@ impl<'a> SiteContext<'a> {
             map: None,
             coord: None,
             body: None,
+            researched: None,
         }
     }
 
@@ -63,27 +67,44 @@ impl<'a> SiteContext<'a> {
             .collect()
     }
 
-    /// Whether `req` holds at this site.
+    /// Whether `req` holds at this site, or is waived by a researched tech.
     #[must_use]
     pub fn satisfies(&self, req: &SiteRequirement) -> bool {
-        match req {
-            SiteRequirement::Terrain {
+        if let Some(tech) = &req.waived_by_tech {
+            if self
+                .researched
+                .is_some_and(|set| set.contains(tech.as_str()))
+            {
+                return true;
+            }
+        }
+        self.meets(&req.condition)
+    }
+
+    /// Whether the site meets `condition`, ignoring any tech waiver.
+    #[must_use]
+    pub fn meets(&self, condition: &SiteCondition) -> bool {
+        match condition {
+            SiteCondition::Terrain {
                 any_of,
                 within_hexes,
             } => self
                 .cells_in_range(*within_hexes)
                 .iter()
                 .any(|cell| any_of.contains(&cell.terrain)),
-            SiteRequirement::Deposit {
+            SiteCondition::Deposit {
                 commodity,
                 within_hexes,
             } => self
                 .cells_in_range(*within_hexes)
                 .iter()
                 .any(|cell| cell.deposits.iter().any(|d| &d.commodity_id == commodity)),
-            SiteRequirement::MinAtmosphere { density } => self
+            SiteCondition::MinAtmosphere { density } => self
                 .body
                 .is_some_and(|b| b.atmosphere_density.rank() >= density.rank()),
+            SiteCondition::MinGeothermalGradient { min } => self
+                .own_cell()
+                .is_some_and(|cell| cell.geothermal_gradient >= *min),
         }
     }
 
@@ -108,6 +129,9 @@ impl<'a> SiteContext<'a> {
                 Some(f64::from(body.atmosphere_density.rank()) / 3.0)
             }
             SiteProperty::Elevation => Some(f64::from(self.own_cell()?.elevation)),
+            SiteProperty::GeothermalGradient => {
+                Some(f64::from(self.own_cell()?.geothermal_gradient))
+            }
         }
     }
 
@@ -181,25 +205,28 @@ mod tests {
             map: Some(map),
             coord: Some(HexCoord::new(q, r)),
             body,
+            researched: None,
         }
     }
 
     #[test]
     fn terrain_on_the_site_itself_satisfies_a_zero_radius_requirement() {
         let map = map_with(&[(0, 0, Terrain::Volcanic, &[])]);
-        let req = SiteRequirement::Terrain {
+        let req = SiteRequirement::new(SiteCondition::Terrain {
             any_of: vec![Terrain::Volcanic],
             within_hexes: 0,
-        };
+        });
         assert!(ctx(&map, 0, 0, None).satisfies(&req));
     }
 
     #[test]
     fn terrain_one_hex_away_needs_the_radius_to_reach_it() {
         let map = map_with(&[(0, 0, Terrain::Plains, &[]), (1, 0, Terrain::Ocean, &[])]);
-        let ocean = |within_hexes| SiteRequirement::Terrain {
-            any_of: vec![Terrain::Ocean],
-            within_hexes,
+        let ocean = |within_hexes| {
+            SiteRequirement::new(SiteCondition::Terrain {
+                any_of: vec![Terrain::Ocean],
+                within_hexes,
+            })
         };
         assert!(!ctx(&map, 0, 0, None).satisfies(&ocean(0)));
         assert!(ctx(&map, 0, 0, None).satisfies(&ocean(1)));
@@ -208,10 +235,10 @@ mod tests {
     #[test]
     fn any_of_is_satisfied_by_any_listed_terrain() {
         let map = map_with(&[(0, 0, Terrain::Wetlands, &[])]);
-        let req = SiteRequirement::Terrain {
+        let req = SiteRequirement::new(SiteCondition::Terrain {
             any_of: vec![Terrain::Ocean, Terrain::Wetlands],
             within_hexes: 0,
-        };
+        });
         assert!(ctx(&map, 0, 0, None).satisfies(&req));
     }
 
@@ -221,9 +248,11 @@ mod tests {
             (0, 0, Terrain::Plains, &[]),
             (1, 0, Terrain::Plains, &["hydrocarbons"]),
         ]);
-        let req = |within_hexes| SiteRequirement::Deposit {
-            commodity: "hydrocarbons".into(),
-            within_hexes,
+        let req = |within_hexes| {
+            SiteRequirement::new(SiteCondition::Deposit {
+                commodity: "hydrocarbons".into(),
+                within_hexes,
+            })
         };
         assert!(!ctx(&map, 0, 0, None).satisfies(&req(0)));
         assert!(ctx(&map, 0, 0, None).satisfies(&req(1)));
@@ -232,10 +261,10 @@ mod tests {
     #[test]
     fn a_different_commodity_does_not_satisfy_a_deposit_requirement() {
         let map = map_with(&[(0, 0, Terrain::Plains, &["silicates"])]);
-        let req = SiteRequirement::Deposit {
+        let req = SiteRequirement::new(SiteCondition::Deposit {
             commodity: "hydrocarbons".into(),
             within_hexes: 1,
-        };
+        });
         assert!(!ctx(&map, 0, 0, None).satisfies(&req));
     }
 
@@ -245,10 +274,10 @@ mod tests {
         // that column as q = width - 1. Without wrapping, the requirement
         // would not see it.
         let map = map_with(&[(0, 0, Terrain::Plains, &[]), (7, 0, Terrain::Ocean, &[])]);
-        let req = SiteRequirement::Terrain {
+        let req = SiteRequirement::new(SiteCondition::Terrain {
             any_of: vec![Terrain::Ocean],
             within_hexes: 1,
-        };
+        });
         assert!(
             ctx(&map, 0, 0, None).satisfies(&req),
             "the map wraps east-west, so q=7 is adjacent to q=0"
@@ -258,9 +287,9 @@ mod tests {
     #[test]
     fn atmosphere_is_met_at_or_above_the_required_density() {
         let map = map_with(&[(0, 0, Terrain::Plains, &[])]);
-        let req = SiteRequirement::MinAtmosphere {
+        let req = SiteRequirement::new(SiteCondition::MinAtmosphere {
             density: AtmosphereDensity::Thin,
-        };
+        });
         for (density, expected) in [
             (AtmosphereDensity::Vacuum, false),
             (AtmosphereDensity::Thin, true),
@@ -285,20 +314,27 @@ mod tests {
             map: None,
             coord: None,
             body: Some(&body),
+            researched: None,
         };
 
-        assert!(!ctx.satisfies(&SiteRequirement::Terrain {
-            any_of: vec![Terrain::Ocean],
-            within_hexes: 2,
-        }));
-        assert!(!ctx.satisfies(&SiteRequirement::Deposit {
-            commodity: "hydrocarbons".into(),
-            within_hexes: 2,
-        }));
+        assert!(
+            !ctx.satisfies(&SiteRequirement::new(SiteCondition::Terrain {
+                any_of: vec![Terrain::Ocean],
+                within_hexes: 2,
+            }))
+        );
+        assert!(
+            !ctx.satisfies(&SiteRequirement::new(SiteCondition::Deposit {
+                commodity: "hydrocarbons".into(),
+                within_hexes: 2,
+            }))
+        );
         // ...but a body-scoped one still answers.
-        assert!(ctx.satisfies(&SiteRequirement::MinAtmosphere {
-            density: AtmosphereDensity::Thin,
-        }));
+        assert!(
+            ctx.satisfies(&SiteRequirement::new(SiteCondition::MinAtmosphere {
+                density: AtmosphereDensity::Thin,
+            }))
+        );
     }
 
     #[test]
@@ -306,17 +342,17 @@ mod tests {
         let map = map_with(&[(0, 0, Terrain::Plains, &[])]);
         let body = body_with(AtmosphereDensity::Vacuum);
         let reqs = vec![
-            SiteRequirement::Terrain {
+            SiteRequirement::new(SiteCondition::Terrain {
                 any_of: vec![Terrain::Ocean],
                 within_hexes: 0,
-            },
-            SiteRequirement::Deposit {
+            }),
+            SiteRequirement::new(SiteCondition::Deposit {
                 commodity: "hydrocarbons".into(),
                 within_hexes: 0,
-            },
-            SiteRequirement::MinAtmosphere {
+            }),
+            SiteRequirement::new(SiteCondition::MinAtmosphere {
                 density: AtmosphereDensity::Thin,
-            },
+            }),
         ];
         assert_eq!(ctx(&map, 0, 0, Some(&body)).unmet(&reqs).len(), 3);
     }
@@ -329,25 +365,25 @@ mod tests {
     #[test]
     fn describe_reads_as_the_condition_rather_than_a_failure() {
         assert_eq!(
-            SiteRequirement::Terrain {
+            SiteRequirement::new(SiteCondition::Terrain {
                 any_of: vec![Terrain::Ocean],
                 within_hexes: 2
-            }
+            })
             .describe(),
             "ocean within 2 hexes"
         );
         assert_eq!(
-            SiteRequirement::Deposit {
+            SiteRequirement::new(SiteCondition::Deposit {
                 commodity: "hydrocarbons".into(),
                 within_hexes: 1
-            }
+            })
             .describe(),
             "hydrocarbons deposit within 1 hex"
         );
         assert_eq!(
-            SiteRequirement::MinAtmosphere {
+            SiteRequirement::new(SiteCondition::MinAtmosphere {
                 density: AtmosphereDensity::Thin
-            }
+            })
             .describe(),
             "thin atmosphere or denser"
         );
@@ -478,5 +514,129 @@ mod tests {
         let s = scaling(SiteProperty::Elevation, -4.0, -1.0);
         assert!(s.multiplier_at(0.0) >= 0.0);
         assert!(s.multiplier_at(1.0) >= 0.0);
+    }
+
+    // ── Tech-waived requirements + geothermal (issue #414) ──────────────────
+
+    fn researched(ids: &[&str]) -> std::collections::HashSet<crate::tech::TechId> {
+        ids.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn a_gradient_requirement_reads_the_hex() {
+        let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+        cell.geothermal_gradient = 0.35;
+        m.cells.insert(coord, cell);
+
+        let req = |min| SiteRequirement::new(SiteCondition::MinGeothermalGradient { min });
+        assert!(ctx(&m, 0, 0, None).satisfies(&req(0.2)));
+        assert!(!ctx(&m, 0, 0, None).satisfies(&req(0.6)));
+    }
+
+    #[test]
+    fn a_tech_waives_a_requirement_the_site_does_not_meet() {
+        // The conditional gate issue #414 needed: the *site* decides whether
+        // the tech is required, which `tech_prerequisite` cannot express.
+        let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+        cell.geothermal_gradient = 0.05;
+        m.cells.insert(coord, cell);
+
+        let req = SiteRequirement::waivable(
+            SiteCondition::MinGeothermalGradient { min: 0.2 },
+            "deep_drilling",
+        );
+
+        let without = SiteContext {
+            researched: None,
+            ..ctx(&m, 0, 0, None)
+        };
+        assert!(
+            !without.satisfies(&req),
+            "cold site must refuse without the tech"
+        );
+
+        let techs = researched(&["deep_drilling"]);
+        let with = SiteContext {
+            researched: Some(&techs),
+            ..ctx(&m, 0, 0, None)
+        };
+        assert!(with.satisfies(&req), "the tech must lift it");
+    }
+
+    #[test]
+    fn an_unrelated_tech_does_not_waive_a_requirement() {
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let req = SiteRequirement::waivable(
+            SiteCondition::Terrain {
+                any_of: vec![Terrain::Ocean],
+                within_hexes: 0,
+            },
+            "deep_drilling",
+        );
+        let techs = researched(&["automation", "fusion_basics"]);
+        let c = SiteContext {
+            researched: Some(&techs),
+            ..ctx(&m, 0, 0, None)
+        };
+        assert!(!c.satisfies(&req));
+    }
+
+    #[test]
+    fn a_site_that_already_meets_a_waivable_requirement_needs_no_tech() {
+        let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+        cell.geothermal_gradient = 0.9;
+        m.cells.insert(coord, cell);
+
+        let req = SiteRequirement::waivable(
+            SiteCondition::MinGeothermalGradient { min: 0.2 },
+            "deep_drilling",
+        );
+        assert!(ctx(&m, 0, 0, None).satisfies(&req));
+    }
+
+    #[test]
+    fn describe_names_the_waiving_tech_so_it_reads_as_a_choice() {
+        let req = SiteRequirement::waivable(
+            SiteCondition::MinGeothermalGradient { min: 0.2 },
+            "deep_drilling",
+        );
+        let text = req.describe();
+        assert!(text.contains("20%"), "{text}");
+        assert!(text.contains("deep_drilling"), "{text}");
+    }
+
+    #[test]
+    fn output_scales_with_the_geothermal_gradient() {
+        let build = |g: f32| {
+            let mut m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+            let coord = HexCoord::new(0, 0);
+            let mut cell = HexCell::new(coord, Terrain::Plains, Biome::Desert);
+            cell.geothermal_gradient = g;
+            m.cells.insert(coord, cell);
+            m
+        };
+        // The authored curve from content/base/buildings.yaml.
+        let s = SiteScaling {
+            property: SiteProperty::GeothermalGradient,
+            at_min: 0.15,
+            at_max: 1.4,
+        };
+        let cold = build(0.2);
+        let hot = build(0.85);
+        let cold_m = ctx(&cold, 0, 0, None).output_multiplier(Some(&s));
+        let hot_m = ctx(&hot, 0, 0, None).output_multiplier(Some(&s));
+
+        assert!(cold_m < 0.5, "cold site multiplier {cold_m}");
+        assert!(hot_m > 1.1, "hot site multiplier {hot_m}");
+        assert!(
+            hot_m > cold_m * 2.5,
+            "{hot_m} vs {cold_m} — too flat to matter"
+        );
     }
 }

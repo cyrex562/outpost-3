@@ -30,6 +30,7 @@ function mountDialog(catalog: BuildingOption[], disabledReason: (b: BuildingOpti
       isTechLocked: () => false,
       isAffordable: () => true,
       requirements: () => [],
+      siteYield: () => null,
     },
   })
 }
@@ -89,6 +90,7 @@ describe('BuildDialog catalog failure vs empty pack', () => {
         isTechLocked: () => false,
         isAffordable: () => true,
         requirements: () => [],
+        siteYield: () => null,
         catalogError: 'Could not load the building catalog: no content registry loaded',
       },
     })
@@ -109,6 +111,7 @@ describe('BuildDialog catalog failure vs empty pack', () => {
         isTechLocked: () => false,
         isAffordable: () => true,
         requirements: () => [],
+        siteYield: () => null,
       },
     })
     expect(wrapper.find('[data-testid="build-dialog-error"]').exists()).toBe(false)
@@ -136,6 +139,7 @@ describe('BuildDialog catalogue filters', () => {
         isTechLocked: (b: BuildingOption) => b.id === TECH_LOCKED,
         isAffordable: (b: BuildingOption) => b.id !== UNAFFORDABLE,
         requirements: () => [],
+        siteYield: () => null,
       },
     })
   }
@@ -191,6 +195,7 @@ describe('BuildDialog catalogue filters', () => {
         isTechLocked: () => true,
         isAffordable: () => true,
         requirements: () => [],
+        siteYield: () => null,
       },
     })
     await wrapper.get('[data-testid="filter-hide-tech-locked"]').setValue(true)
@@ -249,6 +254,7 @@ describe('BuildDialog category tree', () => {
         isTechLocked: () => false,
         isAffordable: () => true,
         requirements: () => [],
+        siteYield: () => null,
       },
     })
   }
@@ -328,6 +334,7 @@ describe('BuildDialog category tree', () => {
         isTechLocked: (b: BuildingOption) => b.id === 'smelter',
         isAffordable: () => true,
         requirements: () => [],
+        siteYield: () => null,
       },
     })
     expect(wrapper.find('[data-testid="build-cat-Processing"]').exists()).toBe(true)
@@ -350,5 +357,48 @@ describe('BuildDialog category tree', () => {
     expect(toggle.element.tagName).toBe('BUTTON')
     expect(toggle.attributes('aria-controls')).toBe('build-cat-body-Power')
     expect(wrapper.find('#build-cat-body-Power').exists()).toBe(true)
+  })
+})
+
+describe('BuildDialog expected site yield (issue #414)', () => {
+  function mountWithYield(multiplier: number | null) {
+    return mount(BuildDialog, {
+      props: {
+        catalog: [makeBuildingOption({ id: 'geothermal_plant', name: 'Geothermal Plant' })],
+        disabledReason: () => null,
+        slotsAvailable: 5,
+        busy: false,
+        isTechLocked: () => false,
+        isAffordable: () => true,
+        requirements: () => [],
+        siteYield: () => multiplier,
+      },
+    })
+  }
+
+  const yieldText = (w: ReturnType<typeof mount>) =>
+    w.find('[data-testid="build-site-yield-geothermal_plant"]').text()
+
+  it('warns before committing when the site is poor', () => {
+    // The trap this closes: a geothermal plant on cold crust is worthless,
+    // and without this the player only finds out once it is built.
+    const wrapper = mountWithYield(0.4)
+    expect(yieldText(wrapper)).toContain('40%')
+    expect(yieldText(wrapper)).toMatch(/barely worth the slot/i)
+  })
+
+  it('calls out a strong site', () => {
+    expect(yieldText(mountWithYield(1.3))).toMatch(/strong site/i)
+  })
+
+  it('reports an ordinary site plainly', () => {
+    const text = yieldText(mountWithYield(1))
+    expect(text).toContain('100%')
+    expect(text).not.toMatch(/strong|weak|barely/i)
+  })
+
+  it('shows nothing for a building whose output does not depend on the site', () => {
+    const wrapper = mountWithYield(null)
+    expect(wrapper.find('[data-testid="build-site-yield-geothermal_plant"]').exists()).toBe(false)
   })
 })

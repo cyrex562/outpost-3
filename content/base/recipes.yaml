@@ -145,6 +145,18 @@
     - id: waste_processing
       quantity: 40.0
 
+# Nominal output before the site multiplier (issue #414). What a colony
+# actually gets is this scaled by its hex's geothermal gradient — see
+# buildings.yaml's output_scaling for the resulting curve.
+- id: generate_power_geothermal
+  name: Generate Power (Geothermal)
+  building: geothermal_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 36.0
+
 - id: generate_power_solar_mk1
   name: Generate Power (Solar Mk1)
   building: solar_array_mk1

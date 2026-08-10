@@ -388,6 +388,17 @@ function requirementsFor(b: BuildingOption): BuildRequirement[] {
   return out
 }
 
+/**
+ * Expected output multiplier for `buildingId` at this colony's site, or
+ * `null` when the building is not site-scaled (issue #414).
+ */
+function siteYieldFor(buildingId: string): number | null {
+  const row = (screen.value?.site_output_multipliers ?? []).find(
+    (r) => r.building_type === buildingId,
+  )
+  return row?.multiplier ?? null
+}
+
 /** This colony's evaluated site requirements for one building. */
 function siteRequirementsFor(buildingId: string) {
   return (screen.value?.site_requirements ?? []).filter((r) => r.building_type === buildingId)
@@ -799,6 +810,7 @@ watch(
         :catalog="buildingCatalog"
         :catalog-error="catalogError"
         :disabled-reason="disabledReason"
+        :site-yield="siteYieldFor"
         :is-tech-locked="isTechLocked"
         :is-affordable="isAffordable"
         :requirements="requirementsFor"
