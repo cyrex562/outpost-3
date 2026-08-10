@@ -884,6 +884,89 @@
     - id: structural_metal
       quantity: 25.0
 
+- id: wave_power_plant
+  name: Wave Power Plant
+  description: >
+    Anchored buoys converting swell into power. Waves are wind-driven, so
+    this needs both a coast and an atmosphere thick enough to raise a sea —
+    on a thin-atmosphere world the water is nearly flat.
+  category: power
+  tech_prerequisite: marine_power
+  power_delta: -40.0
+  worker_slots: 1
+  default_priority: 3
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 4
+  construction_cost:
+    - id: structural_metal
+      quantity: 32.0
+    - id: components
+      quantity: 8.0
+  # Coastal only. Radius 1, not 2, on measurement: at the site a colony
+  # actually lands on, ocean is within 1 hex about half the time and within 2
+  # about five sixths — radius 2 would make "coastal" mean almost everywhere
+  # and stop being a choice (issue #418).
+  site_requirements:
+    - kind: terrain
+      any_of: [ocean]
+      within_hexes: 1
+  # No wind, no waves. Shares a property with wind_turbine deliberately —
+  # both are ultimately driven by moving air — but pays for a coast to get a
+  # much better curve out of it.
+  # Tuned against solar_array_mk2 (30 capacity / 36 power, same tier, buildable
+  # anywhere): a plant needing tier-2 tech AND a coast AND an atmosphere has to
+  # beat the unconstrained option where it applies, or nothing would ever be
+  # built here.
+  #   thin       -> x0.62 -> 24.7 capacity / 29.0 power   (below mk2 — thin
+  #                                                        seas are poor)
+  #   breathable -> x0.88 -> 35.3 capacity / 41.5 power   (beats mk2)
+  #   dense      -> x1.15 -> 46.0 capacity / 54.0 power   (its best case, and
+  #                                                        rare — dense is ~4%
+  #                                                        of foundable bodies)
+  # The curve is flatter than wind_turbine's on purpose: this one is already
+  # gated three ways, so it should not also swing wildly.
+  output_scaling:
+    property: atmosphere_density
+    at_min: 0.35
+    at_max: 1.15
+
+- id: ocean_thermal_plant
+  name: Ocean Thermal Plant
+  description: >
+    Runs a heat engine between warm surface water and the cold deep. Needs a
+    coast, and needs the surface actually warmed — the further from the star,
+    the smaller the temperature difference it has to work with.
+  category: power
+  tech_prerequisite: marine_power
+  power_delta: -32.0
+  worker_slots: 1
+  default_priority: 3
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 4
+  construction_cost:
+    - id: structural_metal
+      quantity: 28.0
+    - id: components
+      quantity: 10.0
+  site_requirements:
+    - kind: terrain
+      any_of: [ocean]
+      within_hexes: 1
+  # Scales on insolation, not atmosphere — so the two marine plants are a
+  # genuine pair rather than reskins. Wave wants thick air, thermal wants a
+  # near star; a coastal colony picks whichever its body favours.
+  # Same reasoning as wave: it has to beat solar_array_mk2 where it applies.
+  #    0.5 AU -> x1.35 -> 43.2 capacity / 51.3 power
+  #    1.0 AU -> x1.12 -> 35.8 capacity / 42.6 power   (beats mk2)
+  #    5.0 AU -> x0.45 -> 14.5 capacity / 17.2 power   (a cold sea is a poor
+  #                                                     heat engine)
+  output_scaling:
+    property: insolation
+    at_min: 0.05
+    at_max: 1.35
+
 - id: solar_array_mk2
   name: Solar Array Mk2
   description: High-efficiency panel array with tracking mounts.

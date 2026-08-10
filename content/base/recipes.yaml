@@ -649,6 +649,24 @@
     - id: produce_rations
       quantity: 3.0
 
+- id: generate_power_wave
+  name: Generate Power (Wave)
+  building: wave_power_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 47.0
+
+- id: generate_power_ocean_thermal
+  name: Generate Power (Ocean Thermal)
+  building: ocean_thermal_plant
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: power
+      quantity: 38.0
+
 - id: generate_power_solar_mk2
   name: Generate Power (Solar Mk2)
   building: solar_array_mk2
