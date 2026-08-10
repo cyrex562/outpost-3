@@ -77,6 +77,26 @@ pub struct ColonyScreenData {
     /// has no answer without knowing which colony is asking.
     #[serde(default)]
     pub site_requirements: Vec<SiteRequirementRow>,
+    /// Expected output multiplier at *this* colony's site, for the buildings
+    /// that declare `output_scaling` (issue #414).
+    ///
+    /// The placed-building panel already reports what a site is doing to a
+    /// standing building (issue #411), but that is after the fact. A
+    /// geothermal plant's whole value depends on where it goes, so the number
+    /// has to be visible *before* materials are committed — otherwise a plant
+    /// on cold crust is a trap purchase the player only discovers once it is
+    /// built.
+    #[serde(default)]
+    pub site_output_multipliers: Vec<SiteOutputRow>,
+}
+
+/// Expected output multiplier for one building at one colony's site.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiteOutputRow {
+    /// Content-pack key of the building.
+    pub building_type: String,
+    /// Multiplier its output would get here — `1.0` is nominal.
+    pub multiplier: f32,
 }
 
 /// One site requirement of one building, as it stands at a given colony.
@@ -724,6 +744,7 @@ mod tests {
             construction_queue: vec![],
             manual_override: false,
             site_requirements: Vec::new(),
+            site_output_multipliers: Vec::new(),
         };
         let json = serde_json::to_string(&data).unwrap();
         let back: ColonyScreenData = serde_json::from_str(&json).unwrap();

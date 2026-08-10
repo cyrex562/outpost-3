@@ -627,6 +627,14 @@ mod tests {
 
     // ── Authored landing kit (issue #317) ────────────────────────────────────
 
+    /// Read the real `content/base/tech.yaml`, or `None` when the repository
+    /// layout doesn't include `content/` beside the crate.
+    fn read_real_tech_yaml() -> Option<String> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let root = std::path::Path::new(&manifest).parent()?.to_path_buf();
+        std::fs::read_to_string(root.join("content").join("base").join("tech.yaml")).ok()
+    }
+
     /// Read the real `content/base/recipes.yaml`, or `None` when the repository
     /// layout doesn't include `content/` beside the crate.
     fn read_real_recipes_yaml() -> Option<String> {
@@ -1107,6 +1115,23 @@ mod tests {
             .collect();
         assert!(generators.len() >= 4, "expected the full power roster");
 
+        // A site-scaled generator (issue #411/#414) has no single output — its
+        // nominal figure is what it would give at a perfect site. Comparing
+        // that against a fixed generator would call geothermal dominant on the
+        // strength of a hotspot it may never be built on. Compare at an
+        // ordinary site instead: the question this guard asks is whether a
+        // tech-free option makes a researched one pointless *in general*, and
+        // "only where the ground happens to be hot" is a real trade, not
+        // dominance.
+        const ORDINARY_SITE: f64 = 0.5;
+        let effective_capacity_per_slot = |b: &crate::content::types::BuildingDef| {
+            let multiplier = b
+                .output_scaling
+                .as_ref()
+                .map_or(1.0, |s| s.multiplier_at(ORDINARY_SITE));
+            -b.power_delta * multiplier / f64::from(b.slot_cost)
+        };
+
         for a in &generators {
             for b in &generators {
                 if a.id == b.id {
@@ -1119,8 +1144,7 @@ mod tests {
                 if !(a_free && b_gated) {
                     continue;
                 }
-                let dominated = -a.power_delta / f64::from(a.slot_cost)
-                    >= -b.power_delta / f64::from(b.slot_cost)
+                let dominated = effective_capacity_per_slot(a) >= effective_capacity_per_slot(b)
                     && metal_cost(a) <= metal_cost(b);
                 assert!(
                     !dominated,
@@ -1128,6 +1152,103 @@ mod tests {
                      and costs at least as much metal",
                     b.id, a.id
                 );
+            }
+        }
+    }
+
+    /// The geothermal plant is buildable at tech 0, and its whole value
+    /// comes from the site (issue #414).
+    #[test]
+    fn geothermal_plant_is_tech_zero_and_site_scaled() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let plant = buildings
+            .iter()
+            .find(|b| b.id == "geothermal_plant")
+            .expect("geothermal_plant must exist");
+
+        assert_eq!(plant.tech_prerequisite, None, "must be buildable on sol 1");
+
+        let scaling = plant
+            .output_scaling
+            .as_ref()
+            .expect("its output must depend on the site — that is the point of it");
+        assert!(
+            matches!(
+                scaling.property,
+                crate::content::types::SiteProperty::GeothermalGradient
+            ),
+            "must scale on the gradient, not something else"
+        );
+        assert!(
+            scaling.at_max > scaling.at_min * 2.0,
+            "the curve is too flat for the site to matter: {} to {}",
+            scaling.at_min,
+            scaling.at_max
+        );
+    }
+
+    /// Deep sites need drilling tech, expressed as a *waivable* requirement
+    /// rather than a flat `tech_prerequisite` — the site decides whether the
+    /// tech is needed at all.
+    #[test]
+    fn geothermal_plant_gates_deep_sites_on_drilling_tech() {
+        let Some(yaml) = read_real_buildings_yaml() else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&yaml).expect("content/base/buildings.yaml must parse");
+        let plant = buildings
+            .iter()
+            .find(|b| b.id == "geothermal_plant")
+            .expect("geothermal_plant must exist");
+
+        let req = plant
+            .site_requirements
+            .iter()
+            .find(|r| {
+                matches!(
+                    r.condition,
+                    crate::content::types::SiteCondition::MinGeothermalGradient { .. }
+                )
+            })
+            .expect("must carry a minimum-gradient requirement");
+
+        assert_eq!(
+            req.waived_by_tech.as_deref(),
+            Some("deep_drilling"),
+            "a cold site must be reachable *with* drilling tech, not barred outright"
+        );
+    }
+
+    /// The gate names a tech the tree actually has.
+    ///
+    /// A typo here would silently make the requirement unwaivable, which
+    /// reads in play as a building that can never be placed on cold ground
+    /// no matter what is researched.
+    #[test]
+    fn every_waiving_tech_exists_in_the_tech_tree() {
+        let (Some(byaml), Some(tyaml)) = (read_real_buildings_yaml(), read_real_tech_yaml()) else {
+            return;
+        };
+        let buildings: Vec<crate::content::types::BuildingDef> =
+            serde_yaml::from_str(&byaml).expect("content/base/buildings.yaml must parse");
+        let techs: Vec<crate::tech::TechDef> =
+            serde_yaml::from_str(&tyaml).expect("content/base/tech.yaml must parse");
+        let known: std::collections::HashSet<&str> = techs.iter().map(|t| t.id.as_str()).collect();
+
+        for b in &buildings {
+            for r in &b.site_requirements {
+                if let Some(tech) = &r.waived_by_tech {
+                    assert!(
+                        known.contains(tech.as_str()),
+                        "{} is waived by unknown tech '{tech}'",
+                        b.id
+                    );
+                }
             }
         }
     }

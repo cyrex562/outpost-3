@@ -102,6 +102,51 @@
     - id: structural_metal
       quantity: 37.0
 
+- id: geothermal_plant
+  name: Geothermal Plant
+  description: >
+    Taps the heat under the colony. Buildable almost anywhere and needing no
+    tech, but its output is decided entirely by how shallow magma sits: on a
+    hotspot it beats any other tech-0 generator, and on cold cratonic crust
+    it is barely worth the slot. Check a site's geothermal reading before
+    committing — the planet map shows it per hex.
+
+    Where magma is deeper than about a fifth of the way down the scale,
+    reaching it at all needs deep_drilling — the Kola Superdeep Borehole
+    problem. Self-powered.
+  category: power
+  # No tech_prerequisite: geothermal is a tech-0 option like solar and wind
+  # (issue #409). What varies is not *whether* you can build it but how much
+  # it gives you, which is the point of issue #412's gradient layer.
+  power_delta: -30.0
+  worker_slots: 0
+  default_priority: 9
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 18.0
+  # A *conditional* tech gate (issue #414): the site decides whether the tech
+  # is needed, which `tech_prerequisite` cannot express because it would gate
+  # the building everywhere at once.
+  site_requirements:
+    - kind: min_geothermal_gradient
+      min: 0.2
+      waived_by_tech: deep_drilling
+  # Output rides on the gradient (issue #411 + #412). Endpoints chosen against
+  # the tech-0 roster from issue #427, where solar_array_mk1 gives 20
+  # capacity / 24 power per slot:
+  #   gradient 0.2 (the drilling threshold) -> x0.40 ->  12 cap / 14.4 power
+  #   gradient 0.5 (ordinary crust)         -> x0.78 ->  23 cap / 28.1 power
+  #   gradient 0.85 (hotspot)               -> x1.21 ->  36 cap / 43.6 power
+  # So it loses to solar on cold ground, edges it on average ground, and
+  # clearly beats it on a hotspot — without reaching fission's 48 power/slot.
+  output_scaling:
+    property: geothermal_gradient
+    at_min: 0.15
+    at_max: 1.4
+
 - id: ice_miner
   name: Ice Miner
   description: >

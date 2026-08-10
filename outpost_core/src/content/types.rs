@@ -240,7 +240,8 @@ pub enum BuildingCategory {
     Other,
 }
 
-/// A condition a site must satisfy before a building can be constructed there.
+/// One thing a site must be like before a building can be constructed there
+/// (issue #410).
 ///
 /// Authored per building rather than inferred, the same way
 /// [`BuildingDef::max_instances`] is: which structures care about where they
@@ -256,9 +257,10 @@ pub enum BuildingCategory {
 /// what makes e.g. a coastal power plant buildable on the land hex beside the
 /// water rather than requiring the colony to sit *on* an unbuildable ocean
 /// tile.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// No `Eq`: `MinGeothermalGradient` carries an f32.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SiteRequirement {
+pub enum SiteCondition {
     /// At least one hex within range has one of these terrains.
     Terrain {
         /// Any one of these satisfies the requirement.
@@ -284,9 +286,19 @@ pub enum SiteRequirement {
         /// The thinnest atmosphere that satisfies this.
         density: crate::system::AtmosphereDensity,
     },
+    /// The site's geothermal gradient is at least this high (issue #412).
+    ///
+    /// Reads [`crate::map::HexCell::geothermal_gradient`] — how shallow magma
+    /// sits. Paired with [`SiteRequirement::waived_by_tech`], this is what
+    /// expresses "you cannot reach usable heat here without drilling
+    /// technology."
+    MinGeothermalGradient {
+        /// The shallowest magma that satisfies this, in `[0.0, 1.0]`.
+        min: f32,
+    },
 }
 
-impl SiteRequirement {
+impl SiteCondition {
     /// A short human-readable statement of the condition, for error messages
     /// and the build UI. Phrased as the requirement, not as a failure, so the
     /// same string serves a met and an unmet row.
@@ -322,6 +334,62 @@ impl SiteRequirement {
                     format!("{density:?}").to_lowercase()
                 )
             }
+            Self::MinGeothermalGradient { min } => {
+                format!("geothermal gradient of at least {:.0}%", min * 100.0)
+            }
+        }
+    }
+}
+
+/// A site condition, optionally overcome by a technology (issue #414).
+///
+/// The wrapper exists because some conditions are not absolute: a site too
+/// cold for geothermal heat is unreachable *until you can drill deep enough*,
+/// and then it is not. That is a **conditional tech gate** — it depends on the
+/// site, not just the building — which [`BuildingDef::tech_prerequisite`]
+/// cannot express, since that gates a building everywhere at once.
+///
+/// Kept general rather than special-cased to geothermal: any condition can be
+/// waived, so a future pressurisation tech could lift an atmosphere
+/// requirement without this type changing again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SiteRequirement {
+    /// What the site must be like.
+    #[serde(flatten)]
+    pub condition: SiteCondition,
+    /// A researched technology that satisfies this requirement regardless of
+    /// the site. `None` — the default — means the condition is absolute.
+    #[serde(default)]
+    pub waived_by_tech: Option<String>,
+}
+
+impl SiteRequirement {
+    /// An absolute requirement — no technology overcomes it.
+    #[must_use]
+    pub fn new(condition: SiteCondition) -> Self {
+        Self {
+            condition,
+            waived_by_tech: None,
+        }
+    }
+
+    /// A requirement a researched technology lifts.
+    #[must_use]
+    pub fn waivable(condition: SiteCondition, tech: impl Into<String>) -> Self {
+        Self {
+            condition,
+            waived_by_tech: Some(tech.into()),
+        }
+    }
+
+    /// A short human-readable statement, naming the waiving tech when there is
+    /// one — "X, or Y" reads as a genuine choice, where the bare condition
+    /// would look like a wall.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match &self.waived_by_tech {
+            Some(tech) => format!("{} (or {tech})", self.condition.describe()),
+            None => self.condition.describe(),
         }
     }
 }
@@ -349,6 +417,9 @@ pub enum SiteProperty {
     AtmosphereDensity,
     /// The site hex's elevation, already stored normalised.
     Elevation,
+    /// The site hex's geothermal gradient (issue #412) — how shallow magma
+    /// sits beneath it.
+    GeothermalGradient,
 }
 
 /// How a building's output responds to a site property (issue #411).
