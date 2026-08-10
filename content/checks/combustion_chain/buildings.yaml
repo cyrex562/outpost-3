@@ -1,0 +1,26 @@
+# Mirrors content/base/buildings.yaml exactly. Both are tech-0 as of issue
+# #417 — the well was opened up precisely so this chain closes without
+# research.
+- id: hydrocarbon_well
+  name: Hydrocarbon Well
+  category: extraction
+  power_delta: 7.0
+  worker_slots: 2
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 3
+  construction_cost:
+    - id: structural_metal
+      quantity: 18.0
+
+- id: combustion_plant
+  name: Combustion Plant
+  category: power
+  power_delta: -28.0
+  worker_slots: 1
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 14.0

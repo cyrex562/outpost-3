@@ -102,6 +102,42 @@
     - id: structural_metal
       quantity: 37.0
 
+- id: combustion_plant
+  name: Combustion Plant
+  description: >
+    Burns hydrocarbons pumped nearby. Alone among the early generators its
+    output does not depend on where it stands at all — solar fades with
+    distance from the star, wind needs air, geothermal needs shallow magma,
+    and this one simply works, as long as you keep feeding it.
+
+    That reliability is paid for every sol: it consumes hydrocarbons
+    continuously and emits waste. Let the waste pile up past what the colony
+    can store and it contaminates the ground the colony is standing on.
+  category: power
+  # No tech_prerequisite — the fourth tech-0 option (issue #417).
+  power_delta: -28.0
+  worker_slots: 1
+  default_priority: 3
+  labor_required: 1
+  slot_cost: 1
+  construction_turns: 2
+  construction_cost:
+    - id: structural_metal
+      quantity: 14.0
+  # Needs fuel within reach. Deliberately a *buildability* gate rather than an
+  # output scale: this generator's whole character is that its output is
+  # constant, so the site decides whether you can have one at all, not how
+  # well it runs. Two hexes rather than the colony's own, so a hydrocarbon
+  # field beside the colony counts — matching how a well would actually be
+  # sited relative to what it draws from.
+  site_requirements:
+    - kind: deposit
+      commodity: hydrocarbons
+      within_hexes: 2
+  # No output_scaling on purpose. Its variability lives in the fuel supply,
+  # which is already deposit-gated at the well (issue #239) — scaling here too
+  # would penalise a poor site twice for the same reason.
+
 - id: geothermal_plant
   name: Geothermal Plant
   description: >
@@ -652,7 +688,16 @@
   labor_required: 1
   slot_cost: 1
   construction_turns: 3
-  tech_prerequisite: resource_extraction
+  # No tech_prerequisite since issue #417. The combustion plant burns
+  # hydrocarbons and is a tech-0 building, so the chain that feeds it has to
+  # close at tech 0 too — a plant with no reachable fuel is unbuildable in
+  # practice, whatever its own gate says.
+  #
+  # Safe to open up because `pump_hydrocarbons` is already deposit-gated
+  # (issue #239): hydrocarbons is a vein commodity, so the well produces
+  # nothing where there is nothing to pump. The specialised mines stay behind
+  # resource_extraction; this is the crude counterpart, the same way
+  # excavation_rig is to structural_mine.
   construction_cost:
     - id: structural_metal
       quantity: 18.0

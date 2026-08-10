@@ -1,0 +1,22 @@
+# Rates mirror content/base/recipes.yaml exactly.
+- id: pump_hydrocarbons
+  name: Pump Hydrocarbons
+  building: hydrocarbon_well
+  cycle_sols: 1
+  inputs: []
+  outputs:
+    - id: hydrocarbons
+      quantity: 9.0
+
+- id: burn_hydrocarbons
+  name: Burn Hydrocarbons
+  building: combustion_plant
+  cycle_sols: 1
+  inputs:
+    - id: hydrocarbons
+      quantity: 3.0
+  outputs:
+    - id: power
+      quantity: 34.0
+    - id: waste
+      quantity: 1.0
