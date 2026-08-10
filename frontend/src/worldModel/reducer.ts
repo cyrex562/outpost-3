@@ -210,6 +210,21 @@ export function applyEvent(state: WorldState, event: ServerEvent): WorldState {
       return { ...state, notifications: [...state.notifications, notification] }
     }
 
+    case 'colony_founding_launched': {
+      // The colony does not exist yet — it is in transit (#359). Announcing
+      // the launch is the whole point: without it the player has no signal
+      // that anything happened at all (issue #403).
+      const notification = {
+        id: nextNotificationId(),
+        tier: 'notable' as const,
+        message: `${event.name} launched — arriving in ${event.sols_remaining} sol${
+          event.sols_remaining === 1 ? '' : 's'
+        }`,
+        timestamp_sol: state.sol,
+      }
+      return { ...state, notifications: [...state.notifications, notification] }
+    }
+
     case 'hazard_occurred': {
       const colony = state.colonies[event.colony_id]
       const notification = {

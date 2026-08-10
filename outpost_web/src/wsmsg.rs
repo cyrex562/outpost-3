@@ -549,6 +549,24 @@ pub enum ServerEvent {
         /// Planet-map site UUID the colony was placed on.
         site_id: String,
     },
+    /// A colony founding was launched and is in transit (issue #359).
+    ///
+    /// Sponsored foundings — which is what the wizard sends, since it always
+    /// names a sponsor — do **not** create the colony immediately; it arrives
+    /// after a distance-derived delay. Before this had a wire representation
+    /// the event mapped to `Ignored`, so the player clicked Found, was routed
+    /// onward, and received no confirmation of any kind (issue #403). The
+    /// colony then appeared some sols later with nothing having announced it.
+    ColonyFoundingLaunched {
+        /// Pending-colony UUID, distinct from the eventual colony id.
+        pending_id: String,
+        /// Colony display name.
+        name: String,
+        /// Body UUID the colony is bound for.
+        body_id: String,
+        /// Sols until it arrives.
+        sols_remaining: u32,
+    },
     /// A construction project was queued.
     ConstructionQueued {
         /// Colony UUID.
@@ -918,6 +936,18 @@ impl ServerEvent {
                 name: name.clone(),
                 starting_population: *starting_population,
                 site_id: site_id.to_string(),
+            },
+            Event::ColonyFoundingLaunched {
+                pending_id,
+                name,
+                body_id,
+                sols_remaining,
+                ..
+            } => Self::ColonyFoundingLaunched {
+                pending_id: pending_id.to_string(),
+                name: name.clone(),
+                body_id: body_id.0.to_string(),
+                sols_remaining: *sols_remaining,
             },
             Event::ConstructionQueued {
                 colony_id,

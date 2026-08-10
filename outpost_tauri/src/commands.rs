@@ -331,6 +331,17 @@ pub enum ServerEvent {
         name: String,
         starting_population: u64,
     },
+    /// A colony founding was launched and is in transit (issue #359).
+    ///
+    /// The wizard always names a sponsor, so foundings are deferred rather
+    /// than immediate. Without this the event mapped to nothing and the
+    /// player got no confirmation at all (issue #403).
+    ColonyFoundingLaunched {
+        pending_id: String,
+        name: String,
+        body_id: String,
+        sols_remaining: u32,
+    },
     ConstructionQueued {
         colony_id: String,
         building_type: String,
@@ -530,6 +541,18 @@ impl ServerEvent {
                 colony_id: colony_id.to_string(),
                 name: name.clone(),
                 starting_population: *starting_population,
+            },
+            Event::ColonyFoundingLaunched {
+                pending_id,
+                name,
+                body_id,
+                sols_remaining,
+                ..
+            } => Self::ColonyFoundingLaunched {
+                pending_id: pending_id.to_string(),
+                name: name.clone(),
+                body_id: body_id.0.to_string(),
+                sols_remaining: *sols_remaining,
             },
             Event::ConstructionQueued {
                 colony_id,

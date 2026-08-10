@@ -61,10 +61,30 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   await page.getByTestId('colony-name-input').fill('Kitted Landing')
   await primaryAction.click()
 
-  // A successful `found_colony_at_site` command routes back to /colony with
-  // the new colony selected.
+  // A successful `found_colony_at_site` command routes back to /colony.
+  //
+  // The colony does **not** exist yet. The wizard always names a sponsor, so
+  // the engine takes issue #359's deferred path: the sponsor is billed now and
+  // the colony arrives after a distance-derived transit, announced by
+  // `colony_founding_launched`. Issue #403 was this spec assuming an instant
+  // founding — and, underneath that, the launch event having no wire
+  // representation at all, so the player got no confirmation either.
   await expect(page).toHaveURL(/#\/colony/)
   await expect(page.locator('[data-testid^="colony-detail-"]')).toBeVisible({ timeout: 15_000 })
+
+  // The launch must announce itself. This is the half of #403 that was a real
+  // bug rather than a wrong assertion: `colony_founding_launched` had no wire
+  // representation, so it mapped to `Ignored` and the player received no
+  // confirmation that anything had happened at all.
+  //
+  // Deliberately not asserting a *count*: browser mode currently logs each
+  // command-issued event twice (the POST response is fed to the reducer and
+  // the server also fans the same events out over the WebSocket to every
+  // client including the issuer). That duplication is pre-existing and filed
+  // separately — pinning a count here would couple this spec to it.
+  const launched = page.getByTestId('log-item-colony_founding_launched').first()
+  await expect(launched).toBeVisible({ timeout: 15_000 })
+  await expect(launched).toContainText('Kitted Landing')
 
   // ── UI-rework PR5: the construction-queue panel's "Build…" button opens the
   // build dialog (the catalog itself only populates in Tauri mode, so here we
@@ -133,10 +153,27 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   await expect(page).toHaveURL(/#\/colony\//)
   await expect(page.locator('[data-testid^="colony-detail-"]')).toBeVisible({ timeout: 15_000 })
 
-  // Issue #317: the colony founded through the wizard is operational on sol 1 —
-  // its landing kit is already standing, not sitting in the build queue.
+  // Advance time so the in-transit founding actually lands (issue #359/#403).
+  // One fast-forward covers the transit, which is at least one sol and
+  // distance-derived; polling for the card rather than asserting straight
+  // after keeps this honest if the distance ever changes.
   await page.getByRole('link', { name: 'Colonies', exact: true }).click()
-  await page.locator('[data-testid^="colony-card-"]', { hasText: 'Kitted Landing' }).first().click()
+  const arriving = page.locator('[data-testid^="colony-card-"]', { hasText: 'Kitted Landing' })
+  await expect
+    .poll(
+      async () => {
+        if ((await arriving.count()) > 0) return true
+        await page.getByTestId('btn-fast-forward').click()
+        await page.waitForTimeout(500)
+        return (await arriving.count()) > 0
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
+
+  // Issue #317: the colony founded through the wizard is operational on arrival
+  // — its landing kit is already standing, not sitting in the build queue.
+  await arriving.first().click()
   await expect(page.getByTestId('buildings-panel')).toBeVisible()
   await expect
     .poll(async () => page.locator('[data-testid^="building-row-"]').count(), { timeout: 15_000 })
