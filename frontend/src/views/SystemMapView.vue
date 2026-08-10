@@ -194,6 +194,28 @@ function isBelt(b: SystemBody): boolean {
   return b.belt_profile !== null && b.belt_profile !== undefined
 }
 
+/**
+ * Bodies in paint order: belts first, everything else on top (issue #402).
+ *
+ * SVG paints later siblings over earlier ones, and hit-testing follows the
+ * same order — so whichever body happened to come later in the list won. A
+ * belt annulus measures a couple of hundred pixels across and a planet node
+ * about four, so any planet overlapping a belt that sorted after it was both
+ * hidden and unclickable: the click selected the belt instead.
+ *
+ * That was a real UX fault, not only a test one — `view-surface-live` failed
+ * about half the time because its target planet was covered, which is exactly
+ * what a player aiming at the same planet would experience.
+ *
+ * Belts stay fully clickable everywhere a body is not sitting on top of them,
+ * which is almost their whole area. Ordering rather than `pointer-events:
+ * none` keeps them selectable at all — the side panel has a belt readout.
+ */
+const bodiesInPaintOrder = computed(() => [
+  ...bodies.value.filter((b) => isBelt(b)),
+  ...bodies.value.filter((b) => !isBelt(b)),
+])
+
 /** Per-belt annular-sector descriptors, keyed by body id. */
 const beltRenders = computed(() => {
   const map = new Map<string, { key: string; path: string; opacity: number }[]>()
@@ -606,7 +628,7 @@ function viewSurface(body: SystemBody): void {
 
           <!-- Bodies -->
           <g
-            v-for="b in bodies"
+            v-for="b in bodiesInPaintOrder"
             :key="b.id"
             class="body-group"
             :class="{ selected: selected?.id === b.id }"
