@@ -1305,6 +1305,7 @@ mod tests {
         use std::collections::HashSet;
 
         let buildings = vec![BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "adv_lab".to_string(),
             name: "Advanced Lab".to_string(),

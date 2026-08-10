@@ -444,6 +444,9 @@ pub fn process_production(
         // No site on the plain path — callers with one use
         // `process_production_scaled` directly (issue #411).
         None,
+        // No body on the plain path either, so no atmospheric penalty
+        // (issues #438/#443).
+        crate::system::AtmosphereHazard::None,
     )
 }
 
@@ -520,6 +523,13 @@ pub fn process_production_scaled(
     modifier_accumulator: &crate::modifier::ModifierAccumulator,
     difficulty_scalar: &crate::modifier::DifficultyScalar,
     site_multipliers: Option<&std::collections::HashMap<String, f64>>,
+    // The body's atmosphere, for the per-building maintenance penalty
+    // (issues #438/#443). Taken here rather than folded into
+    // `maintenance_scalar` by the caller — which is what #438 did while the
+    // penalty was uniform — because #443 makes it depend on each building's
+    // authored `hazard_susceptibility`, and a colony-wide scalar cannot
+    // express that.
+    atmosphere_hazard: crate::system::AtmosphereHazard,
 ) -> ProductionStepOutcome {
     // ── Step 1: build power grid ─────────────────────────────────────────────
     // `power_import` folds in this sol's net cross-colony powerline transfer
@@ -658,6 +668,18 @@ pub fn process_production_scaled(
         } else {
             &[][..]
         };
+
+        // Per-building upkeep multiplier (issue #443): difficulty's colony-wide
+        // scalar, times this building's share of the atmospheric hazard. A
+        // sealed habitat takes less of a corrosive world's penalty than an
+        // exposed rig standing in the same air; an unauthored building takes
+        // it in full, so this shadows the outer value with an identical one
+        // wherever content says nothing.
+        let maintenance_multiplier = maintenance_multiplier
+            * f64::from(crate::system::apply_hazard_susceptibility(
+                atmosphere_hazard.maintenance_multiplier(),
+                bdef.hazard_susceptibility,
+            ));
 
         // Power applies only to recipe-running buildings: a pure
         // maintenance-only building doesn't drive brownouts. Power is computed
@@ -1998,6 +2020,7 @@ mod tests {
             // directly; this shared helper keeps its existing 23 call sites
             // unchanged by passing no site data (issue #411).
             None,
+            crate::system::AtmosphereHazard::None,
         )
     }
 
@@ -2008,6 +2031,7 @@ mod tests {
 
         // Power plant: produces 100 kW
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
@@ -2033,6 +2057,7 @@ mod tests {
 
         // Mine: extracts ore; needs 30 kW; 2 workers
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "mine".into(),
             name: "Mine".into(),
@@ -2081,6 +2106,7 @@ mod tests {
     /// clippy's function-length limit.
     fn insert_smelter(reg: &mut ContentRegistry) {
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "smelter".into(),
             name: "Smelter".into(),
@@ -2382,6 +2408,7 @@ mod tests {
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
             None,
+            crate::system::AtmosphereHazard::None,
         )
     }
 
@@ -2542,6 +2569,7 @@ mod tests {
     fn make_registry_with_two_water_consumers() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str| BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
@@ -2697,6 +2725,7 @@ mod tests {
     fn make_registry_with_a_chain() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str| BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
@@ -2943,6 +2972,7 @@ mod tests {
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
             None,
+            crate::system::AtmosphereHazard::None,
         )
     }
 
@@ -3253,6 +3283,7 @@ mod tests {
         let mut reg = ContentRegistry::default();
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
@@ -3277,6 +3308,7 @@ mod tests {
         });
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "advanced_smelter".into(),
             name: "Advanced Smelter".into(),
@@ -3482,6 +3514,7 @@ mod tests {
     /// function-length limit.
     fn solar_array_def() -> BuildingDef {
         BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "solar_array".into(),
             name: "Solar Array".into(),
@@ -3516,6 +3549,7 @@ mod tests {
         reg.insert_building(solar_array_def());
 
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "recycler".into(),
             name: "Recycler".into(),
@@ -3928,6 +3962,7 @@ mod tests {
     fn make_registry_with_two_recipes() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "refinery".into(),
             name: "Refinery".into(),
@@ -4069,6 +4104,7 @@ mod tests {
     fn make_registry_with_vein_mine() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "structural_mine".into(),
             name: "Structural Mine".into(),
@@ -4108,6 +4144,7 @@ mod tests {
         // Non-deposit-gated recipe (not in VEIN_COMMODITIES) — a control to
         // prove gating is scoped to deposit-tracked commodities only.
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "water_well".into(),
             name: "Water Well".into(),
@@ -4377,6 +4414,7 @@ mod tests {
     fn make_registry_with_concurrent_recipes() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "colony_hq".into(),
             name: "Colony HQ".into(),
@@ -4524,6 +4562,7 @@ mod tests {
         // count toward the same shared scale/shortfalls.
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "hybrid_plant".into(),
             name: "Hybrid Plant".into(),
@@ -4631,6 +4670,7 @@ mod tests {
     fn make_registry_for_io_summary() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str| BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
@@ -4830,6 +4870,7 @@ mod tests {
     fn io_summary_covers_every_line_not_just_the_first() {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "complex".into(),
             name: "complex".into(),
@@ -4941,6 +4982,7 @@ mod tests {
     fn lines_registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let b = |id: &str| BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
@@ -5165,6 +5207,7 @@ mod tests {
     fn a_building_with_no_recipes_has_no_lines() {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "silo".into(),
             name: "silo".into(),
@@ -5198,6 +5241,7 @@ mod tests {
     fn live_lines_registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "complex".into(),
             name: "Fabrication Complex".into(),
@@ -5406,6 +5450,7 @@ mod tests {
             &crate::modifier::ModifierAccumulator::default(),
             &crate::modifier::DifficultyScalar::default(),
             None,
+            crate::system::AtmosphereHazard::None,
         );
 
         assert!(
@@ -5425,6 +5470,7 @@ mod tests {
     fn site_scaled_generator_registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         reg.insert_building(BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: "array".into(),
             name: "Array".into(),
@@ -5500,6 +5546,7 @@ mod tests {
             &crate::modifier::ModifierAccumulator::new(),
             &crate::modifier::DifficultyScalar::new(),
             site,
+            crate::system::AtmosphereHazard::None,
         );
         // `power` is unregistered here, so it lands in the tradeable pool
         // rather than the colony-local resource store — which is all this

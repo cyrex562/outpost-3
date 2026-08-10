@@ -253,6 +253,7 @@ mod tests {
     fn registry() -> ContentRegistry {
         let mut reg = ContentRegistry::default();
         let building = |id: &str, worker_slots: u32| BuildingDef {
+            hazard_susceptibility: None,
             repair_cost: vec![],
             id: id.into(),
             name: id.into(),
