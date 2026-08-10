@@ -523,7 +523,24 @@ impl Snapshot {
             .map_err(|_| SnapshotError::MissingGameState)?;
 
         let blob: FullStateBlob = serde_json::from_str(&state_json)?;
-        Ok(blob.into_game_state())
+        let mut state = blob.into_game_state();
+
+        // Issue #412: a save written before the geothermal layer existed has
+        // every cell at the neutral default. Rebuild the real field from each
+        // map's own seed so an old save gets a varying layer rather than a
+        // flat one — otherwise geothermal output and hydrothermal prospecting
+        // would read identically everywhere on that body forever.
+        //
+        // Each map records the archetype baseline it was generated with, so
+        // a current save is rebuilt to exactly the values it already holds —
+        // genuinely a no-op, not an approximation. Only a save predating the
+        // layer falls back to the neutral baseline, recovering the field's
+        // shape while its overall heat is a plausible average.
+        for map in state.planet_maps.values_mut() {
+            map.backfill_geothermal_gradient();
+        }
+
+        Ok(state)
     }
 
     /// Apply the DDL and initialise the `schema_version` row if absent.

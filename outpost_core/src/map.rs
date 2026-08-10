@@ -121,6 +121,49 @@ impl HexCoord {
 
 // ─── Terrain & Biome ─────────────────────────────────────────────────────────
 
+/// Gradient assumed for a cell that predates the layer (issue #412).
+///
+/// Mid-range on purpose: a pre-#412 save's hexes should read as ordinary
+/// crust, so nothing standing on them suddenly becomes worthless or free.
+pub const NEUTRAL_GEOTHERMAL_GRADIENT: f32 = 0.5;
+
+/// Minimum gradient at which [`Terrain::Volcanic`] can appear (issue #412).
+///
+/// Volcanic terrain is a *symptom* of shallow magma, so it is gated on the
+/// gradient rather than rolled independently — otherwise the two layers would
+/// contradict each other on the same hex, with a volcano sitting on cold
+/// crust.
+pub const VOLCANIC_MIN_GRADIENT: f32 = 0.6;
+
+/// Gradient below which reaching useful heat needs deep-drilling technology
+/// (issue #412).
+///
+/// Named here so the layer owns the threshold, but nothing enforces it yet —
+/// the tech gate belongs with the geothermal plant (issue #414), and is a
+/// *conditional* tech requirement, which `tech_prerequisite` cannot express.
+/// The Kola Superdeep Borehole is the reference point: reaching heat this
+/// deep should be a real, late capability rather than a minor modifier.
+pub const DEEP_DRILLING_GRADIENT: f32 = 0.2;
+
+/// How strongly the geothermal gradient biases deposit formation (issue
+/// #412).
+///
+/// Applied as `1 + (gradient - map_mean) * BIAS`, centred on the map's own
+/// mean gradient rather than on a fixed 0.5. That makes the bias
+/// **redistributive**: it moves deposits toward hot ground without changing
+/// how many the map has. Total deposit density is a balance-calibrated
+/// quantity (see `deposit_density_in_target_band_across_seeds_and_sizes`);
+/// *where* they land is what this layer decides.
+///
+/// Kept well below 1.0 deliberately: the gradient should make hot ground
+/// worth prospecting, not make cold ground barren — a player who lands
+/// somewhere cold still needs a viable game.
+pub const HYDROTHERMAL_DEPOSIT_BIAS: f32 = 0.8;
+
+fn default_geothermal_gradient() -> f32 {
+    NEUTRAL_GEOTHERMAL_GRADIENT
+}
+
 /// Surface terrain type of a hex cell.
 ///
 /// Determines movement cost and infrastructure construction difficulty.
@@ -262,6 +305,21 @@ pub struct HexCell {
     /// and tempered by how harsh the cell's `temperature` band is.
     #[serde(default = "default_vegetation_density")]
     pub vegetation_density: f32,
+    /// Geothermal gradient in `[0.0, 1.0]` (issue #412) — how shallow magma
+    /// sits beneath this hex. `1.0` is a hotspot where heat is almost at the
+    /// surface; `0.0` is cold cratonic crust where reaching it means drilling
+    /// deeper than anyone has.
+    ///
+    /// A world-model layer rather than a power stat: it steers where
+    /// [`Terrain::Volcanic`] appears, biases hydrothermal ore formation in
+    /// deposit generation, and scales geothermal output (issue #414).
+    ///
+    /// Defaults to [`NEUTRAL_GEOTHERMAL_GRADIENT`] when absent, so a save
+    /// written before this field existed loads as ordinary crust rather than
+    /// as either extreme. [`PlanetMap::backfill_geothermal_gradient`] then
+    /// rebuilds the real field from the map's own seed.
+    #[serde(default = "default_geothermal_gradient")]
+    pub geothermal_gradient: f32,
     /// Resource deposits present in this cell (may be empty).
     pub deposits: Vec<Deposit>,
     /// Contamination severity in `[0.0, 1.0]` from waste overflow (issue
@@ -297,6 +355,7 @@ impl HexCell {
             temperature: default_cell_temperature(),
             water_coverage: default_water_coverage(),
             vegetation_density: default_vegetation_density(),
+            geothermal_gradient: NEUTRAL_GEOTHERMAL_GRADIENT,
             deposits: Vec::new(),
             contamination: default_contamination(),
         }
@@ -395,6 +454,19 @@ fn temperature_suitability_factor(temperature: TemperatureBand) -> f32 {
 pub struct PlanetMap {
     /// RNG seed used to generate this map (for reproducibility checks).
     pub seed: u64,
+    /// The body archetype's geothermal baseline this map was generated with
+    /// (issue #412), from
+    /// [`crate::system::PlanetarySubtype::geothermal_baseline`].
+    ///
+    /// Recorded so [`Self::backfill_geothermal_gradient`] can rebuild the
+    /// exact field the map was generated with. Without it a reload would
+    /// recompute a molten world's hot field at some other baseline and
+    /// silently flatten it.
+    ///
+    /// Defaults to [`NEUTRAL_GEOTHERMAL_GRADIENT`] for a save that predates
+    /// the layer, where the original archetype is not recoverable.
+    #[serde(default = "default_geothermal_gradient")]
+    pub geothermal_baseline: f32,
     /// Number of columns (`q` values), the axis that wraps east-west.
     pub width: u32,
     /// Number of rows (`r` values), the axis with hard poles.
@@ -527,6 +599,37 @@ impl PlanetMap {
             })
             .collect();
 
+        // Pass 1b: the geothermal gradient field (issue #412). A world-model
+        // layer in its own right — it steers volcanic terrain, biases
+        // hydrothermal ore formation below, and scales geothermal output
+        // (#414). Computed from the seed alone (no `rng` draw), so it can be
+        // rebuilt exactly for a save written before the layer existed.
+        let geothermal_baseline = planetary_subtype.geothermal_baseline();
+        let gradients: HashMap<HexCoord, f32> = coords
+            .iter()
+            .map(|coord| {
+                (
+                    *coord,
+                    compute_geothermal_gradient(seed, *coord, width, geothermal_baseline),
+                )
+            })
+            .collect();
+        // The map's own mean, so the hydrothermal deposit bias below
+        // redistributes rather than inflates — see
+        // `HYDROTHERMAL_DEPOSIT_BIAS`.
+        //
+        // Summed over `coords` — a Vec — rather than over `gradients.values()`.
+        // `gradients` is a HashMap, whose iteration order is arbitrary, and
+        // summing f32 in a different order gives a different last bit. That
+        // fed straight into every deposit's richness and made generation
+        // non-reproducible between two runs of the same seed.
+        #[allow(clippy::cast_precision_loss)]
+        let gradient_mean = if coords.is_empty() {
+            NEUTRAL_GEOTHERMAL_GRADIENT
+        } else {
+            coords.iter().map(|c| gradients[c]).sum::<f32>() / coords.len() as f32
+        };
+
         // The elevation quantile below which a cell becomes ocean, chosen so
         // the map's water coverage matches the archetype's target land
         // fraction (issue #313) instead of a fixed per-cell probability.
@@ -561,6 +664,8 @@ impl PlanetMap {
                 width,
                 height,
                 elevation,
+                gradients[coord],
+                gradient_mean,
                 body_temperature,
                 &veins,
                 water_threshold,
@@ -583,6 +688,7 @@ impl PlanetMap {
 
         Self {
             seed,
+            geothermal_baseline,
             width,
             height,
             cells,
@@ -608,6 +714,40 @@ impl PlanetMap {
     #[must_use]
     pub fn coord_for_site(&self, site_id: SiteId) -> Option<HexCoord> {
         self.sites.get(&site_id).copied()
+    }
+
+    /// Rebuild the geothermal gradient for cells that predate the layer
+    /// (issue #412).
+    ///
+    /// A save written before the layer existed deserialises every cell at
+    /// [`NEUTRAL_GEOTHERMAL_GRADIENT`]. That is a safe default but a flat
+    /// one — the whole point of the layer is that it varies — so this
+    /// recomputes the real field from the map's own `seed` and `width`,
+    /// which is all `compute_geothermal_gradient` needs.
+    ///
+    /// Uses the map's own recorded [`Self::geothermal_baseline`], so a map
+    /// generated with the layer in place is rebuilt to exactly the values it
+    /// already holds — this is genuinely a no-op there, not an approximation.
+    /// A save predating the layer has no recorded baseline and defaults to
+    /// neutral, recovering the field's *shape* exactly while its overall heat
+    /// is a plausible average rather than the original.
+    ///
+    /// Volcanic cells are then raised to at least [`VOLCANIC_MIN_GRADIENT`],
+    /// preserving the invariant that volcanic terrain implies shallow magma.
+    /// Without that, an old save could hold a volcano on cold crust — the
+    /// exact contradiction gating Volcanic on the gradient exists to prevent.
+    ///
+    /// Idempotent, and a no-op for a map generated with the layer already in
+    /// place, since it recomputes the same values.
+    pub fn backfill_geothermal_gradient(&mut self) {
+        let (seed, width, baseline) = (self.seed, self.width, self.geothermal_baseline);
+        for (coord, cell) in &mut self.cells {
+            let mut g = compute_geothermal_gradient(seed, *coord, width, baseline);
+            if matches!(cell.terrain, Terrain::Volcanic) {
+                g = g.max(VOLCANIC_MIN_GRADIENT);
+            }
+            cell.geothermal_gradient = g;
+        }
     }
 
     /// Return a reference to a cell by coordinate, if it exists.
@@ -1100,6 +1240,8 @@ fn generate_cell(
     width: u32,
     height: u32,
     elevation: f32,
+    geothermal_gradient: f32,
+    gradient_mean: f32,
     body_temperature: TemperatureBand,
     veins: &[Vein],
     water_threshold: Option<f32>,
@@ -1121,7 +1263,7 @@ fn generate_cell(
         // occasional lake."
         if elevation <= threshold {
             Terrain::Ocean
-        } else if adjusted < 0.06 {
+        } else if adjusted < 0.06 && geothermal_gradient >= VOLCANIC_MIN_GRADIENT {
             Terrain::Volcanic
         } else if adjusted < 0.18 {
             Terrain::Mountains
@@ -1139,7 +1281,7 @@ fn generate_cell(
         } else {
             Terrain::Plains
         }
-    } else if adjusted < 0.08 {
+    } else if adjusted < 0.08 && geothermal_gradient >= VOLCANIC_MIN_GRADIENT {
         Terrain::Volcanic
     } else if adjusted < 0.20 {
         Terrain::Mountains
@@ -1177,6 +1319,7 @@ fn generate_cell(
 
     let mut cell = HexCell::new(coord, terrain, biome);
     cell.elevation = elevation;
+    cell.geothermal_gradient = geothermal_gradient;
     cell.temperature = temperature;
     cell.water_coverage = compute_water_coverage(terrain, elevation, water_threshold);
     cell.vegetation_density = compute_vegetation_density(biome, temperature, has_vegetation);
@@ -1189,10 +1332,18 @@ fn generate_cell(
     // entirely empty between fields.
     if !matches!(terrain, Terrain::Ocean) {
         let (deposit_prob, nearest_commodity) = nearest_vein_influence(coord, veins, width);
-        if rng.gen::<f32>() < deposit_prob {
-            let richness: f32 = rng.gen::<f32>() * 0.9 + 0.1;
+        // Hydrothermal concentration (issue #412): circulating water near
+        // shallow magma is what deposits many ores in the first place, so a
+        // hot hex is likelier to hold something and to hold more of it. This
+        // is the layer's reach beyond power — it makes the gradient worth
+        // reading when choosing a landing site, not only when placing a
+        // generator.
+        let hydrothermal = 1.0 + (geothermal_gradient - gradient_mean) * HYDROTHERMAL_DEPOSIT_BIAS;
+        if rng.gen::<f32>() < deposit_prob * hydrothermal {
+            let richness: f32 = (rng.gen::<f32>() * 0.9 + 0.1) * hydrothermal.clamp(0.0, 2.0);
             let commodity = nearest_commodity.unwrap_or_else(|| pick_deposit_commodity(rng, biome));
-            cell.deposits.push(Deposit::new(commodity, richness));
+            cell.deposits
+                .push(Deposit::new(commodity, richness.clamp(0.05, 1.0)));
         }
         // Rare second deposit, at a flat low rate independent of veins —
         // keeps the occasional surprise find outside authored ore fields.
@@ -1320,6 +1471,65 @@ fn compute_elevation(seed: u64, coord: HexCoord, width: u32, rng: &mut ChaCha8Rn
     let spatial = ((ridge + valley + cross) / 3.0 + 1.0) * 0.5;
     let jitter: f32 = rng.gen();
     (spatial * 0.7 + jitter * 0.3).clamp(0.0, 1.0)
+}
+
+/// Geothermal gradient for one cell (issue #412).
+///
+/// Deliberately coarser than [`compute_elevation`]: two low-frequency fields
+/// instead of three mid-frequency ones, and far less jitter. Magma depth
+/// varies over hundreds of kilometres, not hex to hex — a noisy per-cell
+/// value would make a "hotspot" mean nothing, since every site would have a
+/// hot neighbour. The two components are read as:
+///
+/// - **hotspots** — a low-frequency blob field, the mantle plumes;
+/// - **rifts** — a banded field running across them, the spreading zones.
+///
+/// Taking the *maximum* of the two rather than the mean is what keeps them
+/// legible as distinct features: a rift stays hot where it crosses cold
+/// crust instead of being averaged into the background.
+///
+/// Wrap-safety follows `compute_elevation`: `q` enters only through
+/// `q / width * TAU * integer_frequency`, so the field is continuous across
+/// the east-west seam. `r` shifts phase but never period, so the seam still
+/// matches at every row.
+///
+/// `baseline` is the body's own archetype heat (see
+/// [`PlanetarySubtype::geothermal_baseline`]); the spatial field varies
+/// around it rather than replacing it, so a molten world is hot nearly
+/// everywhere and an icy one has only isolated warm spots.
+fn compute_geothermal_gradient(seed: u64, coord: HexCoord, width: u32, baseline: f32) -> f32 {
+    let phase_a = phase_from_seed(seed, 24);
+    let phase_b = phase_from_seed(seed, 32);
+    // Low whole-cycle frequencies: 1-2 hotspot lobes and 2-3 rift bands
+    // around the body, so features span a large fraction of the surface.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let freq_hotspot = 1 + (seed % 2) as i32;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let freq_rift = 2 + ((seed >> 8) % 2) as i32;
+    #[allow(clippy::cast_precision_loss)]
+    let width_f = width.max(1) as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let q = coord.q as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let r = coord.r as f32;
+
+    #[allow(clippy::cast_precision_loss)]
+    let freq_hotspot_f = freq_hotspot as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let freq_rift_f = freq_rift as f32;
+    let hotspot = ((q / width_f * std::f32::consts::TAU * freq_hotspot_f + phase_a).sin()
+        * (r * 0.18 + phase_a).cos())
+    .abs();
+    let rift = (q / width_f * std::f32::consts::TAU * freq_rift_f + r * 0.10 + phase_b)
+        .sin()
+        .abs();
+
+    // Both components are in [0, 1]; the max keeps features distinct.
+    let field = hotspot.max(rift);
+    // Centre the field on zero so it varies the baseline both ways, then
+    // scale it down — the archetype should dominate, with terrain-scale
+    // features moving it rather than overwhelming it.
+    (baseline + (field - 0.5) * 0.7).clamp(0.0, 1.0)
 }
 
 /// Elevation quantile below which a cell becomes ocean, chosen so that the
@@ -2769,6 +2979,7 @@ mod tests {
         let height = radius * 2 + 1;
         let map = PlanetMap {
             seed: 0,
+            geothermal_baseline: NEUTRAL_GEOTHERMAL_GRADIENT,
             width,
             height,
             cells,
@@ -3600,5 +3811,224 @@ mod tests {
         let cell = HexCell::new(HexCoord::origin(), Terrain::Plains, Biome::Grassland);
         assert_eq!(cell.water_coverage, 0.0);
         assert_eq!(cell.vegetation_density, 0.0);
+    }
+
+    // ── Geothermal gradient layer (issue #412) ──────────────────────────────
+
+    fn gradients_of(map: &PlanetMap) -> Vec<f32> {
+        let mut v: Vec<f32> = map.cells.values().map(|c| c.geothermal_gradient).collect();
+        v.sort_by(f32::total_cmp);
+        v
+    }
+
+    #[test]
+    fn every_cell_carries_a_gradient_in_range() {
+        let map = PlanetMap::generate(7, 20, 20);
+        assert_eq!(map.cells.len(), 400);
+        for cell in map.cells.values() {
+            assert!(
+                (0.0..=1.0).contains(&cell.geothermal_gradient),
+                "{:?} has out-of-range gradient {}",
+                cell.coord,
+                cell.geothermal_gradient
+            );
+        }
+    }
+
+    #[test]
+    fn the_gradient_field_is_deterministic_for_a_seed() {
+        let a = PlanetMap::generate(11, 18, 18);
+        let b = PlanetMap::generate(11, 18, 18);
+        assert_eq!(gradients_of(&a), gradients_of(&b));
+    }
+
+    #[test]
+    fn the_gradient_field_is_spatially_coherent_not_per_hex_noise() {
+        // The point of the layer: a hotspot has to be somewhere you can
+        // *stand in*. Neighbouring cells must resemble each other far more
+        // than two cells picked at random do, or "shallow magma here" carries
+        // no information about anywhere nearby.
+        let map = PlanetMap::generate(3, 24, 24);
+        let mut neighbour_delta = 0.0f64;
+        let mut neighbour_n = 0u32;
+        for (coord, cell) in &map.cells {
+            for n in coord.neighbours() {
+                if let Some(other) = map.cell(map.wrap_coord(n)) {
+                    neighbour_delta +=
+                        f64::from((cell.geothermal_gradient - other.geothermal_gradient).abs());
+                    neighbour_n += 1;
+                }
+            }
+        }
+        let mean_neighbour = neighbour_delta / f64::from(neighbour_n);
+
+        // Mean absolute difference between arbitrary pairs, via the sorted
+        // list's spread — a coherent field still varies globally.
+        let sorted = gradients_of(&map);
+        let global_spread = f64::from(sorted[sorted.len() - 1] - sorted[0]);
+
+        assert!(
+            mean_neighbour < global_spread / 5.0,
+            "neighbours differ by {mean_neighbour:.4} against a global spread of \
+             {global_spread:.4} — the field is noise, not terrain"
+        );
+    }
+
+    #[test]
+    fn two_body_archetypes_produce_visibly_different_gradient_distributions() {
+        let mean = |sub: PlanetarySubtype| {
+            let map = PlanetMap::generate_for_body_and_subtype(
+                5,
+                20,
+                20,
+                TemperatureBand::Temperate,
+                sub,
+            );
+            let g = gradients_of(&map);
+            #[allow(clippy::cast_precision_loss)]
+            let m: f32 = g.iter().sum::<f32>() / g.len() as f32;
+            m
+        };
+        let molten = mean(PlanetarySubtype::Molten);
+        let icy = mean(PlanetarySubtype::Icy);
+        assert!(
+            molten > icy + 0.3,
+            "a molten world ({molten:.3}) must run far hotter than an icy one ({icy:.3})"
+        );
+    }
+
+    #[test]
+    fn volcanic_terrain_only_appears_where_magma_is_shallow() {
+        // The invariant gating Volcanic on the gradient exists to prevent: a
+        // volcano sitting on cold crust, with the two layers contradicting
+        // each other on the same hex.
+        for seed in 0..8u64 {
+            let map = PlanetMap::generate(seed, 22, 22);
+            for cell in map.cells.values() {
+                if matches!(cell.terrain, Terrain::Volcanic) {
+                    assert!(
+                        cell.geothermal_gradient >= VOLCANIC_MIN_GRADIENT,
+                        "seed {seed}: volcanic {:?} on gradient {}",
+                        cell.coord,
+                        cell.geothermal_gradient
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deposits_correlate_with_the_gradient() {
+        // The layer's reach beyond power: hydrothermal circulation near
+        // shallow magma is what forms many ores, so hot ground must actually
+        // be worth prospecting.
+        let mut hot_with = 0u32;
+        let mut hot_total = 0u32;
+        let mut cold_with = 0u32;
+        let mut cold_total = 0u32;
+        for seed in 0..12u64 {
+            let map = PlanetMap::generate(seed, 24, 24);
+            let mut sorted = gradients_of(&map);
+            sorted.dedup();
+            let lo = sorted[sorted.len() / 4];
+            let hi = sorted[sorted.len() * 3 / 4];
+            for cell in map.cells.values() {
+                if matches!(cell.terrain, Terrain::Ocean) {
+                    continue;
+                }
+                if cell.geothermal_gradient >= hi {
+                    hot_total += 1;
+                    if !cell.deposits.is_empty() {
+                        hot_with += 1;
+                    }
+                } else if cell.geothermal_gradient <= lo {
+                    cold_total += 1;
+                    if !cell.deposits.is_empty() {
+                        cold_with += 1;
+                    }
+                }
+            }
+        }
+        let hot_rate = f64::from(hot_with) / f64::from(hot_total);
+        let cold_rate = f64::from(cold_with) / f64::from(cold_total);
+        assert!(
+            hot_rate > cold_rate,
+            "hot ground yielded {hot_rate:.3} deposits per hex against cold ground's \
+             {cold_rate:.3} — the gradient is not reaching deposit generation"
+        );
+    }
+
+    #[test]
+    fn cold_ground_still_holds_deposits() {
+        // The bias must not make a cold landing site unplayable — it makes hot
+        // ground worth prospecting, not cold ground barren.
+        let mut cold_with = 0u32;
+        for seed in 0..12u64 {
+            let map = PlanetMap::generate(seed, 24, 24);
+            let mut sorted = gradients_of(&map);
+            sorted.dedup();
+            let lo = sorted[sorted.len() / 4];
+            cold_with += map
+                .cells
+                .values()
+                .filter(|c| c.geothermal_gradient <= lo && !c.deposits.is_empty())
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX);
+        }
+        assert!(
+            cold_with > 0,
+            "no deposit anywhere on cold ground across 12 seeds"
+        );
+    }
+
+    #[test]
+    fn backfill_rebuilds_the_exact_field_a_current_map_already_holds() {
+        // The migration must be a no-op for a save written with the layer in
+        // place, or every reload would quietly reshape the world.
+        let mut map = PlanetMap::generate_for_body_and_subtype(
+            9,
+            18,
+            18,
+            TemperatureBand::Temperate,
+            PlanetarySubtype::Molten,
+        );
+        let before = gradients_of(&map);
+        map.backfill_geothermal_gradient();
+        assert_eq!(before, gradients_of(&map));
+    }
+
+    #[test]
+    fn backfill_replaces_a_flat_pre_layer_field_with_a_varying_one() {
+        let mut map = PlanetMap::generate(4, 18, 18);
+        // Simulate a save predating the layer: every cell at the neutral
+        // default, which is what serde would produce.
+        for cell in map.cells.values_mut() {
+            cell.geothermal_gradient = NEUTRAL_GEOTHERMAL_GRADIENT;
+        }
+        map.backfill_geothermal_gradient();
+
+        let g = gradients_of(&map);
+        assert!(
+            g[g.len() - 1] - g[0] > 0.1,
+            "backfill left the field flat: spread {}",
+            g[g.len() - 1] - g[0]
+        );
+    }
+
+    #[test]
+    fn backfill_keeps_volcanic_terrain_consistent_with_its_gradient() {
+        // An old save can hold volcanic terrain that was rolled before the
+        // gradient gated it. The backfill must not leave a volcano on cold
+        // crust.
+        let mut map = PlanetMap::generate(2, 20, 20);
+        let coord = HexCoord::new(0, 0);
+        let mut cell = HexCell::new(coord, Terrain::Volcanic, Biome::Geothermal);
+        cell.geothermal_gradient = 0.0;
+        map.cells.insert(coord, cell);
+
+        map.backfill_geothermal_gradient();
+
+        assert!(map.cell(coord).unwrap().geothermal_gradient >= VOLCANIC_MIN_GRADIENT);
     }
 }

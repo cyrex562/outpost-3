@@ -465,6 +465,30 @@ impl PlanetarySubtype {
         }
     }
 
+    /// Baseline geothermal gradient for this archetype, in `[0.0, 1.0]`
+    /// (issue #412) — how shallow magma sits on a *typical* hex of such a
+    /// body, before local hotspots and cold cratons vary it.
+    ///
+    /// This is what makes a young molten world and a long-dead ice body
+    /// produce visibly different gradient maps rather than the same field
+    /// under different names. Ordered by how much internal heat the
+    /// archetype plausibly still has: molten worlds are barely cooled, giants
+    /// retain enormous internal heat, and icy or barren-cold bodies have had
+    /// time to freeze through.
+    #[must_use]
+    pub fn geothermal_baseline(self) -> f32 {
+        match self {
+            Self::Molten => 0.85,
+            Self::GasGiant | Self::IceGiant => 0.70,
+            Self::Mountain => 0.55,
+            Self::RockyBarrenHot => 0.50,
+            Self::Unclassified | Self::EarthLike | Self::Ocean => 0.45,
+            Self::Rocky => 0.35,
+            Self::RockyBarrenCold => 0.25,
+            Self::Icy => 0.15,
+        }
+    }
+
     /// Whether a body of this archetype can support vegetation at all
     /// (issue #316).
     ///

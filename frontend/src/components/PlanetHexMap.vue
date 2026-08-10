@@ -723,6 +723,31 @@ function harshClimateWarning(temperature: string): string | null {
   return HARSH_CLIMATE_WARNING[temperature] ?? null
 }
 
+/**
+ * A hex's geothermal gradient (issue #412), or `null` when the backend
+ * predates the layer.
+ */
+function geothermal(h: PlanetHex): number | null {
+  return h.geothermal_gradient ?? null
+}
+
+/**
+ * The gradient as a percentage plus a word, because the number alone means
+ * nothing to a player deciding where to land. The bands match the thresholds
+ * the engine actually uses: below `DEEP_DRILLING_GRADIENT` (0.2) reaching
+ * heat needs drilling tech, and at or above `VOLCANIC_MIN_GRADIENT` (0.6) the
+ * ground is volcanic.
+ */
+function geothermalLabel(h: PlanetHex): string {
+  const g = geothermal(h)
+  if (g === null) return ''
+  const pct = (g * 100).toFixed(0)
+  if (g >= 0.6) return `${pct}% — shallow magma`
+  if (g >= 0.4) return `${pct}% — warm crust`
+  if (g >= 0.2) return `${pct}% — cool crust`
+  return `${pct}% — deep, needs drilling tech`
+}
+
 // ── Hover tooltip ─────────────────────────────────────────────────────────
 
 const hoveredHex = ref<Positioned | null>(null)
@@ -883,6 +908,10 @@ defineExpose({ focusSite, resetView })
       <div class="tt-row">
         <span class="tt-label">Elevation</span>
         <span>{{ (hoveredHex.elevation * 100).toFixed(0) }}%</span>
+      </div>
+      <div class="tt-row" v-if="geothermal(hoveredHex) !== null">
+        <span class="tt-label">Geothermal</span>
+        <span>{{ geothermalLabel(hoveredHex) }}</span>
       </div>
       <div class="tt-row">
         <span class="tt-label">Suitability</span>
