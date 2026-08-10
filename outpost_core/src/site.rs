@@ -801,4 +801,119 @@ mod tests {
         };
         assert!((c.output_multiplier(Some(&solar_curve())) - 1.0).abs() < 1e-9);
     }
+
+    // ── Wind: atmosphere gate and density scaling (issue #416) ──────────────
+
+    fn wind_curve() -> SiteScaling {
+        // The authored curve from content/base/buildings.yaml.
+        SiteScaling {
+            property: SiteProperty::AtmosphereDensity,
+            at_min: 0.15,
+            at_max: 1.5,
+        }
+    }
+
+    fn wind_multiplier_on(density: AtmosphereDensity) -> f64 {
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let body = body_with(density);
+        ctx(&m, 0, 0, Some(&body)).output_multiplier(Some(&wind_curve()))
+    }
+
+    #[test]
+    fn a_turbine_is_refused_on_an_airless_body() {
+        // The point of the requirement: a turbine on an airless moon is
+        // nonsense, and roughly two thirds of foundable bodies are vacuum.
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let req = SiteRequirement::new(SiteCondition::MinAtmosphere {
+            density: AtmosphereDensity::Thin,
+        });
+        let vacuum = body_with(AtmosphereDensity::Vacuum);
+        assert!(!ctx(&m, 0, 0, Some(&vacuum)).satisfies(&req));
+    }
+
+    #[test]
+    fn a_turbine_is_allowed_on_any_body_with_air() {
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let req = SiteRequirement::new(SiteCondition::MinAtmosphere {
+            density: AtmosphereDensity::Thin,
+        });
+        for density in [
+            AtmosphereDensity::Thin,
+            AtmosphereDensity::Breathable,
+            AtmosphereDensity::Dense,
+        ] {
+            let body = body_with(density);
+            assert!(
+                ctx(&m, 0, 0, Some(&body)).satisfies(&req),
+                "{density:?} must allow a turbine"
+            );
+        }
+    }
+
+    #[test]
+    fn output_rises_with_atmospheric_density() {
+        // Not a binary present/absent: a thin atmosphere is a poor site, a
+        // dense one is a good one.
+        let thin = wind_multiplier_on(AtmosphereDensity::Thin);
+        let breathable = wind_multiplier_on(AtmosphereDensity::Breathable);
+        let dense = wind_multiplier_on(AtmosphereDensity::Dense);
+
+        assert!(thin < breathable, "{thin} vs {breathable}");
+        assert!(breathable < dense, "{breathable} vs {dense}");
+        assert!(
+            dense > thin * 2.0,
+            "density barely matters: thin {thin}, dense {dense}"
+        );
+    }
+
+    #[test]
+    fn a_thin_atmosphere_still_leaves_a_turbine_worth_building() {
+        // Thin is the most common atmosphere among foundable bodies, so it
+        // has to be a genuine option rather than a token.
+        let thin = wind_multiplier_on(AtmosphereDensity::Thin);
+        // Nominal 21 power from content; anything under a few power per slot
+        // would not be worth the slot at all.
+        assert!(
+            21.0 * thin > 10.0,
+            "thin yields only {:.1} power",
+            21.0 * thin
+        );
+    }
+
+    #[test]
+    fn wind_beats_solar_where_the_air_is_thick_and_the_sun_is_far() {
+        // The niche issue #409 promised and #415/#416 deliver: solar fades
+        // with distance, wind does not care about distance at all.
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let dense = body_with(AtmosphereDensity::Dense);
+        let far_dense = SiteContext {
+            insolation: Some(0.04), // ~5 AU
+            ..ctx(&m, 0, 0, Some(&dense))
+        };
+
+        let wind = 21.0 * far_dense.output_multiplier(Some(&wind_curve()));
+        let solar = 24.0 * far_dense.output_multiplier(Some(&solar_curve()));
+        assert!(
+            wind > solar * 2.0,
+            "at 5 AU on a dense world, wind {wind:.1} should clearly beat solar {solar:.1}"
+        );
+    }
+
+    #[test]
+    fn solar_still_beats_wind_near_the_star_on_a_thin_atmosphere() {
+        // The trade has to run both ways, or one of them is simply better.
+        let m = map_with(&[(0, 0, Terrain::Plains, &[])]);
+        let thin = body_with(AtmosphereDensity::Thin);
+        let near_thin = SiteContext {
+            insolation: Some(1.0), // 1 AU
+            ..ctx(&m, 0, 0, Some(&thin))
+        };
+
+        let wind = 21.0 * near_thin.output_multiplier(Some(&wind_curve()));
+        let solar = 24.0 * near_thin.output_multiplier(Some(&solar_curve()));
+        assert!(
+            solar > wind,
+            "solar {solar:.1} should beat wind {wind:.1} here"
+        );
+    }
 }
