@@ -7795,6 +7795,44 @@ impl GameEngine {
             .max(trade::DEFAULT_TRANSIT_SOLS)
     }
 
+    /// Place the colony's node on `body`'s map and record the hex's terrain.
+    ///
+    /// The two belong together: `Colony::terrain_id` is simply "the terrain of
+    /// the hex this colony was placed on", and splitting them is how it came
+    /// to be `None` forever. It has existed since the hazard system was
+    /// written, and is the one input `HazardEntry::terrain_modifiers` keys off
+    /// — but nothing ever assigned it (issue #421), so every authored modifier
+    /// was dead weight and every hazard rolled at its flat base probability no
+    /// matter where the colony sat.
+    ///
+    /// Terrain is captured once here rather than re-derived per roll: a colony
+    /// does not move, so the answer cannot change. A hex that cannot be read
+    /// leaves `terrain_id` as `None`, which yields unmodified probabilities —
+    /// the same behaviour as a terrain slug the content pack does not mention.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::NoPlanetMap`] when `body` has no committed map, or
+    /// [`EngineError::InvalidState`] when the hex rejects the placement.
+    fn place_colony_and_record_terrain(
+        &mut self,
+        colony_id: ColonyId,
+        body: &system::BodyId,
+        coord: map::HexCoord,
+    ) -> Result<(), EngineError> {
+        let pm = self
+            .state
+            .map_for_body_mut(body)
+            .ok_or(EngineError::NoPlanetMap)?;
+        pm.place_colony(colony_id, coord)
+            .map_err(|e| EngineError::InvalidState(e.to_string()))?;
+        let terrain = pm.cell(coord).map(|cell| cell.terrain.slug().to_owned());
+        if let Ok(idx) = self.find_colony_index(colony_id) {
+            self.state.colonies[idx].terrain_id = terrain;
+        }
+        Ok(())
+    }
+
     /// Create and place a colony that has already been validated and (if
     /// sponsored) paid for — the second half of `Command::FoundColonyAtSite`,
     /// shared between the immediate bootstrap path and a [`PendingColony`]'s
@@ -7825,13 +7863,7 @@ impl GameEngine {
         self.insert_default_directives(colony_id);
         // Place colony node on the target body's map — not the founding
         // planet's, which is what #358 was.
-        let pm_mut = self
-            .state
-            .map_for_body_mut(target_body)
-            .ok_or(EngineError::NoPlanetMap)?;
-        pm_mut
-            .place_colony(colony_id, coord)
-            .map_err(|e| EngineError::InvalidState(e.to_string()))?;
+        self.place_colony_and_record_terrain(colony_id, target_body, coord)?;
         // Seed the starter supplies. Package-derived amounts are
         // per-100-colonist and scaled linearly by starting_population;
         // `supply_overrides` amounts (issue #167) are already absolute final
@@ -18180,6 +18212,56 @@ mod tests {
             "a hazard with a neutral multiplier must not be reported as the \
              cause of an elevated maintenance cost"
         );
+    }
+
+    /// Issue #421: founding must record the hex's terrain, or every authored
+    /// `terrain_modifiers` entry in `hazards.yaml` stays dead weight.
+    #[test]
+    fn founding_records_the_hexs_terrain_on_the_colony() {
+        let (engine, colony_id) = engine_with_founded_colony();
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let recorded = engine.state.colonies[idx]
+            .terrain_id
+            .clone()
+            .expect("a colony founded on a hex must record that hex's terrain");
+
+        // It must be the *actual* hex's terrain, not a plausible default.
+        let coord = engine
+            .state
+            .home_map()
+            .unwrap()
+            .colonies
+            .iter()
+            .find(|n| n.colony_id == colony_id)
+            .unwrap()
+            .coord;
+        let expected = engine
+            .state
+            .home_map()
+            .unwrap()
+            .cell(coord)
+            .unwrap()
+            .terrain
+            .slug();
+        assert_eq!(recorded, expected);
+    }
+
+    /// A colony with no map placement keeps `None`, which reads as
+    /// "unmodified probability" rather than as some default terrain.
+    #[test]
+    fn a_colony_founded_without_a_hex_records_no_terrain() {
+        let mut engine = GameEngine::new();
+        let events = engine
+            .apply(&Command::FoundColony {
+                name: "Mapless".into(),
+                starting_population: 50,
+            })
+            .unwrap();
+        let Event::ColonyFounded { colony_id, .. } = &events[0] else {
+            panic!("expected ColonyFounded")
+        };
+        let idx = engine.find_colony_index(*colony_id).unwrap();
+        assert!(engine.state.colonies[idx].terrain_id.is_none());
     }
 
     #[test]

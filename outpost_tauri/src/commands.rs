@@ -14,6 +14,7 @@ use outpost_core::morale::MoraleConfig;
 use outpost_core::needs::NeedsConfig;
 use outpost_core::snapshot::Snapshot as SnapshotDb;
 use outpost_core::system::{BodyKind, SystemCommand, SystemRole};
+use outpost_core::hazard::load_hazard_config;
 use outpost_core::tech::load_tech_registry;
 use outpost_core::trade::SiteId;
 use outpost_core::{Command, Event, GameEngine, Query, QueryResult};
@@ -1190,6 +1191,32 @@ fn attach_content(
     engine.state.needs_config = Some(NeedsConfig::default_survival());
     engine.state.morale_config = Some(MoraleConfig::default_config());
     load_embedded_tech(engine);
+    load_embedded_hazards(engine);
+}
+
+/// Attach the authored hazard table (issue #421).
+///
+/// `hazards.yaml` shipped in the pack from the beginning but nothing ever
+/// read it: `PackLoader` only parses the ten tables that make up a
+/// `ContentRegistry`, and no host loaded it separately the way it loads
+/// `tech.yaml`. `GameState::hazard_config` therefore stayed `None` in every
+/// real session, and the per-sol hazard step skips entirely when it is —
+/// so the whole "primary always-on threat layer" never fired once, in a
+/// fresh game or a loaded one.
+fn load_embedded_hazards(engine: &mut GameEngine) {
+    let Some(file) = EMBEDDED_PACK.get_file("hazards.yaml") else {
+        return;
+    };
+    let Some(yaml) = file.contents_utf8() else {
+        return;
+    };
+    match load_hazard_config(yaml) {
+        Ok(config) => engine.state.hazard_config = Some(config),
+        // Loud rather than silent: an unreadable hazard table is the exact
+        // failure this issue was about, and swallowing it would recreate the
+        // same invisible inertness one layer down.
+        Err(e) => log::error!("embedded hazards.yaml failed to load, hazards disabled: {e}"),
+    }
 }
 
 fn load_embedded_tech(engine: &mut GameEngine) {
@@ -2830,9 +2857,42 @@ mod embedded_content_tests {
         );
     }
 
+    /// The other half of issue #421's done-when: a *fresh* game must have a
+    /// hazard config too, not only a loaded one.
+    ///
+    /// Reads the embedded pack rather than a fixture, because the bug was
+    /// precisely that the real shipped `hazards.yaml` was never read — a test
+    /// against a hand-built config would have passed throughout.
+    #[test]
+    fn a_fresh_game_has_a_hazard_config_from_the_embedded_pack() {
+        let mut engine = GameEngine::new();
+        assert!(
+            engine.state.hazard_config.is_none(),
+            "precondition: a bare engine has no hazard config"
+        );
+
+        attach_content(
+            &mut engine,
+            load_embedded_content().expect("embedded pack must load"),
+        );
+
+        let config = engine
+            .state
+            .hazard_config
+            .as_ref()
+            .expect("attach_content must install the embedded hazard table (issue #421)");
+        assert_eq!(
+            config.kinds.len(),
+            outpost_core::hazard::HazardKind::ALL.len(),
+            "every hazard kind should be configured, got {} entries",
+            config.kinds.len()
+        );
+    }
+
     /// A save records *state*, not content — `SnapshotBlob::into_state`
     /// deliberately restores `registry`/`tech_registry`/`needs_config`/
-    /// `morale_config` as `None`, leaving the caller to reattach them.
+    /// `morale_config`/`hazard_config` as `None`, leaving the caller to
+    /// reattach them.
     /// `load_game` did not, so a loaded game came back with no content at all:
     /// the build dialog was empty (`list_buildings` errors without a
     /// registry), the tech tree failed to load, and the production step
@@ -2895,6 +2955,10 @@ mod embedded_content_tests {
         assert!(
             restored.state.morale_config.is_some(),
             "morale config not reattached"
+        );
+        assert!(
+            restored.state.hazard_config.is_some(),
+            "hazard config not reattached (issue #421)"
         );
 
         // And the thing the player actually noticed: buildings are listable.

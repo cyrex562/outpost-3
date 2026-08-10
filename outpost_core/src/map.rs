@@ -185,6 +185,26 @@ pub enum Terrain {
 }
 
 impl Terrain {
+    /// Content-pack slug for this terrain, as authored in YAML.
+    ///
+    /// Exists so engine code that has to *name* a terrain to content — the
+    /// `terrain_modifiers` keys in `hazards.yaml` (issue #421) — uses the
+    /// same vocabulary the author wrote, rather than a stringified `Debug`
+    /// that happens to look similar. `terrain_slug_matches_the_serde_form`
+    /// pins the two together so a `#[serde(rename)]` cannot silently
+    /// desynchronise content lookups from content parsing.
+    #[must_use]
+    pub fn slug(self) -> &'static str {
+        match self {
+            Terrain::Plains => "plains",
+            Terrain::Hills => "hills",
+            Terrain::Mountains => "mountains",
+            Terrain::Wetlands => "wetlands",
+            Terrain::Ocean => "ocean",
+            Terrain::Volcanic => "volcanic",
+        }
+    }
+
     /// Infrastructure construction difficulty multiplier for this terrain.
     ///
     /// Multiplied against the base cost when computing edge costs.
@@ -2405,6 +2425,30 @@ mod tests {
                 expected,
                 "{side}x{side}: expected {expected} cells, got {}",
                 map.cells.len()
+            );
+        }
+    }
+
+    /// `Terrain::slug` must equal what serde writes, or content authored
+    /// against the YAML vocabulary would stop matching engine lookups
+    /// (issue #421).
+    #[test]
+    fn terrain_slug_matches_the_serde_form() {
+        for terrain in [
+            Terrain::Plains,
+            Terrain::Hills,
+            Terrain::Mountains,
+            Terrain::Wetlands,
+            Terrain::Ocean,
+            Terrain::Volcanic,
+        ] {
+            let serialised = serde_yaml::to_string(&terrain).expect("terrain serialises");
+            assert_eq!(
+                serialised.trim(),
+                terrain.slug(),
+                "{terrain:?} serialises as {} but slug() says {}",
+                serialised.trim(),
+                terrain.slug()
             );
         }
     }
