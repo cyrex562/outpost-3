@@ -33,10 +33,15 @@ xtask/target/
 /logs/
 *.pdb
 
-# Node / frontend (old web stack, kept in node_modules for reference but not needed)
+# Node / frontend
 node_modules/
 dist/
-package-lock.json
+# `frontend/package-lock.json` is deliberately NOT ignored. This rule was
+# blanket-ignoring it, left over from the old web stack under `old/` — but the
+# current frontend is an application, not a library, so its lockfile belongs in
+# the repo: `npm ci` requires one, and without it CI resolves whatever
+# transitive versions happen to be current on the day it runs (issue #457).
+old/**/package-lock.json
 
 # Coverage reports (generated, not committed)
 coverage/
