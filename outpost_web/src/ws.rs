@@ -5,7 +5,7 @@
 //! Engine events are broadcast to all connected clients as [`ServerMessage::Event`].
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Query as AxumQuery, State};
 use axum::response::Response;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -26,12 +26,29 @@ use crate::wsmsg::{
     WorldSnapshot,
 };
 
-/// Upgrade an HTTP GET to the game WebSocket.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+/// Query string accepted on the WebSocket upgrade.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct WsParams {
+    /// Stable per-tab id, so the server can avoid echoing back events that tab
+    /// already has from a `POST /api/command` response (issue #452).
+    ///
+    /// Optional: absent means "send me everything", which is what any client
+    /// that only listens wants.
+    #[serde(default)]
+    client_id: Option<String>,
 }
 
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
+/// Upgrade an HTTP GET to the game WebSocket.
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    AxumQuery(params): AxumQuery<WsParams>,
+    State(state): State<AppState>,
+) -> Response {
+    let client_id = params.client_id;
+    ws.on_upgrade(move |socket| handle_socket(socket, state, client_id))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: AppState, client_id: Option<String>) {
     // Broadcast receiver — subscribes before sending the snapshot so no events
     // emitted between snapshot construction and subscription are missed.
     let mut events = state.events.subscribe();
@@ -57,7 +74,16 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             }
             broadcast = events.recv() => {
                 match broadcast {
-                    Ok(event) => {
+                    Ok((origin, event)) => {
+                        // Skip an event this very client already received in
+                        // its command response (issue #452). `origin` is only
+                        // ever set by the REST path, which returns its events;
+                        // the WS command path leaves it `None` because its
+                        // reply is a bare `Ack` and the broadcast is the
+                        // sender's only copy.
+                        if origin.is_some() && origin == client_id {
+                            continue;
+                        }
                         let se = ServerEvent::from_core(&event);
                         if let Ok(json) = serde_json::to_string(&ServerMessage::Event { event: se }) {
                             if socket.send(Message::Text(json)).await.is_err() {
@@ -130,7 +156,9 @@ async fn handle_client_message(text: &str, state: &AppState, socket: &mut WebSoc
                             // Fan-out through the broadcast channel so all connected
                             // clients (including this one) receive incremental events.
                             for e in events {
-                                let _ = state.events.send(e);
+                                // `None`: this path's reply carries no events,
+                                // so the sender needs its own broadcast copy.
+                                let _ = state.events.send((None, e));
                             }
                             let _ = send_json(socket, &ServerMessage::Ack { seq }).await;
                         }
@@ -819,7 +847,9 @@ async fn handle_new_game(
     match init_result {
         Ok(events) => {
             for e in events {
-                let _ = state.events.send(e);
+                // New-game bootstrap: everyone should see it, including the
+                // tab that asked, which receives a fresh snapshot alongside.
+                let _ = state.events.send((None, e));
             }
             let snapshot = build_snapshot(state);
             let msg = ServerMessage::NewGameSnapshot {

@@ -77,14 +77,13 @@ test('new game + found colony wizard against a live backend', async ({ page }) =
   // representation, so it mapped to `Ignored` and the player received no
   // confirmation that anything had happened at all.
   //
-  // Deliberately not asserting a *count*: browser mode currently logs each
-  // command-issued event twice (the POST response is fed to the reducer and
-  // the server also fans the same events out over the WebSocket to every
-  // client including the issuer). That duplication is pre-existing and filed
-  // separately — pinning a count here would couple this spec to it.
-  const launched = page.getByTestId('log-item-colony_founding_launched').first()
-  await expect(launched).toBeVisible({ timeout: 15_000 })
-  await expect(launched).toContainText('Kitted Landing')
+  // The count is asserted, not just the presence (issue #452): the server used
+  // to broadcast these events back to the tab that issued them, on top of
+  // returning them in the command response, so every command-issued event was
+  // applied and logged twice. One command, one entry.
+  const launched = page.getByTestId('log-item-colony_founding_launched')
+  await expect(launched).toHaveCount(1, { timeout: 15_000 })
+  await expect(launched.first()).toContainText('Kitted Landing')
 
   // ── UI-rework PR5: the construction-queue panel's "Build…" button opens the
   // build dialog (the catalog itself only populates in Tauri mode, so here we

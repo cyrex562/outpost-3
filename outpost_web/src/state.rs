@@ -17,8 +17,19 @@ pub struct AppStateInner {
     pub config: RuntimeConfig,
     /// The live game engine, protected by a mutex for multi-handler access.
     pub engine: Mutex<GameEngine>,
-    /// Broadcast sender — every `apply` call fans events out to all connected clients.
-    pub events: broadcast::Sender<Event>,
+    /// Broadcast sender — every `apply` call fans events out to all connected
+    /// clients, paired with the id of the client that already has them.
+    ///
+    /// `None` means "send to everyone" and is what the WebSocket command path
+    /// uses: it replies with a bare `Ack`, so the broadcast is the *only* way
+    /// the sender learns what happened.
+    ///
+    /// `Some(id)` means "everyone except this client". `POST /api/command`
+    /// returns its events in the response body — callers genuinely need them,
+    /// the founding wizard reads the new colony's id straight out of them — so
+    /// broadcasting to the issuer as well delivered every command-issued event
+    /// twice (issue #452).
+    pub events: broadcast::Sender<(Option<String>, Event)>,
     /// Registry of named game sessions (one engine each).
     pub sessions: SessionRegistry,
 }
