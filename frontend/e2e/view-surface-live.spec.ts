@@ -40,7 +40,12 @@ test('view a body surface preview from the system map', async ({ page }) => {
     // rings / belt annuli; force past the actionability check and skip any
     // node the click can't land on — some surfaced planet is always reachable.
     try {
-      await nodes.nth(i).click({ force: true })
+      // Click the painted dot, not the group's bounding-box centre. A body
+      // group contains a ~4px circle and a label below it, so its bbox centre
+      // falls in the empty gap between them — and SVG only hit-tests painted
+      // geometry, so the click sails through to whatever is behind.
+      const dot = nodes.nth(i).locator('circle, path').first()
+      await dot.click({ force: true })
     } catch {
       continue
     }
