@@ -9,13 +9,19 @@
 import type { Command } from '@/types/commands'
 import type { GameEvent } from '@/types/gameEvents'
 import type { ColonyScreenData } from '@/types/screen'
+import { clientId } from './clientId'
 
 const BASE = ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    // `...init` first: spreading it *after* `headers` let a caller-supplied
+    // `headers` replace the merged object wholesale rather than extend it,
+    // silently dropping `Content-Type` and getting the request rejected. No
+    // caller passed headers until issue #452 needed one, so the bug had never
+    // fired.
     ...init,
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   if (!res.ok) {
     const body = await res.text()
@@ -53,6 +59,11 @@ export async function applyCommand(sessionId: string, cmd: Command): Promise<Gam
 export async function applySharedCommand(cmd: Command): Promise<GameEvent[]> {
   return request<GameEvent[]>('/api/command', {
     method: 'POST',
+    // Identifies this tab so the server does not broadcast these same events
+    // back to it over the WebSocket — they are in this response already, and
+    // receiving both is what made every command-issued event log twice
+    // (issue #452).
+    headers: { 'X-Client-Id': clientId() },
     body: JSON.stringify(cmd),
   })
 }

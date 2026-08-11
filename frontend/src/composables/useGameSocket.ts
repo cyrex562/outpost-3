@@ -28,13 +28,17 @@
 import { useWorldStore } from '@/stores/worldStore'
 import type { ClientMessage, ServerMessage } from '@/types/api'
 import { isTauri } from '@/services/tauriBridge'
+import { clientId } from '@/api/clientId'
 
 const RECONNECT_DELAY_MS = 2000
 
 /** Return the WebSocket URL relative to the current page origin. */
 function wsUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/ws`
+  // `client_id` lets the server skip broadcasting back events this tab already
+  // received in a `POST /api/command` response (issue #452). A reconnect
+  // reuses the same id, which is why it is stored rather than regenerated.
+  return `${proto}://${window.location.host}/ws?client_id=${encodeURIComponent(clientId())}`
 }
 
 let socket: WebSocket | null = null

@@ -130,8 +130,16 @@ async fn current_sol(State(state): State<AppState>) -> impl IntoResponse {
 /// Panics if the shared engine mutex is poisoned.
 async fn apply_shared_command(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(client_cmd): Json<ClientCommand>,
 ) -> impl IntoResponse {
+    // Who is asking, so the fan-out below can skip them (issue #452). Absent
+    // means the caller is not on the socket — curl, a script — and wants no
+    // special treatment.
+    let origin = headers
+        .get("x-client-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     let cmd = match client_command_to_core(client_cmd, &state) {
         Ok(cmd) => cmd,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -144,12 +152,17 @@ async fn apply_shared_command(
 
     match result {
         Ok(events) => {
-            // Fan out to every WS-connected client watching the shared engine
-            // (a second browser tab, a future spectator client, ...), same as
-            // the WS command handler does — otherwise only the issuing tab's
-            // locally-injected copy of these events would ever be seen.
+            // Fan out to every *other* WS-connected client watching the shared
+            // engine (a second browser tab, a future spectator client, ...) —
+            // otherwise only the issuing tab's locally-injected copy of these
+            // events would ever be seen.
+            //
+            // Tagged with the issuer so it is skipped: this response already
+            // carries the events, and the frontend applies them straight away
+            // rather than waiting on a round trip. Before that tag, every
+            // command-issued event was logged twice in browser mode (#452).
             for e in &events {
-                let _ = state.events.send(e.clone());
+                let _ = state.events.send((origin.clone(), e.clone()));
             }
             let wire_events: Vec<crate::wsmsg::ServerEvent> = events
                 .iter()
@@ -314,6 +327,78 @@ mod tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["app"], "outpost3");
+    }
+
+    /// Issue #452: a command issued over REST must not be broadcast back to
+    /// the client that issued it — the response already carries those events,
+    /// and receiving both made every command-issued event log twice.
+    #[tokio::test]
+    async fn a_rest_command_is_not_broadcast_back_to_its_issuer() {
+        let state = new_state(RuntimeConfig::default());
+        let mut issuer = state.events.subscribe();
+        let router = build_router(Arc::clone(&state));
+
+        let response = router
+            .oneshot(
+                Request::post("/api/command")
+                    .header("content-type", "application/json")
+                    .header("x-client-id", "tab-a")
+                    .body(Body::from(
+                        r#"{"kind":"found_colony","name":"Echo","starting_population":10}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // The command produced events — they came back in the body.
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            json.as_array().is_some_and(|a| !a.is_empty()),
+            "expected the response to carry the events, got {json}"
+        );
+
+        // And every broadcast copy is tagged with the issuer, so that client
+        // filters them out. Anyone else on the socket still receives them.
+        let mut seen = 0;
+        while let Ok((origin, _)) = issuer.try_recv() {
+            assert_eq!(
+                origin.as_deref(),
+                Some("tab-a"),
+                "broadcast events must carry the issuing client so it can skip its own"
+            );
+            seen += 1;
+        }
+        assert!(seen > 0, "other clients must still receive the events");
+    }
+
+    /// A caller with no client id — curl, a script — is not special-cased and
+    /// still reaches every socket client.
+    #[tokio::test]
+    async fn a_rest_command_without_a_client_id_is_broadcast_to_everyone() {
+        let state = new_state(RuntimeConfig::default());
+        let mut listener = state.events.subscribe();
+        let router = build_router(Arc::clone(&state));
+
+        let response = router
+            .oneshot(
+                Request::post("/api/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"kind":"found_colony","name":"Anon","starting_population":10}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let (origin, _) = listener.try_recv().expect("an event should have been sent");
+        assert_eq!(origin, None, "an untagged command must reach every client");
     }
 
     #[tokio::test]

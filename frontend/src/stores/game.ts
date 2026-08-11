@@ -112,8 +112,17 @@ export const useGameStore = defineStore('game', () => {
         // Browser mode dispatches against the shared engine (the same one
         // the WebSocket `new_game` flow bootstraps content/planet/colony
         // onto), not the unbootstrapped per-session engine (issue #220).
-        // The WS channel only pushes events for commands it itself issued,
-        // so feed these into the world reducer directly, same as Tauri mode.
+        //
+        // These are fed into the reducer directly, same as Tauri mode, so the
+        // UI reacts without waiting on a round trip. The server broadcasts the
+        // same events over the WebSocket to every *other* client but skips
+        // this one, keyed on the `X-Client-Id` header `applySharedCommand`
+        // sends — see `api/clientId.ts`.
+        //
+        // (The comment previously here claimed the WS "only pushes events for
+        // commands it itself issued". It never did: the server fanned out to
+        // everyone including the issuer, so every command-issued event was
+        // applied and logged twice — issue #452.)
         events = await applySharedCommand(cmd)
         for (const ev of events) {
           worldStore.handleServerMessage({ type: 'event', event: ev as unknown as import('@/types/events').ServerEvent })
