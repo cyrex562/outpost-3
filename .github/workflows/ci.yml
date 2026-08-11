@@ -101,3 +101,96 @@ jobs:
 
       - name: Test
         run: cargo test --manifest-path outpost_tauri/Cargo.toml
+
+  # ── Frontend (issue #457) ───────────────────────────────────────────────────
+  #
+  # Split into a fast job and a slow one, and **both run on every PR**.
+  #
+  # Per-PR is the point: the issue this closes exists because ~450 unit tests
+  # and 33 e2e specs had no automated gate at all, so a frontend regression
+  # reached `main` unless someone happened to run the suite by hand. A gate
+  # that only runs after merge would not have fixed that.
+  #
+  # They are two jobs rather than one so a type error or a failing unit test
+  # comes back in about a minute, instead of queueing behind a Rust build and
+  # a browser download — and so a red mark tells you which kind of failure it
+  # was without opening the log.
+  frontend:
+    name: Frontend (Type-check, Unit, Build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          # Pinned to the version this is developed against rather than
+          # `lts/*`, so a new LTS cannot silently change what CI tests.
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: npm run build
+
+  frontend-e2e:
+    name: Frontend (E2E)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `playwright.config.ts` starts the `outpost_web` backend itself
+      # (`cargo run --bin outpost_web`), so this job needs the Rust toolchain
+      # as well as Node — the live specs drive real game state through it.
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # A runner has no browser. The standing "never run `playwright install`"
+      # rule in CLAUDE.md is about the *sandbox*, which ships a preinstalled
+      # Chromium that `playwright.config.ts` detects via
+      # `PLAYWRIGHT_BROWSERS_PATH`; that variable is unset here, so the config
+      # falls through to Playwright's own resolution and this is required.
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # Pre-build so the 120s webServer timeout covers starting the binary
+      # rather than compiling it from cold on a slower runner.
+      - name: Build backend
+        run: cargo build --bin outpost_web
+
+      - name: E2E tests
+        working-directory: frontend
+        run: npm run test:e2e
