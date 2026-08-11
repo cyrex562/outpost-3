@@ -490,7 +490,7 @@ mod tests {
                     commodity_loss_per_severity: 0.0,
                     population_damage_per_severity: 0.0,
                 },
-                terrain_modifiers: Default::default(),
+                modifiers: Vec::new(),
             })
             .collect();
         let hazard_cfg = HazardConfig {

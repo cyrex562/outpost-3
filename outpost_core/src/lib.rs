@@ -8237,26 +8237,20 @@ impl GameEngine {
             .max(trade::DEFAULT_TRANSIT_SOLS)
     }
 
-    /// Place the colony's node on `body`'s map and record the hex's terrain.
+    /// Place the colony's node on `body`'s map.
     ///
-    /// The two belong together: `Colony::terrain_id` is simply "the terrain of
-    /// the hex this colony was placed on", and splitting them is how it came
-    /// to be `None` forever. It has existed since the hazard system was
-    /// written, and is the one input `HazardEntry::terrain_modifiers` keys off
-    /// — but nothing ever assigned it (issue #421), so every authored modifier
-    /// was dead weight and every hazard rolled at its flat base probability no
-    /// matter where the colony sat.
-    ///
-    /// Terrain is captured once here rather than re-derived per roll: a colony
-    /// does not move, so the answer cannot change. A hex that cannot be read
-    /// leaves `terrain_id` as `None`, which yields unmodified probabilities —
-    /// the same behaviour as a terrain slug the content pack does not mention.
+    /// This used to also capture the hex's terrain onto `Colony::terrain_id`
+    /// (issue #421), because that string was the one input hazard modifiers
+    /// keyed off. Issue #448 replaced that single captured slug with a live
+    /// read of the site's terrain, biome, atmosphere and radiation — the map
+    /// and body are authoritative and cannot go stale — so the captured copy
+    /// became write-only state and was removed with it.
     ///
     /// # Errors
     ///
     /// [`EngineError::NoPlanetMap`] when `body` has no committed map, or
     /// [`EngineError::InvalidState`] when the hex rejects the placement.
-    fn place_colony_and_record_terrain(
+    fn place_colony_on_map(
         &mut self,
         colony_id: ColonyId,
         body: &system::BodyId,
@@ -8268,10 +8262,6 @@ impl GameEngine {
             .ok_or(EngineError::NoPlanetMap)?;
         pm.place_colony(colony_id, coord)
             .map_err(|e| EngineError::InvalidState(e.to_string()))?;
-        let terrain = pm.cell(coord).map(|cell| cell.terrain.slug().to_owned());
-        if let Ok(idx) = self.find_colony_index(colony_id) {
-            self.state.colonies[idx].terrain_id = terrain;
-        }
         Ok(())
     }
 
@@ -8305,7 +8295,7 @@ impl GameEngine {
         self.insert_default_directives(colony_id);
         // Place colony node on the target body's map — not the founding
         // planet's, which is what #358 was.
-        self.place_colony_and_record_terrain(colony_id, target_body, coord)?;
+        self.place_colony_on_map(colony_id, target_body, coord)?;
         // Seed the starter supplies. Package-derived amounts are
         // per-100-colonist and scaled linearly by starting_population;
         // `supply_overrides` amounts (issue #167) are already absolute final
@@ -19478,18 +19468,23 @@ mod tests {
         );
     }
 
-    /// Issue #421: founding must record the hex's terrain, or every authored
-    /// `terrain_modifiers` entry in `hazards.yaml` stays dead weight.
+    /// Issue #448: hazards read the site's world properties live from the map
+    /// and body, so a founded colony resolves to a real terrain and biome.
+    ///
+    /// Replaces #421's pair of tests, which asserted a `Colony::terrain_id`
+    /// captured at founding. That captured slug became write-only once
+    /// modifiers gained four axes, and a live read cannot go stale.
     #[test]
-    fn founding_records_the_hexs_terrain_on_the_colony() {
+    fn a_founded_colony_resolves_a_real_hazard_site() {
         let (engine, colony_id) = engine_with_founded_colony();
         let idx = engine.find_colony_index(colony_id).unwrap();
-        let recorded = engine.state.colonies[idx]
-            .terrain_id
-            .clone()
-            .expect("a colony founded on a hex must record that hex's terrain");
+        let site = turn::hazard_site_for(&engine.state, &engine.state.colonies[idx]);
+        assert!(
+            site.terrain.is_some() && site.biome.is_some(),
+            "a colony on a hex must resolve both hex properties, got {site:?}"
+        );
 
-        // It must be the *actual* hex's terrain, not a plausible default.
+        // And it is the *actual* hex's terrain, not a plausible default.
         let coord = engine
             .state
             .home_map()
@@ -19499,21 +19494,15 @@ mod tests {
             .find(|n| n.colony_id == colony_id)
             .unwrap()
             .coord;
-        let expected = engine
-            .state
-            .home_map()
-            .unwrap()
-            .cell(coord)
-            .unwrap()
-            .terrain
-            .slug();
-        assert_eq!(recorded, expected);
+        let cell = engine.state.home_map().unwrap().cell(coord).unwrap();
+        assert_eq!(site.terrain, Some(cell.terrain));
+        assert_eq!(site.biome, Some(cell.biome));
     }
 
-    /// A colony with no map placement keeps `None`, which reads as
-    /// "unmodified probability" rather than as some default terrain.
+    /// A colony with no map placement matches no hex-keyed modifier, rather
+    /// than matching some default terrain.
     #[test]
-    fn a_colony_founded_without_a_hex_records_no_terrain() {
+    fn a_colony_without_a_hex_resolves_an_empty_hazard_site() {
         let mut engine = GameEngine::new();
         let events = engine
             .apply(&Command::FoundColony {
@@ -19525,7 +19514,9 @@ mod tests {
             panic!("expected ColonyFounded")
         };
         let idx = engine.find_colony_index(*colony_id).unwrap();
-        assert!(engine.state.colonies[idx].terrain_id.is_none());
+        let site = turn::hazard_site_for(&engine.state, &engine.state.colonies[idx]);
+        assert_eq!(site.terrain, None);
+        assert_eq!(site.biome, None);
     }
 
     #[test]
