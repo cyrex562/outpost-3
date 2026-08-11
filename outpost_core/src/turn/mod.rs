@@ -639,8 +639,23 @@ impl TurnProcessor {
                 let hazard_prob_scalar = state
                     .difficulty_scalar
                     .scalar_for(&ModifiableQuantity::HazardProbability);
-                for (colony, pop) in state.colonies.iter().zip(state.populations.iter()) {
-                    let terrain: Option<String> = colony.terrain_id.clone();
+                // Each colony's world properties, resolved before the loop
+                // below borrows the colony list (issue #448). Terrain and
+                // biome come from the hex it sits on; atmosphere and radiation
+                // from the body it orbits — the authored table keys off all
+                // four.
+                let sites: Vec<crate::hazard::HazardSite> = state
+                    .colonies
+                    .iter()
+                    .map(|c| hazard_site_for(state, c))
+                    .collect();
+                for (idx, (colony, pop)) in state
+                    .colonies
+                    .iter()
+                    .zip(state.populations.iter())
+                    .enumerate()
+                {
+                    let site = sites.get(idx).copied().unwrap_or_default();
                     let pool_entries: Vec<(String, f64)> = colony
                         .pool
                         .commodity_ids()
@@ -667,7 +682,7 @@ impl TurnProcessor {
                             rng_comm,
                             kind,
                             colony.id,
-                            terrain.as_deref(),
+                            &site,
                             hazard_cfg,
                             pop.count,
                             &pool_entries,
@@ -999,6 +1014,33 @@ impl TurnProcessor {
             cargo_delivered: delivery_records,
             convoy_arrivals,
         }
+    }
+}
+
+/// The world properties hazards read for `colony` (issue #448).
+///
+/// Terrain and biome are hex facts, read from whichever planet map the colony
+/// sits on; atmosphere and radiation are body facts. A colony with no surface
+/// placement simply yields `None` for the hex-scoped pair and matches no
+/// hex-keyed modifier, which is the same permissive posture the rest of the
+/// hazard system takes toward an unplaced colony.
+pub(crate) fn hazard_site_for(
+    state: &GameState,
+    colony: &crate::colony::Colony,
+) -> crate::hazard::HazardSite {
+    let hex = state.planet_maps.values().find_map(|pm| {
+        let node = pm.colonies.iter().find(|n| n.colony_id == colony.id)?;
+        pm.cell(node.coord)
+    });
+    let body = colony
+        .home_body_id
+        .as_ref()
+        .and_then(|b| state.system_state.node_map.bodies.get(b));
+    crate::hazard::HazardSite {
+        terrain: hex.map(|c| c.terrain),
+        biome: hex.map(|c| c.biome),
+        atmosphere: body.map(|b| b.atmosphere_density),
+        radiation: body.map(|b| b.radiation),
     }
 }
 
@@ -1475,7 +1517,7 @@ mod tests {
                     commodity_loss_per_severity: 0.05,
                     population_damage_per_severity: 0.01,
                 },
-                terrain_modifiers: Default::default(),
+                modifiers: Vec::new(),
             })
             .collect();
         HazardConfig { kinds }

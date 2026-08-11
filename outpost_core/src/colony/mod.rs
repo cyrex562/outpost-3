@@ -80,12 +80,6 @@ pub struct Colony {
     pub build_queue: ConstructionQueue,
     /// Total build-slot capacity (base + tech bonuses).
     pub slot_capacity: u32,
-    /// Optional terrain/biome slug used for hazard probability modifiers.
-    ///
-    /// Set when the colony is founded at a planetary site; `None` for
-    /// colonies created without map context.
-    #[serde(default)]
-    pub terrain_id: Option<String>,
     /// Optional back-pointer to the star-system body this colony sits on.
     ///
     /// Set by [`crate::Command::AssignColonyHomeBody`] so downstream systems
@@ -235,7 +229,6 @@ impl Colony {
             buildings: Vec::new(),
             build_queue: ConstructionQueue::new(),
             slot_capacity: BASE_SLOT_CAPACITY,
-            terrain_id: None,
             home_body_id: None,
             habitability_modifier: default_habitability_modifier(),
             category_modifiers: Vec::new(),

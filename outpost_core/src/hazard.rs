@@ -97,6 +97,69 @@ pub struct HazardConfig {
     pub kinds: Vec<HazardEntry>,
 }
 
+/// One world property a hazard modifier can key off (issue #448).
+///
+/// Externally tagged, so a modifier reads as `{ terrain: volcanic, x: 3.0 }`
+/// — the property name is the key and its value the payload.
+///
+/// Four axes rather than one because the authored table always spanned four:
+/// dust storms keyed off *biome* (desert, tundra), seismic events off
+/// *terrain* (volcanic, plains), meteor impacts off how thin the air is
+/// ("exposed"), and radiation leaks off how irradiated the body is. Before
+/// this those last two named nothing the engine knew, so they silently did
+/// nothing — as did six of the eleven slugs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HazardCondition {
+    /// The colony hex's terrain.
+    Terrain(crate::map::Terrain),
+    /// The colony hex's biome.
+    Biome(crate::map::Biome),
+    /// The body's atmospheric density — thin air lets more impactors through.
+    Atmosphere(crate::system::AtmosphereDensity),
+    /// The body's ambient radiation level.
+    Radiation(crate::system::RadiationLevel),
+}
+
+/// One probability multiplier, and the world property that triggers it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct HazardModifier {
+    /// What must hold for this multiplier to apply.
+    #[serde(flatten)]
+    pub condition: HazardCondition,
+    /// Probability multiplier applied when it does.
+    pub x: f32,
+}
+
+/// The world properties of a colony's location, as hazards see it.
+///
+/// Every field is optional: a colony with no surface placement can still be
+/// rolled for, it simply matches no hex-scoped modifier.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HazardSite {
+    /// Terrain of the colony's hex.
+    pub terrain: Option<crate::map::Terrain>,
+    /// Biome of the colony's hex.
+    pub biome: Option<crate::map::Biome>,
+    /// Atmospheric density of the body.
+    pub atmosphere: Option<crate::system::AtmosphereDensity>,
+    /// Ambient radiation of the body.
+    pub radiation: Option<crate::system::RadiationLevel>,
+}
+
+impl HazardSite {
+    /// Whether this site satisfies `condition`.
+    #[must_use]
+    pub fn matches(&self, condition: HazardCondition) -> bool {
+        match condition {
+            HazardCondition::Terrain(t) => self.terrain == Some(t),
+            HazardCondition::Biome(b) => self.biome == Some(b),
+            HazardCondition::Atmosphere(a) => self.atmosphere == Some(a),
+            HazardCondition::Radiation(r) => self.radiation == Some(r),
+        }
+    }
+}
+
 /// One entry in the hazard YAML list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HazardEntry {
@@ -105,13 +168,16 @@ pub struct HazardEntry {
     /// Tunable parameters for this kind.
     #[serde(flatten)]
     pub config: HazardKindConfig,
-    /// Optional terrain-modifier map: `terrain_id → probability_multiplier`.
+    /// Probability multipliers keyed off the site's world properties.
     ///
-    /// When a colony's terrain matches a key in this map, the base probability
-    /// is multiplied by the associated value.  Defaults to `1.0` if the
-    /// terrain is not listed.
+    /// **Every match multiplies** (issue #448): a volcanic-terrain,
+    /// barren-biome site takes both a seismic terrain modifier and a seismic
+    /// biome one. Each property is an independent statement about the place,
+    /// and this is how `output_scaling`, the difficulty scalars, and hazard
+    /// susceptibility already compose. The product is clamped to a
+    /// probability, so stacking cannot run past certainty.
     #[serde(default)]
-    pub terrain_modifiers: std::collections::HashMap<String, f32>,
+    pub modifiers: Vec<HazardModifier>,
 }
 
 impl HazardConfig {
@@ -121,19 +187,23 @@ impl HazardConfig {
         self.kinds.iter().find(|e| e.kind == kind)
     }
 
-    /// Effective probability for `kind` given an optional terrain slug.
+    /// Effective probability for `kind` at `site`.
     ///
-    /// Returns `0.0` when there is no entry for the kind.
+    /// Every matching modifier multiplies (issue #448); the result is clamped
+    /// into `[0, 1]` so a stack of them cannot exceed certainty. Returns `0.0`
+    /// when there is no entry for the kind.
     #[must_use]
-    pub fn effective_probability(&self, kind: HazardKind, terrain: Option<&str>) -> f32 {
+    pub fn effective_probability(&self, kind: HazardKind, site: &HazardSite) -> f32 {
         let Some(entry) = self.entry_for(kind) else {
             return 0.0;
         };
-        let terrain_mod = terrain
-            .and_then(|t| entry.terrain_modifiers.get(t))
-            .copied()
-            .unwrap_or(1.0);
-        (entry.config.base_probability * terrain_mod).clamp(0.0, 1.0)
+        let multiplier: f32 = entry
+            .modifiers
+            .iter()
+            .filter(|m| site.matches(m.condition))
+            .map(|m| m.x)
+            .product();
+        (entry.config.base_probability * multiplier).clamp(0.0, 1.0)
     }
 }
 
@@ -169,7 +239,7 @@ pub struct HazardOutcome {
 /// - `rng_comm`    — commodity index (modulo the pool size) for selecting which commodity is damaged.
 /// - `kind`        — which hazard to roll for.
 /// - `colony_id`   — colony being evaluated.
-/// - `terrain`     — optional terrain slug for probability modification.
+/// - `site`        — the location's world properties, for modifiers.
 /// - `config`      — hazard configuration.
 /// - `population`  — current colony head-count.
 /// - `pool_entries`— snapshot of `(commodity_id, amount)` pairs from the colony pool.
@@ -181,13 +251,13 @@ pub fn roll_hazard(
     rng_comm: usize,
     kind: HazardKind,
     colony_id: crate::colony::ColonyId,
-    terrain: Option<&str>,
+    site: &HazardSite,
     config: &HazardConfig,
     population: f32,
     pool_entries: &[(String, f64)],
 ) -> Option<HazardOutcome> {
     let entry = config.entry_for(kind)?;
-    let prob = config.effective_probability(kind, terrain);
+    let prob = config.effective_probability(kind, site);
 
     if rng_prob >= prob {
         return None;
@@ -277,11 +347,12 @@ pub fn load_hazard_config(yaml: &str) -> Result<HazardConfig, HazardLoadError> {
                 c.severity_min, c.severity_max
             )));
         }
-        for (terrain, modifier) in &entry.terrain_modifiers {
-            if *modifier < 0.0 || !modifier.is_finite() {
+        for m in &entry.modifiers {
+            if m.x < 0.0 || !m.x.is_finite() {
                 return Err(HazardLoadError::Invalid(format!(
-                    "{kind:?} has terrain modifier {modifier} for {terrain:?}, \
-                     which must be finite and non-negative"
+                    "{kind:?} has modifier {} for {:?}, which must be finite \
+                     and non-negative",
+                    m.x, m.condition
                 )));
             }
         }
@@ -308,7 +379,7 @@ mod tests {
                 commodity_loss_per_severity: 0.1,
                 population_damage_per_severity: 0.02,
             },
-            terrain_modifiers: Default::default(),
+            modifiers: Vec::new(),
         };
         HazardConfig { kinds: vec![entry] }
     }
@@ -434,24 +505,191 @@ mod tests {
         );
     }
 
-    /// The other half of the same bug: a colony that never recorded its
-    /// terrain cannot have terrain modifiers applied to it (issue #421).
+    /// The authored table must actually discriminate between places — a
+    /// modifier that reads the same everywhere is not a modifier.
     #[test]
-    fn terrain_modifiers_only_bite_when_a_colony_records_its_terrain() {
+    fn the_authored_table_discriminates_between_sites() {
         let Some(yaml) = read_real_hazards_yaml() else {
             return;
         };
         let config = load_hazard_config(&yaml).expect("hazards.yaml must load");
 
         // seismic_event authors volcanic 3.0 and plains 0.6.
-        let volcanic = config.effective_probability(HazardKind::SeismicEvent, Some("volcanic"));
-        let plains = config.effective_probability(HazardKind::SeismicEvent, Some("plains"));
-        let unknown = config.effective_probability(HazardKind::SeismicEvent, None);
+        let site = |terrain| HazardSite {
+            terrain: Some(terrain),
+            ..HazardSite::default()
+        };
+        let volcanic = config.effective_probability(
+            HazardKind::SeismicEvent,
+            &site(crate::map::Terrain::Volcanic),
+        );
+        let plains = config
+            .effective_probability(HazardKind::SeismicEvent, &site(crate::map::Terrain::Plains));
+        let unknown =
+            config.effective_probability(HazardKind::SeismicEvent, &HazardSite::default());
 
         assert!(
             volcanic > unknown && unknown > plains,
             "volcanic {volcanic} should exceed the unmodified {unknown}, which \
              should exceed plains {plains}"
+        );
+    }
+
+    // ── Multi-axis modifiers (issue #448) ───────────────────────────────
+
+    /// Every matching modifier multiplies — a site that is bad in two
+    /// independent ways is worse than one bad in a single way.
+    #[test]
+    fn matching_modifiers_multiply_together() {
+        let cfg = HazardConfig {
+            kinds: vec![HazardEntry {
+                kind: HazardKind::SeismicEvent,
+                config: HazardKindConfig {
+                    base_probability: 0.1,
+                    severity_min: 0.1,
+                    severity_max: 0.2,
+                    stability_damage_per_severity: 0.0,
+                    commodity_loss_per_severity: 0.0,
+                    population_damage_per_severity: 0.0,
+                },
+                modifiers: vec![
+                    HazardModifier {
+                        condition: HazardCondition::Terrain(crate::map::Terrain::Volcanic),
+                        x: 3.0,
+                    },
+                    HazardModifier {
+                        condition: HazardCondition::Biome(crate::map::Biome::Barren),
+                        x: 1.5,
+                    },
+                ],
+            }],
+        };
+        let both = cfg.effective_probability(
+            HazardKind::SeismicEvent,
+            &HazardSite {
+                terrain: Some(crate::map::Terrain::Volcanic),
+                biome: Some(crate::map::Biome::Barren),
+                ..HazardSite::default()
+            },
+        );
+        let one = cfg.effective_probability(
+            HazardKind::SeismicEvent,
+            &HazardSite {
+                terrain: Some(crate::map::Terrain::Volcanic),
+                ..HazardSite::default()
+            },
+        );
+        assert!(
+            (one - 0.3).abs() < 1e-6,
+            "one modifier: 0.1 x 3.0, got {one}"
+        );
+        assert!(
+            (both - 0.45).abs() < 1e-6,
+            "both should multiply: 0.1 x 3.0 x 1.5, got {both}"
+        );
+    }
+
+    /// Stacking cannot run past certainty.
+    #[test]
+    fn a_stack_of_modifiers_is_clamped_to_a_probability() {
+        let cfg = HazardConfig {
+            kinds: vec![HazardEntry {
+                kind: HazardKind::DustStorm,
+                config: HazardKindConfig {
+                    base_probability: 0.5,
+                    severity_min: 0.1,
+                    severity_max: 0.2,
+                    stability_damage_per_severity: 0.0,
+                    commodity_loss_per_severity: 0.0,
+                    population_damage_per_severity: 0.0,
+                },
+                modifiers: vec![
+                    HazardModifier {
+                        condition: HazardCondition::Biome(crate::map::Biome::Desert),
+                        x: 5.0,
+                    },
+                    HazardModifier {
+                        condition: HazardCondition::Atmosphere(
+                            crate::system::AtmosphereDensity::Dense,
+                        ),
+                        x: 5.0,
+                    },
+                ],
+            }],
+        };
+        let p = cfg.effective_probability(
+            HazardKind::DustStorm,
+            &HazardSite {
+                biome: Some(crate::map::Biome::Desert),
+                atmosphere: Some(crate::system::AtmosphereDensity::Dense),
+                ..HazardSite::default()
+            },
+        );
+        assert!((p - 1.0).abs() < 1e-6, "expected clamping to 1.0, got {p}");
+    }
+
+    /// A slug the engine does not know is a **load error**, not a silent
+    /// no-op. Silence is exactly how eleven authored modifiers — six of them
+    /// naming nothing at all — did nothing for the life of the project.
+    #[test]
+    fn an_unrecognised_modifier_value_is_rejected_at_load() {
+        let yaml = "kinds:\n  - kind: seismic_event\n    base_probability: 0.1\n    severity_min: 0.1\n    severity_max: 0.5\n    stability_damage_per_severity: 0.1\n    commodity_loss_per_severity: 0.1\n    population_damage_per_severity: 0.1\n    modifiers:\n      - { terrain: rocky, x: 1.5 }\n";
+        let err = load_hazard_config(yaml).expect_err("\"rocky\" is not a Terrain");
+        assert!(
+            matches!(err, HazardLoadError::Parse(_)),
+            "expected a parse rejection, got {err:?}"
+        );
+        // The message has to name the offender, or the author is left hunting.
+        assert!(
+            format!("{err}").contains("rocky"),
+            "the error should name the bad value, got {err}"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_property_name_is_rejected_at_load() {
+        let yaml = "kinds:\n  - kind: seismic_event\n    base_probability: 0.1\n    severity_min: 0.1\n    severity_max: 0.5\n    stability_damage_per_severity: 0.1\n    commodity_loss_per_severity: 0.1\n    population_damage_per_severity: 0.1\n    modifiers:\n      - { elevation: high, x: 1.5 }\n";
+        assert!(matches!(
+            load_hazard_config(yaml),
+            Err(HazardLoadError::Parse(_))
+        ));
+    }
+
+    /// The whole point of #448: every authored modifier must name something
+    /// the engine can actually match, so none of them is decoration.
+    #[test]
+    fn every_authored_modifier_can_actually_fire() {
+        let Some(yaml) = read_real_hazards_yaml() else {
+            return;
+        };
+        let config = load_hazard_config(&yaml).expect("hazards.yaml must load");
+        let mut total = 0;
+        for entry in &config.kinds {
+            for m in &entry.modifiers {
+                total += 1;
+                // Build the one site that satisfies this condition and check
+                // the probability actually moves off the base.
+                let mut site = HazardSite::default();
+                match m.condition {
+                    HazardCondition::Terrain(t) => site.terrain = Some(t),
+                    HazardCondition::Biome(b) => site.biome = Some(b),
+                    HazardCondition::Atmosphere(a) => site.atmosphere = Some(a),
+                    HazardCondition::Radiation(r) => site.radiation = Some(r),
+                }
+                let base = config.effective_probability(entry.kind, &HazardSite::default());
+                let modified = config.effective_probability(entry.kind, &site);
+                assert!(
+                    (modified - base).abs() > f32::EPSILON,
+                    "{:?}'s modifier {:?} x{} changes nothing — it is decoration",
+                    entry.kind,
+                    m.condition,
+                    m.x
+                );
+            }
+        }
+        assert!(
+            total >= 10,
+            "expected a real table, found {total} modifiers"
         );
     }
 
@@ -480,7 +718,7 @@ mod tests {
                 0,
                 HazardKind::DustStorm,
                 id,
-                None,
+                &HazardSite::default(),
                 &cfg,
                 100.0,
                 &pool(),
@@ -505,7 +743,7 @@ mod tests {
                 0,
                 HazardKind::DustStorm,
                 id,
-                None,
+                &HazardSite::default(),
                 &cfg,
                 100.0,
                 &pool(),
@@ -528,7 +766,7 @@ mod tests {
             0,
             HazardKind::DustStorm,
             id,
-            None,
+            &HazardSite::default(),
             &cfg,
             200.0,
             &pool(),
@@ -540,7 +778,7 @@ mod tests {
             0,
             HazardKind::DustStorm,
             id,
-            None,
+            &HazardSite::default(),
             &cfg,
             200.0,
             &pool(),
@@ -569,9 +807,12 @@ mod tests {
                 commodity_loss_per_severity: 0.1,
                 population_damage_per_severity: 0.02,
             },
-            terrain_modifiers: Default::default(),
+            modifiers: Vec::new(),
         };
-        entry.terrain_modifiers.insert("desert".to_string(), 2.0);
+        entry.modifiers.push(HazardModifier {
+            condition: HazardCondition::Biome(crate::map::Biome::Desert),
+            x: 2.0,
+        });
         let cfg = HazardConfig { kinds: vec![entry] };
 
         // base 0.5 × 2.0 = 1.0 → any rng_prob < 1.0 fires
@@ -582,24 +823,27 @@ mod tests {
             0,
             HazardKind::DustStorm,
             id,
-            Some("desert"),
+            &HazardSite {
+                biome: Some(crate::map::Biome::Desert),
+                ..HazardSite::default()
+            },
             &cfg,
             100.0,
             &pool(),
         );
         assert!(
             result.is_some(),
-            "desert terrain should double prob to 1.0 and always fire"
+            "a desert biome should double prob to 1.0 and always fire"
         );
 
-        // without terrain modifier at rng_prob=0.6 (>0.5) should not fire
+        // with no matching modifier at rng_prob=0.6 (>0.5) should not fire
         let result2 = roll_hazard(
             0.6,
             0.5,
             0,
             HazardKind::DustStorm,
             id,
-            None,
+            &HazardSite::default(),
             &cfg,
             100.0,
             &pool(),
@@ -624,7 +868,7 @@ mod tests {
                     commodity_loss_per_severity: 0.05,
                     population_damage_per_severity: 0.01,
                 },
-                terrain_modifiers: Default::default(),
+                modifiers: Vec::new(),
             })
             .collect();
         let cfg = HazardConfig {
@@ -633,7 +877,17 @@ mod tests {
         let id = dummy_id();
 
         for kind in HazardKind::ALL {
-            let result = roll_hazard(0.0, 0.5, 0, kind, id, None, &cfg, 100.0, &pool());
+            let result = roll_hazard(
+                0.0,
+                0.5,
+                0,
+                kind,
+                id,
+                &HazardSite::default(),
+                &cfg,
+                100.0,
+                &pool(),
+            );
             assert!(
                 result.is_some(),
                 "kind {kind:?} should fire with probability=1.0"
@@ -653,7 +907,7 @@ mod tests {
             0,
             HazardKind::DustStorm,
             id,
-            None,
+            &HazardSite::default(),
             &cfg,
             100.0,
             &pool_entries,
@@ -678,7 +932,7 @@ mod tests {
                 commodity_loss_per_severity: 0.05,
                 population_damage_per_severity: 0.04,
             },
-            terrain_modifiers: Default::default(),
+            modifiers: Vec::new(),
         };
         let cfg = HazardConfig { kinds: vec![entry] };
         let yaml = serde_yaml::to_string(&cfg).expect("should serialise");

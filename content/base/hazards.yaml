@@ -1,6 +1,34 @@
 # Outpost 3 — Environmental Hazard Configuration
 # Loaded at runtime. Probabilities are per colony-sol; severity in [0, 1].
-# terrain_modifiers: map of terrain slug → probability multiplier.
+#
+# ── Modifiers (issue #448) ───────────────────────────────────────────────────
+#
+# Each modifier names ONE world property and a probability multiplier:
+#
+#   - { terrain: volcanic, x: 3.0 }     the colony hex's terrain
+#   - { biome:   desert,   x: 2.5 }     the colony hex's biome
+#   - { atmosphere: thin,  x: 1.5 }     the body's atmospheric density
+#   - { radiation:  high,  x: 3.0 }     the body's ambient radiation
+#
+# **Every matching modifier multiplies.** A volcanic-terrain, barren-biome site
+# takes both of seismic_event's first two, for 4.5x. Each property is an
+# independent statement about the place, which is how output_scaling, the
+# difficulty scalars and hazard susceptibility already compose. The product is
+# clamped to a probability, so stacking cannot exceed certainty.
+#
+# A slug the engine does not recognise is a **load error**, not a warning. This
+# table previously keyed off a `terrain_modifiers` map whose eleven slugs
+# included six — arid, rocky, exposed, humid, tropical, irradiated — that named
+# nothing in any engine enum, plus three that were biomes filed under terrain.
+# They silently did nothing for the life of the project. Failing loudly is what
+# stops that recurring.
+#
+# Valid values:
+#   terrain:    plains | hills | mountains | wetlands | ocean | volcanic
+#   biome:      desert | tundra | polar | forest | jungle | grassland
+#               | barren | ocean | geothermal
+#   atmosphere: vacuum | thin | breathable | dense
+#   radiation:  low | moderate | high
 
 kinds:
   - kind: dust_storm
@@ -10,10 +38,17 @@ kinds:
     stability_damage_per_severity: 0.25
     commodity_loss_per_severity: 0.08
     population_damage_per_severity: 0.005
-    terrain_modifiers:
-      desert: 2.5
-      arid: 1.8
-      tundra: 0.4
+    modifiers:
+      # Loose dry surface to lift. `arid` was a near-synonym of `desert` under
+      # the old single-key lookup, so only ever one of the two could apply;
+      # `barren` carries that intent onto a slug that exists.
+      - { biome: desert, x: 2.5 }
+      - { biome: barren, x: 1.8 }
+      # Frozen ground holds its dust down.
+      - { biome: tundra, x: 0.4 }
+      # Thin air cannot raise much of a storm; a dense one carries more.
+      - { atmosphere: thin, x: 0.5 }
+      - { atmosphere: dense, x: 1.3 }
 
   - kind: seismic_event
     base_probability: 0.005
@@ -22,10 +57,14 @@ kinds:
     stability_damage_per_severity: 0.40
     commodity_loss_per_severity: 0.12
     population_damage_per_severity: 0.015
-    terrain_modifiers:
-      volcanic: 3.0
-      rocky: 1.5
-      plains: 0.6
+    modifiers:
+      - { terrain: volcanic, x: 3.0 }
+      # Was `rocky` — bare rock, which is what `barren` means here.
+      - { biome: barren, x: 1.5 }
+      - { biome: geothermal, x: 2.0 }
+      # Settled flat ground is the stable case.
+      - { terrain: plains, x: 0.6 }
+      - { terrain: mountains, x: 1.4 }
 
   - kind: meteor_impact
     base_probability: 0.001
@@ -34,8 +73,13 @@ kinds:
     stability_damage_per_severity: 0.60
     commodity_loss_per_severity: 0.20
     population_damage_per_severity: 0.040
-    terrain_modifiers:
-      exposed: 1.5
+    modifiers:
+      # Was `exposed`. What it meant is that nothing burns up on the way in:
+      # no atmosphere at all is worst, a thin one barely better, a dense one
+      # is real protection.
+      - { atmosphere: vacuum, x: 2.0 }
+      - { atmosphere: thin, x: 1.5 }
+      - { atmosphere: dense, x: 0.5 }
 
   - kind: equipment_failure
     base_probability: 0.015
@@ -44,7 +88,7 @@ kinds:
     stability_damage_per_severity: 0.15
     commodity_loss_per_severity: 0.05
     population_damage_per_severity: 0.002
-    terrain_modifiers: {}
+    modifiers: []
 
   - kind: disease_outbreak
     base_probability: 0.008
@@ -53,9 +97,14 @@ kinds:
     stability_damage_per_severity: 0.30
     commodity_loss_per_severity: 0.04
     population_damage_per_severity: 0.025
-    terrain_modifiers:
-      humid: 2.0
-      tropical: 1.8
+    modifiers:
+      # Was `humid` and `tropical` — two names for the same warm wet place,
+      # only one of which could ever have applied. `jungle` is that place;
+      # `wetlands` is the terrain-scale version of it.
+      - { biome: jungle, x: 2.0 }
+      - { terrain: wetlands, x: 1.8 }
+      # Cold and dry suppresses transmission.
+      - { biome: polar, x: 0.5 }
 
   - kind: radiation_leak
     base_probability: 0.003
@@ -64,6 +113,11 @@ kinds:
     stability_damage_per_severity: 0.35
     commodity_loss_per_severity: 0.06
     population_damage_per_severity: 0.030
-    terrain_modifiers:
-      irradiated: 3.0
-      polar: 1.4
+    modifiers:
+      # Was `irradiated`, which named nothing. Ambient radiation is a real body
+      # attribute and is plainly what was meant.
+      - { radiation: high, x: 3.0 }
+      - { radiation: moderate, x: 1.6 }
+      # Was `polar`. Thin air means less shielding from what arrives.
+      - { atmosphere: vacuum, x: 1.6 }
+      - { atmosphere: thin, x: 1.4 }
