@@ -60,7 +60,12 @@ const isEmpty = computed(() => props.queue === null || props.queue.length === 0)
         class="queue-item"
         :data-testid="`queue-item-${proj.project_id}`"
       >
-        <span class="building-name">{{ proj.building_type }}</span>
+        <!-- A repair shares this queue (issue #451) but is not a new
+             building; saying so avoids reading the row as a duplicate. -->
+        <span class="building-name">
+          <span v-if="proj.is_repair" class="queue-kind" data-testid="queue-repair-tag">repair:</span>
+          {{ proj.building_type }}
+        </span>
         <span class="queue-progress">{{ proj.turns_completed }}/{{ proj.turns_total }} turns</span>
         <span class="queue-meta">{{ proj.slot_cost }} slot{{ proj.slot_cost !== 1 ? 's' : '' }}</span>
         <button
@@ -121,6 +126,7 @@ const isEmpty = computed(() => props.queue === null || props.queue.length === 0)
   color: var(--text);
 }
 .building-name { flex: 1 0 100px; }
+.queue-kind { color: var(--accent); margin-right: 0.25rem; }
 .queue-progress { font-size: 0.72rem; color: var(--text-dim); }
 .queue-meta { color: var(--text-dim); font-size: 0.72rem; }
 .btn-cancel {
