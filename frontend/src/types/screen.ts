@@ -62,6 +62,14 @@ export interface BuildingRow {
   broken?: boolean
   /** What a repair would cost; empty unless `broken` (issue #384). */
   repair_cost?: IngredientRow[]
+  /**
+   * Repair progress as `[sols done, sols total]`, or absent when no repair is
+   * queued for this building (issue #451).
+   *
+   * Repair is scheduled work, not an instant fix — without this a broken
+   * building looks abandoned between queueing the repair and its completion.
+   */
+  repair_progress?: [number, number] | null
   slot_cost: number
   full_capacity: boolean
   /**
@@ -177,7 +185,12 @@ export interface ConstructionQueueRow {
   building_type: string
   turns_completed: number
   turns_total: number
-  slot_cost: number
+  slot_cost: number  /**
+   * Whether this row is a repair rather than a new build (issue #451).
+   * Repairs share the construction queue — same sols, same labour, same
+   * per-sol material instalments — so the panel must say which it is.
+   */
+  is_repair?: boolean
 }
 
 /** Complete data bundle for the colony management screen. */

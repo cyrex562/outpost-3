@@ -1416,6 +1416,23 @@ pub enum Event {
         /// Content-pack key of the failed building.
         building_type: String,
     },
+    /// A repair was queued for a broken building (issue #451).
+    ///
+    /// Repair is a scheduled project, not an instant fix — it draws labour
+    /// every sol and pays for materials in instalments, exactly as
+    /// construction does. [`Event::BuildingRepaired`] follows on completion.
+    RepairQueued {
+        /// Colony the building belongs to.
+        colony_id: ColonyId,
+        /// Stable instance id of the building being repaired.
+        building_id: uuid::Uuid,
+        /// Content-pack key of the building.
+        building_type: String,
+        /// Queue project id, for cancellation.
+        project_id: colony::ProjectId,
+        /// Sols the repair will take.
+        turns: u32,
+    },
     /// A broken building was repaired and returned to service (issue #384).
     BuildingRepaired {
         /// Colony the building belongs to.
@@ -2498,6 +2515,30 @@ fn productivity_note_for(habitability: f32, contamination_factor: f32) -> Option
     (!causes.is_empty()).then(|| causes.join(", "))
 }
 
+/// Fraction of a building's construction time a repair takes (issue #451).
+///
+/// Repair is meant to be quicker than building from nothing but not free: at
+/// `0.5`, a four-sol building is down two sols after a breakdown, on top of
+/// the materials. A single dial, deliberately, rather than a second authored
+/// figure per building that would drift from `construction_turns`.
+pub const REPAIR_TIME_FRACTION: f64 = 0.5;
+
+/// Least labour a repair draws per sol, whatever the building (issue #451).
+///
+/// A building authored with `labor_required: 0` runs itself, but it does not
+/// *fix* itself — someone has to go out to the wreck. Without this floor a
+/// fully automated building would repair with no workforce at all, which would
+/// make "a colony with materials but no spare labour cannot repair" false for
+/// exactly the buildings most likely to be left unattended.
+pub const MIN_REPAIR_LABOUR: u32 = 1;
+
+/// Shortest a repair can take, in sols (issue #451).
+///
+/// One, so a repair always costs at least one sol of downtime. Zero would
+/// complete on the sol it was queued, which is the instant repair this
+/// replaced.
+pub const MIN_REPAIR_SOLS: u32 = 1;
+
 /// Charge a colonization cost against a settlement's stockpile (issue #359).
 ///
 /// Affordability is checked for *every* commodity before any is withdrawn, so
@@ -3062,6 +3103,35 @@ impl GameEngine {
                             if let Some(reduction) = remediation_grants.get(&building_type).copied()
                             {
                                 remediations.push((colony.id, building_type, reduction));
+                                continue;
+                            }
+                            // A repair ends by returning the existing wreck to
+                            // service, not by placing a second building
+                            // (issue #451).
+                            if let Some(target) = completed.repair_target {
+                                if let Some(b) =
+                                    colony.buildings.iter_mut().find(|b| b.id == target)
+                                {
+                                    b.broken = false;
+                                    b.condition = condition::CONDITION_AFTER_REPAIR;
+                                    events.push(Event::BuildingRepaired {
+                                        colony_id: colony.id,
+                                        building_id: target,
+                                        building_type,
+                                        cost: completed
+                                            .construction_cost
+                                            .iter()
+                                            .map(|(id, qty)| content::types::Ingredient {
+                                                id: id.clone(),
+                                                quantity: *qty,
+                                            })
+                                            .collect(),
+                                    });
+                                }
+                                // A target that has since vanished simply drops
+                                // the project; the materials and labour are
+                                // already spent, matching how a lost convoy is
+                                // not refunded.
                                 continue;
                             }
                             // Seed the staffing priority from the building's
@@ -4743,47 +4813,41 @@ impl GameEngine {
                     )));
                 }
                 let building_type = building.building_type.clone();
-                let cost = self.repair_cost_for(&building_type);
+                // Already queued? Repairing twice would charge twice and
+                // complete twice.
+                if self.state.colonies[idx]
+                    .build_queue
+                    .projects
+                    .iter()
+                    .any(|p| p.repair_target == Some(*building_id))
+                {
+                    return Err(EngineError::InvalidArgument(format!(
+                        "building {building_id} is already being repaired"
+                    )));
+                }
 
-                // Check every commodity before withdrawing any, so an
-                // unaffordable repair changes nothing.
-                {
-                    let colony = &self.state.colonies[idx];
-                    for ing in &cost {
-                        let available = colony.pool.amount(&ing.id)
-                            - colony
-                                .commodity_reserves
-                                .get(&ing.id)
-                                .copied()
-                                .unwrap_or(0.0);
-                        if available < ing.quantity {
-                            #[allow(clippy::cast_possible_truncation)]
-                            return Err(EngineError::InsufficientResources {
-                                commodity: ing.id.clone(),
-                                needed: ing.quantity as f32,
-                                available: available.max(0.0) as f32,
-                            });
-                        }
-                    }
-                }
-                for ing in &cost {
-                    self.state.colonies[idx]
-                        .pool
-                        .withdraw(&ing.id, ing.quantity);
-                }
-                if let Some(b) = self.state.colonies[idx]
-                    .buildings
-                    .iter_mut()
-                    .find(|b| b.id == *building_id)
-                {
-                    b.broken = false;
-                    b.condition = condition::CONDITION_AFTER_REPAIR;
-                }
-                Ok(vec![Event::BuildingRepaired {
+                let cost: Vec<(String, f64)> = self
+                    .repair_cost_for(&building_type)
+                    .into_iter()
+                    .map(|i| (i.id, i.quantity))
+                    .collect();
+                let (labour, turns) = self.repair_terms(&building_type);
+                let project = colony::ConstructionProject::repair(
+                    &building_type,
+                    *building_id,
+                    labour,
+                    cost,
+                    turns,
+                );
+                let project_id = project.id;
+                self.state.colonies[idx].build_queue.enqueue(project);
+
+                Ok(vec![Event::RepairQueued {
                     colony_id: *colony_id,
                     building_id: *building_id,
                     building_type,
-                    cost,
+                    project_id,
+                    turns,
                 }])
             }
 
@@ -7190,6 +7254,12 @@ impl GameEngine {
                                 0.0
                             },
                             broken: b.broken,
+                            repair_progress: c
+                                .build_queue
+                                .projects
+                                .iter()
+                                .find(|p| p.repair_target == Some(b.id))
+                                .map(|p| (p.turns_completed, p.total_turns)),
                             repair_cost: if b.broken {
                                 self.repair_cost_for(&b.building_type)
                                     .into_iter()
@@ -7266,6 +7336,7 @@ impl GameEngine {
                         turns_completed: proj.turns_completed,
                         turns_total: proj.total_turns,
                         slot_cost: proj.slot_cost,
+                        is_repair: proj.is_repair(),
                     })
                     .collect();
                 let manual_override = self.state.directive_store.is_manual_override(*colony_id);
@@ -8546,6 +8617,32 @@ impl GameEngine {
     /// Absent means neutral, not unknown: a colony with no `home_body_id` (the
     /// bare `Command::FoundColony` fixture path) pays nominal maintenance
     /// rather than inheriting a penalty from nowhere.
+    /// Labour per sol and total sols to repair `building_type` (issue #451).
+    ///
+    /// Derived from the building's own construction terms rather than
+    /// authored separately: a repair is a fraction of the original job, and
+    /// giving every building a second pair of numbers to keep in step with the
+    /// first is how they drift apart.
+    ///
+    /// Floored at one sol, so a repair is never instant — that instantness was
+    /// the whole complaint in #451. An unregistered building type falls back
+    /// to the same floor rather than erroring, matching how
+    /// [`Self::repair_cost_for`] treats one.
+    fn repair_terms(&self, building_type: &str) -> (u32, u32) {
+        let def = self
+            .state
+            .registry
+            .as_ref()
+            .and_then(|r| r.buildings().find(|b| b.id == building_type));
+        let Some(def) = def else {
+            return (MIN_REPAIR_LABOUR, MIN_REPAIR_SOLS);
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let turns = ((f64::from(def.construction_turns) * REPAIR_TIME_FRACTION).round() as u32)
+            .max(MIN_REPAIR_SOLS);
+        (def.labor_required.max(MIN_REPAIR_LABOUR), turns)
+    }
+
     /// What repairing `building_type` costs (issue #384).
     ///
     /// The authored `repair_cost` when the pack supplies one, else
@@ -18863,7 +18960,7 @@ mod tests {
     }
 
     #[test]
-    fn repairing_restores_the_building_and_charges_the_colony() {
+    fn repairing_takes_sols_and_charges_the_colony() {
         let (mut engine, _body, colony_id) =
             engine_on_hazardous_body(system::AtmosphereHazard::None);
         let idx = engine.find_colony_index(colony_id).unwrap();
@@ -18873,6 +18970,7 @@ mod tests {
         engine.state.colonies[idx]
             .pool
             .deposit("structural_metal", 500.0);
+        engine.state.colonies[idx].pool.deposit("labor", 500.0);
         let before = engine.state.colonies[idx].pool.amount("structural_metal");
 
         let events = engine
@@ -18880,14 +18978,38 @@ mod tests {
                 colony_id,
                 building_id,
             })
-            .expect("repair should succeed");
+            .expect("repair should queue");
+        assert!(
+            matches!(events.first(), Some(Event::RepairQueued { .. })),
+            "queueing a repair announces itself, got {events:?}"
+        );
 
+        // Still broken: repair is scheduled work now, not an instant fix
+        // (issue #451). That downtime is the point.
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        assert!(
+            engine.state.colonies[idx].buildings[0].broken,
+            "the building must stay broken until the repair completes"
+        );
+
+        // Run it out.
+        for _ in 0..8 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
         let idx = engine.find_colony_index(colony_id).unwrap();
         let b = &engine.state.colonies[idx].buildings[0];
-        assert!(!b.broken, "repair must clear the broken flag");
+        assert!(!b.broken, "the repair should have completed by now");
+        // At least the post-repair figure — and possibly a little above it,
+        // since ordinary upkeep recovery (#384) resumes the moment the
+        // building is back in service and keeps nudging condition up.
         assert!(
-            (b.condition - condition::CONDITION_AFTER_REPAIR).abs() < 1e-6,
-            "repair should leave it serviceable but not new, got {}",
+            b.condition >= condition::CONDITION_AFTER_REPAIR - 1e-6,
+            "repair leaves it serviceable, got {}",
+            b.condition
+        );
+        assert!(
+            b.condition < condition::CONDITION_NEW,
+            "but not new — a repaired building has still been neglected, got {}",
             b.condition
         );
         let after = engine.state.colonies[idx].pool.amount("structural_metal");
@@ -18895,10 +19017,94 @@ mod tests {
             after < before,
             "repair must charge materials: {before} -> {after}"
         );
-        assert!(matches!(
-            events.first(),
-            Some(Event::BuildingRepaired { .. })
-        ));
+    }
+
+    /// The repair occupies no extra build slot — the wreck already holds one
+    /// (issue #384 kept it standing), so charging a second would bill the
+    /// colony twice for one building.
+    #[test]
+    fn a_queued_repair_reserves_no_additional_build_slot() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+        let before = engine.state.colonies[idx].slots_used();
+
+        engine
+            .apply(&Command::RepairBuilding {
+                colony_id,
+                building_id,
+            })
+            .unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let queued_slots: u32 = engine.state.colonies[idx]
+            .build_queue
+            .projects
+            .iter()
+            .map(|p| p.slot_cost)
+            .sum();
+        assert_eq!(queued_slots, 0, "a repair must reserve no slot");
+        assert_eq!(engine.state.colonies[idx].slots_used(), before);
+    }
+
+    #[test]
+    fn the_same_building_cannot_be_queued_for_repair_twice() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+
+        engine
+            .apply(&Command::RepairBuilding {
+                colony_id,
+                building_id,
+            })
+            .unwrap();
+        let second = engine.apply(&Command::RepairBuilding {
+            colony_id,
+            building_id,
+        });
+        assert!(
+            matches!(second, Err(EngineError::InvalidArgument(_))),
+            "a second repair would charge and complete twice, got {second:?}"
+        );
+    }
+
+    /// The done-when bullet from #451: materials alone must not be enough.
+    ///
+    /// The queue withdraws `labor_per_turn` from the colony pool for each sol
+    /// a project advances, so a colony with the metal but no workforce makes
+    /// no progress.
+    #[test]
+    fn a_repair_draws_labour_every_sol_it_advances() {
+        let (mut engine, _body, colony_id) =
+            engine_on_hazardous_body(system::AtmosphereHazard::None);
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        engine.state.colonies[idx].buildings[0].broken = true;
+        let building_id = engine.state.colonies[idx].buildings[0].id;
+        engine.state.colonies[idx]
+            .pool
+            .deposit("structural_metal", 500.0);
+        engine.state.colonies[idx].pool.deposit("labor", 500.0);
+        let labour_before = engine.state.colonies[idx].pool.amount("labor");
+
+        engine
+            .apply(&Command::RepairBuilding {
+                colony_id,
+                building_id,
+            })
+            .unwrap();
+        engine.apply(&Command::AdvanceColonySol).unwrap();
+
+        let idx = engine.find_colony_index(colony_id).unwrap();
+        let labour_after = engine.state.colonies[idx].pool.amount("labor");
+        assert!(
+            labour_after < labour_before,
+            "a repair sol must consume labour: {labour_before} -> {labour_after}"
+        );
     }
 
     #[test]
@@ -18916,36 +19122,43 @@ mod tests {
         assert!(matches!(result, Err(EngineError::InvalidArgument(_))));
     }
 
+    /// An unaffordable repair **stalls**, it is no longer rejected outright.
+    ///
+    /// That is a deliberate change from #384's instant repair: a queued repair
+    /// pays for its materials in per-sol instalments exactly as construction
+    /// does, so an unfunded sol stalls the project rather than failing the
+    /// command. Consistency with the construction queue is worth more than the
+    /// up-front check — and it lets a player queue a repair now and let the
+    /// materials arrive.
     #[test]
-    fn an_unaffordable_repair_changes_nothing() {
+    fn an_unaffordable_repair_stalls_rather_than_completing() {
         let (mut engine, _body, colony_id) =
             engine_on_hazardous_body(system::AtmosphereHazard::None);
         let idx = engine.find_colony_index(colony_id).unwrap();
         engine.state.colonies[idx].buildings[0].broken = true;
         let building_id = engine.state.colonies[idx].buildings[0].id;
-        // Give it *some* of what a repair needs, but not enough.
-        engine.state.colonies[idx]
-            .pool
-            .deposit("structural_metal", 1.0);
-        let before = engine.state.colonies[idx].pool.amount("structural_metal");
+        // No structural_metal at all, so the instalments cannot be paid.
+        engine.state.colonies[idx].pool.deposit("labor", 500.0);
 
-        let result = engine.apply(&Command::RepairBuilding {
-            colony_id,
-            building_id,
-        });
+        engine
+            .apply(&Command::RepairBuilding {
+                colony_id,
+                building_id,
+            })
+            .expect("queueing is allowed even when the colony cannot pay yet");
 
-        assert!(matches!(
-            result,
-            Err(EngineError::InsufficientResources { .. })
-        ));
+        for _ in 0..8 {
+            engine.apply(&Command::AdvanceColonySol).unwrap();
+        }
+
         let idx = engine.find_colony_index(colony_id).unwrap();
         assert!(
-            (engine.state.colonies[idx].pool.amount("structural_metal") - before).abs() < 1e-6,
-            "a rejected repair must not part-spend the stockpile"
+            engine.state.colonies[idx].buildings[0].broken,
+            "an unfunded repair must not complete"
         );
         assert!(
-            engine.state.colonies[idx].buildings[0].broken,
-            "a rejected repair must leave the building broken"
+            !engine.state.colonies[idx].build_queue.projects.is_empty(),
+            "the stalled project should still be queued, waiting on materials"
         );
     }
 

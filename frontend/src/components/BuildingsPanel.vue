@@ -198,7 +198,11 @@ function siteDetail(b: BuildingRow): string {
 
 function statusDetail(b: BuildingRow): string {
   if (b.broken) {
-    return `Broken down — produces nothing until repaired (${repairCostLabel(b)}). Still occupies its build slot.`
+    if (b.repair_progress) {
+      const [done, total] = b.repair_progress
+      return `Broken down — repair under way, ${done} of ${total} sols done. Produces nothing until it completes.`
+    }
+    return `Broken down — produces nothing until repaired (${repairCostLabel(b)}, plus labour and downtime). Still occupies its build slot.`
   }
   if (b.paused)
     return 'Paused — draws no labour, power, or inputs. Still occupies its build slot.'
@@ -414,11 +418,20 @@ function displayName(b: BuildingRow): string {
             >Unpin</button>
           </template>
 
+          <!-- Once queued, the button becomes a progress readout: repair is
+               scheduled work (issue #451), so offering "Repair" again would
+               invite a second click the engine rejects anyway. -->
+          <span
+            v-if="b.broken && b.repair_progress"
+            class="building-badge badge-repairing"
+            :data-testid="`building-repairing-${b.building_id}`"
+            :title="`Repair under way — ${b.repair_progress[0]} of ${b.repair_progress[1]} sols done.`"
+          >repairing {{ b.repair_progress[0] }}/{{ b.repair_progress[1] }}</span>
           <button
-            v-if="b.broken"
+            v-else-if="b.broken"
             class="btn-small btn-repair"
             :data-testid="`building-repair-${b.building_id}`"
-            :title="`Repair this building and return it to service. Costs ${repairCostLabel(b)}.`"
+            :title="`Queue a repair. Costs ${repairCostLabel(b)}, plus labour and sols of downtime.`"
             @click="emit('repair', b.building_id)"
           >Repair</button>
 
@@ -556,6 +569,7 @@ function displayName(b: BuildingRow): string {
    it is highlighted rather than dimmed like a paused one (issue #384). */
 .building-item.is-broken { border-color: var(--danger); }
 .btn-repair { border-color: var(--danger); color: var(--danger); }
+.badge-repairing { border-color: var(--accent); color: var(--accent); }
 .badge-at-risk { border-color: var(--danger); color: var(--danger); }
 .btn-paused { border-color: var(--border-accent); color: var(--accent); }
 

@@ -215,6 +215,14 @@ pub struct BuildingRow {
     /// What repairing it would cost, empty unless [`Self::broken`].
     #[serde(default)]
     pub repair_cost: Vec<IngredientRow>,
+    /// Progress of this building's repair as `(sols done, sols total)`, or
+    /// `None` when no repair is queued for it (issue #451).
+    ///
+    /// Surfaced so a broken building shows work under way rather than looking
+    /// abandoned — without it the only feedback between queueing a repair and
+    /// its completion is that nothing visibly happens.
+    #[serde(default)]
+    pub repair_progress: Option<(u32, u32)>,
     /// Number of build slots consumed by this building.
     pub slot_cost: u32,
     /// Whether the building ran at full capacity last turn.
@@ -349,6 +357,14 @@ pub struct ConstructionQueueRow {
     pub turns_total: u32,
     /// Build slots reserved during construction.
     pub slot_cost: u32,
+    /// Whether this row is a repair rather than a new build (issue #451).
+    ///
+    /// A repair shares the construction queue — same sols, same labour draw,
+    /// same per-sol material instalments — so it appears here alongside
+    /// builds. The flag lets the panel say "Repairing" instead of "Building",
+    /// which are very different things to see in a queue.
+    #[serde(default)]
+    pub is_repair: bool,
 }
 
 // ─── Building details HUD ──────────────────────────────────────────────────────
@@ -780,6 +796,7 @@ mod tests {
                 breakdown_risk: 0.0,
                 broken: false,
                 repair_cost: vec![],
+                repair_progress: None,
                 building_id: uuid::Uuid::nil(),
                 name: "Greenhouse 1".to_string(),
                 building_type: "greenhouse".to_string(),

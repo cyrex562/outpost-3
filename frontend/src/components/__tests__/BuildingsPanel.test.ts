@@ -585,6 +585,22 @@ describe('BuildingsPanel condition and breakdown (#384)', () => {
     expect(wrecked.find('[data-testid="building-repair-b-1"]').exists()).toBe(true)
   })
 
+  it('replaces the repair button with progress once a repair is queued (#451)', async () => {
+    // Offering "Repair" again would invite a second click the engine rejects.
+    const wrapper = mountWith({ broken: true, repair_progress: [1, 3] })
+    expect(wrapper.find('[data-testid="building-repair-b-1"]').exists()).toBe(false)
+    const badge = wrapper.find('[data-testid="building-repairing-b-1"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('1/3')
+  })
+
+  it('says the repair is under way rather than that it is unrepaired', () => {
+    const wrapper = mountWith({ broken: true, repair_progress: [2, 4] })
+    const status = wrapper.find('[data-testid="building-status-smelter"]')
+    expect(status.attributes('title')).toContain('repair under way')
+    expect(status.attributes('title')).toContain('2 of 4 sols')
+  })
+
   it('emits repair with the building id', async () => {
     const wrapper = mountWith({ broken: true })
     await wrapper.find('[data-testid="building-repair-b-1"]').trigger('click')

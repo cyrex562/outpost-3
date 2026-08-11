@@ -234,6 +234,23 @@ pub struct ConstructionProject {
     pub total_turns: u32,
     /// Turns of construction already completed.
     pub turns_completed: u32,
+    /// The placed building this project repairs, if it is a repair (#451).
+    ///
+    /// `None` — the default, and every project before this existed — is an
+    /// ordinary build that ends in a new [`PlacedBuilding`]. `Some(id)` ends
+    /// instead by clearing that instance's [`PlacedBuilding::broken`] flag.
+    ///
+    /// Modelled as a project rather than as its own queue because a repair is
+    /// the same shape of work as a build: it takes sols, draws labour every
+    /// sol, and pays for materials in instalments — all of which
+    /// [`ConstructionProject`] already does. A repair-specific mechanism would
+    /// have duplicated every one of those, including the stall handling.
+    ///
+    /// A repair carries `slot_cost: 0`. The wreck already occupies its slot
+    /// (#384 kept it standing), so reserving another would charge the colony
+    /// twice for one building.
+    #[serde(default)]
+    pub repair_target: Option<Uuid>,
 }
 
 impl ConstructionProject {
@@ -254,7 +271,39 @@ impl ConstructionProject {
             construction_cost,
             total_turns,
             turns_completed: 0,
+            repair_target: None,
         }
+    }
+
+    /// Create a repair project for a broken placed building (issue #451).
+    ///
+    /// `slot_cost` is zero — the wreck already holds its slot — and completion
+    /// returns the existing instance to service rather than placing a new one.
+    #[must_use]
+    pub fn repair(
+        building_type: impl Into<String>,
+        building_id: Uuid,
+        labor_per_turn: u32,
+        cost: Vec<(String, f64)>,
+        total_turns: u32,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            building_type: building_type.into(),
+            slot_cost: 0,
+            labor_per_turn,
+            construction_cost: cost,
+            total_turns,
+            turns_completed: 0,
+            repair_target: Some(building_id),
+        }
+    }
+
+    /// Whether this project repairs an existing building rather than building
+    /// a new one (issue #451).
+    #[must_use]
+    pub fn is_repair(&self) -> bool {
+        self.repair_target.is_some()
     }
 
     /// Returns `true` if all construction turns are complete.
